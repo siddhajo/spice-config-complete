@@ -21,10 +21,16 @@ const PORT = process.env.PORT || 3000;
 const BEHIND_PROXY = (() => {
   if (process.env.TRUST_PROXY === '1') return true;
   if (process.env.TRUST_PROXY === '0') return false;
-  return !!(process.env.RAILWAY_ENVIRONMENT || process.env.RENDER || process.env.FLY_APP_NAME ||
-           process.env.DYNO || process.env.VERCEL || process.env.K_SERVICE);
+  // Railway: any of RAILWAY_ENVIRONMENT / RAILWAY_PROJECT_ID / RAILWAY_PUBLIC_DOMAIN.
+  // Render: RENDER. Fly: FLY_APP_NAME. Heroku: DYNO. Vercel: VERCEL. Cloud Run: K_SERVICE.
+  return !!(
+    process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_PUBLIC_DOMAIN ||
+    process.env.RENDER || process.env.FLY_APP_NAME || process.env.DYNO ||
+    process.env.VERCEL || process.env.K_SERVICE
+  );
 })();
 if (BEHIND_PROXY) app.set('trust proxy', true);
+console.log(`  Detected proxy mode: ${BEHIND_PROXY ? 'YES (HTTP only, trust X-Forwarded-Proto)' : 'NO (local dev)'}`);
 
 const upload = multer({ dest: path.join(__dirname, 'data', 'uploads') });
 
@@ -2189,6 +2195,10 @@ app.post('/api/restore', requireAdmin, upload.single('file'), async (req, res) =
     res.status(500).json({ error: 'Restore failed: ' + err.message });
   }
 });
+
+// ── HEALTH CHECK ────────────────────────────────────────────
+// Plain 200 with no DB hit so Railway/Render/etc. edge probes always pass.
+app.get(['/healthz', '/_health'], (req, res) => res.status(200).type('text/plain').send('ok'));
 
 // ── ADMIN ───────────────────────────────────────────────────
 
