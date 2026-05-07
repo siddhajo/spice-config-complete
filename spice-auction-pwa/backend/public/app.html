@@ -136,6 +136,14 @@ select:focus{border-color:var(--green)}
 .lot-empty{text-align:center;padding:40px 16px;color:var(--text3);font-size:13px;font-weight:500}
 .undo-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
 .appbar-logo{height:30px;width:30px;object-fit:cover;margin-right:8px;vertical-align:middle;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:2px solid rgba(255,255,255,.3)}
+/* ── Shared searchbox: icon + clear ── */
+.sx{position:relative;display:block;width:100%}
+.sx>input{width:100%;padding-left:34px !important;padding-right:32px !important}
+.sx-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3);pointer-events:none;display:flex;align-items:center;justify-content:center}
+.sx-icon svg{width:14px;height:14px;display:block}
+.sx-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:20px;height:20px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border);border:none;padding:0;line-height:1;font-family:inherit}
+.sx-clear.show{display:flex}
+.sx-clear:hover{background:var(--border2);color:var(--text2)}
 .le-progress{flex-shrink:0;background:var(--stat-bg);color:#fff;padding:11px 14px;font-size:12px;box-shadow:0 -3px 12px rgba(13,124,95,.25);position:relative;overflow:hidden}
 .le-progress::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent)}
 .le-progress.over{background:linear-gradient(135deg,#c0392b 0%,#962d22 50%,#7a241b 100%);box-shadow:0 -3px 12px rgba(192,57,43,.35)}
@@ -249,9 +257,10 @@ select:focus{border-color:var(--green)}
         <!-- Seller -->
         <div id="le-sw" style="margin-bottom:6px">
           <div class="elb" id="elb-seller">SELLER</div>
-          <div style="position:relative">
-            <input type="text" id="le-name" placeholder="Search seller by name, phone, GSTIN..." autocomplete="off" onfocus="showSaveBtn()" oninput="searchTrader(this.value);document.getElementById('le-name-clear').style.display=this.value?'flex':'none'" style="height:36px;font-size:13px;padding-right:30px">
-            <span id="le-name-clear" onclick="document.getElementById('le-name').value='';document.getElementById('le-res').style.display='none';this.style.display='none';document.getElementById('le-name').focus()" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:14px;font-weight:700;width:20px;height:20px;align-items:center;justify-content:center;border-radius:50%;background:var(--border)">✕</span>
+          <div class="sx">
+            <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <input type="text" id="le-name" placeholder="Search seller by name, phone, GSTIN..." autocomplete="off" onfocus="showSaveBtn()" oninput="searchTrader(this.value)" style="height:36px;font-size:13px">
+            <button type="button" class="sx-clear" id="le-name-clear" aria-label="Clear search">✕</button>
           </div>
           <div class="sr" id="le-res" style="display:none"></div>
         </div>
@@ -357,7 +366,11 @@ select:focus{border-color:var(--green)}
       <div class="lot-stat"><div class="val" id="ml-bags">0</div><div class="lbl">Bags</div></div>
       <div class="lot-stat"><div class="val" id="ml-qty">0</div><div class="lbl">Kg</div></div>
     </div>
-    <div class="lot-search" style="position:relative"><input type="text" id="ml-search" placeholder="Search seller name..." oninput="filterMyLots(this.value);document.getElementById('ml-search-clear').style.display=this.value?'flex':'none'" style="padding-right:30px"><span id="ml-search-clear" onclick="document.getElementById('ml-search').value='';filterMyLots('');this.style.display='none'" style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:14px;font-weight:700;width:20px;height:20px;align-items:center;justify-content:center;border-radius:50%;background:var(--border)">✕</span></div>
+    <div class="lot-search"><div class="sx">
+      <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+      <input type="text" id="ml-search" placeholder="Search seller name..." oninput="filterMyLots(this.value)">
+      <button type="button" class="sx-clear" id="ml-search-clear" aria-label="Clear search">✕</button>
+    </div></div>
     <div id="ml-actions" style="display:none;margin-bottom:8px;gap:6px;align-items:center;flex-wrap:wrap">
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">🖨 Print selected</button>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">🖨 Print all by seller</button>
@@ -390,7 +403,11 @@ select:focus{border-color:var(--green)}
         <button onclick="editSellerMode()" title="Change to a different seller" style="background:none;border:none;color:#1D9E75;font-size:11px;font-weight:600;cursor:pointer;text-decoration:underline">Change</button>
       </div>
       <div id="ed-seller-search" style="display:none">
-        <input type="text" id="ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchEditSeller(this.value)" autocomplete="off">
+        <div class="sx">
+          <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+          <input type="text" id="ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchEditSeller(this.value)" autocomplete="off">
+          <button type="button" class="sx-clear" id="ed-seller-input-clear" aria-label="Clear search">✕</button>
+        </div>
         <div class="sr" id="ed-seller-res" style="display:none"></div>
       </div>
     </div>
@@ -761,7 +778,27 @@ cacheTrader(t);
 fetchSellerTemplate(t.id);
 loadSellerBookings(t.id);
 document.getElementById('le-bags').focus()}
-function clearTrader(){selT=null;document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';document.getElementById('le-name').value='';document.getElementById('le-name-clear').style.display='none';document.getElementById('le-res').style.display='none';hideSellerBookings();document.getElementById('le-name').focus()}
+function clearTrader(){selT=null;document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';document.getElementById('le-name').value='';var leClr=document.getElementById('le-name-clear');if(leClr)leClr.classList.remove('show');document.getElementById('le-res').style.display='none';hideSellerBookings();document.getElementById('le-name').focus()}
+
+// Shared search-clear wiring: toggles ✕ visibility based on value, clears + re-fires input on click.
+function attachSearchClear(inputId, onAfterClear){
+  var inp=document.getElementById(inputId); if(!inp)return;
+  var btn=document.getElementById(inputId+'-clear'); if(!btn)return;
+  var sync=function(){btn.classList.toggle('show', !!inp.value)};
+  inp.addEventListener('input', sync);
+  btn.addEventListener('click', function(){
+    inp.value=''; btn.classList.remove('show');
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    if(typeof onAfterClear==='function')onAfterClear();
+    inp.focus();
+  });
+  sync();
+}
+document.addEventListener('DOMContentLoaded', function(){
+  attachSearchClear('le-name', function(){document.getElementById('le-res').style.display='none'});
+  attachSearchClear('ml-search');
+  attachSearchClear('ed-seller-input', function(){var r=document.getElementById('ed-seller-res');if(r)r.style.display='none'});
+});
 
 var sellerBookingsReq=0;
 function hideSellerBookings(){sellerBookingsReq++;var el=document.getElementById('le-seller-lots');if(el)el.style.display='none';var b=document.getElementById('le-seller-lots-body');if(b)b.innerHTML=''}

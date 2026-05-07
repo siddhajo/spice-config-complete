@@ -335,6 +335,15 @@
   .alloc-tile-pct{font-size:18px;font-weight:800}
   .alloc-tile-count{font-size:11px;color:var(--text3)}
   .alloc-tile-detail{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:none}
+
+  /* ── Shared searchbox: icon + clear ── */
+  .sx{position:relative;display:inline-block}
+  .sx>input{padding-left:32px !important;padding-right:30px !important}
+  .sx-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3,#888);pointer-events:none;display:flex;align-items:center;justify-content:center}
+  .sx-icon svg{width:14px;height:14px;display:block}
+  .sx-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3,#888);font-size:11px;font-weight:700;width:18px;height:18px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border,#e0e0e0);border:none;padding:0;line-height:1;font-family:inherit}
+  .sx-clear.show{display:flex}
+  .sx-clear:hover{background:var(--border2,#c8c8c8);color:var(--text2,#444)}
   .alloc-tile.expanded .alloc-tile-detail{display:block}
 
   /* ═══ EDIT-ALLOC CHIP TILES ═══ */
@@ -539,7 +548,11 @@
       <select id="auction-select"><option value="">Select auction...</option></select>
       <select id="filter-branch"><option value="">All branches</option></select>
       <select id="filter-user"><option value="">All users</option></select>
-      <div style="position:relative;display:inline-block"><input type="text" id="filter-seller" placeholder="Search seller..." style="height:34px;border-radius:7px;border:1px solid #ccc;padding:0 30px 0 12px;font-size:13px;font-family:inherit;width:160px" oninput="filterBySeller();document.getElementById('filter-seller-clear').style.display=this.value?'flex':'none'"><span id="filter-seller-clear" onclick="document.getElementById('filter-seller').value='';filterBySeller();this.style.display='none'" style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:18px;height:18px;align-items:center;justify-content:center;border-radius:50%;background:var(--border)">✕</span></div>
+      <div class="sx">
+        <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+        <input type="text" id="filter-seller" placeholder="Search seller..." style="height:34px;border-radius:7px;border:1px solid #ccc;font-size:13px;font-family:inherit;width:160px" oninput="filterBySeller()">
+        <button type="button" class="sx-clear" id="filter-seller-clear" aria-label="Clear search">✕</button>
+      </div>
       <button class="ico-act rf" onclick="refresh()" title="Refresh" style="margin-left:auto"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button>
     </div>
 
@@ -984,7 +997,11 @@
 
       <div id="adm-ed-seller-search" style="display:none">
 
-        <input type="text" id="adm-ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchAdmEditSeller(this.value)" autocomplete="off">
+        <div class="sx" style="display:block">
+          <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+          <input type="text" id="adm-ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchAdmEditSeller(this.value)" autocomplete="off" style="width:100%">
+          <button type="button" class="sx-clear" id="adm-ed-seller-input-clear" aria-label="Clear search">✕</button>
+        </div>
 
         <div id="adm-ed-seller-res" style="display:none;background:#fff;border:1px solid #ddd;border-radius:8px;max-height:180px;overflow-y:auto;margin-top:4px"></div>
 
@@ -2650,6 +2667,25 @@ function filterBySeller() {
   clearTimeout(sellerSearchTimer);
   sellerSearchTimer = setTimeout(() => { currentPage = 1; loadLots(); }, 300);
 }
+
+// Shared search-clear wiring: toggles ✕ visibility based on value, clears + re-fires input on click.
+function attachSearchClear(inputId, onAfterClear){
+  var inp=document.getElementById(inputId); if(!inp)return;
+  var btn=document.getElementById(inputId+'-clear'); if(!btn)return;
+  var sync=function(){btn.classList.toggle('show', !!inp.value)};
+  inp.addEventListener('input', sync);
+  btn.addEventListener('click', function(){
+    inp.value=''; btn.classList.remove('show');
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    if(typeof onAfterClear==='function')onAfterClear();
+    inp.focus();
+  });
+  sync();
+}
+document.addEventListener('DOMContentLoaded', function(){
+  attachSearchClear('filter-seller');
+  attachSearchClear('adm-ed-seller-input', function(){var r=document.getElementById('adm-ed-seller-res');if(r)r.style.display='none'});
+});
 
 function exportSource(format) {
   window.open(`${BASE}/api/export-source/${format}?token=${authToken}`, '_blank');
