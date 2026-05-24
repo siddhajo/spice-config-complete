@@ -142,7 +142,29 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .side-item.active::before{content:'';position:absolute;left:0;top:8px;bottom:8px;width:3px;background:var(--spice-turmeric);border-radius:0 3px 3px 0}
 .side-item.active svg{color:var(--spice-turmeric)}
 .side-item svg{width:18px;height:18px;flex-shrink:0;stroke-width:2;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;color:rgba(255,255,255,.65)}
-.sb-collapse-btn{display:flex;align-items:center;justify-content:center;width:100%;padding:8px;margin:0 0 12px;background:rgba(255,255,255,.04);border:none;border-radius:8px;color:var(--spice-text-hint);cursor:pointer}
+.sb-collapse-btn{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;margin:0 0 14px auto;background:rgba(255,255,255,.06);border:none;border-radius:8px;color:rgba(255,255,255,.7);cursor:pointer;transition:background .15s, color .15s}
+.sb-collapse-btn:hover{background:rgba(255,255,255,.14);color:#fff}
+.sb-collapse-btn svg{width:16px;height:16px;stroke-width:2.4;transition:transform .25s}
+.sidebar.collapsed .sb-collapse-btn{margin-right:auto;margin-left:auto}
+.sidebar.collapsed .sb-collapse-btn svg{transform:rotate(180deg)}
+
+/* ---- Collapsed sidebar ---- */
+.sidebar{transition:width .25s ease}
+.sidebar.collapsed{width:68px;padding:20px 8px}
+.sidebar.collapsed .side-group-lbl{display:none}
+.sidebar.collapsed .side-item{justify-content:center;padding:12px 8px;gap:0;font-size:0}
+.sidebar.collapsed .side-item > svg{margin:0}
+.sidebar.collapsed .side-item > span,
+.sidebar.collapsed .side-item{font-size:0}
+.sidebar.collapsed .side-item > svg{width:20px;height:20px}
+.sidebar.collapsed .side-item.active::before{top:4px;bottom:4px}
+.sidebar.collapsed .side-item:hover::after{
+  content:attr(data-tip);
+  position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);
+  background:var(--spice-text-main);color:#fff;padding:6px 10px;border-radius:6px;
+  font-size:12px;font-weight:600;white-space:nowrap;z-index:60;
+  box-shadow:0 4px 12px rgba(0,0,0,.18);pointer-events:none;
+}
 .content{flex:1;padding:28px 36px;max-width:1400px;margin:0 auto;min-width:0}
 .tc{display:none}
 .tc.active{display:block;animation:fadeIn .25s ease-out}
@@ -2024,6 +2046,16 @@ function toggleSidebarCollapse(){
   sb.classList.toggle('collapsed');
   try { localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0'); } catch(e){}
 }
+function initSidebarCollapse(){
+  const sb = document.getElementById('sidebar');
+  if (!sb) return;
+  try { if (localStorage.getItem('sidebarCollapsed') === '1') sb.classList.add('collapsed'); } catch(_){}
+  sb.querySelectorAll('.side-item').forEach(b => {
+    if (!b.getAttribute('data-tip')) b.setAttribute('data-tip', (b.textContent || '').trim());
+  });
+}
+document.addEventListener('DOMContentLoaded', initSidebarCollapse);
+if (document.readyState !== 'loading') initSidebarCollapse();
 
 // ── Shared trade selector ──
 function getSharedAuctionId(){
