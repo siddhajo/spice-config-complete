@@ -143,6 +143,21 @@ const DEFAULTS = [
   { key: 'flag_round',      value: 'true',           category: 'flags',     label: 'Round Invoice Amounts',    type: 'boolean' },
   { key: 'flag_eway',       value: 'false',          category: 'flags',     label: 'ASP eWay Bill / Transport', type: 'boolean' },
   { key: 'flag_export',     value: 'false',          category: 'flags',     label: 'Export Invoices',          type: 'boolean' },
+  // ── PWA-merged flags ─────────────────────────────────────
+  // flag_local_ti      → toggles visibility of Local Transport / Local
+  //                      Insurance rate fields under Settings → Rates.
+  // flag_addl_charges  → toggles visibility of Additional Charge — Name /
+  //                      % fields under Rates & Charges (and emits the
+  //                      addl_chg / addl_name columns on invoices when on).
+  // flag_whatsapp      → exposes WhatsApp Share buttons across invoices,
+  //                      payment slips, etc. (uses cfg.whatsapp_phone_id).
+  // flag_price_list_mapping → ON shows the Price List Mapping sidebar
+  //                      item + a quick-access toolbar button on the Lots
+  //                      screen. OFF hides both via CSS .feat-* rules.
+  { key: 'flag_local_ti',        value: 'false', category: 'flags', label: 'Local Transport / Insurance',     type: 'boolean' },
+  { key: 'flag_addl_charges',    value: 'false', category: 'flags', label: 'Additional Charges',              type: 'boolean' },
+  { key: 'flag_whatsapp',        value: 'false', category: 'flags', label: 'WhatsApp Share Buttons',          type: 'boolean' },
+  { key: 'flag_price_list_mapping', value: 'true', category: 'flags', label: 'Price List Mapping',           type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
   { key: 'business_mode',   value: 'e-Trade',        category: 'mode',      label: 'Business Mode',            type: 'select' },

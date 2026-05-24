@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1D9E75">
+<link rel="manifest" href="/mobile/manifest.json">
+<title>Spice Auction</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+:root{--bg:#f6f5f1;--bg2:#fff;--text:#1a1a18;--text2:#555;--text3:#999;--border:#e8e6e1;--border2:#d5d2cb;--green:#0d7c5f;--green2:#0a6a50;--green-light:#e8f5f0;--red:#c0392b;--orange:#d4820a;--gold:#c9950c;--card-even:#f2f8f5;--input-bg:#fff;--modal-bg:#f6f5f1;--stat-bg:linear-gradient(135deg,#0d7c5f 0%,#0a6a50 50%,#085540 100%);--shadow:0 1px 3px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.04);--shadow-lg:0 8px 30px rgba(0,0,0,.12);--radius:10px;--appbar:linear-gradient(135deg,#0d7c5f 0%,#0a6a50 40%,#085540 100%)}
+[data-theme="dark"]{--bg:#141413;--bg2:#1e1e1c;--text:#e8e6e1;--text2:#aaa;--text3:#666;--border:#2e2e2a;--border2:#3a3a35;--green:#1dab82;--green2:#18946f;--green-light:#162e25;--card-even:#1a2420;--input-bg:#262624;--modal-bg:#1a1a18;--stat-bg:linear-gradient(135deg,#0d5c48 0%,#094a3a 100%);--shadow:0 2px 8px rgba(0,0,0,.25);--shadow-lg:0 8px 30px rgba(0,0,0,.4);--appbar:linear-gradient(135deg,#0a5c48 0%,#084a3a 100%)}
+body{font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;letter-spacing:-.01em}
+.screen{display:none;flex-direction:column;height:100dvh;position:absolute;top:0;left:0;right:0;bottom:0}
+.screen.active{display:flex}
+#s-lots,#s-mylots{height:calc(100dvh - 56px)}
+
+/* ââ APPBAR ââ */
+.appbar{background:var(--appbar);padding:10px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;min-height:50px;box-shadow:0 4px 20px rgba(13,124,95,.3);position:relative;z-index:2}
+.appbar::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent)}
+.appbar h1{flex:1;font-size:14px;color:#fff;font-weight:700;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.02em}
+.appbar .badge{font-size:9px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.9);padding:3px 10px;border-radius:20px;font-weight:600;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1)}
+.appbar .btn-icon{background:rgba(255,255,255,.1);border:none;padding:6px;cursor:pointer;color:rgba(255,255,255,.85);font-size:16px;border-radius:8px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.appbar .btn-icon:active{background:rgba(255,255,255,.25);transform:scale(.92)}
+.scroll{flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch}
+
+/* ââ LABELS ââ */
+.lb{font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px;margin-top:14px}
+.elb{font-size:8px;font-weight:800;color:var(--text3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:3px}
+.lb:first-child{margin-top:0}
+
+/* ââ INPUTS ââ */
+.ein{width:100%;height:34px;border-radius:8px;border:1.5px solid var(--border);padding:0 10px;font-size:14px;font-family:inherit;outline:none;background:var(--input-bg);color:var(--text);-webkit-appearance:none;transition:all .25s}
+.ein:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(13,124,95,.1);transform:translateY(-1px)}
+input[type=text],input[type=password],input[type=tel],input[type=email],input[type=number],input[type=search]{width:100%;height:44px;border-radius:var(--radius);border:1.5px solid var(--border);padding:0 14px;font-size:14px;font-family:inherit;outline:none;background:var(--input-bg);color:var(--text);-webkit-appearance:none;transition:all .25s}
+/* Mobile search inputs â left-anchored magnifying glass + native
+   browser clear (Ã) on the right. Same visual language as the
+   desktop app so dad sees the icons either device he uses. */
+input[type=search]{padding-left:36px !important;padding-right:34px !important;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230d7c5f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");background-repeat:no-repeat;background-position:12px center;background-size:16px 16px}
+input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;height:18px;width:18px;cursor:pointer;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c0392b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='15' y1='9' x2='9' y2='15'/><line x1='9' y1='9' x2='15' y2='15'/></svg>");background-size:contain;background-repeat:no-repeat;opacity:.7}
+input.invalid{border-color:#d93025;background:#fff5f5}
+input:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(13,124,95,.1)}
+input::placeholder{color:#bbb}
+select{width:100%;height:44px;border-radius:var(--radius);border:1.5px solid var(--border);padding:0 12px;font-size:14px;font-family:inherit;background:var(--input-bg);color:var(--text);outline:none;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;transition:all .2s}
+select:focus{border-color:var(--green)}
+
+/* ââ LOT CHIPS ââ */
+.lot-chip{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:30px;padding:0 6px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:2px dashed var(--border2);background:var(--bg2);color:var(--text2);transition:all .2s cubic-bezier(.34,1.56,.64,1);user-select:none;-webkit-tap-highlight-color:transparent;letter-spacing:-.02em;position:relative;overflow:hidden}
+.lot-chip:active{transform:scale(.88)}
+.lot-chip.used{background:#0d7c5f;color:#fff;cursor:not-allowed;font-size:10px;border:2px solid #0a6a50;opacity:.8}
+.lot-chip.selected{background:#e85d26;color:#fff;border:2px solid #d04d1a;box-shadow:0 3px 14px rgba(232,93,38,.4);transform:scale(1.1)}
+.lot-chip.selected::after{content:'';position:absolute;inset:-2px;border-radius:10px;border:2px solid rgba(255,255,255,.5);animation:chipRing 1.5s ease-out infinite}
+
+/* ââ BUTTONS ââ */
+.btn{width:100%;height:48px;border-radius:var(--radius);border:none;background:var(--stat-bg);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:18px;box-shadow:0 4px 14px rgba(13,124,95,.25);transition:all .2s;letter-spacing:-.01em;position:relative;overflow:hidden}
+.btn::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.1) 0%,transparent 50%);pointer-events:none}
+.btn:active{transform:scale(.97);box-shadow:0 2px 8px rgba(13,124,95,.2)}
+.btn:disabled{opacity:.35;pointer-events:none}
+.btn-sm{height:36px;border-radius:8px;font-size:13px;margin-top:0;width:auto;padding:0 16px;box-shadow:none}
+.btn-outline{background:#fff;color:var(--green);border:1.5px solid var(--green);box-shadow:none}
+.btn-outline::after{display:none}
+
+/* ââ SELLER CARD ââ */
+.tc{background:var(--green-light);border-radius:var(--radius);border:1.5px solid var(--green);padding:10px 12px;margin-top:6px;display:flex;gap:8px;margin-bottom:6px;position:relative;overflow:hidden}
+.tc::before{content:'';position:absolute;top:0;right:0;width:60px;height:60px;background:radial-gradient(circle,rgba(13,124,95,.08) 0%,transparent 70%);pointer-events:none}
+.tc .ti{flex:1}.tc .tn{font-size:13px;font-weight:700;color:var(--green)}.tc .td{font-size:10px;color:var(--text2);line-height:1.5;margin-top:2px}
+.tc .tx{background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:2px}
+
+/* ââ STATUS BAR ââ */
+.sb{background:var(--stat-bg);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative}
+.sb::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent)}
+.sc{font-size:12px;font-weight:700;color:#fff}.sl{font-size:9px;color:rgba(255,255,255,.55);font-weight:500}
+.st{font-size:12px;font-weight:700;text-align:right;color:#fff}
+
+/* ââ BOTTOM NAV (fixed, outside screens) ââ */
+.bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);box-shadow:0 -4px 16px rgba(0,0,0,.06);height:56px;align-items:stretch;z-index:999}
+.bnav.visible{display:flex}
+.bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0;cursor:pointer;font-size:9px;color:var(--text3);gap:3px;font-weight:700;transition:all .15s;-webkit-tap-highlight-color:transparent;user-select:none;height:100%;letter-spacing:.3px;text-transform:uppercase;position:relative;touch-action:manipulation;background:none;border:none;outline:none}
+.bnav-item,.bnav-item *{cursor:pointer}
+.bnav-item::before{content:'';position:absolute;top:0;left:20%;right:20%;height:3px;border-radius:0 0 3px 3px;background:var(--green);transform:scaleX(0);transition:transform .2s}
+.bnav-item:active{color:var(--green);background:rgba(13,124,95,.06)}
+.bnav-item.active{color:var(--green)}
+.bnav-item.active::before{transform:scaleX(1)}
+.bnav-item svg{width:20px;height:20px;transition:transform .15s}
+.bnav-item:active svg{transform:scale(.85)}
+
+/* ââ RECENT STRIP ââ */
+.recent-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px}
+.recent-item .ri-lot{font-weight:800;color:var(--green);min-width:40px;font-size:13px}
+.recent-item .ri-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
+.recent-item .ri-qty{font-weight:700;color:var(--text2);white-space:nowrap;font-size:11px}
+
+/* ââ MISC ââ */
+.qi{font-size:18px!important;font-weight:800!important;color:var(--green)!important;letter-spacing:-.02em}
+.eb{background:#fef1f1;border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--red);margin-top:10px;border:1px solid #f5c6c6}
+.logo{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:50px;color:var(--green)}
+.logo .dot{display:none}
+.logo #login-logo,.logo-title{font-size:26px;font-weight:800;letter-spacing:-.04em}
+.login-logo-img{height:72px;width:72px;object-fit:cover;display:none;margin:0 auto 14px;border-radius:18px;box-shadow:0 6px 20px rgba(13,124,95,.2);border:3px solid var(--green)}
+.sub{font-size:13px;color:var(--text3);margin-top:8px;margin-bottom:30px;text-align:center;font-weight:500}
+.badge{font-size:10px;background:rgba(255,255,255,.15);color:#fff;padding:3px 10px;border-radius:20px;font-weight:600}
+.fr{display:flex;gap:8px}.fr>div{flex:1}
+.sr{background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow-lg);margin-top:4px;max-height:240px;overflow-y:auto}
+.si{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:all .15s}.si:active{background:var(--green-light);padding-left:16px}.si:last-child{border-bottom:none}
+.si.add-new{color:var(--green);font-weight:700;font-size:12px;display:flex;align-items:center;gap:6px}
+.sn{font-size:13px;font-weight:600}.sn mark{background:none;color:var(--green);font-weight:800}
+.sd{font-size:11px;color:var(--text3);margin-top:2px}
+.toast{position:fixed;bottom:110px;left:14px;right:14px;background:var(--green);color:#fff;padding:12px 16px;border-radius:var(--radius);font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px;transform:translateY(100px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);z-index:1100;box-shadow:0 8px 28px rgba(0,0,0,.18);backdrop-filter:blur(4px)}
+.toast.show{transform:translateY(0);opacity:1}.toast.err{background:var(--red)}
+.tu{background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-left:auto;font-family:inherit}
+.mo{position:fixed;top:0;left:0;right:0;bottom:0;z-index:50;display:none;background:rgba(0,0,0,.25);backdrop-filter:blur(2px)}
+.md{position:absolute;top:50px;right:14px;background:var(--bg2);border-radius:14px;border:1px solid var(--border);box-shadow:var(--shadow-lg);overflow:hidden;min-width:190px;animation:menuSlide .2s ease-out}
+@keyframes menuSlide{from{opacity:0;transform:translateY(-8px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+.mi{padding:13px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);font-weight:500;transition:all .15s}.mi:last-child{border-bottom:none}.mi:active{background:var(--green-light);padding-left:20px}.mi.dg{color:var(--red)}
+
+/* ââ MY LOTS ââ */
+.ml-fixed{flex-shrink:0;padding:12px 14px 0}
+.ml-scroll{flex:1;overflow-y:auto;padding:0 14px 14px;-webkit-overflow-scrolling:touch}
+.lot-stats{display:flex;gap:6px;margin-bottom:10px}
+.lot-stat{flex:1;background:var(--stat-bg);border-radius:var(--radius);padding:10px 6px;text-align:center;box-shadow:0 3px 12px rgba(13,124,95,.2);position:relative;overflow:hidden}
+.lot-stat::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent)}
+.lot-stat .val{font-size:16px;font-weight:800;color:#fff}
+.lot-stat .lbl{font-size:8px;color:rgba(255,255,255,.55);text-transform:uppercase;margin-top:2px;letter-spacing:.5px;font-weight:700}
+.lot-search{margin-bottom:8px}
+.lot-search input{height:36px;font-size:13px;border-radius:var(--radius)}
+.lot-card{background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);padding:12px;margin-bottom:6px;box-shadow:var(--shadow);transition:all .25s}
+.lot-card:nth-child(even){background:var(--card-even)}
+.lot-card:active{transform:scale(.99);box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.lot-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.lot-num{font-size:14px;font-weight:800;color:var(--green)}
+.lot-name{font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lot-row{display:flex;align-items:center;gap:4px;margin-bottom:3px}
+.lot-meta{font-size:11px;color:var(--text2);line-height:1.5;font-weight:500}
+.lot-actions{display:flex;gap:4px;flex-shrink:0}
+.ico-btn{background:var(--bg2);border:1.5px solid var(--border);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+.ico-btn:active{transform:scale(.85)}.ico-btn.ed{color:var(--green);border-color:var(--green)}.ico-btn.dl{color:var(--red);border-color:var(--red)}.ico-btn.pr{color:#2563eb;border-color:#2563eb}
+.ico-btn svg{width:14px;height:14px}
+.lot-empty{text-align:center;padding:40px 16px;color:var(--text3);font-size:13px;font-weight:500}
+.undo-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
+.appbar-logo{height:30px;width:30px;object-fit:cover;margin-right:8px;vertical-align:middle;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:2px solid rgba(255,255,255,.3)}
+/* ââ Shared searchbox: icon + clear ââ */
+.sx{position:relative;display:block;width:100%}
+.sx>input{width:100%;padding-left:34px !important;padding-right:32px !important}
+.sx-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3);pointer-events:none;display:flex;align-items:center;justify-content:center}
+.sx-icon svg{width:14px;height:14px;display:block}
+.sx-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:20px;height:20px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border);border:none;padding:0;line-height:1;font-family:inherit}
+.sx-clear.show{display:flex}
+.sx-clear:hover{background:var(--border2);color:var(--text2)}
+.le-progress{flex-shrink:0;background:var(--stat-bg);color:#fff;padding:11px 14px;font-size:12px;box-shadow:0 -3px 12px rgba(13,124,95,.25);position:relative;overflow:hidden}
+.le-progress::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent)}
+.le-progress.over{background:linear-gradient(135deg,#c0392b 0%,#962d22 50%,#7a241b 100%);box-shadow:0 -3px 12px rgba(192,57,43,.35)}
+.le-progress .pp-row{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.le-progress .pp-lbl{font-size:9px;font-weight:700;color:rgba(255,255,255,.65);letter-spacing:.6px;text-transform:uppercase;margin-bottom:1px}
+.le-progress .pp-val{font-size:15px;font-weight:800;color:#fff;line-height:1.1}
+.le-progress .pp-pct{margin-left:auto;font-size:18px;font-weight:800;color:#fff;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:8px;letter-spacing:-.5px}
+.le-progress .pp-bar{height:6px;background:rgba(255,255,255,.18);border-radius:3px;overflow:hidden}
+.le-progress .pp-bar>div{height:100%;background:#fff;transition:width .3s;box-shadow:0 0 8px rgba(255,255,255,.5)}
+.le-progress .pp-warn{margin-top:6px;font-size:11px;font-weight:700;color:#fff;background:rgba(0,0,0,.18);padding:3px 8px;border-radius:5px;display:inline-block}
+.undo-item .ui-info{flex:1;font-size:12px}
+.undo-item .ui-restore{background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
+
+/* ââ MODALS ââ */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:20px}
+.modal-overlay.show{display:flex}
+.modal{background:var(--bg);border-radius:16px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;animation:modalUp .3s ease-out;overflow:hidden}
+@keyframes modalUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-hdr{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border-radius:16px 16px 0 0;flex-shrink:0}
+.modal-hdr h2{font-size:15px;font-weight:700}
+.modal-close{background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer}
+.modal-body{flex:1;overflow-y:auto;padding:14px 16px;min-height:0}
+.modal-foot{padding:10px 16px;border-top:1px solid var(--border);background:var(--bg2);display:flex;gap:8px;flex-shrink:0;border-radius:0 0 16px 16px}
+
+/* ââ ANIMATIONS ââ */
+@keyframes chipPop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1.1)}}
+@keyframes chipRing{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.3)}}
+.lot-chip.selected{animation:chipPop .25s cubic-bezier(.34,1.56,.64,1)}
+
+/* ââ DARK MODE ââ */
+[data-theme="dark"] .appbar{background:var(--appbar)}
+[data-theme="dark"] .sb{background:var(--stat-bg)}
+[data-theme="dark"] .lot-stat{background:var(--stat-bg)}
+[data-theme="dark"] .bnav{background:var(--bg2);border-top-color:var(--border)}
+[data-theme="dark"] .btn{background:var(--stat-bg)}
+[data-theme="dark"] input,[data-theme="dark"] select{background:var(--input-bg);color:var(--text);border-color:var(--border)}
+[data-theme="dark"] .modal{background:var(--modal-bg)}
+[data-theme="dark"] .modal-hdr{background:var(--bg2)}
+[data-theme="dark"] .modal-foot{background:var(--bg2)}
+[data-theme="dark"] .sr{background:var(--bg2);border-color:var(--border)}
+[data-theme="dark"] .tc{background:var(--green-light)}
+[data-theme="dark"] .md{background:var(--bg2);border-color:var(--border)}
+[data-theme="dark"] .lot-card:nth-child(odd){background:var(--bg2)}
+[data-theme="dark"] .lot-card:nth-child(even){background:var(--card-even)}
+
+/* ââ RESPONSIVE ââ */
+@media(max-width:360px){.scroll{padding:10px}.ml-fixed{padding:10px 10px 0}.ml-scroll{padding:0 10px 10px}input[type=text],input[type=password],input[type=tel],input[type=email],input[type=number]{height:38px;font-size:13px}select{height:38px;font-size:13px}.btn{height:40px;font-size:13px}.lot-stat{padding:6px 2px}.lot-stat .val{font-size:12px}.lot-stat .lbl{font-size:8px}.fr{gap:6px}.lot-chip{min-width:36px;height:26px;font-size:10px}}
+@media(max-height:500px){.sb{display:none}.bnav{display:none!important}#s-lots,#s-mylots{height:100dvh}}
+@media(min-width:600px){.screen{max-width:480px;margin:0 auto;left:0;right:0;border-left:1px solid var(--border);border-right:1px solid var(--border)}.bnav{max-width:480px;margin:0 auto;left:0;right:0}}
+</style>
+</head>
+<body>
+<div class="screen active" id="s-login"><div class="scroll">
+  <div class="logo">
+    <img id="login-logo-img" class="login-logo-img" src="">
+    <div id="login-logo" class="logo-title">Spice Auction</div>
+  </div>
+  <div class="sub">Login to start entering lots</div>
+  <div class="lb">USERNAME</div><input type="text" id="l-user" placeholder="Enter username" autocomplete="username" autocapitalize="none">
+  <div class="lb">PASSWORD</div><div style="position:relative"><input type="password" id="l-pass" placeholder="Enter password" autocomplete="current-password" style="padding-right:40px"><button type="button" onclick="togglePwdVis('l-pass',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:4px" title="Show password">ð</button></div>
+  <div id="l-err"></div><button class="btn" id="l-btn" onclick="doLogin()">Login</button>
+</div></div>
+
+<div class="screen" id="s-session">
+  <div class="appbar"><h1 id="ss-title"><img class="appbar-logo" src="" style="display:none">Spice Auction</h1><span class="badge" id="ss-user"></span><button class="btn-icon" onclick="doLogout()" title="Logout">&#x2715;</button></div>
+  <div class="scroll">
+    <div style="text-align:center;font-size:13px;color:var(--text2);margin-bottom:20px">Select a trade to start entering lots</div>
+    <div class="lb">SELECT TRADE</div>
+    <select id="ss-trade"></select>
+    <div id="ss-trade-info" style="font-size:11px;color:var(--text3);margin-top:4px"></div>
+    <div class="lb">BRANCH</div><select id="ss-branch"></select>
+    <div id="ss-err"></div><button class="btn" id="ss-btn" onclick="startSession()">Start Entering Lots</button>
+  </div>
+</div>
+
+<div class="screen" id="s-lots">
+  <div class="appbar"><h1 id="le-title"><img id="app-logo" class="appbar-logo" src="" style="display:none"><span id="le-title-text">Trade #1</span></h1><span class="badge" id="le-user"></span><button class="btn-icon" onclick="refreshConfig();toast('Config refreshed',false)" title="Refresh settings">ð</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
+
+  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0">
+    <!-- Alloc bar -->
+    <div id="le-alloc-bar" style="display:none;padding:6px 12px;border-bottom:1px solid var(--border);font-size:11px"></div>
+
+    <!-- Scrollable content: lot grid + form + recent -->
+    <div style="flex:1;overflow-y:auto;padding:0" id="le-scroll">
+
+      <!-- Lot Picker -->
+      <div style="padding:8px 12px;background:var(--bg)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <span style="font-size:10px;font-weight:700;color:var(--text2);letter-spacing:.5px">SELECT LOT</span>
+          <span id="le-lot-selected" style="font-size:11px;color:var(--green);font-weight:700"></span>
+        </div>
+        <div id="le-lot-grid-wrap">
+          <div id="le-lot-grid" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+        </div>
+        <div id="le-lot-err" style="display:none;font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;margin-top:2px"></div>
+      </div>
+
+      <!-- Selected Lot Display (shown after selection, grid collapsed) -->
+      <div id="le-lot-banner" style="display:none;padding:8px 12px">
+        <div style="display:flex;align-items:center;gap:8px;background:var(--green-light);border:1.5px solid rgba(13,124,95,.2);border-radius:10px;padding:8px 12px">
+          <div style="flex:1">
+            <div style="font-size:9px;font-weight:700;color:var(--text3);letter-spacing:.5px;margin-bottom:2px">SELECTED LOT</div>
+            <div style="font-size:20px;font-weight:800;color:var(--green)" id="le-lot-banner-num">#001</div>
+          </div>
+          <button onclick="showLotGrid()" style="background:var(--green);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">Change</button>
+        </div>
+      </div>
+
+      <!-- Main form -->
+      <div style="padding:8px 12px">
+        <!-- Seller -->
+        <div id="le-sw" style="margin-bottom:6px">
+          <div class="elb" id="elb-seller">SELLER</div>
+          <div class="sx">
+            <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <input type="search" id="le-name" placeholder="Search seller by name, phone, GSTIN..." autocomplete="off" onfocus="showSaveBtn()" oninput="searchTrader(this.value)" style="height:36px;font-size:13px">
+            <button type="button" class="sx-clear" id="le-name-clear" aria-label="Clear search">â</button>
+          </div>
+          <div class="sr" id="le-res" style="display:none"></div>
+        </div>
+        <div id="le-tc" style="display:none"></div>
+
+        <!-- Bank row -->
+        <div id="le-bank" style="display:none;margin-bottom:6px">
+          <div style="display:flex;gap:4px;align-items:center">
+            <select id="le-bank-select" style="flex:1;height:32px;border-radius:6px;border:1px solid var(--border2);padding:0 6px;font-size:11px;font-family:inherit;background:var(--input-bg);color:var(--text)" onchange="onBankSelect(this)">
+              <option value="">No bank</option>
+            </select>
+            <button onclick="editSelectedBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:13px" title="Edit bank">â</button>
+            <button onclick="deleteSelectedBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px" title="Delete bank">â</button>
+            <button onclick="showAddBank()" title="Add bank" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer">+Add</button>
+          </div>
+          <div id="le-bank-info" style="font-size:10px;color:var(--text3);margin-top:1px"></div>
+        </div>
+
+        <!-- Bank form (hidden) -->
+        <div id="le-bank-form" style="display:none;margin-bottom:6px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <div><div class="elb">A/C NUMBER</div><input type="text" id="le-acct" placeholder="9-18 digits" oninput="sanitizeInt(this);checkAcctMatch('le');checkLeAcctChanged()" class="ein"></div>
+            <div id="le-confirm-col" style="display:none"><div class="elb">RE-ENTER A/C</div><input type="text" id="le-acct-confirm" placeholder="Confirm" oninput="sanitizeInt(this);checkAcctMatch('le')" class="ein"></div>
+          </div>
+          <div id="le-acct-err" style="display:none;font-size:9px;font-weight:600;color:var(--red)"></div>
+          <div id="le-acct-match" style="display:none;font-size:9px;font-weight:600"></div>
+          <div id="le-acct-confirm-lbl" style="display:none"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px">
+            <div><div class="elb">IFSC CODE</div><input type="text" id="le-ifsc" placeholder="IFSC" class="ein" style="text-transform:uppercase" oninput="lookupIFSC(this,'le-ifsc-info')"></div>
+            <div><div class="elb">HOLDER NAME</div><input type="text" id="le-holder" placeholder="Holder name" class="ein"></div>
+          </div>
+          <div id="le-ifsc-info" style="display:none;font-size:9px;color:var(--green);font-weight:600"></div>
+          <div style="margin-top:4px"><div class="elb">LABEL</div><input type="text" id="le-bank-label" placeholder="e.g. SBI Main" class="ein"></div>
+          <input type="hidden" id="le-bank-edit-id" value="">
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button style="background:var(--green);color:#fff;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer" onclick="saveBankAccount()">Save</button>
+            <button style="background:none;border:1px solid var(--border);border-radius:5px;padding:4px 12px;font-size:11px;color:var(--text2);cursor:pointer" onclick="hideBankForm()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Grade + Bags + Litre -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <div><div class="elb" id="elb-grade">GRADE</div><input type="text" id="le-grade" value="1" autocomplete="off" class="ein"></div>
+          <div><div class="elb" id="elb-bags">BAGS</div><input type="text" id="le-bags" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"></div>
+          <div><div class="elb" id="elb-litre">LITRE WT</div><input type="text" id="le-litre" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"></div>
+        </div>
+
+        <!-- Net + Sample + Gross -->
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-bottom:6px">
+          <div><div class="elb" id="elb-net">NET WT (KG)</div><input type="text" id="le-qty" placeholder="0.000" inputmode="decimal" onfocus="showSaveBtn()" class="ein qi" oninput="sanitizeDec(this);calcGrossWeight()"></div>
+          <div><div class="elb" id="elb-sample">SAMPLE</div><input type="text" id="le-sample" placeholder="0" readonly class="ein" style="background:var(--bg);color:var(--text3)"></div>
+          <div><div class="elb" id="elb-gross">GROSS</div><input type="text" id="le-gross" placeholder="0" readonly class="ein" style="background:var(--bg);color:var(--green);font-weight:700"></div>
+        </div>
+
+        <!-- Moisture (conditional, compact) -->
+        <div id="le-moisture-wrap" style="display:none;margin-bottom:6px;margin-top:-2px"><div style="width:33%"><div class="elb" id="elb-moisture">MOISTURE %</div><input type="text" id="le-moisture" placeholder="0.0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"></div></div>
+
+        <!-- Buttons -->
+        <div id="le-btn-save" style="display:flex;gap:8px">
+          <button class="btn" id="le-save" onclick="saveLot()" title="Save lot" style="flex:2;height:40px;margin-top:0;font-size:14px;border-radius:10px">â Save</button>
+          <button onclick="clearEntryForm()" title="Clear form" style="flex:1;height:40px;border-radius:10px;border:1.5px solid var(--border2);background:var(--input-bg);color:var(--text2);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">â Clear</button>
+        </div>
+        <div id="le-btn-saved" style="display:none">
+          <div style="display:flex;gap:6px;align-items:center;background:var(--green-light);border:1.5px solid rgba(13,124,95,.2);border-radius:10px;padding:6px 10px">
+            <span style="font-size:12px;font-weight:700;color:var(--green);flex:1" id="le-saved-label">â Saved #001</span>
+            <button onclick="printLastLot()" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">ð¨ This Lot</button>
+            <button onclick="printLastSeller()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">ð All by Seller</button>
+          </div>
+        </div>
+
+        <!-- Seller's existing bookings (this trade, all branches) -->
+        <div id="le-seller-lots" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);overflow:hidden">
+          <div id="le-seller-lots-hdr" style="display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.4px"></div>
+          <div id="le-seller-lots-body" style="max-height:180px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <!-- Recent lots strip -->
+      <div id="le-recent" style="border-top:1px solid var(--border);font-size:11px"></div>
+    </div>
+
+    <!-- Received vs planned progress bar (replaces old totals summary) -->
+    <div id="le-progress" class="le-progress" style="display:none"></div>
+  </div>
+
+  </div>
+
+<div class="mo" id="menu" onclick="toggleMenu()"><div class="md" onclick="event.stopPropagation()">
+    <div class="mi" onclick="toggleDarkMode()"><span id="dm-icon">ð</span> <span id="dm-label">Dark Mode</span></div>
+    <div class="mi" id="menu-undo" style="display:none" onclick="showUndoHistory()">â© Undo History</div>
+    <div class="mi" onclick="togglePrintFormat()">ð¨ Print format: <span id="pf-label">Full</span></div>
+    <div class="mi" onclick="showChangePassword()">ð Change Password</div>
+    <div class="mi" onclick="changeSession()">Change session</div>
+    <div class="mi dg" onclick="doLogout()">Logout</div>
+  </div></div>
+
+<div class="screen" id="s-mylots">
+  <div class="appbar"><h1 id="ml-title"><img class="appbar-logo" src="" style="display:none"><span id="ml-title-text">My Lots</span></h1><span class="badge" id="ml-user"></span><button class="btn-icon" onclick="refreshConfig();loadMyLots();toast('Refreshed',false)" title="Refresh">ð</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
+  <div id="ml-alloc-bar" style="display:none;background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
+  <div class="ml-fixed">
+    <div class="lot-stats">
+      <div class="lot-stat"><div class="val" id="ml-cnt">0</div><div class="lbl">Lots</div></div>
+      <div class="lot-stat"><div class="val" id="ml-bags">0</div><div class="lbl">Bags</div></div>
+      <div class="lot-stat"><div class="val" id="ml-qty">0</div><div class="lbl">Kg</div></div>
+    </div>
+    <div class="lot-search"><div class="sx">
+      <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+      <input type="search" id="ml-search" placeholder="Search seller name..." oninput="filterMyLots(this.value)">
+      <button type="button" class="sx-clear" id="ml-search-clear" aria-label="Clear search">â</button>
+    </div></div>
+    <div id="ml-actions" style="display:none;margin-bottom:8px;gap:6px;align-items:center;flex-wrap:wrap">
+      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">ð¨ Print selected</button>
+      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">ð¨ Print all by seller</button>
+      <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">ð Delete Selected</button>
+      <span style="font-size:11px;color:var(--text3)" id="ml-sel-count"></span>
+    </div>
+  </div>
+  <div class="ml-scroll" id="ml-scroll">
+    <div id="ml-top"></div>
+    <div style="text-align:right;padding:2px 12px"><a onclick="document.getElementById('ml-bottom').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">â¬ Bottom</a></div>
+    <div id="ml-list"></div>
+    <div style="text-align:right;padding:4px 12px" id="ml-bottom"><a onclick="document.getElementById('ml-top').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">â¬ Top</a></div>
+  </div>
+</div>
+
+<!-- GLOBAL FIXED BOTTOM NAV -->
+<div class="bnav" id="global-bnav">
+  <div class="bnav-item active" id="bnav-entry" onclick="showTab('entry')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg><span>Entry</span></div>
+  <div class="bnav-item" id="bnav-mylots" onclick="showTab('mylots')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg><span>My Lots</span></div>
+</div>
+
+<div class="modal-overlay" id="edit-modal"><div class="modal">
+  <div class="modal-hdr"><h2>Edit Lot #<span id="ed-lotno-display"></span></h2><button class="modal-close" onclick="closeEdit()">&#x2715;</button></div>
+  <div class="modal-body">
+    <div class="lb">LOT NUMBER</div><input type="text" id="ed-lotno">
+    <div class="lb">SELLER</div>
+    <div id="ed-seller-wrap">
+      <div id="ed-seller-card" style="background:#e1f5ee;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600;color:#0F6E56;display:flex;align-items:center;gap:6px">
+        <span id="ed-seller-name" style="flex:1"></span>
+        <button onclick="editSellerMode()" title="Change to a different seller" style="background:none;border:none;color:#1D9E75;font-size:11px;font-weight:600;cursor:pointer;text-decoration:underline">Change</button>
+      </div>
+      <div id="ed-seller-search" style="display:none">
+        <div class="sx">
+          <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+          <input type="search" id="ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchEditSeller(this.value)" autocomplete="off">
+          <button type="button" class="sx-clear" id="ed-seller-input-clear" aria-label="Clear search">â</button>
+        </div>
+        <div class="sr" id="ed-seller-res" style="display:none"></div>
+      </div>
+    </div>
+    <div id="ed-bank" style="display:none;margin-top:6px">
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-weight:700;color:var(--text2);font-size:11px">BANK ACCOUNT</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="ed-bank-select" style="flex:1;height:36px;border-radius:6px;border:1px solid var(--border2);padding:0 8px;font-size:12px;font-family:inherit;background:var(--input-bg);color:var(--text)" onchange="onEditBankSelect(this)">
+            <option value="">No bank account</option>
+          </select>
+          <button onclick="editSelectedEditBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:15px" title="Edit selected bank account">â</button>
+          <button onclick="deleteSelectedEditBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px" title="Delete selected bank account">â</button>
+          <button onclick="showEditBankAdd()" title="Add new bank account" style="background:var(--green);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
+        </div>
+        <div id="ed-bank-info" style="margin-top:4px;font-size:11px;color:var(--text3)"></div>
+      </div>
+      <div id="ed-bank-form" style="display:none;margin-top:6px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px">
+        <div class="lb">A/C NUMBER</div><input type="text" id="ed-acct" placeholder="Account number (9-18 digits)" oninput="sanitizeInt(this);checkAcctMatch('ed');checkEdAcctChanged()">
+        <div id="ed-acct-err" style="display:none;font-size:10px;font-weight:600;margin-top:2px;color:var(--red)"></div>
+        <div class="lb" id="ed-acct-confirm-lbl" style="margin-top:6px;display:none">RE-ENTER A/C NUMBER</div><input type="text" id="ed-acct-confirm" placeholder="Re-enter account number" style="display:none" oninput="sanitizeInt(this);checkAcctMatch('ed')">
+        <div id="ed-acct-match" style="display:none;font-size:10px;font-weight:600;margin-top:2px"></div>
+        <div class="fr" style="margin-top:6px"><div><div class="lb">IFSC CODE</div><input type="text" id="ed-ifsc" placeholder="IFSC code" style="text-transform:uppercase" oninput="lookupIFSC(this,'ed-ifsc-info')"></div><div><div class="lb">HOLDER NAME</div><input type="text" id="ed-holder" placeholder="Account holder name"></div></div>
+        <div id="ed-ifsc-info" style="display:none;font-size:10px;margin-top:2px;color:var(--green);font-weight:600"></div>
+        <div class="lb" style="margin-top:6px">LABEL (optional)</div><input type="text" id="ed-bank-label" placeholder="e.g. SBI Main">
+        <input type="hidden" id="ed-bank-edit-id" value="">
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit" onclick="saveEditBankAccount()">Save</button>
+          <button style="background:none;border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:12px;color:var(--text2);cursor:pointer;font-family:inherit" onclick="document.getElementById('ed-bank-form').style.display='none'">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="lb">GRADE</div><input type="text" id="ed-grade">
+    <div class="fr" style="margin-top:12px"><div><div class="lb">BAGS</div><input type="text" id="ed-bags" inputmode="numeric" oninput="sanitizeInt(this)"></div><div><div class="lb">LITRE</div><input type="text" id="ed-litre" inputmode="numeric" oninput="sanitizeInt(this)"></div></div>
+    <div class="lb">QUANTITY (KG)</div><input type="text" id="ed-qty" inputmode="decimal" class="qi" oninput="sanitizeDec(this);calcEditGross()">
+    <div class="fr" style="margin-top:8px"><div><div class="lb">SAMPLE WT</div><input type="text" id="ed-sample" inputmode="decimal" oninput="sanitizeDec(this);calcEditGross()" readonly style="background:var(--bg);color:var(--text3)"></div><div><div class="lb">GROSS WT</div><input type="text" id="ed-gross" readonly style="background:var(--bg);color:var(--green);font-weight:700"></div></div>
+    <div id="ed-err"></div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-sm btn-outline" onclick="closeEdit()" style="flex:1">Cancel</button><button class="btn btn-sm" onclick="saveEdit()" id="ed-save" style="flex:2">Save</button></div>
+</div></div>
+
+<div class="modal-overlay" id="seller-modal"><div class="modal">
+  <div class="modal-hdr"><h2>Add New Seller</h2><button class="modal-close" onclick="closeSellerModal()">&#x2715;</button></div>
+  <div class="modal-body"><form autocomplete="off" onsubmit="event.preventDefault();saveNewSeller()">
+    <div class="lb">NAME *</div><input type="text" id="ns-name" autocapitalize="characters" autocomplete="off" name="ns-name">
+    <div class="lb">GSTIN / CR</div><input type="text" id="ns-cr" autocomplete="off" name="ns-cr">
+    <div class="lb">PAN</div><input type="text" id="ns-pan" autocapitalize="characters" autocomplete="off" name="ns-pan">
+    <div class="lb">PHONE</div><input type="tel" id="ns-tel" inputmode="tel" autocomplete="off" name="ns-tel" maxlength="15" oninput="this.value=this.value.replace(/[^0-9+]/g,'');if(document.getElementById('ns-wa-same').checked)document.getElementById('ns-whatsapp').value=this.value">
+    <div class="lb" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>WHATSAPP</span><label style="font-size:11px;font-weight:600;color:var(--text2);display:inline-flex;align-items:center;gap:5px;cursor:pointer;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="ns-wa-same" onchange="onWaSameToggle()" style="width:14px;height:14px;cursor:pointer;margin:0"> Same as phone</label></div>
+    <input type="tel" id="ns-whatsapp" inputmode="tel" autocomplete="off" name="ns-whatsapp" maxlength="15" oninput="this.value=this.value.replace(/[^0-9+]/g,'')">
+    <div class="lb">EMAIL</div><input type="email" id="ns-email" inputmode="email" autocapitalize="none" autocomplete="off" name="ns-email" spellcheck="false" oninput="validateEmailField(this)" onblur="validateEmailField(this,true)">
+    <div id="ns-email-err" style="display:none;font-size:11px;color:#d93025;margin-top:4px;font-weight:600">Enter a valid email address</div>
+    <div class="lb">ADDRESS</div><input type="text" id="ns-padd" autocomplete="off" name="ns-padd">
+    <div class="fr"><div><div class="lb">PLACE</div><input type="text" id="ns-ppla" autocomplete="off" name="ns-ppla"></div><div><div class="lb">PIN</div><input type="text" id="ns-pin" inputmode="numeric" autocomplete="off" name="ns-pin"></div></div>
+    <div class="fr"><div><div class="lb">STATE</div><input type="text" id="ns-pstate" value="TAMIL NADU" autocomplete="off" name="ns-pstate"></div><div><div class="lb">STATE CODE</div><input type="text" id="ns-pst" value="33" autocomplete="off" name="ns-pst"></div></div>
+    <div id="ns-err"></div>
+  </form></div>
+  <div class="modal-foot"><button class="btn btn-sm btn-outline" onclick="closeSellerModal()" style="flex:1">Cancel</button><button class="btn btn-sm" onclick="saveNewSeller()" id="ns-save" style="flex:2">Add Seller</button></div>
+</div></div>
+
+<!-- Bank popover -->
+<div id="user-bank-pop" style="display:none;position:fixed;z-index:1001;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-width:260px"></div>
+
+<!-- Offline banner -->
+<div id="offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;background:#E67E22;color:#fff;text-align:center;padding:6px 10px;font-size:12px;font-weight:600;z-index:300;display:none;align-items:center;justify-content:center;gap:8px">
+  <span>â¡ Offline <span id="offline-count"></span></span>
+  <button onclick="syncOfflineQueue()" style="background:rgba(255,255,255,.3);border:none;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Sync now</button>
+</div>
+
+<!-- Undo History Modal -->
+<div class="modal-overlay" id="undo-modal"><div class="modal">
+  <div class="modal-hdr"><h2>Undo History</h2><button class="modal-close" onclick="document.getElementById('undo-modal').classList.remove('show')">&#x2715;</button></div>
+  <div class="modal-body">
+    <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Last 10 deleted lots â click Restore to bring back</p>
+    <div id="undo-list"></div>
+  </div>
+</div></div>
+
+<div class="modal-overlay" id="cp-modal"><div class="modal" style="max-width:340px">
+  <div class="modal-hdr"><h2>Change Password</h2><button class="modal-close" onclick="document.getElementById('cp-modal').classList.remove('show')">&#x2715;</button></div>
+  <div class="modal-body">
+    <div class="lb">CURRENT PASSWORD</div><input type="password" id="app-cp-current" placeholder="Enter current password">
+    <div class="lb">NEW PASSWORD</div><input type="password" id="app-cp-new" placeholder="Min 6 characters">
+    <div class="lb">CONFIRM NEW PASSWORD</div><input type="password" id="app-cp-confirm" placeholder="Repeat new password">
+    <div id="app-cp-err"></div>
+  </div>
+  <div class="modal-foot"><button class="btn btn-sm btn-outline" onclick="document.getElementById('cp-modal').classList.remove('show')" style="flex:1">Cancel</button><button class="btn btn-sm" onclick="appChangePassword()" style="flex:2">Change Password</button></div>
+</div></div>
+
+<div class="toast" id="toast"><span id="t-ico">&#10003;</span> <span id="t-msg"></span></div>
+
+<script>
+const B=window.location.origin;
+let token=localStorage.getItem('sa_token')||'',user='',userBranch='',userRole='';
+let aid=null,tno=1,br='',nxt='',lc=0,tq=0,sessionEnd=null;
+let selT=null,lastId=null,stm=null,editId=null;
+let appTitle='Spice Auction',lastSearchQuery='',editTimeoutMinutes=0;
+let allMyLots=[],editEnabled=true;
+let cfgDefaultLitre='';
+
+const ICO_EDIT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+const ICO_DEL='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+const ICO_PRINT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>';
+
+function togglePwdVis(id,btn){var inp=document.getElementById(id);if(inp.type==='password'){inp.type='text';btn.textContent='ð'}else{inp.type='password';btn.textContent='ð'}}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');var bn=document.getElementById('global-bnav');if(bn){if(id==='s-lots'||id==='s-mylots'){bn.classList.add('visible')}else{bn.classList.remove('visible')}}}
+document.addEventListener('click',function(){var el=document.getElementById('le-recent');if(el){el.querySelectorAll('[style*="position:absolute"]').forEach(function(p){p.style.display='none'})}});
+function ah(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'}}
+function fmtDate(d){if(!d)return'';var p=d.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d}
+function setTitle(t){appTitle=t;document.getElementById('login-logo').textContent=t;var ssImg=document.querySelector('#ss-title .appbar-logo');document.getElementById('ss-title').innerHTML=(ssImg?ssImg.outerHTML:'')+t;document.title=t}
+function isEditLocked(c){if(!editTimeoutMinutes||editTimeoutMinutes<=0||!c)return false;return(new Date()-new Date(c.replace(' ','T')))/(1000*60)>editTimeoutMinutes}
+
+let _hl=false;const _of=window.fetch;window.fetch=async function(...a){const r=await _of.apply(this,a);const u=typeof a[0]==='string'?a[0]:'';if(u.includes('/api/')&&!u.includes('/api/auth/login')&&!u.includes('/api/config')&&!u.includes('/api/status')&&r.status===401&&!_hl){_hl=true;token='';localStorage.removeItem('sa_token');show('s-login');_hl=false}return r};
+
+function showTab(t){
+  // Close any open modals
+  document.querySelectorAll('.modal-overlay.show').forEach(function(m){m.classList.remove('show')});
+  // Instant screen switch
+  if(t==='entry'){show('s-lots')}else{show('s-mylots')}
+  // Update single global bnav
+  document.getElementById('bnav-entry').classList.toggle('active',t==='entry');
+  document.getElementById('bnav-mylots').classList.toggle('active',t!=='entry');
+  // Async work after visual update
+  if(t==='entry'){refreshConfig();renderAllocBars()}else{loadMyLots();renderAllocBars()}
+}
+
+async function refreshConfig(){
+  try{
+    var r=await fetch(B+'/api/config');var d=await r.json();
+    var changed=false;
+    var oldLitre=cfgDefaultLitre;
+    if(d.sampleWeight!=cfgSampleWeight){cfgSampleWeight=d.sampleWeight||0;changed=true}
+    if(d.showMoisture!=cfgShowMoisture){cfgShowMoisture=d.showMoisture||false;changed=true}
+    if(d.defaultLitre!=cfgDefaultLitre){cfgDefaultLitre=d.defaultLitre||'';changed=true}
+    if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
+    if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
+    if(d.labels&&JSON.stringify(d.labels)!==JSON.stringify(cfgLabels)){
+      cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);
+      applyLabels();changed=true;
+    }
+    if(changed){
+      document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
+      document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';
+      // Update litre if empty or still showing old default
+      var litreEl=document.getElementById('le-litre');
+      if(litreEl&&(litreEl.value===''||litreEl.value===oldLitre)){litreEl.value=cfgDefaultLitre||''}
+      calcGrossWeight();
+    }
+  }catch(e){}
+}
+// Poll config every 30s while on lot entry
+setInterval(function(){if(document.getElementById('s-lots').classList.contains('active'))refreshConfig()},30000);
+
+async function doLogin(forceLogin){const u=document.getElementById('l-user').value.trim(),p=document.getElementById('l-pass').value,er=document.getElementById('l-err');er.innerHTML='';if(!u||!p){er.innerHTML='<div class="eb">Enter username and password</div>';return}document.getElementById('l-btn').disabled=true;try{const r=await fetch(B+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p,force:forceLogin||false})});const d=await r.json();if(r.status===409&&d.error==='already_logged_in'){er.innerHTML='<div class="eb" style="text-align:center">'+d.message+'<br><button onclick="doLogin(true)" style="margin-top:8px;background:#1D9E75;color:#fff;border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Yes, switch to this device</button></div>';return}if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Login failed')+'</div>';return}token=d.token;user=d.user.username;userBranch=d.user.branch||'';userRole=d.user.role||'user';localStorage.setItem('sa_token',token);goSession()}catch(e){er.innerHTML='<div class="eb">Could not connect</div>'}finally{document.getElementById('l-btn').disabled=false}}
+function doLogout(){fetch(B+'/api/auth/logout',{method:'POST',headers:ah()}).catch(()=>{});token='';user='';localStorage.removeItem('sa_token');toggleMenu(true);show('s-login')}
+async function tryAutoLogin(){if(!token){loadTitle();return}try{const r=await fetch(B+'/api/auth/me',{headers:ah()});if(r.ok){const d=await r.json();user=d.user.username;userBranch=d.user.branch||'';userRole=d.user.role||'user';goSession()}else{token='';localStorage.removeItem('sa_token');loadTitle()}}catch(e){loadTitle()}}
+var cfgSampleWeight=0,cfgShowMoisture=false;
+var cfgLabels={lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'};
+function applyLabels(){
+  var L=cfgLabels;
+  var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
+  Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
+}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+await loadAvailableTrades();
+show('s-session')}
+
+async function loadAvailableTrades(){
+  var sel=document.getElementById('ss-trade');
+  var info=document.getElementById('ss-trade-info');
+  sel.innerHTML='<option value="">Loading...</option>';
+  info.textContent='';
+  try{
+    var r=await fetch(B+'/api/mobile/auctions',{headers:{'Authorization':'Bearer '+token}});
+    if(!r.ok){
+      // Server gates every non-auth endpoint behind must_change_password
+      // when the user's password hasn't been rotated yet. Surface the
+      // change-password modal instead of a useless "Failed to load".
+      try {
+        var errBody = await r.json();
+        if (r.status === 403 && errBody && errBody.must_change_password) {
+          sel.innerHTML = '<option value="">Change password to continue</option>';
+          var info = document.getElementById('ss-trade-info');
+          // Inline message includes a clickable link so the user can
+          // re-open the change-password modal after dismissing it.
+          // Without this they'd be stuck looking at the warning with
+          // no obvious way back to the form.
+          if (info) {
+            info.innerHTML = 'You must change your password before loading trades. <a href="#" onclick="event.preventDefault();showChangePassword();" style="color:var(--green,#0E8A5F);font-weight:600;text-decoration:underline">Change password now â</a>';
+          }
+          showChangePassword();
+          // Pre-fill the error banner inside the modal so it's clear
+          // why the modal popped up.
+          var errEl = document.getElementById('app-cp-err');
+          if (errEl) errEl.innerHTML = '<div class="eb">Your password must be changed before you can use the app.</div>';
+          return;
+        }
+      } catch(_){ /* response wasn't JSON */ }
+      sel.innerHTML='<option value="">Failed to load</option>';
+      return;
+    }
+    var d=await r.json();
+    var trades=d.auctions||[];
+    sel.innerHTML='<option value="">Select a trade...</option>';
+    for(var i=0;i<trades.length;i++){
+      var a=trades[i];
+      var ts='';
+      if(a.start_time||a.end_time) ts=' ('+(a.start_time||'--')+' - '+(a.end_time||'--')+')';
+      var opt=document.createElement('option');
+      opt.value=a.id;
+      opt.setAttribute('data-ano',a.ano);
+      opt.setAttribute('data-date',a.date);
+      opt.setAttribute('data-crop',a.crop_type||'ASP');
+      opt.setAttribute('data-end',a.end_time||'');
+      opt.textContent='Trade #'+a.ano+' - '+fmtDate(a.date)+' - '+(a.crop_type||'ASP')+ts;
+      sel.appendChild(opt);
+    }
+    if(!trades.length) info.textContent='No trades available - ask admin to create one';
+    sel.onchange=function(){var o=sel.options[sel.selectedIndex];info.textContent=o&&o.value&&o.getAttribute('data-end')?'Ends at '+o.getAttribute('data-end'):''};
+  }catch(e){sel.innerHTML='<option value="">Error: '+e.message+'</option>';console.error('Load trades:',e)}
+}
+
+async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select a trade</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
+// Reload config for sample weight + moisture
+try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none'}catch(e){}
+await loadStats();goLots()}
+
+var allocStats=null;
+var selectedLots=[];
+var availableLots=[];
+var recentLots=[];
+var lastSavedLot=null;
+async function loadStats(){try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();const lots=d.lots||[];lc=d.stats?.lotCount||lots.length;tq=d.stats?.totalQty||0;
+// Don't show previous lots on entry screen - only show after save
+renderRecentLots();
+// Fetch allocation stats + lot grid
+try{const r3=await fetch(B+'/api/auctions/'+aid+'/allocation-stats',{headers:ah()});const d3=await r3.json();allocStats=d3.stats||[];renderAllocBars();renderLotGrid()}catch(e){allocStats=null}
+}catch(e){}}
+
+function renderLotGrid(){
+  var grid=document.getElementById('le-lot-grid');
+  var myBranch=allocStats?allocStats.find(function(s){return s.branch===br}):null;
+  if(!myBranch||!myBranch.ranges){grid.innerHTML='<span style="font-size:10px;color:var(--text3)">No lots allocated</span>';return}
+  availableLots=[];
+  var html='';
+  myBranch.ranges.forEach(function(rng){
+    if(rng.lots){
+      rng.lots.forEach(function(l){
+        var cls='lot-chip';
+        if(l.used)cls+=' used';
+        else{availableLots.push(l.lot);if(selectedLots.indexOf(l.lot)>=0)cls+=' selected'}
+        html+='<span class="'+cls+'" data-lot="'+l.lot+'" '+(l.used?'':'onclick="toggleLotChip(this)"')+'>'+l.lot+'</span>';
+      });
+    }
+  });
+  grid.innerHTML=html||'<span style="font-size:10px;color:var(--text3)">No lots</span>';
+  updateLotSelection();
+}
+
+function hasFormData(){
+  return !!(selT || document.getElementById('le-name').value.trim() || document.getElementById('le-bags').value || document.getElementById('le-qty').value);
+}
+
+function toggleLotChip(el){
+  var lot=el.dataset.lot;
+  if(selectedLots.length && selectedLots[0]===lot){return}
+  // Warn if form has data (only bags/qty filled)
+  if((document.getElementById('le-bags').value || document.getElementById('le-qty').value) && selectedLots.length){
+    if(!confirm('Changing lot will clear bags, litre and weight fields.\n\nSeller will be kept.\n\nProceed?'))return;
+    // Clear only entry fields, keep seller + grade + bank
+    document.getElementById('le-bags').value='';
+    document.getElementById('le-litre').value=cfgDefaultLitre||'';
+    document.getElementById('le-qty').value='';
+    document.getElementById('le-gross').value='';
+    document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
+    if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  }
+  selectedLots=[lot];
+  document.querySelectorAll('#le-lot-grid .lot-chip.selected').forEach(function(c){c.classList.remove('selected')});
+  el.classList.add('selected');
+  // Collapse grid, show banner
+  collapseLotGrid();
+  updateLotSelection();
+}
+
+function selectNextAvailableLot(){
+  selectedLots=[];
+  if(availableLots.length>0){
+    selectedLots=[availableLots[0]];
+    var chips=document.querySelectorAll('#le-lot-grid .lot-chip');
+    chips.forEach(function(c){c.classList.remove('selected');if(c.dataset.lot===availableLots[0])c.classList.add('selected')});
+  }
+  // After save: collapse grid, show banner
+  if(selectedLots.length) collapseLotGrid();
+  updateLotSelection();
+}
+
+function updateLotSelection(){
+  var el=document.getElementById('le-lot-selected');
+  var banner=document.getElementById('le-lot-banner');
+  var bannerNum=document.getElementById('le-lot-banner-num');
+  if(selectedLots.length===0){
+    el.textContent='';
+    banner.style.display='none';
+  } else {
+    el.textContent='Lot #'+selectedLots[0];
+    bannerNum.textContent='#'+selectedLots[0];
+  }
+}
+
+function collapseLotGrid(){
+  document.getElementById('le-lot-grid-wrap').style.display='none';
+  document.getElementById('le-lot-banner').style.display='block';
+}
+
+function showLotGrid(){
+  document.getElementById('le-lot-grid-wrap').style.display='block';
+  document.getElementById('le-lot-banner').style.display='none';
+  // Scroll to grid
+  document.getElementById('le-scroll').scrollTop=0;
+}
+
+function renderRecentLots(){
+  var el=document.getElementById('le-recent');
+  if(!lastSavedLot){el.innerHTML='';return}
+  var l=lastSavedLot;
+  // Print actions live in the green "Saved" bar above â keep this row passive to avoid duplication.
+  el.innerHTML='<div class="recent-item" style="background:rgba(29,158,117,.06)"><span class="ri-lot">#'+l.lot_no+'</span><span class="ri-name">'+(l.trader_name||'')+'</span><span class="ri-qty">'+Number(l.qty).toFixed(3)+' kg</span></div>';
+}
+
+// Open a print URL in a popup that auto-closes after printing.
+function printAndClose(url){
+  var w=window.open('','_blank','width=420,height=620');
+  if(!w){window.open(url,'_blank');return}
+  var html='<!DOCTYPE html><html><head><title>Print Receipt</title><style>html,body{margin:0;padding:0;height:100%;background:#fff;font-family:system-ui,Arial,sans-serif}.bar{padding:8px 12px;background:#0d7c5f;color:#fff;font-size:12px;display:flex;gap:8px;align-items:center}.bar button{margin-left:auto;background:#fff;color:#0d7c5f;border:0;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}iframe{border:0;width:100%;height:calc(100% - 34px)}<\/style></head><body>'
+    +'<div class="bar">Receipt â auto-closes after print<button onclick="window.close()">Close</button></div>'
+    +'<iframe id="pf" src="'+url+'"></iframe>'
+    +'<script>var f=document.getElementById("pf");var done=false,printed=false;function finish(){if(done)return;done=true;setTimeout(function(){window.close()},400)}window.onafterprint=function(){if(printed)finish()};f.onload=function(){setTimeout(function(){try{f.contentWindow.focus();f.contentWindow.print();printed=true}catch(e){try{window.print();printed=true}catch(_){}}},600)}<\/script>'
+    +'</body></html>';
+  w.document.open();w.document.write(html);w.document.close();
+}
+function printFmt(){return localStorage.getItem('sa_print_format')==='compact'?'compact':'full'}
+function applyPrintFmtLabel(){var el=document.getElementById('pf-label');if(el)el.textContent=printFmt()==='compact'?'Compact (2.5Ã3.5)':'Full'}
+function togglePrintFormat(){localStorage.setItem('sa_print_format',printFmt()==='compact'?'full':'compact');applyPrintFmtLabel();toast('Print format: '+(printFmt()==='compact'?'Compact':'Full'),false)}
+applyPrintFmtLabel();
+async function printSellerLots(traderId){
+  // Branch-scoped: only include lots from the currently logged-in branch.
+  printAndClose(B+'/api/lots/print-seller?trader_id='+traderId+'&auction_id='+aid+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt());
+}
+
+function editRecentLot(lotId){
+  var l=recentLots.find(function(x){return x.id===lotId});
+  if(!l)return;
+  var tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");
+  openEdit(l.id,String(l.lot_no),tn,String(l.grade||''),l.bags,l.litre,l.qty,l.trader_id,l.bank_id||null);
+}
+
+function goLots(){document.getElementById('le-title-text').textContent='Trade #'+tno+' â '+br;document.getElementById('le-user').textContent=user;document.getElementById('ml-title-text').textContent='Lots â '+br;document.getElementById('ml-user').textContent=user;document.getElementById('menu-undo').style.display=userRole==='admin'?'block':'none';loadAppLogo();refreshConfig();updUI();resetForm();show('s-lots')}
+function updUI(){updProgress()}
+function updProgress(){
+  var el=document.getElementById('le-progress');if(!el)return;
+  var planned=0;
+  if(typeof allocStats!=='undefined'&&allocStats){var mine=allocStats.find(function(s){return s.branch===br});if(mine)planned=mine.total||0}
+  if(!planned){el.style.display='none';return}
+  var received=lc||0;var pct=Math.round(received/planned*100);var over=received>planned;
+  el.classList.toggle('over',over);
+  el.style.display='block';
+  el.innerHTML='<div class="pp-row">'
+    +'<div><div class="pp-lbl">Received</div><div class="pp-val">'+(over?'ð© ':'')+received+' / '+planned+' lots</div></div>'
+    +'<div><div class="pp-lbl">Net Wt</div><div class="pp-val">'+tq.toFixed(3)+' kg</div></div>'
+    +'<span class="pp-pct">'+pct+'%</span>'
+    +'</div>'
+    +'<div class="pp-bar"><div style="width:'+Math.min(100,pct)+'%"></div></div>'
+    +(over?'<div class="pp-warn">â  Allocated lot limit exceeded</div>':'');
+}
+
+function searchTrader(q){clearTimeout(stm);const el=document.getElementById('le-res');lastSearchQuery=q;if(q.length<2){el.style.display='none';return}stm=setTimeout(async()=>{
+// Try online first, fall back to cache
+var ts=[];
+try{const r=await fetch(B+'/api/traders?search='+encodeURIComponent(q),{headers:ah()});const d=await r.json();ts=Array.isArray(d)?d:(d.traders||[]);ts.forEach(cacheTrader)}catch(e){ts=searchTraderCache(q)}
+const qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');let html=ts.map((t,i)=>{const h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');const loc=[t.ppla,t.pin].filter(Boolean).join(', ');const info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' â '+info:'')+'</div></div>'}).join('');const isPhone=/^\d{4,}$/.test(q.trim());if(!ts.length){html+='<div class="si add-new" onclick="openSellerModal(\''+(isPhone?'':q.toUpperCase().replace(/'/g,"\\'"))+'\',\''+(isPhone?q.trim():'')+'\')">&#43; Add new seller'+(isPhone?'':' &quot;'+q.toUpperCase()+'&quot;')+'</div>'}else if(!isPhone){html+='<div class="si add-new" onclick="openSellerModal(\''+q.toUpperCase().replace(/'/g,"\\'")+'\',\'\')">&#43; Add new seller &quot;'+q.toUpperCase()+'&quot;</div>'}el.innerHTML=html;el.style.display='block';el._traders=ts;el.querySelectorAll('.si:not(.add-new)').forEach(item=>{item.onclick=function(){pickTrader(el._traders[parseInt(this.dataset.idx)])}})},200)}
+
+function pickTrader(t){selT=t;document.getElementById('le-res').style.display='none';document.getElementById('le-sw').style.display='none';
+var loc=[t.ppla,t.pin].filter(Boolean).join(', ');
+var cr=(t.cr||'').trim();
+// Auto-grade: starts with CR. â Grade 1, has GSTIN (number prefix) â Grade 2
+var grade='1';
+if(cr.length>5 && !cr.toUpperCase().startsWith('CR.'))grade='2';
+document.getElementById('le-tc').innerHTML='<div class="tc"><div class="ti"><div class="tn">'+t.name+'</div><div class="td">'+loc+(cr?' â '+cr:'')+'</div></div><button class="tx" onclick="clearTrader()">&#x2715;</button></div>';document.getElementById('le-tc').style.display='block';
+document.getElementById('le-grade').value=grade;
+cacheTrader(t);
+fetchSellerTemplate(t.id);
+loadSellerBookings(t.id);
+document.getElementById('le-bags').focus()}
+function clearTrader(){selT=null;document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';document.getElementById('le-name').value='';var leClr=document.getElementById('le-name-clear');if(leClr)leClr.classList.remove('show');document.getElementById('le-res').style.display='none';hideSellerBookings();document.getElementById('le-name').focus()}
+
+// Shared search-clear wiring: toggles â visibility based on value, clears + re-fires input on click.
+function attachSearchClear(inputId, onAfterClear){
+  var inp=document.getElementById(inputId); if(!inp)return;
+  var btn=document.getElementById(inputId+'-clear'); if(!btn)return;
+  var sync=function(){btn.classList.toggle('show', !!inp.value)};
+  inp.addEventListener('input', sync);
+  btn.addEventListener('click', function(){
+    inp.value=''; btn.classList.remove('show');
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    if(typeof onAfterClear==='function')onAfterClear();
+    inp.focus();
+  });
+  sync();
+}
+document.addEventListener('DOMContentLoaded', function(){
+  attachSearchClear('le-name', function(){document.getElementById('le-res').style.display='none'});
+  attachSearchClear('ml-search');
+  attachSearchClear('ed-seller-input', function(){var r=document.getElementById('ed-seller-res');if(r)r.style.display='none'});
+});
+
+var sellerBookingsReq=0;
+function hideSellerBookings(){sellerBookingsReq++;var el=document.getElementById('le-seller-lots');if(el)el.style.display='none';var b=document.getElementById('le-seller-lots-body');if(b)b.innerHTML=''}
+async function loadSellerBookings(traderId){
+  if(!traderId||!aid){hideSellerBookings();return}
+  var token=++sellerBookingsReq;
+  var box=document.getElementById('le-seller-lots');
+  var hdr=document.getElementById('le-seller-lots-hdr');
+  var body=document.getElementById('le-seller-lots-body');
+  box.style.display='block';
+  hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Loadingâ¦</span>';
+  body.innerHTML='';
+  try{
+    var r=await fetch(B+'/api/reports/seller-history/'+traderId+'?auction_id='+encodeURIComponent(aid),{headers:ah()});
+    if(token!==sellerBookingsReq)return;
+    if(!r.ok){hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Failed to load</span>';return}
+    var d=await r.json();
+    if(token!==sellerBookingsReq)return;
+    var lots=(d.lots||[]).slice().sort(function(a,b){return (parseInt(a.lot_no)||0)-(parseInt(b.lot_no)||0)});
+    if(!lots.length){hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">None in this trade</span>';body.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--text3)">No prior lots booked for this seller in the current trade.</div>';return}
+    var s=d.summary||{};
+    var totQty=Number(s.total_qty||0).toFixed(3);
+    var totBags=s.total_bags||0;
+    hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--green);font-weight:700">'+lots.length+' lot'+(lots.length>1?'s':'')+' â¢ '+totBags+' bags â¢ '+totQty+' kg</span>';
+    var rows=lots.map(function(l){
+      var when=(l.created_at||'').slice(11,16);
+      return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11px">'
+        +'<span style="font-weight:700;color:var(--green);min-width:46px">#'+l.lot_no+'</span>'
+        +'<span style="color:var(--text2);min-width:90px;font-weight:600">'+(l.branch||'')+'</span>'
+        +'<span style="color:var(--text3)">G'+(l.grade||'')+'</span>'
+        +'<span style="color:var(--text3)">'+(l.bags||0)+'b</span>'
+        +'<span style="color:var(--text);font-weight:700;margin-left:auto">'+Number(l.qty||0).toFixed(3)+' kg</span>'
+        +(when?'<span style="color:var(--text3);font-size:10px;min-width:40px;text-align:right">'+when+'</span>':'')
+        +'</div>';
+    }).join('');
+    body.innerHTML=rows;
+  }catch(e){
+    if(token!==sellerBookingsReq)return;
+    hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Offline</span>';
+  }
+}
+
+function openSellerModal(n,p){document.getElementById('le-res').style.display='none';document.getElementById('ns-name').value=n||'';document.getElementById('ns-cr').value='';document.getElementById('ns-pan').value='';document.getElementById('ns-tel').value=p||'';document.getElementById('ns-whatsapp').value='';document.getElementById('ns-email').value='';document.getElementById('ns-padd').value='';document.getElementById('ns-ppla').value='';document.getElementById('ns-pin').value='';document.getElementById('ns-pstate').value='TAMIL NADU';document.getElementById('ns-pst').value='33';var wa=document.getElementById('ns-wa-same');wa.checked=false;var waInp=document.getElementById('ns-whatsapp');waInp.readOnly=false;waInp.style.background='';var em=document.getElementById('ns-email');em.classList.remove('invalid');var emErr=document.getElementById('ns-email-err');if(emErr)emErr.style.display='none';document.getElementById('ns-err').innerHTML='';document.getElementById('seller-modal').classList.add('show')}
+function onWaSameToggle(){var same=document.getElementById('ns-wa-same').checked;var wa=document.getElementById('ns-whatsapp');if(same){wa.value=document.getElementById('ns-tel').value;wa.readOnly=true;wa.style.background='var(--bg)'}else{wa.readOnly=false;wa.style.background=''}}
+function validateEmailField(el,showErr){var v=(el.value||'').trim();var ok=!v||/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);el.classList.toggle('invalid',!ok);var er=document.getElementById('ns-email-err');if(er)er.style.display=(!ok&&showErr)?'block':'none';return ok}
+function closeSellerModal(){document.getElementById('seller-modal').classList.remove('show')}
+async function saveNewSeller(){
+  const name=document.getElementById('ns-name').value.trim(),er=document.getElementById('ns-err');
+  er.innerHTML='';
+  if(!name){er.innerHTML='<div class="eb">Name required</div>';return}
+  const emailEl=document.getElementById('ns-email');
+  const email=emailEl.value.trim();
+  if(!validateEmailField(emailEl,true)){er.innerHTML='<div class="eb">Invalid email format</div>';emailEl.focus();return}
+  document.getElementById('ns-save').disabled=true;
+  try{
+    // Use /api/traders/quick so the lot_entry role can save (the full
+    // POST /api/traders requires trader_write) AND so the response
+    // includes the trader row pickTrader needs. Both endpoints share
+    // the same hard PAN-duplicate guard server-side.
+    const r=await fetch(B+'/api/traders/quick',{method:'POST',headers:ah(),body:JSON.stringify({
+      name,
+      cr:document.getElementById('ns-cr').value.trim(),
+      pan:document.getElementById('ns-pan').value.trim(),
+      tel:document.getElementById('ns-tel').value.trim(),
+      whatsapp:document.getElementById('ns-whatsapp').value.trim(),
+      email:email,
+      padd:document.getElementById('ns-padd').value.trim(),
+      ppla:document.getElementById('ns-ppla').value.trim(),
+      pin:document.getElementById('ns-pin').value.trim(),
+      pstate:document.getElementById('ns-pstate').value.trim(),
+      pst_code:document.getElementById('ns-pst').value.trim()
+    })});
+    const d=await r.json();
+    if(!r.ok){
+      // 409 = duplicate PAN. On phones the modal is tall, the
+      // keyboard may still be up, and toasts can be hidden behind
+      // either. We force a native alert() so the user is guaranteed
+      // to see what happened â they MUST tap OK to continue. The
+      // inline banner stays for reference after they dismiss.
+      if(r.status===409 && d && d.duplicate){
+        var ex=d.existing||{};
+        var existingLine = 'Existing: '+(ex.name||'(unnamed)')+
+          ' Â· PAN '+(ex.pan||'â')+' Â· phone '+(ex.tel||'â');
+        er.innerHTML='<div class="eb"><b>'+(d.error||'Duplicate seller')+'</b>'+
+          '<br><span style="opacity:.85">'+existingLine+'</span>'+
+          '<br>Cancel and pick that seller from the search list.</div>';
+        try { er.scrollIntoView({block:'center',behavior:'smooth'}); } catch(_) {}
+        alert((d.error||'Duplicate seller')+'\n\n'+existingLine+
+          '\n\nCancel and pick that seller from the search list.');
+        return;
+      }
+      // Any other non-OK response â same alert-first pattern so the
+      // user can't think the popup "did nothing".
+      er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';
+      try { er.scrollIntoView({block:'center',behavior:'smooth'}); } catch(_) {}
+      alert(d.error||('Save failed ('+r.status+')'));
+      return;
+    }
+    closeSellerModal();
+    pickTrader(d.trader);
+    var deduped = d && d.deduped;
+    toast((deduped?'Picked existing seller "':'Added "')+(d.trader&&d.trader.name||name)+'"',false);
+  }catch(e){
+    er.innerHTML='<div class="eb">Failed</div>';
+  }finally{
+    document.getElementById('ns-save').disabled=false;
+  }
+}
+
+var lotValidateTimer=null,lotIsValid=true;
+function validateLotNo(val){
+  // No longer needed - lot grid handles validation visually
+}
+
+// ââ INPUT SANITIZERS ââ
+
+function sanitizeInt(inp) {
+  // Allow only digits, strip everything else
+  var v = inp.value.replace(/[^0-9]/g, '');
+  if (v !== inp.value) inp.value = v;
+}
+
+function sanitizeDec(inp) {
+  // Allow only digits and one decimal point
+  var v = inp.value.replace(/[^0-9.]/g, '');
+  // Only keep first decimal point
+  var parts = v.split('.');
+  if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+  if (v !== inp.value) inp.value = v;
+}
+
+function validatePositive(inp, label) {
+  sanitizeInt(inp);
+}
+
+function validatePositiveVal(inp, label) {
+  sanitizeDec(inp);
+}
+
+function checkAcctMatch(prefix) {
+  var acct = document.getElementById(prefix + '-acct').value.trim();
+  var errEl = document.getElementById(prefix + '-acct-err');
+  var confirmEl = document.getElementById(prefix + '-acct-confirm');
+  var matchEl = document.getElementById(prefix + '-acct-match');
+  // Validate format
+  if (acct && !/^\d*$/.test(acct)) {
+    errEl.textContent = 'Only digits allowed';
+    errEl.style.display = 'block';
+  } else if (acct && acct.length > 0 && (acct.length < 9 || acct.length > 18)) {
+    errEl.textContent = 'Must be 9-18 digits (' + acct.length + ' entered)';
+    errEl.style.display = 'block';
+  } else {
+    errEl.style.display = 'none';
+  }
+  // Check match
+  if (confirmEl.style.display !== 'none' && confirmEl.value.trim()) {
+    if (acct === confirmEl.value.trim()) {
+      matchEl.textContent = 'â Account numbers match';
+      matchEl.style.color = 'var(--green)';
+    } else {
+      matchEl.textContent = 'â Account numbers do not match';
+      matchEl.style.color = 'var(--red)';
+    }
+    matchEl.style.display = 'block';
+  } else {
+    matchEl.style.display = 'none';
+  }
+}
+
+var ifscTimer = null;
+function lookupIFSC(inp, infoId) {
+  clearTimeout(ifscTimer);
+  var code = inp.value.trim().toUpperCase();
+  var infoEl = document.getElementById(infoId);
+  if (!code || code.length < 11) { infoEl.style.display = 'none'; return; }
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) {
+    infoEl.textContent = 'â Invalid IFSC format';
+    infoEl.style.color = 'var(--red)';
+    infoEl.style.display = 'block';
+    return;
+  }
+  infoEl.textContent = 'Looking up...';
+  infoEl.style.color = 'var(--text3)';
+  infoEl.style.display = 'block';
+  ifscTimer = setTimeout(function() {
+    fetch('https://ifsc.razorpay.com/' + code)
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (d && d.BANK) {
+          infoEl.textContent = 'ð¦ ' + d.BANK + (d.BRANCH ? ' â ' + d.BRANCH : '');
+          infoEl.style.color = 'var(--green)';
+        } else {
+          infoEl.textContent = 'â IFSC not found';
+          infoEl.style.color = 'var(--red)';
+        }
+      })
+      .catch(function() {
+        infoEl.textContent = 'â Format valid (lookup unavailable)';
+        infoEl.style.color = 'var(--text3)';
+      });
+  }, 400);
+}
+
+function calcGrossWeight(){
+  var net=parseFloat(document.getElementById('le-qty').value)||0;
+  var sample=parseFloat(document.getElementById('le-sample').value)||0;
+  document.getElementById('le-gross').value=(net+sample).toFixed(3);
+}
+
+async function saveLot(){
+  if(!selT){toast('Select seller',true);return}
+  if(!selectedLots.length){toast('Tap a lot number to select',true);return}
+  var lotNo=selectedLots[0];
+  var grade=document.getElementById('le-grade').value.trim()||'1';
+  var bags=parseInt(document.getElementById('le-bags').value);
+  var litre=parseInt(document.getElementById('le-litre').value);
+  var qty=parseFloat(document.getElementById('le-qty').value);
+  if(!bags&&bags!==0){toast('Enter bags',true);return}
+  if(bags<0){toast('Bags cannot be negative',true);return}
+  if(!litre&&litre!==0){toast('Enter litre weight',true);return}
+  if(litre<0){toast('Litre cannot be negative',true);return}
+  if(!qty||qty<=0){toast('Enter net weight',true);return}
+  var moisture=cfgShowMoisture?parseFloat(document.getElementById('le-moisture').value)||null:null;
+  if(moisture!==null&&moisture<0){toast('Moisture cannot be negative',true);return}
+  var sampleWt=parseFloat(document.getElementById('le-sample').value)||0;
+  var grossWt=parseFloat(document.getElementById('le-gross').value)||0;
+  var selBankId=document.getElementById('le-bank-select')?document.getElementById('le-bank-select').value:'';
+
+  document.getElementById('le-save').disabled=true;
+  var lotData={auction_id:aid,trader_id:selT.id,branch:br,grade:grade,bags:bags,litre:litre,qty:qty,lot_no:lotNo,state:'TAMIL NADU',bank_id:selBankId?parseInt(selBankId):null,gross_weight:grossWt,sample_weight:sampleWt,moisture:moisture};
+  try{
+    var r=await fetch(B+'/api/lots',{method:'POST',headers:ah(),body:JSON.stringify(lotData)});
+    var d=await r.json();
+    if(!r.ok){toast(d.error||'Failed',true);document.getElementById('le-save').disabled=false;return}
+    lastId=d.lot?.id;
+    lastSavedLot={id:d.lot?.id,lot_no:lotNo,trader_name:selT.name,trader_id:selT.id,qty:qty};
+    if(navigator.vibrate)navigator.vibrate(50);
+    toast('Lot #'+lotNo+' saved â',false,true);
+    // Show inline print buttons â stays until user starts next entry
+    document.getElementById('le-saved-label').textContent='â Saved #'+lotNo;
+    document.getElementById('le-btn-save').style.display='none';
+    document.getElementById('le-btn-saved').style.display='block';
+    await loadStats();updUI();
+    renderRecentLots();
+    if(selT)loadSellerBookings(selT.id);
+    // Keep seller, clear only entry fields, auto-select next lot
+    resetFormKeepSeller();
+  }catch(e){toast('Save failed',true)}
+  document.getElementById('le-save').disabled=false;
+}
+async function undoLot(){if(!lastId)return;try{await fetch(B+'/api/lots/'+lastId,{method:'DELETE',headers:ah()});lastId=null;await loadStats();updUI();toast('Undone',false);showSaveBtn()}catch(e){}}
+
+function showSaveBtn(){document.getElementById('le-btn-save').style.display='flex';document.getElementById('le-btn-saved').style.display='none'}
+function printLastLot(){if(lastSavedLot&&lastSavedLot.id)printLot(lastSavedLot.id)}
+function printLastSeller(){if(lastSavedLot&&lastSavedLot.trader_id)printSellerLots(lastSavedLot.trader_id)}
+
+// After save: keep seller+bank, clear bags/litre/qty, auto-select next lot
+function resetFormKeepSeller(){
+  selectedLots=[];
+  document.getElementById('le-bags').value='';
+  document.getElementById('le-litre').value=cfgDefaultLitre||'';
+  document.getElementById('le-qty').value='';
+  document.getElementById('le-gross').value='';
+  document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
+  if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  renderLotGrid();
+  selectNextAvailableLot();
+}
+
+// Full reset (Clear button)
+function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
+
+// ââ MY LOTS (by branch) ââ
+async function loadMyLots(){if(!aid)return;try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();allMyLots=d.lots||[];const stats=d.stats||{};document.getElementById('ml-cnt').textContent=stats.lotCount||0;document.getElementById('ml-bags').textContent=stats.totalBags||0;document.getElementById('ml-qty').textContent=(stats.totalQty||0).toFixed(3);document.getElementById('ml-search').value='';renderMyLots(allMyLots)}catch(e){}}
+function filterMyLots(q){if(!q||q.length<2){renderMyLots(allMyLots);return}const f=q.toUpperCase();renderMyLots(allMyLots.filter(l=>(l.trader_name||'').toUpperCase().includes(f)))}
+function renderMyLots(lots){const list=document.getElementById('ml-list');if(!lots.length){list.innerHTML='<div class="lot-empty">No lots found</div>';return}
+list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';return`<div class="lot-card"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span></label><span style="font-size:10px;color:var(--text3)">${l.user_id} Â· ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> Â· ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
+
+function updateMySelCount(){const checked=document.querySelectorAll('.ml-cb:checked').length;const bar=document.getElementById('ml-actions');const cnt=document.getElementById('ml-sel-count');const hasLots=allMyLots&&allMyLots.length>0;bar.style.display=hasLots?'flex':'none';cnt.textContent=checked>0?checked+' selected':''}
+
+async function printSelectedMyLots(){var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(cb=>parseInt(cb.value));if(!ids.length){toast('Select lots to print',true);return}printAndClose(B+'/api/lots/print-batch?ids='+ids.join(',')+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt())}
+
+async function printAllBySellerUser(){
+  if(!aid){toast('No trade selected',true);return}
+  printAndClose(B+'/api/lots/print-all-sellers/'+aid+'?branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt());
+}
+
+function printLot(id){printAndClose(B+'/api/lots/'+id+'/receipt?branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt())}
+
+var editBanks=[],editTraderId=null;
+var editLotBankId=null;
+function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';calcEditGross()}}).catch(()=>{calcEditGross()})}
+function closeEdit(){document.getElementById('edit-modal').classList.remove('show');editId=null;editTraderId=null}
+function editSellerMode(){document.getElementById('ed-seller-card').style.display='none';document.getElementById('ed-seller-search').style.display='block';document.getElementById('ed-seller-input').value='';document.getElementById('ed-seller-input').focus()}
+let edStm;
+function searchEditSeller(q){clearTimeout(edStm);var el=document.getElementById('ed-seller-res');if(q.length<2){el.style.display='none';return}edStm=setTimeout(async function(){try{var r=await fetch(B+'/api/traders?search='+encodeURIComponent(q),{headers:ah()});var d=await r.json();var ts=Array.isArray(d)?d:(d.traders||[]);var qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');el.innerHTML=ts.map(function(t,i){var h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');var loc=[t.ppla,t.pin].filter(Boolean).join(', ');var info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' â '+info:'')+'</div></div>'}).join('')||'<div style="padding:10px;color:var(--text3);font-size:12px">No sellers found</div>';el.style.display='block';el._traders=ts;el.querySelectorAll('.si').forEach(function(item){item.onclick=function(){pickEditSeller(el._traders[parseInt(this.dataset.idx)])}})}catch(e){}},200)}
+function pickEditSeller(t){editTraderId=t.id;editLotBankId=null;document.getElementById('ed-seller-name').textContent=t.name;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';var cr=(t.cr||'').trim();var grade='1';if(cr.length>5&&!cr.toUpperCase().startsWith('CR.'))grade='2';document.getElementById('ed-grade').value=grade;loadEditBanks(t.id)}
+
+async function loadEditBanks(traderId){
+  try{
+    var r=await fetch(B+'/api/traders/'+traderId+'/last-lot',{headers:ah()});
+    if(!r.ok)return;
+    var d=await r.json();
+    editBanks=d.banks||[];
+    renderEditBankList();
+    document.getElementById('ed-bank').style.display='block';
+  }catch(e){document.getElementById('ed-bank').style.display='none'}
+}
+
+function renderEditBankList(){
+  var sel=document.getElementById('ed-bank-select');
+  var info=document.getElementById('ed-bank-info');
+  sel.innerHTML='<option value="">No bank account</option>';
+  editBanks.forEach(function(b){
+    var label=b.label?' ('+b.label+')':'';
+    var opt=document.createElement('option');
+    opt.value=b.id;
+    opt.textContent=b.acctnum+label;
+    if(editLotBankId?b.id==editLotBankId:b.is_default)opt.selected=true;
+    sel.appendChild(opt);
+  });
+  onEditBankSelect(sel);
+}
+
+function onEditBankSelect(sel){
+  var info=document.getElementById('ed-bank-info');
+  var b=editBanks.find(function(x){return x.id==sel.value});
+  info.textContent=b?'IFSC: '+(b.ifsc||'â'):'';
+}
+
+function editSelectedEditBank(){
+  var sel=document.getElementById('ed-bank-select');
+  if(!sel.value){showEditBankAdd();return}
+  var b=editBanks.find(function(x){return x.id==sel.value});
+  if(!b)return;
+  editEditBank(b.id);
+}
+
+async function deleteSelectedEditBank(){
+  var sel=document.getElementById('ed-bank-select');
+  if(!sel.value){toast('Select a bank account first',true);return}
+  if(!editTraderId)return;
+  if(!confirm('Delete this bank account?'))return;
+  try{
+    var r=await fetch(B+'/api/traders/'+editTraderId+'/banks/'+sel.value,{method:'DELETE',headers:ah()});
+    if(!r.ok){var d=await r.json();toast(d.error||'Delete failed',true);return}
+    toast('Bank account deleted',false);
+    loadEditBanks(editTraderId);
+  }catch(e){toast('Failed',true)}
+}
+
+function showEditBankAdd(){
+  document.getElementById('ed-acct').value='';document.getElementById('ed-acct').dataset.original='';document.getElementById('ed-acct-confirm').value='';document.getElementById('ed-acct-confirm-lbl').style.display='block';document.getElementById('ed-acct-confirm').style.display='block';document.getElementById('ed-acct-match').style.display='none';document.getElementById('ed-ifsc').value='';document.getElementById('ed-holder').value='';document.getElementById('ed-bank-label').value='';document.getElementById('ed-bank-edit-id').value='';
+  document.getElementById('ed-bank-form').style.display='block';document.getElementById('ed-acct').focus();
+}
+
+function editEditBank(bankId){
+  var b=editBanks.find(function(x){return x.id===bankId});if(!b)return;
+  document.getElementById('ed-acct').value=b.acctnum||'';document.getElementById('ed-acct').dataset.original=b.acctnum||'';document.getElementById('ed-acct-confirm').value='';document.getElementById('ed-acct-confirm-lbl').style.display='none';document.getElementById('ed-acct-confirm').style.display='none';document.getElementById('ed-acct-match').style.display='none';document.getElementById('ed-ifsc').value=b.ifsc||'';document.getElementById('ed-holder').value=b.holder_name||'';document.getElementById('ed-bank-label').value=b.label||'';document.getElementById('ed-bank-edit-id').value=bankId;
+  document.getElementById('ed-bank-form').style.display='block';document.getElementById('ed-acct').focus();
+}
+
+function checkEdAcctChanged(){
+  var inp=document.getElementById('ed-acct');
+  var orig=inp.dataset.original||'';
+  var eid=document.getElementById('ed-bank-edit-id').value;
+  if(eid&&inp.value.trim()!==orig){
+    document.getElementById('ed-acct-confirm-lbl').style.display='block';
+    document.getElementById('ed-acct-confirm').style.display='block';
+  } else if(eid&&inp.value.trim()===orig){
+    document.getElementById('ed-acct-confirm-lbl').style.display='none';
+    document.getElementById('ed-acct-confirm').style.display='none';
+    document.getElementById('ed-acct-match').style.display='none';
+  }
+}
+async function saveEditBankAccount(){
+  if(!editTraderId)return;
+  var acct=document.getElementById('ed-acct').value.trim();var ifsc=document.getElementById('ed-ifsc').value.trim().toUpperCase();var label=document.getElementById('ed-bank-label').value.trim();var holder=document.getElementById('ed-holder').value.trim();var eid=document.getElementById('ed-bank-edit-id').value;var confirmVal=document.getElementById('ed-acct-confirm').value.trim();
+  var orig=(document.getElementById('ed-acct').dataset.original||'').trim();
+  if(!acct){toast('Enter account number',true);return}
+  if(!/^\d{9,18}$/.test(acct)){toast('Account number must be 9-18 digits',true);return}
+  var needConfirm=!eid||(eid&&acct!==orig);
+  if(needConfirm&&acct!==confirmVal){toast('Account numbers do not match',true);return}
+  if(ifsc&&!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)){toast('Invalid IFSC (e.g., ICIC0003816)',true);return}
+  try{
+    var r;var body={acctnum:acct,ifsc:ifsc,label:label,holder_name:holder};
+    if(needConfirm)body.confirm_acctnum=confirmVal;
+    if(eid){r=await fetch(B+'/api/traders/'+editTraderId+'/banks/'+eid,{method:'PUT',headers:ah(),body:JSON.stringify(body)})}
+    else{r=await fetch(B+'/api/traders/'+editTraderId+'/banks',{method:'POST',headers:ah(),body:JSON.stringify(body)})}
+    var d=await r.json();if(!r.ok){toast(d.error||'Failed',true);return}
+    toast(eid?'Bank updated':'Bank added',false);document.getElementById('ed-bank-form').style.display='none';loadEditBanks(editTraderId);
+  }catch(e){toast('Failed',true)}
+}
+function calcEditGross(){var net=parseFloat(document.getElementById('ed-qty').value)||0;var sample=parseFloat(document.getElementById('ed-sample').value)||0;document.getElementById('ed-gross').value=(net+sample).toFixed(3)}
+async function saveEdit(){const lotNo=document.getElementById('ed-lotno').value.trim(),grade=document.getElementById('ed-grade').value.trim()||'1',bags=parseInt(document.getElementById('ed-bags').value),litre=parseInt(document.getElementById('ed-litre').value),qty=parseFloat(document.getElementById('ed-qty').value),sampleWt=parseFloat(document.getElementById('ed-sample').value)||0,grossWt=parseFloat(document.getElementById('ed-gross').value)||0,er=document.getElementById('ed-err');er.innerHTML='';if(!lotNo||!bags||!litre||!qty){er.innerHTML='<div class="eb">Fill all fields</div>';return}document.getElementById('ed-save').disabled=true;try{const body={lot_no:lotNo,grade,bags,litre,qty,sample_weight:sampleWt,gross_weight:grossWt};if(editTraderId)body.trader_id=editTraderId;var edBankSel=document.getElementById('ed-bank-select');if(edBankSel)body.bank_id=edBankSel.value?parseInt(edBankSel.value):null;const r=await fetch(B+'/api/lots/'+editId,{method:'PUT',headers:ah(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';return}toast('Lot updated',false);closeEdit();loadMyLots();await loadStats();updUI()}catch(e){er.innerHTML='<div class="eb">Failed</div>'}finally{document.getElementById('ed-save').disabled=false}}
+async function deleteLot(id,n){if(!confirm('Delete Lot #'+n+'?'))return;try{await fetch(B+'/api/lots/'+id,{method:'DELETE',headers:ah()});toast('Deleted',false);loadMyLots();await loadStats();updUI()}catch(e){}}
+
+function clearEntryForm(){
+  selT=null;selectedLots=[];lastSavedLot=null;
+  document.getElementById('le-recent').innerHTML='';
+  document.getElementById('le-lot-err').style.display='none';
+  document.getElementById('le-name').value='';
+  document.getElementById('le-grade').value='1';
+  document.getElementById('le-bags').value='';
+  document.getElementById('le-litre').value=cfgDefaultLitre||'';
+  document.getElementById('le-qty').value='';
+  document.getElementById('le-gross').value='';
+  document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
+  if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  document.getElementById('le-res').style.display='none';
+  document.getElementById('le-tc').style.display='none';
+  document.getElementById('le-bank').style.display='none';
+  document.getElementById('le-bank-form').style.display='none';
+  document.getElementById('le-sw').style.display='block';
+  showLotGrid();
+  document.getElementById('le-scroll').scrollTop=0;
+  renderLotGrid();
+  selectNextAvailableLot();
+  showSaveBtn();
+  toast('Form cleared',false);
+}
+
+async function deleteSelectedMyLots(){
+  var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(cb=>parseInt(cb.value));
+  if(!ids.length){toast('Select at least one lot',true);return}
+  if(!confirm('Delete '+ids.length+' selected lot(s)? This cannot be undone.'))return;
+  var ok=0,fail=0;
+  for(var i=0;i<ids.length;i++){
+    try{var r=await fetch(B+'/api/lots/'+ids[i],{method:'DELETE',headers:ah()});if(r.ok)ok++;else fail++}catch(e){fail++}
+  }
+  toast(ok+' deleted'+(fail?' Â· '+fail+' failed':''),fail>0);
+  loadMyLots();await loadStats();updUI();
+}
+
+let tt;function toast(m,e,u){clearTimeout(tt);const t=document.getElementById('toast');document.getElementById('t-msg').textContent=m;document.getElementById('t-ico').innerHTML=e?'!':'&#10003;';t.className='toast show'+(e?' err':'');var ub=document.getElementById('t-undo');if(ub)ub.style.display='none';tt=setTimeout(()=>{t.className='toast'},2000)}
+function toggleMenu(fc){const m=document.getElementById('menu');m.style.display=(fc||m.style.display==='block')?'none':'block'}
+function changeSession(){toggleMenu(true);goSession()}
+document.addEventListener('keydown',e=>{if(e.key==='Enter'){const a=document.activeElement;if(a.id==='l-pass')doLogin();else if(a.id==='le-name'){}else if(a.id==='le-grade')document.getElementById('le-bags').focus();else if(a.id==='le-bags')document.getElementById('le-litre').focus();else if(a.id==='le-litre')document.getElementById('le-qty').focus();else if(a.id==='le-qty')saveLot();else if(a.id==='ed-grade')document.getElementById('ed-bags').focus();else if(a.id==='ed-bags')document.getElementById('ed-litre').focus();else if(a.id==='ed-litre')document.getElementById('ed-qty').focus();else if(a.id==='ed-qty')saveEdit()}});
+// ââ DARK MODE ââ
+function toggleDarkMode(){
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  document.documentElement.setAttribute('data-theme', isDark ? '' : 'dark');
+  document.getElementById('dm-icon').textContent = isDark ? 'ð' : 'âï¸';
+  document.getElementById('dm-label').textContent = isDark ? 'Dark Mode' : 'Light Mode';
+  localStorage.setItem('sa_dark', isDark ? '' : 'dark');
+  toggleMenu(true);
+}
+if(localStorage.getItem('sa_dark')==='dark'){document.documentElement.setAttribute('data-theme','dark')}
+
+// ââ TRADER CACHE (for offline search) ââ
+function cacheTrader(t) {
+  var cache = JSON.parse(localStorage.getItem('sa_trader_cache') || '{}');
+  cache[t.id] = { id: t.id, name: t.name, cr: t.cr, pan: t.pan, tel: t.tel, ppla: t.ppla, pin: t.pin, pstate: t.pstate };
+  // Keep max 100
+  var keys = Object.keys(cache);
+  if (keys.length > 100) { delete cache[keys[0]]; }
+  localStorage.setItem('sa_trader_cache', JSON.stringify(cache));
+}
+function searchTraderCache(q) {
+  var cache = JSON.parse(localStorage.getItem('sa_trader_cache') || '{}');
+  var qu = q.toUpperCase();
+  return Object.values(cache).filter(function(t) {
+    return (t.name || '').toUpperCase().includes(qu) || (t.tel || '').includes(q) || (t.cr || '').toUpperCase().includes(qu);
+  }).slice(0, 8);
+}
+
+// ââ SELLER TEMPLATE (auto-fill from last lot) ââ
+var sellerBanks = [];
+
+async function fetchSellerTemplate(traderId) {
+  try {
+    var r = await fetch(B + '/api/traders/' + traderId + '/last-lot', { headers: ah() });
+    if (!r.ok) return;
+    var d = await r.json();
+    if (d.lastLot) {
+      if (d.lastLot.grade) document.getElementById('le-grade').value = d.lastLot.grade;
+      // Litre weight intentionally NOT auto-populated â same seller may bring different grades.
+    }
+    sellerBanks = d.banks || [];
+    renderBankList();
+    document.getElementById('le-bank').style.display = 'block';
+  } catch (e) {}
+}
+
+function renderBankList() {
+  var sel = document.getElementById('le-bank-select');
+  var info = document.getElementById('le-bank-info');
+  sel.innerHTML = '<option value="">No bank account</option>';
+  sellerBanks.forEach(function(b) {
+    var label = b.label ? ' (' + b.label + ')' : '';
+    var opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = b.acctnum + label;
+    if (b.is_default) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  onBankSelect(sel);
+}
+
+function onBankSelect(sel) {
+  var info = document.getElementById('le-bank-info');
+  var b = sellerBanks.find(function(x) { return x.id == sel.value; });
+  if (b) {
+    var parts = ['IFSC: ' + (b.ifsc || 'â')];
+    if (b.holder_name) parts.push('Holder: ' + b.holder_name);
+    info.textContent = parts.join(' | ');
+  } else { info.textContent = ''; }
+}
+
+function editSelectedBank() {
+  var sel = document.getElementById('le-bank-select');
+  if (!sel.value) { showAddBank(); return; }
+  var b = sellerBanks.find(function(x) { return x.id == sel.value; });
+  if (!b) return;
+  editBankAccount(b.id);
+}
+
+async function deleteSelectedBank() {
+  var sel = document.getElementById('le-bank-select');
+  if (!sel.value) { toast('Select a bank account first', true); return; }
+  if (!selT) return;
+  if (!confirm('Delete this bank account?')) return;
+  try {
+    var r = await fetch(B + '/api/traders/' + selT.id + '/banks/' + sel.value, { method: 'DELETE', headers: ah() });
+    if (!r.ok) { var d = await r.json(); toast(d.error || 'Delete failed', true); return; }
+    toast('Bank account deleted', false);
+    fetchSellerTemplate(selT.id);
+  } catch (e) { toast('Failed', true); }
+}
+
+function showAddBank() {
+  document.getElementById('le-acct').value = '';
+  document.getElementById('le-acct').dataset.original = '';
+  document.getElementById('le-acct-confirm').value = '';
+  document.getElementById('le-confirm-col').style.display = 'block';
+  document.getElementById('le-acct-match').style.display = 'none';
+  document.getElementById('le-ifsc').value = '';
+  document.getElementById('le-holder').value = '';
+  document.getElementById('le-bank-label').value = '';
+  document.getElementById('le-bank-edit-id').value = '';
+  document.getElementById('le-bank-form').style.display = 'block';
+  document.getElementById('le-acct').focus();
+}
+
+function editBankAccount(bankId) {
+  var b = sellerBanks.find(function(x) { return x.id === bankId; });
+  if (!b) return;
+  document.getElementById('le-acct').value = b.acctnum || '';
+  document.getElementById('le-acct').dataset.original = b.acctnum || '';
+  document.getElementById('le-acct-confirm').value = '';
+  document.getElementById('le-confirm-col').style.display = 'none';
+  document.getElementById('le-acct-match').style.display = 'none';
+  document.getElementById('le-ifsc').value = b.ifsc || '';
+  document.getElementById('le-holder').value = b.holder_name || '';
+  document.getElementById('le-bank-label').value = b.label || '';
+  document.getElementById('le-bank-edit-id').value = bankId;
+  document.getElementById('le-bank-form').style.display = 'block';
+  document.getElementById('le-acct').focus();
+}
+
+function hideBankForm() {
+  document.getElementById('le-bank-form').style.display = 'none';
+}
+
+function checkLeAcctChanged(){
+  var inp=document.getElementById('le-acct');
+  var orig=inp.dataset.original||'';
+  var eid=document.getElementById('le-bank-edit-id').value;
+  if(eid&&inp.value.trim()!==orig){
+    document.getElementById('le-confirm-col').style.display='block';
+  } else if(eid&&inp.value.trim()===orig){
+    document.getElementById('le-confirm-col').style.display='none';
+    document.getElementById('le-acct-match').style.display='none';
+  }
+}
+
+async function saveBankAccount() {
+  if (!selT) return;
+  var acct = document.getElementById('le-acct').value.trim();
+  var ifsc = document.getElementById('le-ifsc').value.trim().toUpperCase();
+  var label = document.getElementById('le-bank-label').value.trim();
+  var holder = document.getElementById('le-holder').value.trim();
+  var editId = document.getElementById('le-bank-edit-id').value;
+  var confirmVal = document.getElementById('le-acct-confirm').value.trim();
+  var orig = (document.getElementById('le-acct').dataset.original || '').trim();
+  if (!acct) { toast('Enter account number', true); return; }
+  if (!/^\d{9,18}$/.test(acct)) { toast('Account number must be 9-18 digits', true); return; }
+  var needConfirm = !editId || (editId && acct !== orig);
+  if (needConfirm && acct !== confirmVal) {
+    var matchEl = document.getElementById('le-acct-match');
+    matchEl.textContent = 'â Account numbers do not match';
+    matchEl.style.display = 'block'; matchEl.style.color = 'var(--red)';
+    toast('Account numbers do not match', true); return;
+  }
+  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) { toast('Invalid IFSC (e.g., ICIC0003816)', true); return; }
+  try {
+    var r;
+    var body = { acctnum: acct, ifsc: ifsc, label: label, holder_name: holder };
+    if (needConfirm) body.confirm_acctnum = confirmVal;
+    if (editId) {
+      r = await fetch(B + '/api/traders/' + selT.id + '/banks/' + editId, { method: 'PUT', headers: ah(), body: JSON.stringify(body) });
+    } else {
+      r = await fetch(B + '/api/traders/' + selT.id + '/banks', { method: 'POST', headers: ah(), body: JSON.stringify(body) });
+    }
+    var d = await r.json();
+    if (!r.ok) { toast(d.error || 'Failed', true); return; }
+    toast(editId ? 'Bank updated' : 'Bank added', false);
+    hideBankForm();
+    fetchSellerTemplate(selT.id);
+  } catch (e) { toast('Failed', true); }
+}
+
+async function deleteBankAccount(bankId) {
+  if (!selT || !confirm('Remove this bank account?')) return;
+  try {
+    await fetch(B + '/api/traders/' + selT.id + '/banks/' + bankId, { method: 'DELETE', headers: ah() });
+    toast('Bank removed', false);
+    fetchSellerTemplate(selT.id);
+  } catch (e) {}
+}
+
+async function setBankDefault(bankId) {
+  if (!selT) return;
+  try {
+    await fetch(B + '/api/traders/' + selT.id + '/banks/' + bankId + '/default', { method: 'POST', headers: ah() });
+    fetchSellerTemplate(selT.id);
+  } catch (e) {}
+}
+
+function maskPII(val, show) { show = show || 4; if (!val || val.length <= show) return val || 'â'; return 'â'.repeat(val.length - show) + val.slice(-show); }
+
+function showBankPop(e, name, acct, ifsc, tel, cr) {
+  var pop = document.getElementById('user-bank-pop');
+  // Always show full details on screen â masking only applies to printed receipts.
+  var da = acct || 'â';
+  var di = ifsc || 'â';
+  var dt = tel || 'â';
+  var dc = cr || 'â';
+  var telLink = tel ? '<a href="tel:' + tel + '" style="color:var(--green);text-decoration:none;font-weight:700">ð Call</a>' : '';
+  pop.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">' + name + '<button onclick="this.parentElement.parentElement.style.display=\'none\'" style="float:right;background:none;border:none;font-size:14px;cursor:pointer;color:var(--text3)">&times;</button></div>'
+    + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">A/C</span> <strong>' + da + '</strong></div>'
+    + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">IFSC</span> <strong>' + di + '</strong></div>'
+    + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">Phone</span> <strong>' + dt + '</strong> ' + telLink + '</div>'
+    + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">GSTIN</span> <strong>' + dc + '</strong></div>';
+  pop.style.display = 'block';
+  var rect = e.target.getBoundingClientRect();
+  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 160) + 'px';
+  pop.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px';
+  setTimeout(function() { document.addEventListener('click', function h() { pop.style.display = 'none'; document.removeEventListener('click', h); }); }, 10);
+}
+
+function loadAppLogo() {
+  fetch(B + '/api/logo').then(function(r) {
+    var url = B + '/api/logo?t=' + Date.now();
+    var imgs = document.querySelectorAll('.appbar-logo');
+    var loginImg = document.getElementById('login-logo-img');
+    if (r.ok) {
+      imgs.forEach(function(img) { img.src = url; img.style.display = 'inline'; });
+      if (loginImg) { loginImg.src = url; loginImg.style.display = 'block'; }
+    } else {
+      imgs.forEach(function(img) { img.style.display = 'none'; });
+      if (loginImg) loginImg.style.display = 'none';
+    }
+  }).catch(function() {});
+}
+
+// ââ OFFLINE QUEUE ââ
+var offlineQueue = JSON.parse(localStorage.getItem('sa_offline_queue') || '[]');
+
+function saveOfflineQueue() { localStorage.setItem('sa_offline_queue', JSON.stringify(offlineQueue)); }
+
+function showOfflineBar() {
+  var bar = document.getElementById('offline-bar');
+  if (offlineQueue.length > 0) {
+    bar.style.display = 'flex';
+    document.getElementById('offline-count').textContent = 'â ' + offlineQueue.length + ' lot(s) queued';
+  } else if (!navigator.onLine) {
+    bar.style.display = 'flex';
+    document.getElementById('offline-count').textContent = '';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+async function syncOfflineQueue() {
+  if (!offlineQueue.length) { showOfflineBar(); return; }
+  if (!navigator.onLine) { toast('Still offline', true); return; }
+  var synced = 0, failed = [];
+  toast('Syncing ' + offlineQueue.length + ' lot(s)...', false);
+  for (var i = 0; i < offlineQueue.length; i++) {
+    try {
+      var r = await fetch(B + '/api/lots', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(offlineQueue[i])
+      });
+      if (r.ok || r.status === 409) { synced++; } // 409 = duplicate lot, consider synced
+      else { failed.push(offlineQueue[i]); }
+    } catch (e) { failed.push(offlineQueue[i]); break; } // Stop on network error
+  }
+  offlineQueue = failed;
+  saveOfflineQueue();
+  showOfflineBar();
+  if (synced > 0) {
+    toast(synced + ' lot(s) synced!', false);
+    try { await loadStats(); updUI(); } catch(e) {}
+  }
+  if (failed.length > 0) { toast(failed.length + ' lot(s) still queued', true); }
+}
+
+window.addEventListener('online', function() { showOfflineBar(); setTimeout(syncOfflineQueue, 1000); });
+window.addEventListener('offline', function() { showOfflineBar(); });
+
+// ââ UNDO HISTORY (admin only) ââ
+var undoHistory = JSON.parse(localStorage.getItem('sa_undo_history') || '[]');
+
+function saveUndoHistory() {
+  if (undoHistory.length > 10) undoHistory = undoHistory.slice(-10);
+  localStorage.setItem('sa_undo_history', JSON.stringify(undoHistory));
+}
+
+// Override deleteLot to save to undo history (admin only)
+var _origDeleteLot = deleteLot;
+deleteLot = async function(id, lotNo) {
+  if (!confirm('Delete Lot #' + lotNo + '?')) return;
+  if (userRole === 'admin') {
+    try {
+      var r = await fetch(B + '/api/lots?auction_id=' + aid + '&branch=' + encodeURIComponent(br), { headers: ah() });
+      var d = await r.json();
+      var lot = (d.lots || []).find(function(l) { return l.id === id; });
+      if (lot) { undoHistory.push({ lot: lot, deletedAt: new Date().toLocaleString('en-IN'), deletedBy: user }); saveUndoHistory(); }
+    } catch (e) {}
+  }
+  try {
+    await fetch(B + '/api/lots/' + id, { method: 'DELETE', headers: ah() });
+    toast('Lot #' + lotNo + ' deleted', false);
+    loadMyLots(); await loadStats(); updUI();
+  } catch (e) {}
+};
+
+function showUndoHistory() {
+  toggleMenu(true);
+  var list = document.getElementById('undo-list');
+  if (!undoHistory.length) { list.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">No deleted lots to restore</div>'; }
+  else {
+    list.innerHTML = undoHistory.slice().reverse().map(function(item, idx) {
+      var l = item.lot;
+      var realIdx = undoHistory.length - 1 - idx;
+      return '<div class="undo-item"><div class="ui-info"><strong>Lot #' + l.lot_no + '</strong> â ' + (l.trader_name || 'Unknown') + '<br>' + l.branch + ' | ' + l.bags + ' bags | ' + Number(l.qty).toFixed(3) + ' kg<br><span style="color:var(--text3)">Deleted: ' + item.deletedAt + ' by ' + item.deletedBy + '</span></div><button class="ui-restore" onclick="restoreFromHistory(' + realIdx + ')">Restore</button></div>';
+    }).join('');
+  }
+  document.getElementById('undo-modal').classList.add('show');
+}
+
+async function restoreFromHistory(idx) {
+  var item = undoHistory[idx];
+  if (!item) return;
+  var l = item.lot;
+  try {
+    var r = await fetch(B + '/api/lots', { method: 'POST', headers: ah(), body: JSON.stringify({
+      auction_id: l.auction_id, trader_id: l.trader_id, branch: l.branch, grade: l.grade,
+      bags: l.bags, litre: l.litre, qty: l.qty, lot_no: l.lot_no, state: l.state || 'TAMIL NADU'
+    })});
+    var d = await r.json();
+    if (r.ok) {
+      undoHistory.splice(idx, 1); saveUndoHistory();
+      toast('Lot #' + l.lot_no + ' restored!', false);
+      showUndoHistory(); loadMyLots(); await loadStats(); updUI();
+    } else { toast(d.error || 'Restore failed', true); }
+  } catch (e) { toast('Restore failed', true); }
+}
+
+// Init offline bar
+showOfflineBar();
+
+function renderAllocBars(){
+  if(!allocStats||!allocStats.length){document.getElementById('le-alloc-bar').style.display='none';document.getElementById('ml-alloc-bar').style.display='none';return}
+  var myBranch=allocStats.find(function(s){return s.branch===br});
+  var html='';
+  if(myBranch){
+    var pct=myBranch.total>0?Math.round((myBranch.used/myBranch.total)*100):0;
+    var barColor=pct>=90?'#C62828':pct>=70?'#E67E22':'var(--green)';
+    html='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px"><strong style="color:var(--text)">'+br+'</strong><span style="color:var(--text3)">'+myBranch.used+'/'+myBranch.total+' used ('+pct+'%)</span></div>';
+    html+='<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:3px;transition:width .3s"></div></div>';
+  }
+  document.getElementById('le-alloc-bar').innerHTML=html;
+  document.getElementById('le-alloc-bar').style.display=html?'block':'none';
+  updProgress();
+  // My Lots â show all branches with expandable grids
+  var allHtml='';
+  allocStats.forEach(function(s,si){
+    var pct=s.total>0?Math.round((s.used/s.total)*100):0;
+    var barColor=pct>=90?'#C62828':pct>=70?'#E67E22':'var(--green)';
+    var isMine=s.branch===br;
+    allHtml+='<div style="margin-bottom:8px'+(isMine?';background:rgba(29,158,117,.06);border-radius:6px;padding:4px 6px':'')+'">';
+    allHtml+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:2px"><strong style="color:var(--text)">'+s.branch+(isMine?' â':'')+'</strong><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--text3);font-size:10px">'+s.used+'/'+s.total+'</span><button onclick="toggleUserGrid(\'mlg-'+si+'\',this)" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:9px;font-weight:700;cursor:pointer;font-family:inherit">â¼ Lots</button></div></div>';
+    allHtml+='<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:3px"></div></div>';
+    // Grid
+    var gridHtml='';
+    s.ranges.forEach(function(rng){
+      if(rng.lots&&rng.lots.length){
+        gridHtml+=rng.lots.map(function(l){
+          return '<span class="lot-chip '+(l.used?'used':'')+'">'+l.lot+'</span>';
+        }).join('');
+      }
+    });
+    allHtml+='<div id="mlg-'+si+'" style="display:none;margin-top:4px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg)"><div style="margin-bottom:4px;font-size:9px;color:var(--text3)"><span style="display:inline-block;width:8px;height:8px;background:#0d7c5f;border-radius:2px;vertical-align:middle"></span> used <span style="display:inline-block;width:8px;height:8px;background:var(--border);border-radius:2px;vertical-align:middle;margin-left:6px"></span> available</div><div style="display:flex;flex-wrap:wrap;gap:3px">'+gridHtml+'</div></div></div>';
+  });
+  document.getElementById('ml-alloc-bar').innerHTML=allHtml;
+  document.getElementById('ml-alloc-bar').style.display=allHtml?'block':'none';
+}
+
+function toggleUserGrid(id,btn){var el=document.getElementById(id);if(!el)return;if(el.style.display==='none'){el.style.display='block';if(btn)btn.textContent='â² Hide'}else{el.style.display='none';if(btn)btn.textContent='â¼ Lots'}}
+
+function refreshAllocAfterSave(){
+  if(!aid)return;
+  fetch(B+'/api/auctions/'+aid+'/allocation-stats',{headers:ah()}).then(function(r){return r.json()}).then(function(d){
+    allocStats=d.stats||[];renderAllocBars();
+  }).catch(function(){});
+}
+
+// ââ CHANGE PASSWORD ââ
+
+function showChangePassword() {
+  toggleMenu(true);
+  document.getElementById('app-cp-current').value = '';
+  document.getElementById('app-cp-new').value = '';
+  document.getElementById('app-cp-confirm').value = '';
+  document.getElementById('app-cp-err').innerHTML = '';
+  document.getElementById('cp-modal').classList.add('show');
+}
+
+async function appChangePassword() {
+  var cur = document.getElementById('app-cp-current').value;
+  var newP = document.getElementById('app-cp-new').value;
+  var conf = document.getElementById('app-cp-confirm').value;
+  var er = document.getElementById('app-cp-err');
+  er.innerHTML = '';
+  if (!cur || !newP) { er.innerHTML = '<div class="eb">Fill all fields</div>'; return; }
+  if (newP.length < 6) { er.innerHTML = '<div class="eb">Minimum 6 characters</div>'; return; }
+  if (newP !== conf) { er.innerHTML = '<div class="eb">Passwords do not match</div>'; return; }
+  try {
+    var r = await fetch(B + '/api/auth/change-password', {
+      method: 'POST', headers: ah(),
+      body: JSON.stringify({ current_password: cur, new_password: newP })
+    });
+    var d = await r.json();
+    if (r.ok) {
+      document.getElementById('cp-modal').classList.remove('show');
+      toast('Password changed!', false);
+      // If the user was gated behind must_change_password and the
+      // trade dropdown was showing the placeholder, reload it now so
+      // they don't have to refresh the page manually. Also clear the
+      // inline warning under the dropdown.
+      var info = document.getElementById('ss-trade-info');
+      if (info) info.innerHTML = '';
+      if (typeof loadAvailableTrades === 'function') {
+        try { loadAvailableTrades(); } catch(_){}
+      }
+    } else {
+      er.innerHTML = '<div class="eb">' + (d.error || 'Failed') + '</div>';
+    }
+  } catch (e) { er.innerHTML = '<div class="eb">Failed to connect</div>'; }
+}
+
+// ââ SESSION TIMEOUT (30 min inactivity) ââ
+var sessionTimer;
+function resetSessionTimer() {
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(function() {
+    if (token) { toast('Session expired â please login again', true); setTimeout(doLogout, 1500); }
+  }, 30 * 60 * 1000);
+}
+['click','touchstart','keydown','scroll'].forEach(function(ev) { document.addEventListener(ev, resetSessionTimer, { passive: true }); });
+resetSessionTimer();
+
+tryAutoLogin();
+</script>
+</body></html>

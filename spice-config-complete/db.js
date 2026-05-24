@@ -379,6 +379,84 @@ async function initDb() {
     PRIMARY KEY (from_pin, to_pin)
   )`);
 
+  // ── LOT ALLOCATIONS (per-trade per-branch lot-number ranges) ──
+  // Each row reserves a contiguous range of lot numbers (e.g. 001-080)
+  // for one branch within one trade. Optional alpha prefix supported.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS lot_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL,
+    branch TEXT NOT NULL,
+    start_lot TEXT NOT NULL,
+    end_lot TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (auction_id) REFERENCES auctions(id)
+  )`);
+
+  // ── LOGIN HISTORY ──────────────────────────────────────────
+  // Per-login tracking: IP, device type, username. Used by:
+  //   - the desktop admin Users → Login History panel
+  //   - the mobile bridge's /api/auth/login (writes a row each login)
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS login_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    ip TEXT DEFAULT '',
+    user_agent TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )`);
+
+  // ── IMPORT LOG (Import Old Data audit + undo) ─────────────
+  // One row per import run (preview, dry-run, or actual import). Drives
+  // the Import Old Data → History panel and the "Undo this import"
+  // action. inserted_ids holds a JSON array of target-table primary key
+  // IDs created by this import (so undo can DELETE them precisely).
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS import_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    filename TEXT DEFAULT '',
+    dry_run INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    imported INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    errors TEXT DEFAULT '',
+    user_id INTEGER,
+    username TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    inserted_ids TEXT DEFAULT '',
+    undone_at TEXT DEFAULT ''
+  )`);
+
+  // ── REASSIGN LOG (lot-range branch transfers) ─────────────
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS reassign_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL,
+    from_branch TEXT NOT NULL,
+    to_branch TEXT NOT NULL,
+    start_lot TEXT NOT NULL,
+    end_lot TEXT NOT NULL,
+    user_id INTEGER,
+    username TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
+  // ── DELETE LOG (forensic record of Delete All wipes) ─────
+  // Captures the operator, resource, how many rows went away, where the
+  // pre-wipe backup landed, and the client IP — so a misclick can be
+  // traced and recovered from the snapshot.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS delete_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource TEXT NOT NULL,
+    deleted_count INTEGER DEFAULT 0,
+    cascade_counts TEXT DEFAULT '',
+    backup_path TEXT DEFAULT '',
+    user_id INTEGER,
+    username TEXT DEFAULT '',
+    ip TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
   // ── INDEXES ────────────────────────────────────────────────
   const indexes = [
     'CREATE INDEX IF NOT EXISTS idx_traders_name ON traders(name)',
@@ -395,6 +473,13 @@ async function initDb() {
     'CREATE INDEX IF NOT EXISTS idx_bills_name ON bills(name)',
     'CREATE INDEX IF NOT EXISTS idx_buyers_buyer ON buyers(buyer)',
     'CREATE INDEX IF NOT EXISTS idx_buyers_buyer1 ON buyers(buyer1)',
+    'CREATE INDEX IF NOT EXISTS idx_lot_alloc_auction ON lot_allocations(auction_id)',
+    'CREATE INDEX IF NOT EXISTS idx_login_history_user ON login_history(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_login_history_created ON login_history(created_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_traders_cr  ON traders(cr)',
+    'CREATE INDEX IF NOT EXISTS idx_traders_tel ON traders(tel)',
+    'CREATE INDEX IF NOT EXISTS idx_traders_pan ON traders(pan)',
+    'CREATE INDEX IF NOT EXISTS idx_trader_banks_trader ON trader_banks(trader_id)',
   ];
   for (const idx of indexes) { try { wrapped.exec(idx); } catch (e) {} }
 
@@ -450,6 +535,22 @@ async function initDb() {
     // upgraded DBs shed the orphan tables on next restart.
     'DROP TABLE IF EXISTS pin_distances',
     'DROP TABLE IF EXISTS pincodes',
+    // Per-lot bank pin — used by the mobile PWA workflow so a seller with
+    // multiple bank accounts can have a specific one stamped on each lot.
+    // Falls back to the trader's default bank (trader_banks.is_default=1).
+    'ALTER TABLE lots ADD COLUMN bank_id INTEGER',
+    // Trader contact channels added in the mobile PWA workflow.
+    "ALTER TABLE traders ADD COLUMN whatsapp TEXT DEFAULT ''",
+    "ALTER TABLE traders ADD COLUMN email TEXT DEFAULT ''",
+    // Additional Charge — sum(cardamom) × cfg.addl_charge_value (Pwa flag).
+    "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",
+    "ALTER TABLE invoices ADD COLUMN addl_name TEXT DEFAULT ''",
+    // Per-invoice lorry / truck number (emitted into e-way bill voucher).
+    'ALTER TABLE invoices ADD COLUMN lorry_no TEXT',
+    // Per-import undo: existing DBs need the two columns added so the
+    // Undo button on the History panel works.
+    "ALTER TABLE import_log ADD COLUMN inserted_ids TEXT DEFAULT ''",
+    "ALTER TABLE import_log ADD COLUMN undone_at TEXT DEFAULT ''",
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
@@ -673,4 +774,45 @@ function closeDb() {
   }
 }
 
-module.exports = { initDb, getDb, closeDb };
+/**
+ * Replace the entire database from a buffer (used by /api/system/restore
+ * and the Delete All snapshot-restore path). Validates the SQLite magic
+ * header, opens it as a fresh sql.js Database, persists to disk, then
+ * swaps it in. Throws on any error — the existing DB is left untouched
+ * on failure.
+ */
+async function replaceFromBuffer(buf) {
+  if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf);
+  // SQLite files start with "SQLite format 3\0" (16 bytes).
+  const magic = buf.slice(0, 16).toString('utf8').replace(/\0+$/, '');
+  if (magic !== 'SQLite format 3') {
+    throw new Error('Uploaded file is not a valid SQLite database');
+  }
+  if (!SQL) SQL = await initSqlJs();
+  let test;
+  try { test = new SQL.Database(buf); } catch (e) {
+    throw new Error('SQLite file is corrupt or unreadable: ' + e.message);
+  }
+  try {
+    const r = test.exec('PRAGMA integrity_check');
+    const ok = r && r[0] && r[0].values && r[0].values[0] && r[0].values[0][0] === 'ok';
+    if (!ok) throw new Error('integrity_check did not return "ok"');
+  } catch (e) {
+    test.close();
+    throw new Error('Integrity check failed: ' + e.message);
+  }
+  flushSave();
+  if (rawDb) { try { rawDb.close(); } catch(_){} }
+  rawDb = test;
+  try {
+    const out = Buffer.from(rawDb.export());
+    const tmp = DB_PATH + '.tmp';
+    fs.writeFileSync(tmp, out);
+    fs.renameSync(tmp, DB_PATH);
+  } catch (e) {
+    throw new Error('Failed to persist restored DB: ' + e.message);
+  }
+  return { ok: true, size: buf.length };
+}
+
+module.exports = { initDb, getDb, closeDb, flushSave, replaceFromBuffer, DB_PATH };
