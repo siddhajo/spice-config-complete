@@ -2051,7 +2051,7 @@ app.get('/api/auctions/template', requireExport, async (req, res) => {
 // LOTS (CPA1.DBF — main data)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/lots/:auctionId', requireView, (req, res) => {
-  const { branch, name, buyer } = req.query;
+  const { branch, name, buyer, search } = req.query;
   // Correlated subquery (not LEFT JOIN) to avoid any risk of row duplication
   // if the same buyer code exists multiple times in the buyers table.
   let q = `SELECT lots.*,
@@ -2060,8 +2060,19 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
            WHERE lots.auction_id = ?`;
   const p = [req.params.auctionId];
   if (branch) { q += ' AND lots.branch = ?'; p.push(branch); }
-  if (name) { q += ' AND lots.name LIKE ?'; p.push(`%${name}%`); }
-  if (buyer) { q += ' AND lots.buyer = ?'; p.push(buyer); }
+  if (name)   { q += ' AND lots.name LIKE ?'; p.push(`%${name}%`); }
+  if (buyer)  { q += ' AND lots.buyer = ?'; p.push(buyer); }
+  // Free-text search across lot_no / seller name / buyer code / buyer
+  // short alias / invoice no / branch — every column a user would
+  // type when looking for a specific lot. LIKE is case-insensitive in
+  // SQLite for ASCII; matches anywhere in the cell.
+  if (search) {
+    const q2 = `%${search}%`;
+    q += ` AND (lots.lot_no LIKE ? OR lots.name LIKE ? OR lots.buyer LIKE ?
+                 OR (SELECT b.code FROM buyers b WHERE b.buyer = lots.buyer LIMIT 1) LIKE ?
+                 OR lots.invo LIKE ? OR lots.branch LIKE ?)`;
+    p.push(q2, q2, q2, q2, q2, q2);
+  }
   q += ' ORDER BY lots.lot_no';
   res.json(getDb().all(q, p));
 });

@@ -564,6 +564,35 @@ tr:hover td{background:var(--spice-cream)}
 .kpi.chili .kpi-icon{background:var(--spice-chili-lt);color:var(--spice-chili)}
 .kpi-icon svg{width:18px;height:18px;stroke-width:2;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
 
+/* Compact KPI strip used by the Lot Data Summary — denser rows so six
+   tiles (4 lot metrics + sold/withdrawn tiles) fit on a row without
+   towering. Scoped via #lot-kpis so dashboard KPIs are unaffected. */
+#lot-kpis.kpi-grid{gap:10px;margin-bottom:14px}
+#lot-kpis .kpi{padding:10px 14px;border-radius:12px}
+#lot-kpis .kpi-label{font-size:10.5px;letter-spacing:.6px;margin-bottom:4px}
+#lot-kpis .kpi-value{font-size:22px}
+#lot-kpis .kpi-icon{width:28px;height:28px;right:10px;top:10px;border-radius:8px}
+#lot-kpis .kpi-icon svg{width:14px;height:14px}
+#lot-kpis .kpi-meta{
+  /* Mini-table layout — label on the left (muted, small), value on
+     the right (tabular numerals). Thin divider above separates the
+     breakdown from the headline number. */
+  margin-top:10px;
+  padding-top:8px;
+  border-top:1px solid var(--spice-line);
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:3px 12px;
+  font-size:11.5px;
+  line-height:1.4
+}
+#lot-kpis .kpi-meta .lbl{color:var(--spice-text-mute);font-weight:500;letter-spacing:.1px}
+#lot-kpis .kpi-meta .val{
+  text-align:right;font-weight:600;color:var(--spice-text-main);
+  font-variant-numeric:tabular-nums
+}
+#lot-kpis .kpi-meta .val .ccy{color:var(--spice-text-hint);font-weight:500;margin-right:2px}
+
 /* Row layout — 2fr / 1fr grid */
 .dash-row{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:20px}
 .dash-row-eq{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
@@ -1878,8 +1907,13 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </span>
         </h2>
 
-        <!-- KPI strip -->
-        <div id="lot-kpis" class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;display:none">
+        <!-- KPI strip — 6 tiles. Lots / Qty / Amount(+min/max/avg) /
+             Calculated% on top; Sold and Withdrawn (each with their
+             own bags / qty / amount breakdown) round out the row.
+             Updated by loadLots over the FULL filtered set (the table
+             below shows a paginated slice). Hidden until first data
+             load completes. -->
+        <div id="lot-kpis" class="kpi-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:14px;display:none">
           <div class="kpi cardamom">
             <div class="kpi-label">Lots</div>
             <div class="kpi-value" id="lot-kpi-count">0</div>
@@ -1888,15 +1922,17 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             </div>
           </div>
           <div class="kpi">
-            <div class="kpi-label">Total Quantity</div>
+            <div class="kpi-label">Total quantity</div>
             <div class="kpi-value" id="lot-kpi-qty">0<span class="kpi-unit">kg</span></div>
             <div class="kpi-icon">
               <svg viewBox="0 0 24 24"><path d="M5 3h14l-1 9H6z"/><line x1="6" y1="20" x2="18" y2="20"/></svg>
             </div>
           </div>
           <div class="kpi turmeric">
-            <div class="kpi-label">Total Amount</div>
-            <div class="kpi-value" id="lot-kpi-amount" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-label">Total amount</div>
+            <div class="kpi-value" id="lot-kpi-amount" style="font-size:18px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <!-- Min / Max / Avg price across sold lots only. -->
+            <div class="kpi-meta" id="lot-kpi-amount-meta"><span class="lbl">Min</span><span class="val">—</span><span class="lbl">Max</span><span class="val">—</span><span class="lbl">Avg</span><span class="val">—</span></div>
             <div class="kpi-icon">
               <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
@@ -1908,10 +1944,50 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
               <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
           </div>
+          <div class="kpi cardamom">
+            <div class="kpi-label">Sold lots</div>
+            <div class="kpi-value" id="lot-kpi-sold-count">0</div>
+            <div class="kpi-meta" id="lot-kpi-sold-meta"><span class="lbl">Bags</span><span class="val">—</span><span class="lbl">Qty</span><span class="val">—</span><span class="lbl">Amount</span><span class="val">—</span></div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h11"/></svg>
+            </div>
+          </div>
+          <div class="kpi chili">
+            <div class="kpi-label">Withdrawn lots</div>
+            <div class="kpi-value" id="lot-kpi-wd-count">0</div>
+            <div class="kpi-meta" id="lot-kpi-wd-meta"><span class="lbl">Bags</span><span class="val">—</span><span class="lbl">Qty</span><span class="val">—</span><span class="lbl">Amount</span><span class="val">—</span></div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            </div>
+          </div>
         </div>
 
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
           <select id="lot-auction" onchange="loadLots()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px"></select>
+
+          <!-- Within-trade search across lot_no, seller name, buyer code +
+               short alias, invoice no, and branch. Server-side via
+               ?search= so the LIKE runs over every row in the trade,
+               not just the rendered page. Debounced 200ms. -->
+          <input type="search" id="lot-search" placeholder="Search lot no, seller, buyer, code, invoice, branch…" oninput="searchLotsDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background-color:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <!-- Bulk-tick by lot number — paste a comma/space/newline list
+               (and/or ranges like 5-10) and every match in the loaded
+               trade gets checked. If matches fall outside the current
+               page, the client expands the rendered slice so all matches
+               are visible before any bulk action runs. -->
+          <input type="text" id="lot-pick-lots" placeholder="Tick lots: 12, 13, 15…" autocomplete="off"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();lotApplyPickLots()}"
+                 style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:200px"
+                 title="Enter lot numbers separated by comma / space / newline. Supports ranges like 5-10. Press Enter or click Tick to check them.">
+          <button type="button" class="btn btn-o" onclick="lotApplyPickLots()" style="height:38px;padding:0 14px;font-weight:600">Tick</button>
+
+          <!-- Branch filter — populated from Settings → Branches & Contacts.
+               Server-side filter (?branch=) so the KPI strip + table stay
+               in sync. "All branches" passes no filter. -->
+          <select id="lot-branch-filter" onchange="loadLots()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px" title="Filter by branch">
+            <option value="">All branches</option>
+          </select>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="btn btn-o" style="height:38px;padding:0 16px;font-weight:600" onclick="refreshLots(this)" title="Reload the lots table from the server">🔄 Refresh</button>
@@ -5821,6 +5897,20 @@ function updateSdataField(key, value) {
     if (f) { f.value = value; return; }
   }
 }
+
+// Synchronous list of configured branches read from the in-memory
+// _sdata (loaded at boot, refreshed on every Settings save). Looks
+// under the Branches & Contacts category for keys br1..br9 — empty/
+// whitespace values are skipped. Sorted by key so the dropdown
+// matches Settings order. Used by the Lots tab branch-filter
+// dropdown which can't await an async helper on every keystroke.
+function getConfiguredBranches() {
+  const fields = (_sdata.branches || []).filter(f => /^br[1-9]$/.test(f.key));
+  return fields
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(f => String(f.value || '').trim().toUpperCase())
+    .filter(v => v.length > 0);
+}
 async function saveSettings(){
   // Capture what's currently on-screen, then flatten ALL categories EXCEPT
   // 'company' — those fields are stored in the preset table (company_presets)
@@ -7770,17 +7860,139 @@ function gotoLotsPage(p){
   loadLots({ keepPage: true });
 }
 
+// Debounced reload — every keystroke on the search input would
+// otherwise fire a fresh server query. 200ms is short enough to feel
+// live and long enough to coalesce typing.
+let _lotSearchTimer = null;
+function searchLotsDebounced(_q){
+  clearTimeout(_lotSearchTimer);
+  _lotSearchTimer = setTimeout(() => loadLots(), 200);
+}
+
+// ── Tick lots by lot_no — bulk-check matching checkboxes ──────
+// Accepted input shapes:
+//   • single numbers       → "12"
+//   • comma / space /      → "12, 13 15;17\n19"
+//     semicolon / newline
+//   • numeric ranges       → "5-10" → ["5","6","7","8","9","10"]
+//     (both ends inclusive; reversed "10-5" also works)
+// Non-numeric tokens (legacy "A12") are preserved verbatim — only
+// pure-digit start AND end trigger range expansion, so alphanumeric
+// lot codes don't get mangled. Ranges wider than 10,000 are clamped.
+function _expandLotNoTokens(raw){
+  const out = [];
+  const segments = String(raw || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+  for (const seg of segments) {
+    const m = /^(\d+)-(\d+)$/.exec(seg);
+    if (m) {
+      let a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+      if (a > b) { const t = a; a = b; b = t; }
+      const span = Math.min(b - a + 1, 10000);
+      for (let i = 0; i < span; i++) out.push(String(a + i));
+    } else {
+      out.push(seg);
+    }
+  }
+  return out;
+}
+
+// Parse the tick-lots input, look up each token in the full-trade
+// cache, and check the matching row checkboxes. If matches fall
+// outside the current page, expand the client-side pageSize to span
+// the whole trade so every ticked row is visible BEFORE the operator
+// runs a bulk action (otherwise getTickedLotIds — which only reads
+// rendered checkboxes — would silently drop them).
+async function lotApplyPickLots(){
+  const input = document.getElementById('lot-pick-lots');
+  if (!input) return;
+  const raw = String(input.value || '').trim();
+  if (!raw) return;
+  const tokens = _expandLotNoTokens(raw);
+  if (!tokens.length) return;
+
+  const arr = Array.isArray(_lotsFull) ? _lotsFull : [];
+  if (!arr.length) { toast('Load a trade first'); return; }
+
+  // Case-insensitive lot_no → id map. Lot numbers can be alphanumeric
+  // (e.g. "A12") so we don't coerce to int.
+  const byLotNo = new Map();
+  for (const l of arr) {
+    const k = String(l.lot_no == null ? '' : l.lot_no).trim().toUpperCase();
+    if (k) byLotNo.set(k, l.id);
+  }
+
+  const matchedIds = new Set();
+  const missing = [];
+  for (const t of tokens) {
+    const k = t.toUpperCase();
+    if (byLotNo.has(k)) matchedIds.add(byLotNo.get(k));
+    else missing.push(t);
+  }
+
+  // Off-page matches: bump pageSize to render the entire trade so
+  // every matched checkbox exists in the DOM. The pager renders the
+  // expanded size in the dropdown automatically on next paint.
+  const visibleIds = new Set(
+    Array.from(document.querySelectorAll('.lot-select-cb')).map(cb => Number(cb.value))
+  );
+  const offPage = [...matchedIds].filter(id => !visibleIds.has(id));
+  if (offPage.length) {
+    _lotsPager.pageSize = Math.max(arr.length, _lotsPager.pageSize);
+    _lotsPager.page     = 1;
+    await loadLots({ keepPage: true });
+  }
+
+  // Tick matched rows. Done AFTER the optional re-mount so every
+  // matched id has a freshly-rendered checkbox in the DOM.
+  document.querySelectorAll('.lot-select-cb').forEach(cb => {
+    if (matchedIds.has(Number(cb.value))) cb.checked = true;
+  });
+  if (typeof syncLotMaster === 'function') syncLotMaster();
+
+  // Clear the input on success so the next paste starts fresh.
+  if (matchedIds.size) input.value = '';
+
+  const parts = [];
+  if (matchedIds.size) parts.push(`ticked ${matchedIds.size} lot${matchedIds.size === 1 ? '' : 's'}`);
+  if (missing.length)  parts.push(`not found: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? '…' : ''}`);
+  toast(parts.length ? parts.join(' · ') : 'No lots matched');
+}
+
+// Full loaded trade — cached so lotApplyPickLots can resolve lot_no → id
+// without a second round-trip. Replaced on every successful loadLots.
+let _lotsFull = [];
+
 async function loadLots(opts){
   const aid=document.getElementById('lot-auction').value;if(!aid)return;
   // Pager: fresh loads reset to page 1; only pager-driven navigation
   // sets {keepPage:true} to preserve the user's current page.
   if (!opts || !opts.keepPage) _lotsPager.page = 1;
+  // Refresh the branch-filter dropdown options every load so any new
+  // branch added in Settings shows up here. The currently-selected
+  // branch survives via a value-match before clearing.
+  const branchSel = document.getElementById('lot-branch-filter');
+  if (branchSel) {
+    const current = branchSel.value;
+    const branches = (typeof getConfiguredBranches === 'function') ? getConfiguredBranches() : [];
+    branchSel.innerHTML = '<option value="">All branches</option>'
+      + branches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+    if (current && branches.includes(current)) branchSel.value = current;
+  }
+  const branchFilter = branchSel ? branchSel.value : '';
+  const branchParam = branchFilter ? `&branch=${encodeURIComponent(branchFilter)}` : '';
+  // Free-text search across the currently-selected trade.
+  const searchTerm = (document.getElementById('lot-search')?.value || '').trim();
+  const searchParam = searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : '';
   // Cache-buster ensures the browser actually hits the server (otherwise Refresh
-  // may return stale cached JSON and nothing visibly changes)
-  const d=await j(`/api/lots/${aid}?_=${Date.now()}`);
+  // may return stale cached JSON and nothing visibly changes).
+  const d=await j(`/api/lots/${aid}?_=${Date.now()}${branchParam}${searchParam}`);
   const arr = Array.isArray(d) ? d : [];
+  // Cache the full trade so bulk-tick can resolve lot_no → id without
+  // re-fetching. Replaced on every load so it stays in sync with
+  // deletes / inserts / branch filter changes.
+  _lotsFull = arr;
 
-  // Update KPI strip — count, qty, amount, calculated %
+  // Update KPI strip — count, qty, amount, calculated %, sold, withdrawn.
   const kpiStrip = document.getElementById('lot-kpis');
   if (kpiStrip) {
     if (arr.length === 0) {
@@ -7796,16 +8008,68 @@ async function loadLots(opts){
         ((Number(i.puramt) || 0) > 0 || (Number(i.balance) || 0) > 0)).length;
       const realLotCount = arr.filter(i => (Number(i.amount) || 0) > 0).length;
       const pct = realLotCount > 0 ? Math.round((calculatedCount / realLotCount) * 100) : 0;
+
+      // Sold / Withdrawn aggregates.
+      //   Sold      = code present AND not 'WD'
+      //   Withdrawn = code === 'WD' (case-insensitive)
+      // Min / Max / Avg are derived from SOLD lots ONLY (withdrawn
+      // rows have no transacted price; including them would skew the
+      // weighted average and bounds). Avg = Σ amount / Σ qty.
+      const agg = { sold: { n:0, bags:0, qty:0, amt:0 },
+                    wd:   { n:0, bags:0, qty:0, amt:0 } };
+      let priceMin = Infinity, priceMax = -Infinity;
+      for (const l of arr) {
+        const code = String(l.code || '').trim().toUpperCase();
+        if (!code) continue;
+        const bucket = (code === 'WD') ? agg.wd : agg.sold;
+        const qty = Number(l.qty)    || 0;
+        const amt = Number(l.amount) || 0;
+        const price = Number(l.price) || 0;
+        bucket.n   += 1;
+        bucket.bags += parseInt(l.bags, 10) || 0;
+        bucket.qty  += qty;
+        bucket.amt  += amt;
+        if (code !== 'WD' && price > 0 && amt > 0) {
+          if (price < priceMin) priceMin = price;
+          if (price > priceMax) priceMax = price;
+        }
+      }
+      const priceAvg = agg.sold.qty > 0 ? (agg.sold.amt / agg.sold.qty) : 0;
+      const hasSold  = agg.sold.n > 0 && priceMin !== Infinity;
+
       const $ = (id) => document.getElementById(id);
       if ($('lot-kpi-count'))  $('lot-kpi-count').textContent  = arr.length;
       if ($('lot-kpi-qty'))    $('lot-kpi-qty').innerHTML      = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
       if ($('lot-kpi-amount')) $('lot-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
       if ($('lot-kpi-calc'))   $('lot-kpi-calc').innerHTML     = `${pct}%<span class="kpi-unit"> done</span>`;
+
+      // Helper: label/value mini-grid rows for the kpi-meta containers.
+      const metaRow = (lbl, val) => `<span class="lbl">${lbl}</span><span class="val">${val}</span>`;
+      const ccy = (n) => `<span class="ccy">₹</span>${fmtI(n, 0)}`;
+
+      if ($('lot-kpi-amount-meta')) $('lot-kpi-amount-meta').innerHTML = hasSold
+        ? metaRow('Min', ccy(priceMin)) + metaRow('Max', ccy(priceMax)) + metaRow('Avg', ccy(priceAvg))
+        : metaRow('Min', '—') + metaRow('Max', '—') + metaRow('Avg', '—');
+
+      if ($('lot-kpi-sold-count')) $('lot-kpi-sold-count').textContent = agg.sold.n;
+      if ($('lot-kpi-sold-meta'))  $('lot-kpi-sold-meta').innerHTML =
+        metaRow('Bags', fmtI(agg.sold.bags, 0))
+        + metaRow('Qty', `${fmtI(agg.sold.qty, 0)} kg`)
+        + metaRow('Amount', ccy(agg.sold.amt));
+
+      if ($('lot-kpi-wd-count')) $('lot-kpi-wd-count').textContent = agg.wd.n;
+      if ($('lot-kpi-wd-meta'))  $('lot-kpi-wd-meta').innerHTML =
+        metaRow('Bags', fmtI(agg.wd.bags, 0))
+        + metaRow('Qty', `${fmtI(agg.wd.qty, 0)} kg`)
+        + metaRow('Amount', ccy(agg.wd.amt));
+
       updateSummaryStats('lots',
         `<strong>${arr.length}</strong> lot${arr.length===1?'':'s'} · `
         + `<strong>${fmtI(totalQty,0)} kg</strong> · `
         + `<strong>₹${fmtI(totalAmount,0)}</strong> · `
-        + `<strong>${pct}%</strong> calculated`);
+        + `<strong>${pct}%</strong> calculated · `
+        + `<strong>${agg.sold.n}</strong> sold · `
+        + `<strong>${agg.wd.n}</strong> WD`);
     }
   }
 
