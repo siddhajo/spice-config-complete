@@ -8081,6 +8081,12 @@ async function loadLots(opts){
   // Pager: fresh loads reset to page 1; only pager-driven navigation
   // sets {keepPage:true} to preserve the user's current page.
   if (!opts || !opts.keepPage) _lotsPager.page = 1;
+  // Switching auction / branch (i.e. NOT a keepPage re-render) clears
+  // any prior ticked selection — IDs from a different trade would
+  // otherwise hide rows behind the sort-ticked-first reorder.
+  if (!opts || !opts.keepPage) {
+    if (window._lotsTicked) window._lotsTicked.clear();
+  }
   // Refresh the branch-filter dropdown options every load so any new
   // branch added in Settings shows up here. The currently-selected
   // branch survives via a value-match before clearing.
