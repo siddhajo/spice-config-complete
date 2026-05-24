@@ -407,7 +407,7 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
       </button>
       <h1><span class="dot"><img id="topbar-logo-img" alt="" onerror="this.remove()"></span> <span id="topbar-brand-name">Admin Console</span></h1>
       <div id="topbar-trade-wrap" style="display:none;align-items:center;gap:6px;margin-left:14px;padding-left:14px;border-left:1px solid var(--spice-line)">
-        <span style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Trade</span>
+        <span data-biz-label="trade" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Trade</span>
         <select id="topbar-trade" onchange="setSharedAuctionId(this.value, 'topbar')" style="height:32px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:13px;font-weight:600;min-width:200px"></select>
       </div>
     </div>
@@ -459,7 +459,7 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
         </button>
         <button class="side-item" data-tab="auctions" onclick="go('auctions')">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
-          Auctions
+          <span data-biz-label="trades">Trades</span>
         </button>
         <button class="side-item" data-tab="lots" onclick="go('lots')">
           <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
@@ -538,7 +538,16 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div class="toast" id="toast"></div>
 
     <!-- Dashboard -->
-    <div class="tc active" id="tc-dash"><div class="stats" id="stats"></div></div>
+    <div class="tc active" id="tc-dash">
+      <div class="stats" id="stats"></div>
+      <div class="kpi-grid" id="dash-kpis" style="display:none"></div>
+      <div class="card" id="dash-current" style="display:none"></div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:flex-start" id="dash-row1">
+        <div class="card" id="dash-per-trade" style="display:none"></div>
+        <div class="card" id="dash-branches" style="display:none"></div>
+      </div>
+      <div class="card" id="dash-recent" style="display:none"></div>
+    </div>
 
     <!-- Settings (loaded dynamically) -->
     <div class="tc" id="tc-settings"></div>
@@ -677,14 +686,14 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <!-- Auctions -->
     <div class="tc" id="tc-auctions">
       <div class="card">
-        <h2>Trades <button class="btn btn-g" onclick="openAuctionAdd()">+ New Trade</button></h2>
+        <h2><span data-biz-label="trades">Trades</span> <button class="btn btn-g" onclick="openAuctionAdd()">+ New <span data-biz-label="trade">Trade</span></button></h2>
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <div class="fg" style="margin:0;flex:1;min-width:180px"><input type="search" placeholder="Search by trade #…" oninput="searchAuctionsDebounced(this.value)"></div>
+          <div class="fg" style="margin:0;flex:1;min-width:180px"><input type="search" placeholder="Search…" oninput="searchAuctionsDebounced(this.value)"></div>
           <button class="btn btn-a" onclick="openImportAuctionModal()">Import Lots from XLSX</button>
           <button class="btn btn-o" onclick="downloadTemplate('auctions')">Template</button>
         </div>
         <div id="auction-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Trade No</th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th><span data-biz-prefix="trade" data-biz-suffix="No">Trade No</span></th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
         <div id="auctions-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)"></div>
       </div>
     </div>
@@ -693,7 +702,7 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div class="modal-bg" id="auction-modal"><div class="modal">
       <h2 id="auction-modal-title">New Trade</h2>
       <input type="hidden" id="a-id">
-      <div class="fg"><label>Trade No *</label><input id="a-ano"></div>
+      <div class="fg"><label><span data-biz-prefix="trade" data-biz-suffix="No">Trade No</span> *</label><input id="a-ano"></div>
       <div class="fg"><label>Date *</label><input type="date" id="a-date"></div>
       <div class="fg"><label>Crop Type</label><input id="a-crpt"></div>
       <div class="fg"><label>State</label><select id="a-state"><option>TAMIL NADU</option><option>KERALA</option></select></div>
@@ -1656,28 +1665,97 @@ function iconBtn(kind,title,onclick){
   return `<button class="icon-btn i-${kind} ${permCls}" title="${title}" onclick="${onclick}">${ICONS[kind]||''}</button>`;
 }
 
-// ── DataTable (simplified) ──
+// ── Pager: simple client-side pagination for list screens ──
+window._pg = window._pg || {};
+function pgGet(key){
+  if (!window._pg[key]) window._pg[key] = { page: 1, pageSize: 25, data: [] };
+  return window._pg[key];
+}
+function pgRender(key, data, opts){
+  const st = pgGet(key);
+  st.data = Array.isArray(data) ? data : [];
+  if (opts && opts.resetPage) st.page = 1;
+  const total = st.data.length;
+  const totalPages = Math.max(1, Math.ceil(total / st.pageSize));
+  if (st.page > totalPages) st.page = totalPages;
+  const start = (st.page - 1) * st.pageSize;
+  const slice = st.data.slice(start, start + st.pageSize);
+  const tbody = opts && opts.tbodyId ? document.getElementById(opts.tbodyId) : null;
+  if (tbody && opts && typeof opts.rowFn === 'function'){
+    tbody.innerHTML = slice.length ? slice.map(opts.rowFn).join('') : ('<tr><td colspan="' + (opts.cols || 6) + '" style="text-align:center;color:var(--text3);padding:24px">No records</td></tr>');
+  }
+  const pagerEl = opts && opts.pagerId ? document.getElementById(opts.pagerId) : null;
+  if (pagerEl){
+    if (!total){ pagerEl.innerHTML = '<span style="color:var(--text3)">No records.</span>'; return; }
+    const from = start + 1, to = Math.min(start + st.pageSize, total);
+    pagerEl.innerHTML =
+      '<div>Showing <b>'+from+'–'+to+'</b> of <b>'+total+'</b></div>'+
+      '<div style="display:flex;gap:6px;align-items:center">'+
+        '<button class="btn xs" '+(st.page<=1?'disabled':'')+' onclick="pgGo(\''+key+'\',-1)">‹ Prev</button>'+
+        '<span style="font-size:12px">Page '+st.page+' / '+totalPages+'</span>'+
+        '<button class="btn xs" '+(st.page>=totalPages?'disabled':'')+' onclick="pgGo(\''+key+'\',1)">Next ›</button>'+
+        '<select onchange="pgResize(\''+key+'\', this.value)" style="height:28px;padding:0 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;margin-left:8px">'+
+          [10,25,50,100,200].map(n => '<option value="'+n+'" '+(n===st.pageSize?'selected':'')+'>'+n+' / page</option>').join('')+
+        '</select>'+
+      '</div>';
+  }
+}
+function pgGo(key, delta){
+  const st = pgGet(key);
+  st.page = Math.max(1, st.page + delta);
+  if (window._pgRender && window._pgRender[key]) window._pgRender[key]();
+}
+function pgResize(key, n){
+  const st = pgGet(key);
+  st.pageSize = +n || 25;
+  st.page = 1;
+  if (window._pgRender && window._pgRender[key]) window._pgRender[key]();
+}
+window._pgRender = window._pgRender || {};
+
+// ── DataTable (with built-in client-side pagination) ──
 const DataTable = (function(){
-  function render(tbodyId, data, config){
-    const tbody = document.getElementById(tbodyId);
-    if (!tbody) return;
-    const table = tbody.closest('table');
-    const cols = config.columns;
-    // Header
+  const _state = {}; // tbodyId -> { page, pageSize, data, config }
+  function renderHead(table, cols, tbody){
     const thead = table.querySelector('thead') || document.createElement('thead');
     thead.innerHTML = '<tr>' + cols.map(c => {
       const lbl = c.labelHTML != null ? c.labelHTML : esc(c.label);
       return `<th${c.numeric ? ' class="num"' : ''}>${lbl}</th>`;
     }).join('') + '</tr>';
     if (!table.querySelector('thead')) table.insertBefore(thead, tbody);
-    // Body
-    if (!data || !data.length) {
-      const empty = config.emptyState;
+  }
+  function ensurePager(table, tbodyId){
+    let pager = document.getElementById(tbodyId + '-dtpager');
+    if (!pager){
+      pager = document.createElement('div');
+      pager.id = tbodyId + '-dtpager';
+      pager.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;font-size:12.5px;color:var(--text2)';
+      const wrap = table.parentNode;
+      wrap.parentNode.insertBefore(pager, wrap.nextSibling);
+    }
+    return pager;
+  }
+  function paint(tbodyId){
+    const st = _state[tbodyId];
+    if (!st) return;
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    const table = tbody.closest('table');
+    const cols = st.config.columns;
+    renderHead(table, cols, tbody);
+    const data = st.data || [];
+    if (!data.length){
+      const empty = st.config.emptyState;
       tbody.innerHTML = '<tr><td colspan="' + cols.length + '" style="text-align:center;padding:24px;color:var(--text3)">' + (empty ? esc(empty.title || 'No data') : 'No data') + '</td></tr>';
+      const pager = ensurePager(table, tbodyId); pager.innerHTML = '';
       return;
     }
-    tbody.innerHTML = data.map(r => {
-      const rc = config.rowClass ? config.rowClass(r) : '';
+    const totalPages = Math.max(1, Math.ceil(data.length / st.pageSize));
+    if (st.page > totalPages) st.page = totalPages;
+    const start = (st.page - 1) * st.pageSize;
+    const slice = data.slice(start, start + st.pageSize);
+    tbody.innerHTML = slice.map(r => {
+      const rc = st.config.rowClass ? st.config.rowClass(r) : '';
       const cells = cols.map(c => {
         let v;
         if (c.render) v = c.render(r);
@@ -1687,10 +1765,34 @@ const DataTable = (function(){
       }).join('');
       return '<tr' + (rc ? ' class="' + rc + '"' : '') + '>' + cells + '</tr>';
     }).join('');
+    const pager = ensurePager(table, tbodyId);
+    const from = start + 1, to = Math.min(start + st.pageSize, data.length);
+    pager.innerHTML =
+      '<div>Showing <b>'+from+'–'+to+'</b> of <b>'+data.length+'</b></div>'+
+      '<div style="display:flex;gap:6px;align-items:center">'+
+        '<button class="btn xs" '+(st.page<=1?'disabled':'')+' onclick="DataTable._go(\''+tbodyId+'\',-1)">‹ Prev</button>'+
+        '<span style="font-size:12px">Page '+st.page+' / '+totalPages+'</span>'+
+        '<button class="btn xs" '+(st.page>=totalPages?'disabled':'')+' onclick="DataTable._go(\''+tbodyId+'\',1)">Next ›</button>'+
+        '<select onchange="DataTable._resize(\''+tbodyId+'\', this.value)" style="height:28px;padding:0 6px;border:1px solid var(--border);border-radius:6px;font-size:12px;margin-left:8px">'+
+          [10,25,50,100,200].map(n => '<option value="'+n+'" '+(n===st.pageSize?'selected':'')+'>'+n+' / page</option>').join('')+
+        '</select>'+
+      '</div>';
   }
   return {
-    mount(tbodyId, data, config){ render(tbodyId, data || [], config); },
-    _reset(tbodyId){ /* no-op for simplified version */ },
+    mount(tbodyId, data, config){
+      const prev = _state[tbodyId];
+      _state[tbodyId] = {
+        page: prev ? prev.page : 1,
+        pageSize: (config && config.pageSize) || (prev ? prev.pageSize : 25),
+        data: data || [],
+        config: config
+      };
+      if (config && config.resetPage) _state[tbodyId].page = 1;
+      paint(tbodyId);
+    },
+    _go(tbodyId, delta){ const st=_state[tbodyId]; if(!st)return; st.page=Math.max(1, st.page+delta); paint(tbodyId); },
+    _resize(tbodyId, n){ const st=_state[tbodyId]; if(!st)return; st.pageSize=+n||25; st.page=1; paint(tbodyId); },
+    _reset(tbodyId){ const st=_state[tbodyId]; if(st){ st.page=1; } },
   };
 })();
 
@@ -1770,6 +1872,7 @@ function logout(){
 async function applyFeatureFlags(){
   let cfg = null;
   try { if (T) cfg = await j('/api/company-settings/flat'); } catch (_) {}
+  window._cfg = cfg || {};
   const on = (v) => String(v == null ? '' : v).toLowerCase() === 'true' || v === true;
   document.body.setAttribute('data-feat-whatsapp', cfg && on(cfg.flag_whatsapp) ? '1' : '0');
   const featOn = (key) => !cfg || cfg[key] == null || on(cfg[key]);
@@ -1783,6 +1886,9 @@ async function applyFeatureFlags(){
   const pspOn = cfg && (cfg.flag_print_selected_purchase === true || String(cfg.flag_print_selected_purchase || '').toLowerCase() === 'true');
   document.body.setAttribute('data-feat-print-selected-purchase', pspOn ? '1' : '0');
   if (cfg && cfg.date_format) window._dateFmt = String(cfg.date_format).toUpperCase();
+  const mode = String((cfg && cfg.business_mode) || 'e-Trade').toLowerCase();
+  document.body.setAttribute('data-biz-mode', mode === 'e-auction' ? 'auction' : 'trade');
+  if (typeof applyBusinessLabels === 'function') applyBusinessLabels();
 }
 
 async function applyBranding(){
@@ -1942,14 +2048,45 @@ async function fillAucSelect(selId){
 </script>
 <script>
 // ── Dashboard ──
+function bizWord(plural){
+  const mode = String((window._cfg && window._cfg.business_mode) || 'e-Trade').toLowerCase();
+  const isAuc = mode === 'e-auction';
+  const base = isAuc ? 'Auction' : 'Trade';
+  return plural ? base + 's' : base;
+}
+function applyBusinessLabels(){
+  const sing = bizWord(false);
+  const plur = bizWord(true);
+  document.querySelectorAll('[data-biz-label="trade"]').forEach(el => el.textContent = sing);
+  document.querySelectorAll('[data-biz-label="trades"]').forEach(el => el.textContent = plur);
+  document.querySelectorAll('[data-biz-prefix="trade"]').forEach(el => {
+    const suffix = el.getAttribute('data-biz-suffix') || '';
+    el.textContent = sing + (suffix ? (' ' + suffix) : '');
+  });
+  document.querySelectorAll('[data-biz-prefix="trades"]').forEach(el => {
+    const suffix = el.getAttribute('data-biz-suffix') || '';
+    el.textContent = plur + (suffix ? (' ' + suffix) : '');
+  });
+}
+
 async function loadStats(){
   try{
     const d=await j('/api/stats');
     const c=d.counts||{};
     const cum=d.cumulative||{};
-    const inrL=n=>{const v=(n||0)/100000;return v>=1?'₹'+v.toFixed(1)+'L':'₹'+Math.round(n||0).toLocaleString('en-IN')};
+    const kpi=d.kpi||{};
+    const cur=d.currentAuction||null;
+    const perTrade=d.perTradeBreakdown||[];
+    const branches=d.branchTotals||[];
+    const recent=d.recentInvoices||[];
+    const tLbl=bizWord(true);
+    const inrL=n=>{const v=(n||0)/100000;return v>=1?'₹'+v.toFixed(2)+'L':'₹'+Math.round(n||0).toLocaleString('en-IN')};
+    const inr=n=>'₹'+Math.round(n||0).toLocaleString('en-IN');
+    const num=n=>(n||0).toLocaleString('en-IN');
+
+    // KPI tiles (top)
     document.getElementById('stats').innerHTML =
-      '<div class="stat"><div class="n">'+(c.auctions||0)+'</div><div class="l">Trades</div></div>'+
+      '<div class="stat"><div class="n">'+(c.auctions||0)+'</div><div class="l">'+tLbl+'</div></div>'+
       '<div class="stat"><div class="n">'+(c.lots||0)+'</div><div class="l">Lots</div></div>'+
       '<div class="stat"><div class="n">'+(c.invoices||0)+'</div><div class="l">Invoices</div></div>'+
       '<div class="stat"><div class="n">'+(c.purchases||0)+'</div><div class="l">Purchases</div></div>'+
@@ -1958,6 +2095,82 @@ async function loadStats(){
       '<div class="stat"><div class="n">'+(c.traders||0)+'</div><div class="l">Sellers</div></div>'+
       '<div class="stat"><div class="n">'+(c.buyers||0)+'</div><div class="l">Buyers</div></div>'+
       '<div class="stat"><div class="n">'+inrL(cum.amount||0)+'</div><div class="l">Lifetime Vol</div></div>';
+
+    // Activity KPIs (today + month)
+    const dashKpi = document.getElementById('dash-kpis');
+    dashKpi.style.display='grid';
+    dashKpi.innerHTML =
+      '<div class="kpi"><div class="kpi-label">Today — Qty</div><div class="kpi-value">'+num(Math.round(kpi.todayQty||0))+'<span class="kpi-unit">kg</span></div></div>'+
+      '<div class="kpi cardamom"><div class="kpi-label">Today — Amount</div><div class="kpi-value">'+inr(kpi.todayAmt||0)+'</div></div>'+
+      '<div class="kpi turmeric"><div class="kpi-label">This Month — Revenue</div><div class="kpi-value">'+inrL(kpi.monthRevenue||0)+'</div></div>'+
+      '<div class="kpi chili"><div class="kpi-label">Last Month — Revenue</div><div class="kpi-value">'+inrL(kpi.lastMonthRevenue||0)+'</div></div>';
+
+    // Current trade summary
+    const curBox = document.getElementById('dash-current');
+    if (cur && cur.id){
+      curBox.style.display='block';
+      curBox.innerHTML =
+        '<h2>Current '+bizWord(false)+' <span class="pill green">#'+esc(cur.ano||'')+'</span>'+
+          '<span style="margin-left:8px;font-weight:500;font-size:13px;color:var(--text2)">'+esc(fmtD(cur.date))+(cur.crop_type?(' · '+esc(cur.crop_type)):'')+'</span></h2>'+
+        '<div class="kpis">'+
+          '<div class="kpi"><div class="lbl">Lots</div><div class="val">'+num(cur.lots||0)+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Qty (kg)</div><div class="val">'+num(Math.round(cur.qty||0))+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Sold Qty</div><div class="val good">'+num(Math.round(cur.sold_qty||0))+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Withdrawn</div><div class="val warn">'+num(Math.round(cur.wd_qty||0))+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Amount</div><div class="val">'+inrL(cur.amount||0)+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Avg ₹/kg</div><div class="val">'+(cur.avg_price||0).toFixed(2)+'</div></div>'+
+          '<div class="kpi"><div class="lbl">Invoiced</div><div class="val">'+num(cur.invoiced||0)+' / '+num(cur.priced||0)+'</div></div>'+
+        '</div>';
+    } else { curBox.style.display='none'; }
+
+    // Per-trade breakdown
+    const ptBox = document.getElementById('dash-per-trade');
+    if (perTrade.length){
+      ptBox.style.display='block';
+      ptBox.innerHTML = '<h2>Recent '+tLbl+'</h2>'+
+        '<div style="overflow-x:auto"><table class="data">'+
+        '<tr><th>'+bizWord(false)+'#</th><th>Date</th><th>Type</th><th class="num">Lots</th><th class="num">Qty</th><th class="num">Amount</th><th class="num">Avg ₹/kg</th></tr>'+
+        perTrade.slice(0,10).map(t =>
+          '<tr><td><b>#'+esc(t.ano||'')+'</b></td><td>'+esc(fmtD(t.date))+'</td><td>'+esc(t.crop_type||'')+'</td>'+
+          '<td class="num">'+num(t.lots||0)+'</td><td class="num">'+num(Math.round(t.qty||0))+'</td>'+
+          '<td class="num">'+inrL(t.amount||0)+'</td><td class="num">'+(t.avg_price||0).toFixed(2)+'</td></tr>'
+        ).join('') + '</table></div>';
+    } else { ptBox.style.display='none'; }
+
+    // Branch comparison
+    const brBox = document.getElementById('dash-branches');
+    if (branches.length){
+      brBox.style.display='block';
+      const maxAmt = Math.max(1, ...branches.map(b => b.amount||0));
+      brBox.innerHTML = '<h2>Branch Totals</h2>'+
+        branches.map(b => {
+          const pct = Math.round(((b.amount||0) / maxAmt) * 100);
+          return '<div style="margin-bottom:12px">'+
+            '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">'+
+              '<b style="font-size:13px">'+esc(b.branch||'')+'</b>'+
+              '<span class="muted">'+num(b.lots||0)+' lots · '+inrL(b.amount||0)+'</span>'+
+            '</div>'+
+            '<div style="height:8px;background:var(--spice-cream);border-radius:4px;overflow:hidden">'+
+              '<div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,var(--spice-cardamom),var(--spice-saffron))"></div>'+
+            '</div></div>';
+        }).join('');
+    } else { brBox.style.display='none'; }
+
+    // Recent invoices
+    const recBox = document.getElementById('dash-recent');
+    if (recent.length){
+      recBox.style.display='block';
+      recBox.innerHTML = '<h2>Recent Invoices</h2>'+
+        '<div style="overflow-x:auto"><table class="data">'+
+        '<tr><th>Inv#</th><th>Date</th><th>Buyer</th><th>Trade Name</th><th>Place</th><th class="num">Total</th></tr>'+
+        recent.map(r =>
+          '<tr><td><b>'+esc(r.invo||'')+'</b> <span class="muted">'+esc(r.sale||'')+'</span></td><td>'+esc(fmtD(r.date))+'</td>'+
+          '<td>'+esc(r.buyer||'')+'</td><td>'+esc(r.buyer1||'')+'</td><td>'+esc(r.place||'')+'</td>'+
+          '<td class="num">'+inr(r.tot||0)+'</td></tr>'
+        ).join('') + '</table></div>';
+    } else { recBox.style.display='none'; }
+
+    applyBusinessLabels();
   } catch(e){ showError(e); }
 }
 
@@ -2070,16 +2283,15 @@ async function searchTraders(q){
     const url='/api/traders?search='+encodeURIComponent((q||'').trim());
     const data=await j(url);
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
-    document.getElementById('traders-list').innerHTML = arr.map(t=>
-      '<tr><td><strong>'+esc(t.name)+'</strong></td>'+
+    const rowFn = t => '<tr><td><strong>'+esc(t.name)+'</strong></td>'+
       '<td>'+esc(t.cr||'')+'</td>'+
       '<td>'+esc(t.pan||'')+'</td>'+
       '<td>'+esc(t.tel||'')+'</td>'+
       '<td>'+esc([t.ppla,t.pstate].filter(Boolean).join(' · '))+'</td>'+
       '<td>'+(t.banks&&t.banks.length?'<span class="pill pill-local">'+t.banks.length+' bank(s)</span>':'<span style="color:var(--text3)">—</span>')+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openTraderEdit("+JSON.stringify(t).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delTrader('+t.id+')')+'</td></tr>'
-    ).join('');
-    document.getElementById('traders-pager').innerHTML = arr.length ? ('<span>Showing ' + arr.length + (Array.isArray(data)?' rows':' of '+data.total) + '</span>') : '<span style="color:var(--text3)">No matches.</span>';
+      '<td>'+iconBtn('edit','Edit',"openTraderEdit("+JSON.stringify(t).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delTrader('+t.id+')')+'</td></tr>';
+    window._pgRender.traders = () => pgRender('traders', arr, { tbodyId:'traders-list', pagerId:'traders-pager', rowFn, cols:7 });
+    pgRender('traders', arr, { tbodyId:'traders-list', pagerId:'traders-pager', rowFn, cols:7, resetPage:true });
   } catch(e){ showError(e); }
 }
 const T_FIELDS=['name','cr','pan','tel','aadhar','padd','ppla','pstate','pst_code','pin'];
@@ -2149,17 +2361,16 @@ async function searchBuyers(q){
   try{
     const data=await j('/api/buyers?search='+encodeURIComponent((q||'').trim()));
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
-    document.getElementById('buyers-list').innerHTML = arr.map(b=>
-      '<tr><td><strong>'+esc(b.buyer)+'</strong>'+(b.code?' <span style="color:var(--spice-saffron);font-weight:700">('+esc(b.code)+')</span>':'')+'</td>'+
+    const rowFn = b => '<tr><td><strong>'+esc(b.buyer)+'</strong>'+(b.code?' <span style="color:var(--spice-saffron);font-weight:700">('+esc(b.code)+')</span>':'')+'</td>'+
       '<td>'+esc(b.buyer1||'')+'</td>'+
       '<td>'+esc(b.gstin||'')+'</td>'+
       '<td>'+esc(b.pan||'')+'</td>'+
       '<td>'+esc(b.tel||'')+'</td>'+
       '<td>'+esc([b.pla,b.state].filter(Boolean).join(' · '))+'</td>'+
       '<td>'+esc(b.sale||'L')+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openBuyerEdit("+JSON.stringify(b).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delBuyer('+b.id+')')+'</td></tr>'
-    ).join('');
-    document.getElementById('buyers-pager').innerHTML = arr.length ? ('<span>Showing ' + arr.length + (Array.isArray(data)?' rows':' of '+data.total) + '</span>') : '<span style="color:var(--text3)">No matches.</span>';
+      '<td>'+iconBtn('edit','Edit',"openBuyerEdit("+JSON.stringify(b).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delBuyer('+b.id+')')+'</td></tr>';
+    window._pgRender.buyers = () => pgRender('buyers', arr, { tbodyId:'buyers-list', pagerId:'buyers-pager', rowFn, cols:8 });
+    pgRender('buyers', arr, { tbodyId:'buyers-list', pagerId:'buyers-pager', rowFn, cols:8, resetPage:true });
   } catch(e){ showError(e); }
 }
 const B_FIELDS=['buyer','buyer1','code','sbl','add1','add2','pla','pin','state','st_code','gstin','pan','tel','ti','sale','email','cbuyer1','cadd1','cadd2','cpla','cpin','cstate','cst_code','cgstin'];
@@ -2231,18 +2442,17 @@ async function loadAuctions(opts){
     const q=(opts&&opts.query)||'';
     const data=await j('/api/auctions?search='+encodeURIComponent(q));
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
-    document.getElementById('auctions-list').innerHTML = arr.map(a=>
-      '<tr><td><strong>'+esc(a.ano)+'</strong></td>'+
+    const rowFn = a => '<tr><td><strong>'+esc(a.ano)+'</strong></td>'+
       '<td>'+fmtD(a.date)+'</td>'+
       '<td>'+esc(a.crop_type||'')+'</td>'+
       '<td>'+(a.lot_count||0)+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openAuctionEdit("+JSON.stringify(a).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delAuction('+a.id+')')+'</td></tr>'
-    ).join('');
-    document.getElementById('auctions-pager').innerHTML = arr.length ? ('<span>Showing ' + arr.length + ' trades</span>') : '<span style="color:var(--text3)">No trades.</span>';
+      '<td>'+iconBtn('edit','Edit',"openAuctionEdit("+JSON.stringify(a).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delAuction('+a.id+')')+'</td></tr>';
+    window._pgRender.auctions = () => pgRender('auctions', arr, { tbodyId:'auctions-list', pagerId:'auctions-pager', rowFn, cols:5 });
+    pgRender('auctions', arr, { tbodyId:'auctions-list', pagerId:'auctions-pager', rowFn, cols:5, resetPage:true });
   } catch(e){ showError(e); }
 }
 function openAuctionAdd(){
-  document.getElementById('auction-modal-title').textContent='New Trade';
+  document.getElementById('auction-modal-title').textContent='New ' + bizWord(false);
   document.getElementById('a-id').value='';
   document.getElementById('a-ano').value='';
   document.getElementById('a-date').value=new Date().toISOString().slice(0,10);
@@ -2251,7 +2461,7 @@ function openAuctionAdd(){
   showModal('auction-modal');
 }
 function openAuctionEdit(a){
-  document.getElementById('auction-modal-title').textContent='Edit Trade';
+  document.getElementById('auction-modal-title').textContent='Edit ' + bizWord(false);
   document.getElementById('a-id').value=a.id;
   document.getElementById('a-ano').value=a.ano||'';
   document.getElementById('a-date').value=(a.date||'').split('T')[0];
