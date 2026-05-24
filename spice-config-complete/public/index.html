@@ -1674,7 +1674,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <button class="btn feat-debit-notes" onclick="deleteAll('debit-notes','Debit Notes',event)" style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Debit Notes</button>
             <button class="btn" onclick="deleteAll('buyers','Buyers',event)"         style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Buyers</button>
             <button class="btn" onclick="deleteAll('traders','Sellers',event)"       style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Sellers</button>
-            <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes EVERY auction AND cascades through lots, invoices, purchases, bills, debit notes">🗑 Auctions (full reset)</button>
+            <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes EVERY trade/auction AND cascades through lots, invoices, purchases, bills, debit notes">🗑 <span data-term-auction="plural">Auctions</span> (full reset)</button>
           </div>
 
           <details style="margin-top:16px">
@@ -1831,13 +1831,13 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <!-- AUCTIONS -->
     <div class="tc" id="tc-auctions">
       <div class="card">
-        <h2>Auctions / Trades <button class="btn btn-g" onclick="openAuctionAdd()">+ New Auction</button></h2>
+        <h2><span data-term-auction="plural">Auctions</span> <button class="btn btn-g" onclick="openAuctionAdd()">+ New <span data-term-auction="singular">Auction</span></button></h2>
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <button class="btn btn-a" onclick="showModal('import-auction-modal')">Import Lots from XLS/XLSX</button>
           <button class="btn btn-o" onclick="downloadTemplate('auctions')">Download Template</button>
         </div>
         <div id="auction-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Trade No</th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th><span data-term-auction="singular">Trade</span> No</th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
       </div>
     </div>
 
@@ -1850,7 +1850,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--spice-cardamom)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
             </span>
             Lot Data
-            <span style="font-weight:400;font-size:12px;color:var(--text3)">Select an auction from Auctions tab first</span>
+            <span style="font-weight:400;font-size:12px;color:var(--text3)">Pick from <span data-term-auction="plural">Auctions</span> tab first</span>
           </span>
         </h2>
 
@@ -2131,7 +2131,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <span>Export Center — XLSX</span>
           </h3>
           <div class="tally-section-body">
-            <div class="fg" style="max-width:300px;margin-top:12px"><label>Select Auction</label><select id="exp-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select></div>
+            <div class="fg" style="max-width:300px;margin-top:12px"><label>Select <span data-term-auction="singular">Auction</span></label><select id="exp-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select></div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:12px" id="export-btns"></div>
           </div>
         </div>
@@ -2147,9 +2147,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <div class="tally-section-body">
             <p style="font-size:12px;color:var(--text2);margin:12px 0">These exports produce .dbf files that your dad's FoxPro application can read directly. Date format: DD/MM/YYYY. Lot numbers preserve leading zeros.</p>
 
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Per Auction</h3>
+            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Per <span data-term-auction="singular">Auction</span></h3>
             <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
-              <div class="fg" style="margin:0;flex:1;min-width:200px"><label>Auction</label><select id="dbf-auction" style="padding:8px;border:1px solid var(--border);border-radius:6px;width:100%"></select></div>
+              <div class="fg" style="margin:0;flex:1;min-width:200px"><label><span data-term-auction="singular">Auction</span></label><select id="dbf-auction" style="padding:8px;border:1px solid var(--border);border-radius:6px;width:100%"></select></div>
               <button class="btn btn-a" onclick="downloadDbf('lots',{auctionId:document.getElementById('dbf-auction').value})">Lots (CPA1.DBF)</button>
             </div>
 
@@ -2179,9 +2179,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <div class="tc" id="tc-lorry">
       <div class="card">
         <h2>Lorry Reports
-          <span style="font-weight:400;font-size:12px;color:var(--text3)">Auction-floor reports for the day's trade</span>
+          <span style="font-weight:400;font-size:12px;color:var(--text3)"><span data-term-auction="singular">Auction</span>-floor reports for the day's <span data-term-auction="singular-lower">auction</span></span>
         </h2>
-        <div class="fg" style="max-width:360px"><label>Select Auction</label>
+        <div class="fg" style="max-width:360px"><label>Select <span data-term-auction="singular">Auction</span></label>
           <select id="lorry-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
         </div>
 
@@ -2318,7 +2318,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <button class="btn btn-g" onclick="showModal('gen-debit-modal')">Generate Debit Note</button>
           <button class="needs-delete-all btn" style="background:#c0392b;color:#fff;margin-left:auto" onclick="deleteAll('debit-notes','Debit Notes')">Delete All</button>
         </div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Note#</th><th>Date</th><th>Auction</th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debit-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Note#</th><th>Date</th><th><span data-term-auction="singular">Auction</span></th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debit-list"></tbody></table></div>
       </div>
     </div>
 
@@ -2329,7 +2329,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <span style="font-weight:400;font-size:12px;color:var(--text3)">Generate Tally-importable XML files from your auction data</span>
         </h2>
 
-        <div class="fg" style="max-width:360px"><label>Select Auction</label>
+        <div class="fg" style="max-width:360px"><label>Select <span data-term-auction="singular">Auction</span></label>
           <select id="tally-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
         </div>
 
@@ -2588,7 +2588,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
             <button class="btn btn-a" onclick="loadInvoiceDistances()" style="padding:6px 12px;font-size:12px">Refresh</button>
-            <label style="font-size:11px;color:var(--text2);font-weight:600">Auction:</label>
+            <label style="font-size:11px;color:var(--text2);font-weight:600"><span data-term-auction="singular">Auction</span>:</label>
             <select id="dist-inv-auction" style="padding:5px;border:1px solid var(--border);border-radius:4px;font-size:12px"></select>
             <span id="dist-inv-count" style="font-size:11px;color:var(--text3)"></span>
             <button class="btn" onclick="clearAllDistanceOverrides()" title="Wipe all per-invoice manual distances so every ISP invoice resolves via the route table" style="padding:6px 12px;font-size:11px;background:#FEF3C7;color:#B45309;border:1px solid #F59E0B;margin-left:auto">Clear all overrides</button>
@@ -2742,7 +2742,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     Will be tagged as <strong id="a-mode-label">—</strong>. Locked at creation — switch business mode in Settings before saving if needed.
   </div>
   <div class="sgrid">
-    <div class="fg"><label>Trade No *</label><input id="a-ano"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No *</label><input id="a-ano"></div>
     <div class="fg"><label>Date *</label><input type="date" id="a-date"></div>
     <div class="fg"><label>Crop Type</label><input id="a-crpt" value="ASP"></div>
     <div class="fg"><label>State</label><select id="a-state"><option>TAMIL NADU</option><option>KERALA</option></select></div>
@@ -2883,7 +2883,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Import lots from an Excel file. The file should have columns like <strong>ANO</strong> (trade no), <strong>DATE</strong>, <strong>LOT</strong>, <strong>NAME</strong>, <strong>BAG</strong>, <strong>QTY</strong>, etc.</p>
   <p style="font-size:12px;color:var(--green);background:var(--green-bg);border:1px solid var(--green-border);border-radius:6px;padding:8px 10px;margin-bottom:14px">💡 If your file has multiple trade numbers (ANO 1, 2, 3…), leave the override fields below blank — each row goes into its own auction automatically.</p>
   <div class="sgrid">
-    <div class="fg"><label>Trade No — OVERRIDE (blank = read from each row's ANO)</label><input id="ia-ano" placeholder="Leave blank for multi-auction files"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No — OVERRIDE (blank = read from each row's ANO)</label><input id="ia-ano" placeholder="Leave blank for multi-trade files"></div>
     <div class="fg"><label>Date — OVERRIDE (blank = read from each row)</label><input type="date" id="ia-date"></div>
     <div class="fg"><label>Default Crop Type</label><input id="ia-crpt" value="ASP"></div>
     <div class="fg"><label>Default State</label><select id="ia-state"><option>TAMIL NADU</option><option>KERALA</option></select></div>
@@ -2909,7 +2909,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <span style="color:var(--spice-text-mute)">Extra columns are ignored. Amount is auto-computed as QTY × PRICE if not provided.</span>
   </div>
   <div class="sgrid">
-    <div class="fg"><label>Trade No — override (blank = read TNO from each row)</label><input id="pi-ano" placeholder="Leave blank for multi-auction files"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No — override (blank = read TNO from each row)</label><input id="pi-ano" placeholder="Leave blank for multi-trade files"></div>
     <div class="fg"><label>Date — override (blank = read from each row)</label><input type="date" id="pi-date"></div>
   </div>
   <div class="fg" style="margin-top:10px"><label>Select File (.xls or .xlsx)</label>
@@ -2927,7 +2927,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   <h2>Edit Sales Invoice</h2>
   <input type="hidden" id="inv-edit-id">
   <div class="sgrid">
-    <div class="fg"><label>Trade No</label><input id="ie-ano"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="ie-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="ie-date"></div>
     <div class="fg"><label>Sale Type</label>
       <select id="ie-sale"><option value="L">Local</option><option value="I">Inter-state</option><option value="E">Export</option></select>
@@ -2960,7 +2960,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   <h2>Edit Purchase Invoice</h2>
   <input type="hidden" id="pur-edit-id">
   <div class="sgrid">
-    <div class="fg"><label>Trade No</label><input id="pe-ano"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="pe-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="pe-date"></div>
     <div class="fg"><label>State</label><input id="pe-state"></div>
     <div class="fg"><label>Branch</label><input id="pe-br"></div>
@@ -2988,7 +2988,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   <h2>Edit Bill of Supply</h2>
   <input type="hidden" id="bill-edit-id">
   <div class="sgrid">
-    <div class="fg"><label>Trade No</label><input id="be-ano"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="be-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="be-date"></div>
     <div class="fg"><label>State</label><input id="be-state"></div>
     <div class="fg"><label>Branch</label><input id="be-br"></div>
@@ -3015,7 +3015,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   <h2>Edit Debit Note</h2>
   <input type="hidden" id="dn-edit-id">
   <div class="sgrid">
-    <div class="fg"><label>Trade No</label><input id="dne-ano"></div>
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="dne-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="dne-date"></div>
     <div class="fg"><label>State</label><input id="dne-state"></div>
     <div class="fg"><label>Buyer Name</label><input id="dne-name"></div>
@@ -4500,25 +4500,70 @@ async function changeMyPassword(){
 // ── Settings ──────────────────────────────────────────────
 let _cats={},_sdata={},_activeCat='',_setFilter='';
 
-// Update sidebar labels based on business_mode setting.
-// e-Trade  → the "Auctions" menu item displays as "Trades"
-// e-Auction → displays as "Auctions" (default)
+// ── Mode-aware terminology ──────────────────────────────
+// In e-Trade mode, every user-visible mention of "Auction" reads as
+// "Trade" (and vice versa). Internal names — DB columns, URL paths,
+// JS identifiers — stay as "auction" because they're not user-facing.
+//
+// Returns the noun for the CURRENT mode. Pass `plural=true` for
+// "Trades"/"Auctions", `lower=true` for lowercase ("trade"/"auction").
+// Used by both:
+//   1. JS-generated strings (toasts, modal titles, dynamic HTML) —
+//      call termAuction() at render time.
+//   2. The DOM walker below — swaps text content of any element
+//      tagged with [data-term-auction="singular|plural|singular-lower|plural-lower"]
+//      whenever applyModeLabels runs (boot + mode change).
+function termAuction(plural, lower){
+  // Default to e-Auction (matches the legacy app behaviour before the
+  // mode tag existed) so an uninitialised _sdata doesn't break first paint.
+  const mode = (typeof getCurrentBusinessMode === 'function')
+    ? (getCurrentBusinessMode() || 'e-Auction')
+    : 'e-Auction';
+  const isTrade = (mode === 'e-Trade');
+  let word = isTrade ? (plural ? 'Trades' : 'Trade') : (plural ? 'Auctions' : 'Auction');
+  return lower ? word.toLowerCase() : word;
+}
+
+// Walk every [data-term-auction] element and replace its text content
+// with the mode-appropriate term. Attribute values:
+//   "singular"        → "Auction" or "Trade"
+//   "plural"          → "Auctions" or "Trades"
+//   "singular-lower"  → "auction" or "trade"
+//   "plural-lower"    → "auctions" or "trades"
+//
+// HTML markup pattern: keep the original word as the element's text
+// content so the page reads naturally even if JS fails to run. The
+// walker swaps it on boot + on every mode change.
+function applyTermLabels(){
+  document.querySelectorAll('[data-term-auction]').forEach(el => {
+    const kind = el.getAttribute('data-term-auction');
+    const plural = kind.includes('plural');
+    const lower  = kind.includes('lower');
+    el.textContent = termAuction(plural, lower);
+  });
+}
+
+// Update sidebar label + every [data-term-auction] static element to
+// match the current business mode. Called on settings load AND on every
+// mode switch so the whole UI stays in sync with one toggle.
 function applyModeLabels(){
-  const mode = (_sdata.mode||[]).find(f=>f.key==='business_mode')?.value
-            || (_sdata.flags||[]).find(f=>f.key==='business_mode')?.value
-            || 'e-Auction';
+  // Sidebar "Auctions / Trades" item — the SVG-icon button needs its
+  // trailing text node rewritten without losing the SVG.
   const btn = document.querySelector('.side-item[data-tab="auctions"]');
-  if(!btn) return;
-  // Replace the trailing text node (the label after the SVG)
-  const label = (mode === 'e-Trade') ? 'Trades' : 'Auctions';
-  for(const n of btn.childNodes){
-    if(n.nodeType === Node.TEXT_NODE && n.textContent.trim()){
-      n.textContent = ' '+label;
-      return;
+  if (btn) {
+    const label = termAuction(true);   // "Trades" or "Auctions"
+    let swapped = false;
+    for (const n of btn.childNodes) {
+      if (n.nodeType === Node.TEXT_NODE && n.textContent.trim()) {
+        n.textContent = ' ' + label;
+        swapped = true;
+        break;
+      }
     }
+    if (!swapped) btn.appendChild(document.createTextNode(' ' + label));
   }
-  // Fallback: append if not found
-  btn.appendChild(document.createTextNode(' '+label));
+  // Static HTML strings tagged with data-term-auction
+  applyTermLabels();
 }
 
 // Update the topbar logo-code badge to show which company is active.

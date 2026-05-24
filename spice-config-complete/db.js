@@ -548,6 +548,24 @@ async function initDb() {
     console.log('Default admin created (admin / admin123)');
   }
 
+  // One-shot admin password reset for environments where the DB persists
+  // across deploys (e.g. Railway volume) and the admin password has drifted
+  // from the default. Set RESET_ADMIN_PASSWORD on the host, restart to apply,
+  // sign in, then UNSET the var — otherwise the password resets on every boot.
+  if (process.env.RESET_ADMIN_PASSWORD) {
+    const newHash = crypto.createHash('sha256').update(process.env.RESET_ADMIN_PASSWORD).digest('hex');
+    const existing = wrapped.get('SELECT id FROM users WHERE username = ?', ['admin']);
+    if (existing) {
+      wrapped.run('UPDATE users SET password_hash = ?, role = ? WHERE username = ?', [newHash, 'admin', 'admin']);
+      wrapped.run('DELETE FROM sessions WHERE user_id = ?', [existing.id]);
+      console.log('[reset] admin password reset from RESET_ADMIN_PASSWORD — unset this env var after signing in');
+    } else {
+      wrapped.run('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', ['admin', newHash, 'admin']);
+      console.log('[reset] admin user created from RESET_ADMIN_PASSWORD — unset this env var after signing in');
+    }
+    scheduleSave();
+  }
+
   console.log('Database ready at', DB_PATH, '(better-sqlite3, WAL mode)');
   return wrapped;
 }
