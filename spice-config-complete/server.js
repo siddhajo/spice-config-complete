@@ -2074,18 +2074,234 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   res.json({ success: true });
 });
 
+// Returns true if `req.user` has the admin role. Admin bypasses the
+// lock gate — they can edit/delete locked lots and run unlock.
+function isAdminUser(req) {
+  return req.user && req.user.role === 'admin';
+}
+// Returns the lot row's lock state (or null if the row doesn't exist).
+// Used by the PUT/DELETE gates below.
+function getLotLock(db, lotId) {
+  const r = db.get('SELECT id, locked_at, locked_by FROM lots WHERE id = ?', [parseInt(lotId, 10)]);
+  return r || null;
+}
+
 app.put('/api/lots/:id', requireLotWrite, (req, res) => {
+  const db = getDb();
+  // Lock gate: a locked lot is editable only by admins. Server returns
+  // 423 Locked so the client can distinguish from a 403 permission
+  // refusal. The client surfaces the message in a toast.
+  const lock = getLotLock(db, req.params.id);
+  if (lock && lock.locked_at && !isAdminUser(req)) {
+    return res.status(423).json({
+      error: `This lot is locked${lock.locked_by ? ' by ' + lock.locked_by : ''} (${lock.locked_at}). Ask an admin to unlock it before editing.`,
+      locked: true,
+    });
+  }
   const l = req.body; const sets = []; const vals = [];
   for (const [k,v] of Object.entries(l)) {
-    if (k !== 'id' && k !== 'auction_id' && k !== 'created_at') { sets.push(`${k}=?`); vals.push(v); }
+    // `locked_at` / `locked_by` are managed by the lock/unlock
+    // endpoints — never let the generic update slot rewrite them.
+    if (k !== 'id' && k !== 'auction_id' && k !== 'created_at' && k !== 'locked_at' && k !== 'locked_by') {
+      sets.push(`${k}=?`); vals.push(v);
+    }
   }
   vals.push(req.params.id);
-  getDb().run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
+  db.run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
   res.json({ success: true });
 });
 
 app.delete('/api/lots/:id', requireDelete, (req, res) => {
-  getDb().run('DELETE FROM lots WHERE id = ?', [req.params.id]); res.json({ success: true });
+  const db = getDb();
+  // Same lock gate as PUT — server is the authoritative gate; the
+  // client's row-tinting is purely cosmetic.
+  const lock = getLotLock(db, req.params.id);
+  if (lock && lock.locked_at && !isAdminUser(req)) {
+    return res.status(423).json({
+      error: `This lot is locked${lock.locked_by ? ' by ' + lock.locked_by : ''} (${lock.locked_at}). Ask an admin to unlock it before deleting.`,
+      locked: true,
+    });
+  }
+  db.run('DELETE FROM lots WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+// BULK LOT ACTIONS
+// ══════════════════════════════════════════════════════════════
+// Each endpoint accepts { ids: [42, 43, ...] } and operates on the
+// matching lots. Lock-aware: non-admins can't touch locked rows; the
+// server returns the count of rows actually changed AND a list of
+// skipped (locked) lot_no's so the client can show what was protected.
+
+// Filter a list of lot ids to the subset that the caller is allowed to
+// mutate (admin → all; non-admin → only unlocked). Returns:
+//   { allowedIds: [...], skipped: [{id, lot_no}, ...] }
+// `skipped` contains the locked lots the caller wasn't allowed to touch.
+function partitionLotsByLock(db, ids, req) {
+  if (!ids || !ids.length) return { allowedIds: [], skipped: [] };
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = db.all(
+    `SELECT id, lot_no, locked_at FROM lots WHERE id IN (${placeholders})`,
+    ids
+  );
+  if (isAdminUser(req)) return { allowedIds: rows.map(r => r.id), skipped: [] };
+  const allowedIds = [], skipped = [];
+  for (const r of rows) {
+    if (r.locked_at) skipped.push({ id: r.id, lot_no: r.lot_no });
+    else allowedIds.push(r.id);
+  }
+  return { allowedIds, skipped };
+}
+
+// POST /api/lots/bulk-buyer — set buyer code on multiple lots. The
+// new buyer's `buyer1` (trade name) and `sale` type are auto-resolved
+// from the buyers master, so the operator only has to type the code.
+// Body: { ids:[...], buyer:'B042' }
+app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  const buyerCode = String(req.body.buyer || '').trim();
+  if (!ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (!buyerCode) return res.status(400).json({ error: 'buyer code required' });
+  const db = getDb();
+  // Resolve buyer details once so all updates share one read.
+  // Case-insensitive match because operators type codes in any case.
+  const buyer = db.get(
+    'SELECT buyer, buyer1, sale FROM buyers WHERE UPPER(buyer) = ? LIMIT 1',
+    [buyerCode.toUpperCase()]
+  );
+  if (!buyer) return res.status(404).json({ error: `No buyer registered with code "${buyerCode}". Add them in the Buyers tab first.` });
+  const part = partitionLotsByLock(db, ids, req);
+  if (!part.allowedIds.length) {
+    return res.status(423).json({
+      error: 'Every selected lot is locked. Ask an admin to unlock first.',
+      locked: true,
+      skipped: part.skipped,
+    });
+  }
+  // Stamp buyer, buyer1, and sale on each lot in one batched UPDATE.
+  // We also clear `invo` so the lot is treated as un-invoiced again
+  // (it'll need a fresh invoice after a buyer reassignment).
+  const placeholders = part.allowedIds.map(() => '?').join(',');
+  db.run(
+    `UPDATE lots SET buyer=?, buyer1=?, sale=?, invo='' WHERE id IN (${placeholders})`,
+    [buyer.buyer, buyer.buyer1 || '', buyer.sale || 'L', ...part.allowedIds]
+  );
+  res.json({
+    success: true,
+    updated: part.allowedIds.length,
+    buyer: buyer.buyer,
+    buyer1: buyer.buyer1 || '',
+    sale: buyer.sale || 'L',
+    skipped: part.skipped,
+  });
+});
+
+// POST /api/lots/bulk-grade — set grade on multiple lots, then run
+// calculateLot on each so prate/puramt/discount reflect the new grade
+// without forcing the operator to click Calculate All. Body:
+// { ids:[...], grade:'1' }
+app.post('/api/lots/bulk-grade', requireLotWrite, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  const grade = String(req.body.grade || '').trim();
+  if (!ids.length) return res.status(400).json({ error: 'ids array required' });
+  if (!grade)     return res.status(400).json({ error: 'grade required' });
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+  const part = partitionLotsByLock(db, ids, req);
+  if (!part.allowedIds.length) {
+    return res.status(423).json({
+      error: 'Every selected lot is locked. Ask an admin to unlock first.',
+      locked: true,
+      skipped: part.skipped,
+    });
+  }
+  // Stamp grade, then recalc (only the rows that already had a price
+  // entered; un-priced lots have nothing to recompute).
+  const placeholders = part.allowedIds.map(() => '?').join(',');
+  db.run(`UPDATE lots SET grade=? WHERE id IN (${placeholders})`, [grade, ...part.allowedIds]);
+  const toCalc = db.all(`SELECT * FROM lots WHERE id IN (${placeholders}) AND amount > 0`, part.allowedIds);
+  let recalced = 0;
+  for (const lot of toCalc) {
+    const c = calculateLot(lot, cfg);
+    db.run(
+      `UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+      [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]
+    );
+    recalced++;
+  }
+  res.json({
+    success: true,
+    updated: part.allowedIds.length,
+    recalced,
+    grade,
+    skipped: part.skipped,
+  });
+});
+
+// POST /api/lots/bulk-delete — delete multiple lots. Lock-aware.
+app.post('/api/lots/bulk-delete', requireDelete, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids array required' });
+  const db = getDb();
+  const part = partitionLotsByLock(db, ids, req);
+  if (!part.allowedIds.length) {
+    return res.status(423).json({
+      error: 'Every selected lot is locked. Ask an admin to unlock first.',
+      locked: true,
+      skipped: part.skipped,
+    });
+  }
+  const placeholders = part.allowedIds.map(() => '?').join(',');
+  db.run(`DELETE FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  res.json({
+    success: true,
+    deleted: part.allowedIds.length,
+    skipped: part.skipped,
+  });
+});
+
+// POST /api/lots/lock — lock multiple lots. Open to anyone with
+// lot_write (the role allowed to create them). Idempotent: already-
+// locked lots stay locked with their original timestamp.
+app.post('/api/lots/lock', requireLotWrite, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids array required' });
+  const db = getDb();
+  const username = (req.user && req.user.username) || '';
+  // Only stamp `locked_at` on currently-unlocked rows so re-locking
+  // preserves the original lock timestamp.
+  const placeholders = ids.map(() => '?').join(',');
+  const info = db.run(
+    `UPDATE lots SET locked_at = datetime('now','localtime'), locked_by = ?
+     WHERE id IN (${placeholders}) AND (locked_at IS NULL OR locked_at = '')`,
+    [username, ...ids]
+  );
+  res.json({
+    success: true,
+    locked: info.changes || 0,
+    requested: ids.length,
+  });
+});
+
+// POST /api/lots/unlock — admin only. Clears the lock so non-admins
+// can edit/delete the lot again. We DO NOT log an audit row here; the
+// admin doing the unlock is implicit (only they can hit this route).
+app.post('/api/lots/unlock', requireAdmin, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids array required' });
+  const db = getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const info = db.run(
+    `UPDATE lots SET locked_at = NULL, locked_by = NULL
+     WHERE id IN (${placeholders}) AND locked_at IS NOT NULL`,
+    ids
+  );
+  res.json({
+    success: true,
+    unlocked: info.changes || 0,
+    requested: ids.length,
+  });
 });
 
 // ── Calculate all lots for an auction (GENERATE.PRG) ─────────

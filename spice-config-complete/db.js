@@ -497,6 +497,14 @@ async function initDb() {
     // stay NULL until manually re-imported; NULL rows pass any mode
     // filter so legacy data remains visible during a soft cutover.
     "ALTER TABLE auctions ADD COLUMN mode TEXT DEFAULT ''",
+    // Lot locking — when a lot is finalised, lock it so non-admins
+    // can no longer edit or delete it. `locked_at` doubles as the
+    // boolean ("is locked?") and the timestamp; `locked_by` records
+    // which user locked it for the audit log. Admin role bypasses
+    // the gate. Used by the bulk Lock / Unlock buttons on the Lots
+    // tab. NULL = unlocked (default).
+    "ALTER TABLE lots ADD COLUMN locked_at TEXT",
+    "ALTER TABLE lots ADD COLUMN locked_by TEXT",
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
