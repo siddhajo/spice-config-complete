@@ -1210,21 +1210,76 @@ app.get('/api/buyers/template', requireExport, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// BUSINESS MODE FILTERING
+// ══════════════════════════════════════════════════════════════
+// Auctions are tagged with `mode` at creation time (e-Trade or e-Auction).
+// Lists filter by the current company-settings mode so users only see
+// trades — and the downstream invoices/purchases/bills/debit notes/
+// payments that belong to those trades — that match the mode they're
+// currently working in.
+//
+// Two helpers below:
+//   currentBusinessMode(db) — reads the active mode setting.
+//   modeWhere(prefix)       — returns a SQL fragment + params suitable
+//                             for AND-ing into a query that joins or
+//                             filters by an auctions row. NULL/empty
+//                             mode columns always match (legacy data
+//                             stays visible during the soft cutover).
+function currentBusinessMode(db) {
+  try {
+    const row = db.get("SELECT value FROM company_settings WHERE key = 'business_mode'");
+    return row && row.value ? String(row.value) : '';
+  } catch (_) { return ''; }
+}
+// Returns { sql, params } that filter rows to the current business mode.
+// `prefix` is the SQL prefix that resolves to the auctions row's `mode`
+// column — usually 'auctions.mode' (when the query already JOINs auctions)
+// or 'a.mode' (when the JOIN uses alias `a`). For tables that don't store
+// auction_id, use a subquery: prefix='(SELECT mode FROM auctions WHERE id=invoices.auction_id)'.
+function modeWhereClause(db, prefix) {
+  const mode = currentBusinessMode(db);
+  if (!mode) return { sql: '', params: [] };       // no filter when mode unset
+  return {
+    sql: ` AND (${prefix} = ? OR ${prefix} IS NULL OR ${prefix} = '')`,
+    params: [mode],
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
 // AUCTIONS
 // ══════════════════════════════════════════════════════════════
 app.get('/api/auctions', requireView, (req, res) => {
-  const rows = getDb().all('SELECT *, (SELECT COUNT(*) FROM lots WHERE auction_id=auctions.id) as lot_count FROM auctions ORDER BY date DESC, ano DESC LIMIT 100');
+  const db = getDb();
+  const mw = modeWhereClause(db, 'auctions.mode');
+  // Build the WHERE clause manually (no `WHERE 1=1` shortcut because the
+  // mode filter is the only optional one and we want clean SQL).
+  const whereSql = mw.sql ? 'WHERE 1=1' + mw.sql : '';
+  const rows = db.all(
+    `SELECT *, (SELECT COUNT(*) FROM lots WHERE auction_id=auctions.id) as lot_count
+     FROM auctions ${whereSql}
+     ORDER BY date DESC, ano DESC LIMIT 100`,
+    mw.params
+  );
   res.json(withFmtDate(rows));
 });
 app.post('/api/auctions', requireAuctionWrite, (req, res) => {
   const { ano, date, crop_type, state } = req.body;
   const db = getDb();
   const d = normalizeDate(date);
-  db.run('INSERT INTO auctions (ano,date,crop_type,state) VALUES (?,?,?,?)', [ano, d, crop_type||'ASP', state||'TAMIL NADU']);
+  // Mode is ALWAYS stamped from the current setting at creation time —
+  // never honored from the request body. Locking the mode means an
+  // operator can't accidentally create a trade in the wrong mode by
+  // sending a stale value from a stale browser tab.
+  const mode = currentBusinessMode(db);
+  db.run('INSERT INTO auctions (ano,date,crop_type,state,mode) VALUES (?,?,?,?,?)',
+    [ano, d, crop_type||'ASP', state||'TAMIL NADU', mode]);
   const created = db.get('SELECT id FROM auctions WHERE ano = ? AND date = ? ORDER BY id DESC LIMIT 1', [ano, d]);
-  res.json({ success: true, id: created ? created.id : null });
+  res.json({ success: true, id: created ? created.id : null, mode });
 });
 app.put('/api/auctions/:id', requireAuctionWrite, (req, res) => {
+  // Edits NEVER change mode — it's locked at creation. We just refuse to
+  // accept a mode field in the body, and don't include it in the UPDATE.
+  // The auction's mode follows its trade for its entire lifetime.
   const { ano, date, crop_type, state } = req.body;
   getDb().run('UPDATE auctions SET ano=?, date=?, crop_type=?, state=? WHERE id=?',
     [ano, normalizeDate(date), crop_type||'ASP', state||'TAMIL NADU', req.params.id]);
@@ -1582,11 +1637,19 @@ app.post('/api/lots/calculate/:auctionId', requireLotWrite, (req, res) => {
 // like CGST/SGST/IGST and prate are state-sensitive (intra vs inter), so
 // the saved values become stale on a state flip and must be refreshed.
 //
+// CRITICAL: scoped to lots whose parent auction matches the current mode.
+// Without this, flipping to e-Auction and clicking "Calculate All" would
+// overwrite every e-Trade lot's `prate`/`puramt`/`com`/`sertax` with
+// e-Auction formulas (e.g. com=0 in e-Trade becomes a real commission
+// number, prate flips from deduction-based to direct copy-of-price).
+// NULL/empty mode rows pass the filter so legacy data still recalculates
+// during the soft-cutover window.
+//
 // Only touches lots with `amount > 0` (skips empty/auction-floor entries).
-// Returns total lots calculated across all auctions.
 app.post('/api/lots/calculate-all', requireLotWrite, (req, res) => {
   const db = getDb(); const cfg = getSettingsFlat(db);
-  const lots = db.all('SELECT * FROM lots WHERE amount > 0');
+  const mwLots = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=lots.auction_id)');
+  const lots = db.all(`SELECT * FROM lots WHERE amount > 0 ${mwLots.sql}`, mwLots.params);
   let count = 0;
   for (const lot of lots) {
     const calc = calculateLot(lot, cfg);
@@ -1628,6 +1691,9 @@ app.get('/api/invoices', requireView, (req, res) => {
   } else {
     q += " AND UPPER(state) IN ('TAMIL NADU', 'TAMILNADU', 'TN')";
   }
+  // Mode filter via parent auction. NULL/empty mode rows pass (legacy data).
+  const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=invoices.auction_id)');
+  q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC, invo DESC LIMIT 500';
   const rows = db.all(q, p);
   // Hydrate asp_invo: for each invoice, find the ASP invoice number
@@ -2356,12 +2422,15 @@ app.post('/api/invoices/purchase-pdf-bulk', requireView, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 app.get('/api/purchases', requireView, (req, res) => {
   const { auction_id, ano, from, to } = req.query;
+  const db = getDb();
   let q = 'SELECT * FROM purchases WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=purchases.auction_id)');
+  q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC LIMIT 500';
-  res.json(getDb().all(q, p));
+  res.json(db.all(q, p));
 });
 
 app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) => {
@@ -2625,12 +2694,15 @@ app.post('/api/purchases/pdf-bulk', requireView, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 app.get('/api/bills', requireView, (req, res) => {
   const { auction_id, ano, from, to } = req.query;
+  const db = getDb();
   let q = 'SELECT * FROM bills WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=bills.auction_id)');
+  q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC, bil DESC LIMIT 500';
-  res.json(withFmtDate(getDb().all(q, p)));
+  res.json(withFmtDate(db.all(q, p)));
 });
 
 // Generate agri bill for a seller
@@ -2840,12 +2912,15 @@ app.put('/api/bills/:id', requireInvoiceWrite, (req, res) => {
 // ══════════════════════════════════════════════════════════════
 app.get('/api/debit-notes', requireView, (req, res) => {
   const { auction_id, ano, from, to } = req.query;
+  const db = getDb();
   let q = 'SELECT * FROM debit_notes WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=debit_notes.auction_id)');
+  q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC, note_no DESC LIMIT 500';
-  res.json(withFmtDate(getDb().all(q, p)));
+  res.json(withFmtDate(db.all(q, p)));
 });
 
 app.post('/api/debit-notes/generate', requireInvoiceWrite, (req, res) => {
@@ -3724,31 +3799,45 @@ app.get('/api/receipt/:lotId', requireView, async (req, res) => {
 // ══════════════════════════════════════════════════════════════
 app.get('/api/stats', requireView, (req, res) => {
   const db = getDb();
+  // Mode filter — every auction-scoped count and aggregate gets gated.
+  // Traders + buyers stay mode-agnostic (master data isn't auction-scoped).
+  // Subquery prefix is rebuilt per table to keep the SQL readable.
+  const mwA = modeWhereClause(db, 'auctions.mode');
+  const mwLots  = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=lots.auction_id)');
+  const mwInv   = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=invoices.auction_id)');
+  const mwPur   = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=purchases.auction_id)');
+  const mwBill  = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=bills.auction_id)');
+  const mwDN    = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=debit_notes.auction_id)');
+  // Each `_w(mwX)` turns a modeWhereClause into a complete WHERE so we
+  // can prepend it without dragging in `WHERE 1=1`. Empty when no mode.
+  const _w = (mw) => mw.sql ? 'WHERE 1=1' + mw.sql : '';
 
-  // Counts
+  // Counts — auction-scoped tables get filtered, master data doesn't.
   const counts = {
     traders:    (db.get('SELECT COUNT(*) as c FROM traders') || {}).c || 0,
     buyers:     (db.get('SELECT COUNT(*) as c FROM buyers') || {}).c || 0,
-    auctions:   (db.get('SELECT COUNT(*) as c FROM auctions') || {}).c || 0,
-    lots:       (db.get('SELECT COUNT(*) as c FROM lots') || {}).c || 0,
-    invoices:   (db.get('SELECT COUNT(*) as c FROM invoices') || {}).c || 0,
-    purchases:  (db.get('SELECT COUNT(*) as c FROM purchases') || {}).c || 0,
-    bills:      (db.get('SELECT COUNT(*) as c FROM bills') || {}).c || 0,
-    debit_notes:(db.get('SELECT COUNT(*) as c FROM debit_notes') || {}).c || 0,
+    auctions:   (db.get(`SELECT COUNT(*) as c FROM auctions ${_w(mwA)}`,    mwA.params)   || {}).c || 0,
+    lots:       (db.get(`SELECT COUNT(*) as c FROM lots ${_w(mwLots)}`,     mwLots.params)|| {}).c || 0,
+    invoices:   (db.get(`SELECT COUNT(*) as c FROM invoices ${_w(mwInv)}`,  mwInv.params) || {}).c || 0,
+    purchases:  (db.get(`SELECT COUNT(*) as c FROM purchases ${_w(mwPur)}`, mwPur.params) || {}).c || 0,
+    bills:      (db.get(`SELECT COUNT(*) as c FROM bills ${_w(mwBill)}`,    mwBill.params)|| {}).c || 0,
+    debit_notes:(db.get(`SELECT COUNT(*) as c FROM debit_notes ${_w(mwDN)}`,mwDN.params)  || {}).c || 0,
   };
 
   // All auctions (for the dashboard picker)
   const allAuctions = db.all(
-    `SELECT id, ano, date, crop_type FROM auctions ORDER BY id DESC LIMIT 50`
+    `SELECT id, ano, date, crop_type, mode FROM auctions ${_w(mwA)} ORDER BY id DESC LIMIT 50`,
+    mwA.params
   );
 
   // ── Cumulative totals across ALL trades (lifetime) ──
-  // Aggregates over every lot in every auction, regardless of state.
+  // Aggregates over every lot in every (mode-matching) auction.
   const cumRow = db.get(
     `SELECT COALESCE(SUM(qty),0) as qty,
             COALESCE(SUM(amount),0) as amount,
             COUNT(*) as lots
-     FROM lots`
+     FROM lots ${_w(mwLots)}`,
+    mwLots.params
   ) || {};
   const cumulative = {
     qty:    cumRow.qty    || 0,
@@ -3759,8 +3848,10 @@ app.get('/api/stats', requireView, (req, res) => {
 
   // ── Per-trade breakdown (one row per auction, newest first) ──
   // One query with a LEFT JOIN so auctions with zero lots still appear.
+  // Mode-filtered via the parent auction. Alias `a` carries the mode.
+  const mwAa = modeWhereClause(db, 'a.mode');
   const perTradeBreakdown = db.all(
-    `SELECT a.id, a.ano, a.date, a.crop_type,
+    `SELECT a.id, a.ano, a.date, a.crop_type, a.mode,
             COUNT(l.id) as lots,
             COALESCE(SUM(l.qty),0) as qty,
             COALESCE(SUM(l.amount),0) as amount,
@@ -3768,9 +3859,11 @@ app.get('/api/stats', requireView, (req, res) => {
             COALESCE(SUM(CASE WHEN l.invo IS NOT NULL AND l.invo != '' THEN 1 ELSE 0 END),0) as invoiced
      FROM auctions a
      LEFT JOIN lots l ON l.auction_id = a.id
-     GROUP BY a.id, a.ano, a.date, a.crop_type
+     ${mwAa.sql ? 'WHERE 1=1' + mwAa.sql : ''}
+     GROUP BY a.id, a.ano, a.date, a.crop_type, a.mode
      ORDER BY a.date DESC, a.id DESC
-     LIMIT 50`
+     LIMIT 50`,
+    mwAa.params
   );
 
   // Pick: ?auction_id=N if provided
@@ -3797,42 +3890,53 @@ app.get('/api/stats', requireView, (req, res) => {
   }
 
   // Top sellers (this week — by total amount in auctions dated within last 7 days)
+  // Mode-filtered via the joined auction's mode column.
   const topSellers = db.all(
     `SELECT l.name as name, COUNT(*) as lots, COALESCE(SUM(l.qty),0) as qty, COALESCE(SUM(l.amount),0) as amount
      FROM lots l JOIN auctions a ON a.id = l.auction_id
      WHERE a.date >= date('now','-7 days') AND l.name IS NOT NULL AND l.name != ''
+       ${mwAa.sql}
      GROUP BY l.name
      ORDER BY amount DESC
-     LIMIT 5`
+     LIMIT 5`,
+    mwAa.params
   );
 
-  // Recent invoices (last 5)
+  // Recent invoices (last 5) — mode-filtered via the parent auction.
   const recentInvoices = db.all(
     `SELECT i.id, i.sale, i.invo, i.buyer, i.buyer1, i.tot, i.date,
             i.place
      FROM invoices i
-     ORDER BY i.id DESC LIMIT 5`
+     ${mwInv.sql ? 'WHERE 1=1' + mwInv.sql : ''}
+     ORDER BY i.id DESC LIMIT 5`,
+    mwInv.params
   );
 
   // Today's trade totals (active auction lots)
   const todayQty = auctionStats ? auctionStats.totalQty : 0;
   const todayAmt = auctionStats ? auctionStats.totalAmt : 0;
 
-  // Revenue this month (sum of invoice totals in current month)
+  // Revenue this month (sum of invoice totals in current month).
+  // Mode-filtered via the parent auction.
   const monthTot = (db.get(
     `SELECT COALESCE(SUM(tot),0) as s FROM invoices
-     WHERE date >= date('now','start of month')`
+     WHERE date >= date('now','start of month') ${mwInv.sql}`,
+    mwInv.params
   ) || {}).s || 0;
   // Revenue last month (for comparison)
   const lastMonthTot = (db.get(
     `SELECT COALESCE(SUM(tot),0) as s FROM invoices
      WHERE date >= date('now','start of month','-1 month')
-       AND date <  date('now','start of month')`
+       AND date <  date('now','start of month')
+       ${mwInv.sql}`,
+    mwInv.params
   ) || {}).s || 0;
 
   // Pending invoices:
   //   - Drilled into an auction: un-invoiced priced lots in that auction
+  //     (mode-implicit — the auction picker already filtered to mode)
   //   - Cumulative mode: un-invoiced priced lots across ALL auctions
+  //     matching the current mode.
   let pendingInvoices = 0;
   if (currentAuction) {
     pendingInvoices = (db.get(
@@ -3844,7 +3948,9 @@ app.get('/api/stats', requireView, (req, res) => {
     pendingInvoices = (db.get(
       `SELECT COUNT(DISTINCT buyer || '|' || auction_id) as c FROM lots
        WHERE amount > 0 AND buyer IS NOT NULL AND buyer != ''
-         AND (invo IS NULL OR invo = '')`
+         AND (invo IS NULL OR invo = '')
+         ${mwLots.sql}`,
+      mwLots.params
     ) || {}).c || 0;
   }
 

@@ -466,6 +466,14 @@ async function initDb() {
     // upgraded DBs shed the orphan tables on next restart.
     'DROP TABLE IF EXISTS pin_distances',
     'DROP TABLE IF EXISTS pincodes',
+    // Business mode tag on auctions — stamped at trade creation from the
+    // current company_settings.business_mode value (e-Trade or e-Auction)
+    // and locked. Every downstream entity (lots, invoices, purchases,
+    // bills, debit notes, payments) inherits via the FK to auctions, so
+    // list endpoints filter by JOINing auctions on mode. Existing rows
+    // stay NULL until manually re-imported; NULL rows pass any mode
+    // filter so legacy data remains visible during a soft cutover.
+    "ALTER TABLE auctions ADD COLUMN mode TEXT DEFAULT ''",
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }

@@ -2733,6 +2733,14 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 <div class="modal-bg" id="auction-modal"><div class="modal">
   <h2 id="auction-modal-title">New Auction</h2>
   <input type="hidden" id="a-id">
+  <!-- Mode banner — surfaces which business mode this trade will be
+       tagged with at creation. Read at modal-open from the live
+       business_mode setting; user can't change it here (mode is
+       locked at create time, edits never touch it). Hidden when
+       editing an existing trade — see openAuctionEdit. -->
+  <div id="a-mode-banner" style="margin:0 0 14px;padding:10px 12px;background:var(--spice-cardamom-lt);border:1px solid var(--spice-cardamom);border-radius:8px;font-size:12.5px;color:var(--spice-cardamom-dk);line-height:1.5;display:none">
+    Will be tagged as <strong id="a-mode-label">—</strong>. Locked at creation — switch business mode in Settings before saving if needed.
+  </div>
   <div class="sgrid">
     <div class="fg"><label>Trade No *</label><input id="a-ano"></div>
     <div class="fg"><label>Date *</label><input type="date" id="a-date"></div>
@@ -6466,11 +6474,24 @@ async function importBuyers(e){
   }catch(err){status.style.background='var(--red-bg)';status.style.color='var(--red)';status.textContent='Error: '+err.message}}
 
 // ── Auctions ──────────────────────────────────────────────
+// Renders a mode badge — e-Trade in green, e-Auction in saffron,
+// nothing for blank/legacy rows so they don't clutter the list with
+// "—" pills. Used by the Auctions tab column AND the auction picker
+// dropdown labels.
+function modeBadge(mode){
+  const m = String(mode || '').trim();
+  if (!m) return '';
+  const cfg = m === 'e-Auction'
+    ? { bg:'var(--spice-saffron-lt)', fg:'var(--spice-saffron-dk)' }
+    : { bg:'var(--spice-cardamom-lt)', fg:'var(--spice-cardamom-dk)' };
+  return `<span style="display:inline-block;padding:2px 7px;border-radius:8px;background:${cfg.bg};color:${cfg.fg};font-size:10.5px;font-weight:700;letter-spacing:.3px;margin-left:6px">${esc(m)}</span>`;
+}
+
 async function loadAuctions(){const d=await j('/api/auctions');
   DataTable.mount('auctions-list', d, {
-    emptyState: { icon: 'auctions', title: "No auctions yet", body: "Create your first auction (trade) from the Add Auction button to start entering lots." }, 
+    emptyState: { icon: 'auctions', title: "No auctions yet", body: "Create your first auction (trade) from the Add Auction button to start entering lots." },
     columns: [
-      { key:'ano', label:'Trade No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>` },
+      { key:'ano', label:'Trade No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>${modeBadge(a.mode)}` },
       { key:'date', label:'Date', sort:'date', render:(a)=>fmtD(a.date) },
       { key:'crop_type', label:'Type', sort:'text' },
       { key:'lot_count', label:'Lots', sort:'number', numeric:true, render:(a)=>String(a.lot_count||0) },
@@ -6488,6 +6509,13 @@ function openAuctionAdd(){
   document.getElementById('a-date').value='';
   document.getElementById('a-crpt').value='ASP';
   document.getElementById('a-state').value='TAMIL NADU';
+  // Show the mode banner so the user knows which mode the new trade
+  // will inherit (server reads business_mode at save and stamps it).
+  const mode = (typeof getCurrentBusinessMode === 'function')
+    ? (getCurrentBusinessMode() || '—') : '—';
+  const banner = document.getElementById('a-mode-banner');
+  const label  = document.getElementById('a-mode-label');
+  if (banner && label) { label.textContent = mode; banner.style.display = 'block'; }
   showModal('auction-modal');
 }
 function openAuctionEdit(a){
@@ -6497,6 +6525,11 @@ function openAuctionEdit(a){
   document.getElementById('a-date').value=a.date||'';
   document.getElementById('a-crpt').value=a.crop_type||'ASP';
   document.getElementById('a-state').value=a.state||'TAMIL NADU';
+  // Editing — mode is locked, banner is hidden. The trade keeps the
+  // mode it was tagged with at creation regardless of the current
+  // setting; if you need to change it, delete and re-create.
+  const banner = document.getElementById('a-mode-banner');
+  if (banner) banner.style.display = 'none';
   showModal('auction-modal');
 }
 async function saveAuction(){
@@ -6613,8 +6646,14 @@ async function doPriceImport(){
 }
 
 // ── Auction dropdowns ─────────────────────────────────────
+// <option> text is plain-text only — we suffix with [e-Trade] / [e-Auction]
+// so the operator can see at a glance which mode each trade was tagged
+// with when scanning the picker.
 async function fillAucSelect(selId){const d=await j('/api/auctions');const sel=document.getElementById(selId);
-  sel.innerHTML=d.map(a=>`<option value="${a.id}">${a.ano} — ${fmtD(a.date)} (${a.lot_count} lots)</option>`).join('');return d}
+  sel.innerHTML=d.map(a=>{
+    const mt = a.mode ? ` [${a.mode}]` : '';
+    return `<option value="${a.id}">${a.ano} — ${fmtD(a.date)} (${a.lot_count} lots)${mt}</option>`;
+  }).join('');return d}
 function loadLotAuctions(){fillAucSelect('lot-auction').then(()=>loadLots())}
 function loadInvAuctions(){fillAucSelect('inv-auction').then(()=>{loadInvoices();loadInvEligibleBuyers()})}
 function loadPurAuctions(){fillAucSelect('pur-auction').then(()=>{loadPurchases();loadPurEligibleSellers()})}
