@@ -149,14 +149,22 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 /* ---- Tables / Cards ---- */
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin-bottom:18px}
-.card h2{font-size:17px;font-weight:700;margin-bottom:14px;color:var(--text);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:12px 14px;background:var(--spice-cream);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--spice-text-hint);border-bottom:1px solid var(--spice-line)}
-td{padding:12px 14px;border-bottom:1px solid var(--spice-line);font-size:13px;color:var(--spice-text-main)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:18px;box-shadow:0 1px 3px rgba(15,23,42,.04)}
+.card h2{font-size:19px;font-weight:700;margin-bottom:18px;color:var(--text);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;letter-spacing:-.3px}
+table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+th{text-align:left;padding:14px 16px;background:var(--spice-cardamom-lt);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--spice-cardamom-dk);border-bottom:1px solid var(--spice-line);position:sticky;top:0;z-index:1}
+th:first-child{border-top-left-radius:10px}
+th:last-child{border-top-right-radius:10px}
+td{padding:14px 16px;border-bottom:1px solid var(--spice-line);font-size:13px;color:var(--spice-text-main)}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:var(--spice-cream)}
+tbody tr{transition:background .12s}
+tbody tr:hover td{background:var(--spice-saffron-lt)}
+tbody tr.is-selected td{background:var(--spice-cardamom-lt)}
 .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+
+/* Card tables get a soft outer border so the green header pops */
+.card > div[style*="overflow"] > table,
+.card > table{border:1px solid var(--spice-line);border-radius:10px;overflow:hidden}
 
 /* ---- Stats / KPI ---- */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:24px}
@@ -230,25 +238,25 @@ body:not([data-feat-lot-set-buyer="1"]) .feat-lot-set-buyer{display:none !import
 body:not([data-feat-print-selected-purchase="1"]) .feat-print-selected-purchase{display:none !important}
 
 /* ---- Icon buttons ---- */
-.icon-btn{width:30px;height:30px;padding:0;border-radius:7px;border:1.5px solid var(--border);background:var(--card);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all .15s;margin-right:2px;vertical-align:middle}
-.icon-btn:hover{transform:translateY(-1px);box-shadow:0 2px 6px rgba(0,0,0,.08)}
-.icon-btn svg{width:15px;height:15px;stroke-width:2;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
-.icon-btn.i-edit{color:var(--text2)}
-.icon-btn.i-edit:hover{color:var(--green);border-color:var(--green)}
-.icon-btn.i-del{color:var(--red);border-color:var(--spice-chili-lt)}
-.icon-btn.i-del:hover{background:var(--red);color:#fff;border-color:var(--red)}
-.icon-btn.i-pdf{color:var(--green);border-color:var(--green-border)}
-.icon-btn.i-pdf:hover{background:var(--green);color:#fff}
-.icon-btn.i-view{color:var(--blue)}
-.icon-btn.i-view:hover{background:var(--blue);color:#fff}
-.icon-btn.i-revert{color:#B45309;border-color:var(--spice-turmeric)}
+.icon-btn{width:34px;height:34px;padding:0;border-radius:8px;border:1.5px solid var(--border);background:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all .15s;margin-right:4px;vertical-align:middle}
+.icon-btn:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(15,23,42,.10)}
+.icon-btn svg{width:16px;height:16px;stroke-width:2;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn.i-edit{color:var(--spice-cardamom);border-color:#BBF7D0;background:#F0FDF4}
+.icon-btn.i-edit:hover{background:var(--spice-cardamom);color:#fff;border-color:var(--spice-cardamom)}
+.icon-btn.i-del{color:var(--spice-chili);border-color:var(--spice-chili-lt);background:#FEF2F2}
+.icon-btn.i-del:hover{background:var(--spice-chili);color:#fff;border-color:var(--spice-chili)}
+.icon-btn.i-pdf{color:var(--spice-cardamom);border-color:#BBF7D0;background:#F0FDF4}
+.icon-btn.i-pdf:hover{background:var(--spice-cardamom);color:#fff}
+.icon-btn.i-view{color:#2563EB;border-color:#BFDBFE;background:#EFF6FF}
+.icon-btn.i-view:hover{background:#2563EB;color:#fff;border-color:#2563EB}
+.icon-btn.i-revert{color:#B45309;border-color:var(--spice-turmeric);background:var(--spice-turmeric-lt)}
 .icon-btn.i-revert:hover{background:var(--spice-turmeric);color:#fff}
-.icon-btn.i-print{color:var(--spice-saffron);border-color:var(--spice-saffron)}
-.icon-btn.i-print:hover{background:var(--spice-saffron);color:#fff}
-.icon-btn.i-whatsapp{color:#25D366;border-color:#25D366}
-.icon-btn.i-whatsapp:hover{background:#25D366;color:#fff}
-.icon-btn.i-purchase{color:var(--spice-saffron);border-color:var(--spice-saffron)}
-.icon-btn.i-purchase:hover{background:var(--spice-saffron);color:#fff}
+.icon-btn.i-print{color:var(--spice-cardamom-dk);border-color:#BBF7D0;background:#F0FDF4}
+.icon-btn.i-print:hover{background:var(--spice-cardamom);color:#fff;border-color:var(--spice-cardamom)}
+.icon-btn.i-whatsapp{color:#25D366;border-color:#86EFAC;background:#F0FDF4}
+.icon-btn.i-whatsapp:hover{background:#25D366;color:#fff;border-color:#25D366}
+.icon-btn.i-purchase{color:var(--spice-saffron-dk);border-color:#86EFAC;background:#ECFDF5}
+.icon-btn.i-purchase:hover{background:var(--spice-saffron);color:#fff;border-color:var(--spice-saffron)}
 .icon-btn.i-clone{color:var(--text2)}
 .icon-btn.i-clone:hover{color:var(--spice-saffron);border-color:var(--spice-saffron)}
 
@@ -272,13 +280,43 @@ tr.row-locked > td{background:#fffbeb !important;border-top:1px solid #fde68a}
 .dt-loadmore button{padding:8px 20px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:8px;font-size:12px;font-weight:600;color:var(--spice-saffron-dk);cursor:pointer;font-family:inherit}
 
 /* ---- Search inputs ---- */
-input[type="search"],input.dt-search{
+input[type="search"]{
+  height:48px !important;
+  padding:0 44px 0 44px !important;
+  background-color:#fff !important;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23166534' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>") !important;
+  background-repeat:no-repeat !important;
+  background-position:14px center !important;
+  background-size:18px 18px !important;
+  border:1.5px solid var(--spice-line) !important;
+  border-radius:12px !important;
+  font-size:14.5px !important;
+  font-weight:500 !important;
+  color:var(--spice-text-main) !important;
+  outline:none !important;
+  transition:border-color .15s, box-shadow .15s !important;
+}
+input[type="search"]:focus{border-color:var(--spice-cardamom) !important;box-shadow:0 0 0 3px rgba(20,83,45,.12) !important}
+input[type="search"]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;height:22px;width:22px;border-radius:50%;background:var(--spice-line) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231F2937' stroke-width='2.4' stroke-linecap='round'><line x1='18' y1='6' x2='6' y2='18'/><line x1='6' y1='6' x2='18' y2='18'/></svg>") center/12px no-repeat;cursor:pointer}
+input[type="search"]::-webkit-search-cancel-button:hover{background-color:var(--spice-chili-lt)}
+input.dt-search{
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23166534' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>") !important;
   background-repeat:no-repeat !important;
   background-position:10px center !important;
   background-size:16px 16px !important;
   padding-left:32px !important;
 }
+
+/* ---- Larger primary action buttons ---- */
+.btn{height:46px;padding:0 22px;font-size:14px;font-weight:600;border-radius:11px;letter-spacing:.1px}
+.btn.xs{height:30px;padding:0 12px;font-size:12px;border-radius:7px}
+.btn-g{box-shadow:0 1px 2px rgba(20,83,45,.18)}
+.btn-g:hover{box-shadow:0 4px 12px rgba(20,83,45,.22)}
+
+/* ---- Search row helpers ---- */
+.search-row{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.search-row .fg{margin:0;flex:1;min-width:240px}
+.row-count-pill{display:inline-block;padding:6px 12px;background:var(--spice-cream);border:1px solid var(--spice-line);border-radius:999px;font-size:12px;font-weight:600;color:var(--spice-text-mute);margin-bottom:12px}
 
 /* ---- Pill / badge ---- */
 .pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600}
@@ -606,15 +644,16 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div class="tc" id="tc-traders">
       <div class="card">
         <h2>Sellers / Poolers <button class="needs-trader-write btn btn-g" onclick="openTraderAdd()">+ Add Seller</button></h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:end">
-          <div class="fg" style="margin:0;flex:1;min-width:180px"><input type="search" placeholder="Search sellers…" oninput="searchTradersDebounced(this.value)"></div>
-          <button class="btn btn-a" onclick="document.getElementById('imp-traders').click()">Import XLSX</button>
-          <button class="btn btn-o" onclick="downloadTemplate('traders')">Template</button>
+        <div class="search-row">
+          <div class="fg"><input type="search" placeholder="Search sellers by name, GSTIN, PAN, phone…" oninput="searchTradersDebounced(this.value)"></div>
+          <button class="btn btn-a" onclick="document.getElementById('imp-traders').click()">Import XLS/XLSX</button>
+          <button class="btn btn-o" onclick="downloadTemplate('traders')">Download Template</button>
           <input type="file" id="imp-traders" accept=".xlsx,.xls" style="display:none" onchange="importTraders(event)">
         </div>
+        <div id="traders-count" class="row-count-pill" style="display:none"></div>
         <div id="trader-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>CR/GSTIN</th><th>PAN</th><th>Phone</th><th>Place</th><th>Bank</th><th>Actions</th></tr></thead><tbody id="traders-list"></tbody></table></div>
-        <div id="traders-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)"></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>CR/GSTIN</th><th>PAN</th><th>Phone</th><th>Place · State</th><th>Bank(s)</th><th>Actions</th></tr></thead><tbody id="traders-list"></tbody></table></div>
+        <div id="traders-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;font-size:12.5px;color:var(--text2)"></div>
       </div>
     </div>
 
@@ -642,15 +681,16 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div class="tc" id="tc-buyers">
       <div class="card">
         <h2>Buyers / Dealers <button class="needs-buyer-write btn btn-g" onclick="openBuyerAdd()">+ Add Buyer</button></h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:end">
-          <div class="fg" style="margin:0;flex:1;min-width:180px"><input type="search" placeholder="Search buyers…" oninput="searchBuyersDebounced(this.value)"></div>
-          <button class="btn btn-a" onclick="document.getElementById('imp-buyers').click()">Import XLSX</button>
-          <button class="btn btn-o" onclick="downloadTemplate('buyers')">Template</button>
+        <div class="search-row">
+          <div class="fg"><input type="search" placeholder="Search buyers by name, GSTIN, PAN, phone…" oninput="searchBuyersDebounced(this.value)"></div>
+          <button class="btn btn-a" onclick="document.getElementById('imp-buyers').click()">Import XLS/XLSX</button>
+          <button class="btn btn-o" onclick="downloadTemplate('buyers')">Download Template</button>
           <input type="file" id="imp-buyers" accept=".xlsx,.xls" style="display:none" onchange="importBuyers(event)">
         </div>
+        <div id="buyers-count" class="row-count-pill" style="display:none"></div>
         <div id="buyer-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Code</th><th>Trade Name</th><th>GSTIN</th><th>PAN</th><th>Phone</th><th>Place</th><th>Sale</th><th>Actions</th></tr></thead><tbody id="buyers-list"></tbody></table></div>
-        <div id="buyers-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)"></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Code</th><th>Trade Name</th><th>GSTIN</th><th>PAN</th><th>Phone</th><th>Place · State</th><th>Sale</th><th>Actions</th></tr></thead><tbody id="buyers-list"></tbody></table></div>
+        <div id="buyers-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;font-size:12.5px;color:var(--text2)"></div>
       </div>
     </div>
 
@@ -687,11 +727,12 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div class="tc" id="tc-auctions">
       <div class="card">
         <h2><span data-biz-label="trades">Trades</span> <button class="btn btn-g" onclick="openAuctionAdd()">+ New <span data-biz-label="trade">Trade</span></button></h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-          <div class="fg" style="margin:0;flex:1;min-width:180px"><input type="search" placeholder="Search…" oninput="searchAuctionsDebounced(this.value)"></div>
+        <div class="search-row">
+          <div class="fg"><input type="search" placeholder="Search by number, date, type…" oninput="searchAuctionsDebounced(this.value)"></div>
           <button class="btn btn-a" onclick="openImportAuctionModal()">Import Lots from XLSX</button>
-          <button class="btn btn-o" onclick="downloadTemplate('auctions')">Template</button>
+          <button class="btn btn-o" onclick="downloadTemplate('auctions')">Download Template</button>
         </div>
+        <div id="auctions-count" class="row-count-pill" style="display:none"></div>
         <div id="auction-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
         <div style="overflow-x:auto"><table><thead><tr><th><span data-biz-prefix="trade" data-biz-suffix="No">Trade No</span></th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
         <div id="auctions-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2)"></div>
@@ -2283,13 +2324,23 @@ async function searchTraders(q){
     const url='/api/traders?search='+encodeURIComponent((q||'').trim());
     const data=await j(url);
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
+    const bankPill = t => {
+      const banks = Array.isArray(t.banks) ? t.banks : [];
+      const first = banks[0];
+      if (!first) return '<span style="color:var(--text3)">—</span>';
+      const ifsc = first.ifsc || '';
+      const tail = String(first.acctnum || first.account_no || '').slice(-4);
+      return '<span class="pill pill-local" style="font-family:monospace;font-size:11.5px">'+esc(ifsc)+(tail?' ··'+esc(tail):'')+'</span>';
+    };
     const rowFn = t => '<tr><td><strong>'+esc(t.name)+'</strong></td>'+
       '<td>'+esc(t.cr||'')+'</td>'+
       '<td>'+esc(t.pan||'')+'</td>'+
       '<td>'+esc(t.tel||'')+'</td>'+
       '<td>'+esc([t.ppla,t.pstate].filter(Boolean).join(' · '))+'</td>'+
-      '<td>'+(t.banks&&t.banks.length?'<span class="pill pill-local">'+t.banks.length+' bank(s)</span>':'<span style="color:var(--text3)">—</span>')+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openTraderEdit("+JSON.stringify(t).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delTrader('+t.id+')')+'</td></tr>';
+      '<td>'+bankPill(t)+'</td>'+
+      '<td>'+iconBtn('view','View',"openTraderEdit("+JSON.stringify(t).replace(/"/g,'&quot;')+")")+iconBtn('edit','Edit',"openTraderEdit("+JSON.stringify(t).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delTrader('+t.id+')')+'</td></tr>';
+    const countEl = document.getElementById('traders-count');
+    if (countEl){ if (arr.length){ countEl.style.display='inline-block'; countEl.textContent = arr.length + ' rows'; } else { countEl.style.display='none'; } }
     window._pgRender.traders = () => pgRender('traders', arr, { tbodyId:'traders-list', pagerId:'traders-pager', rowFn, cols:7 });
     pgRender('traders', arr, { tbodyId:'traders-list', pagerId:'traders-pager', rowFn, cols:7, resetPage:true });
   } catch(e){ showError(e); }
@@ -2361,14 +2412,16 @@ async function searchBuyers(q){
   try{
     const data=await j('/api/buyers?search='+encodeURIComponent((q||'').trim()));
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
-    const rowFn = b => '<tr><td><strong>'+esc(b.buyer)+'</strong>'+(b.code?' <span style="color:var(--spice-saffron);font-weight:700">('+esc(b.code)+')</span>':'')+'</td>'+
+    const rowFn = b => '<tr><td><strong>'+esc(b.buyer)+'</strong>'+(b.code?' <span style="color:var(--spice-saffron-dk);font-weight:700;font-size:11.5px;background:var(--spice-saffron-lt);padding:2px 8px;border-radius:6px;margin-left:6px">'+esc(b.code)+'</span>':'')+'</td>'+
       '<td>'+esc(b.buyer1||'')+'</td>'+
       '<td>'+esc(b.gstin||'')+'</td>'+
       '<td>'+esc(b.pan||'')+'</td>'+
       '<td>'+esc(b.tel||'')+'</td>'+
       '<td>'+esc([b.pla,b.state].filter(Boolean).join(' · '))+'</td>'+
       '<td>'+esc(b.sale||'L')+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openBuyerEdit("+JSON.stringify(b).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delBuyer('+b.id+')')+'</td></tr>';
+      '<td>'+iconBtn('view','View',"openBuyerEdit("+JSON.stringify(b).replace(/"/g,'&quot;')+")")+iconBtn('edit','Edit',"openBuyerEdit("+JSON.stringify(b).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delBuyer('+b.id+')')+'</td></tr>';
+    const countEl = document.getElementById('buyers-count');
+    if (countEl){ if (arr.length){ countEl.style.display='inline-block'; countEl.textContent = arr.length + ' rows'; } else { countEl.style.display='none'; } }
     window._pgRender.buyers = () => pgRender('buyers', arr, { tbodyId:'buyers-list', pagerId:'buyers-pager', rowFn, cols:8 });
     pgRender('buyers', arr, { tbodyId:'buyers-list', pagerId:'buyers-pager', rowFn, cols:8, resetPage:true });
   } catch(e){ showError(e); }
@@ -2442,11 +2495,13 @@ async function loadAuctions(opts){
     const q=(opts&&opts.query)||'';
     const data=await j('/api/auctions?search='+encodeURIComponent(q));
     const arr=Array.isArray(data)?data:(data&&data.rows?data.rows:[]);
-    const rowFn = a => '<tr><td><strong>'+esc(a.ano)+'</strong></td>'+
+    const rowFn = a => '<tr><td><strong>#'+esc(a.ano)+'</strong></td>'+
       '<td>'+fmtD(a.date)+'</td>'+
       '<td>'+esc(a.crop_type||'')+'</td>'+
       '<td>'+(a.lot_count||0)+'</td>'+
-      '<td>'+iconBtn('edit','Edit',"openAuctionEdit("+JSON.stringify(a).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delAuction('+a.id+')')+'</td></tr>';
+      '<td>'+iconBtn('view','View',"openAuctionEdit("+JSON.stringify(a).replace(/"/g,'&quot;')+")")+iconBtn('edit','Edit',"openAuctionEdit("+JSON.stringify(a).replace(/"/g,'&quot;')+")")+iconBtn('del','Delete','delAuction('+a.id+')')+'</td></tr>';
+    const countEl = document.getElementById('auctions-count');
+    if (countEl){ if (arr.length){ countEl.style.display='inline-block'; countEl.textContent = arr.length + ' ' + bizWord(true).toLowerCase(); } else { countEl.style.display='none'; } }
     window._pgRender.auctions = () => pgRender('auctions', arr, { tbodyId:'auctions-list', pagerId:'auctions-pager', rowFn, cols:5 });
     pgRender('auctions', arr, { tbodyId:'auctions-list', pagerId:'auctions-pager', rowFn, cols:5, resetPage:true });
   } catch(e){ showError(e); }
