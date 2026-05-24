@@ -135,7 +135,12 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .layout{display:flex;min-height:calc(100vh - 64px)}
 .sidebar{width:244px;background:linear-gradient(180deg, var(--sidebar-bg-top, var(--spice-saffron-dk, #14532D)) 0%, var(--sidebar-bg-bot, var(--spice-cardamom-dk, #0E3F22)) 100%);color:rgba(255,255,255,.85);padding:20px 12px;flex-shrink:0;position:sticky;top:64px;height:calc(100vh - 64px);overflow-y:auto}
 .side-group{margin-bottom:18px}
-.side-group-lbl{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:1.2px;padding:0 12px 8px;cursor:pointer;user-select:none}
+.side-group-lbl{font-size:10.5px;font-weight:700;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:1.2px;padding:8px 12px;cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;border-radius:6px;transition:background .15s, color .15s}
+.side-group-lbl:hover{background:rgba(255,255,255,.05);color:rgba(255,255,255,.85)}
+.side-group-lbl::after{content:'';width:8px;height:8px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .2s;margin-right:4px;margin-top:-3px;opacity:.7}
+.side-group.collapsed > .side-group-lbl::after{transform:rotate(-45deg);margin-top:2px}
+.side-group.collapsed > .side-item{display:none !important}
+.sidebar.collapsed .side-group-lbl::after{display:none}
 .side-item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:500;color:rgba(255,255,255,.85);margin-bottom:2px;transition:all .15s;border:none;background:none;font-family:inherit;width:100%;text-align:left;position:relative}
 .side-item:hover{background:rgba(255,255,255,.08);color:#fff}
 .side-item.active{background:rgba(255,255,255,.14);color:#fff;font-weight:600}
@@ -474,8 +479,8 @@ body:not([data-feat-price-check="1"]) .needs-price-check{display:none !important
     <div style="display:flex;gap:10px;align-items:center">
       <span id="sync-indicator" class="sync-pill sync-ok"></span>
       <span id="logo-badge" style="display:none;font-size:13px;font-weight:700;color:var(--green);background:var(--green-bg);padding:6px 12px;border-radius:10px"></span>
-      <span id="user-lbl" class="topbar-user"></span>
-      <span id="user-role-badge" style="display:none;font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:3px 8px;border-radius:8px;text-transform:uppercase"></span>
+      <span id="user-role-badge" style="display:none;font-size:13px;font-weight:700;letter-spacing:.2px;padding:6px 12px;border-radius:10px;display:inline-flex;align-items:center;gap:6px"></span>
+      <span id="user-lbl" style="display:none"></span>
       <button class="btn btn-o" onclick="refreshCurrentTab()" style="padding:6px 10px;font-weight:700">↻ Refresh</button>
       <button class="btn btn-o" onclick="logout()">Logout</button>
     </div>
@@ -1885,10 +1890,12 @@ function applyPermissionAttributes(){
       viewer:   { bg:'#f1f5f9',                  fg:'#64748b' },
     };
     const t = themes[role] || themes.viewer;
+    const userLbl = document.getElementById('user-lbl');
+    const username = (userLbl && userLbl.textContent) || '';
     badge.style.background = t.bg;
     badge.style.color = t.fg;
-    badge.textContent = role.replace('_',' ');
-    badge.style.display = 'inline-block';
+    badge.innerHTML = '<span style="opacity:.55;font-weight:500;text-transform:none">'+esc(username)+'</span> · <span style="text-transform:uppercase;letter-spacing:.4px">'+esc(role.replace('_',' '))+'</span>';
+    badge.style.display = 'inline-flex';
   }
 }
 
@@ -2046,12 +2053,34 @@ function toggleSidebarCollapse(){
   sb.classList.toggle('collapsed');
   try { localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed') ? '1' : '0'); } catch(e){}
 }
+function toggleSideGroup(lblEl){
+  const grp = lblEl && lblEl.closest('.side-group');
+  if (!grp) return;
+  grp.classList.toggle('collapsed');
+  const name = (lblEl.textContent || '').trim().toLowerCase().replace(/\s+/g,'-');
+  try {
+    const raw = localStorage.getItem('sideGroupsCollapsed') || '{}';
+    const map = JSON.parse(raw);
+    map[name] = grp.classList.contains('collapsed') ? 1 : 0;
+    localStorage.setItem('sideGroupsCollapsed', JSON.stringify(map));
+  } catch(_){}
+}
 function initSidebarCollapse(){
   const sb = document.getElementById('sidebar');
   if (!sb) return;
   try { if (localStorage.getItem('sidebarCollapsed') === '1') sb.classList.add('collapsed'); } catch(_){}
   sb.querySelectorAll('.side-item').forEach(b => {
     if (!b.getAttribute('data-tip')) b.setAttribute('data-tip', (b.textContent || '').trim());
+  });
+  let savedGroups = {};
+  try { savedGroups = JSON.parse(localStorage.getItem('sideGroupsCollapsed') || '{}'); } catch(_){}
+  sb.querySelectorAll('.side-group-lbl').forEach(lbl => {
+    if (!lbl.onclick) lbl.addEventListener('click', () => toggleSideGroup(lbl));
+    const name = (lbl.textContent || '').trim().toLowerCase().replace(/\s+/g,'-');
+    if (savedGroups[name]) {
+      const grp = lbl.closest('.side-group');
+      if (grp) grp.classList.add('collapsed');
+    }
   });
 }
 document.addEventListener('DOMContentLoaded', initSidebarCollapse);
@@ -2249,24 +2278,103 @@ async function loadStats(){
 
 // ── Settings (minimal) ──
 let _cats={},_sdata={};
+// Hard-coded option lists for select-typed settings.
+const SELECT_OPTIONS = {
+  business_mode:  ['e-Trade', 'e-Auction'],
+  business_state: ['TAMIL NADU', 'KERALA'],
+  date_format:    ['DD/MM/YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD'],
+};
+function renderLogoUploader(which, label){
+  const cacheBust = Date.now();
+  const imgUrl = '/logo-' + which + '.png?t=' + cacheBust;
+  return '<div class="fg" style="grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:14px;border:1px dashed var(--spice-line-strong);border-radius:10px;background:var(--spice-cream)">'+
+    '<div style="width:72px;height:72px;background:#fff;border:1px solid var(--spice-line);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto">'+
+      '<img src="'+imgUrl+'" alt="logo" style="max-width:100%;max-height:100%;object-fit:contain" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'<span style=color:var(--text3);font-size:11px>No logo</span>\'">'+
+    '</div>'+
+    '<div style="flex:1">'+
+      '<label style="display:block;margin-bottom:4px">'+esc(label)+'</label>'+
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+        '<input type="file" id="logo-upload-'+which+'" accept="image/png,image/jpeg" style="display:none" onchange="uploadCompanyLogo(\''+which+'\',this)">'+
+        '<button class="btn btn-a" onclick="document.getElementById(\'logo-upload-'+which+'\').click()">Choose PNG/JPG…</button>'+
+        '<button class="btn btn-o" onclick="deleteCompanyLogo(\''+which+'\')">Remove</button>'+
+        '<span style="font-size:12px;color:var(--text3)">PNG or JPG, square format works best</span>'+
+      '</div>'+
+    '</div></div>';
+}
+async function uploadCompanyLogo(which, input){
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch(B + '/api/company-settings/logo/' + which, { method:'POST', headers:{'Authorization':'Bearer '+T}, body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Upload failed');
+    toast('Logo updated');
+    input.value = '';
+    await loadSettings();
+    try { await applyBranding(); } catch(_){}
+  } catch(e){ toast(e.message || 'Upload failed'); }
+}
+async function deleteCompanyLogo(which){
+  if (!confirm('Remove this logo?')) return;
+  try {
+    await j('/api/company-settings/logo/' + which, { method:'DELETE' });
+    toast('Logo removed');
+    await loadSettings();
+    try { await applyBranding(); } catch(_){}
+  } catch(e){ toast(e.message || 'Failed'); }
+}
+function _settingsState(){
+  // Read the current dropdown values (used for state-based show/hide).
+  const sEl = document.querySelector('#tc-settings [data-key="business_state"]');
+  return (sEl ? String(sEl.value || '').toUpperCase() : 'TAMIL NADU');
+}
+function applyStateGating(){
+  const state = _settingsState();
+  const hideKL = state !== 'KERALA';
+  const hideTN = state !== 'TAMIL NADU';
+  document.querySelectorAll('#tc-settings [data-category="address_kl"]').forEach(el => el.style.display = hideKL ? 'none' : '');
+  document.querySelectorAll('#tc-settings [data-category="address_tn"]').forEach(el => el.style.display = hideTN ? 'none' : '');
+  // Bank fields are inside a single 'bank' category; gate individual fields by key prefix.
+  document.querySelectorAll('#tc-settings [data-key^="bank_kl_"]').forEach(el => {
+    const wrap = el.closest('.fg'); if (wrap) wrap.style.display = hideKL ? 'none' : '';
+  });
+  document.querySelectorAll('#tc-settings [data-key^="bank_tn_"]').forEach(el => {
+    const wrap = el.closest('.fg'); if (wrap) wrap.style.display = hideTN ? 'none' : '';
+  });
+}
+
 async function loadSettings(){
   try{
     const d=await j('/api/company-settings');
     _cats=d.categories||{};_sdata=d.settings||{};
     const root=document.getElementById('tc-settings');
     if(!root) return;
-    // Build a flat editable form for all settings
     let html='<div class="card"><h2>Company Settings <button class="btn btn-g" onclick="saveSettings()">Save Changes</button></h2>';
     for(const ck of Object.keys(_cats).sort((a,b)=>_cats[a].order-_cats[b].order)){
       const cat=_cats[ck],fields=_sdata[ck]||[];
-      if(!fields.length) continue;
-      html+='<details style="margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:12px"><summary style="cursor:pointer;font-weight:700;font-size:14px">'+esc(cat.icon||'')+' '+esc(cat.title)+'</summary><div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">';
+      if(!fields.length && ck !== 'company' && ck !== 'sister') continue;
+      const openByDefault = ck === 'mode' || ck === 'company';
+      html+='<details data-category="'+esc(ck)+'" '+(openByDefault?'open':'')+' style="margin-bottom:14px;border:1px solid var(--border);border-radius:10px;padding:14px"><summary style="cursor:pointer;font-weight:700;font-size:14px">'+esc(cat.icon||'')+' '+esc(cat.title)+'</summary>';
+      if (cat.description) html += '<div style="margin:8px 0 0;font-size:12.5px;color:var(--text2);line-height:1.5">'+esc(cat.description)+'</div>';
+      html+='<div style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">';
+      // Inject logo uploader at top of company / sister categories.
+      if (ck === 'company') html += renderLogoUploader('ispl', 'Main Company Logo');
+      if (ck === 'sister')  html += renderLogoUploader('asp',  'Sister Company Logo');
       for(const f of fields){
-        const t = f.field_type==='boolean' ? 'checkbox' : (f.field_type==='number'?'number':(f.field_type==='date'?'date':'text'));
-        if(t==='checkbox'){
-          const ck = (String(f.value).toLowerCase()==='true')?'checked':'';
-          html+='<div class="fg" style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px 12px"><label style="margin:0">'+esc(f.label)+'</label><input type="checkbox" data-key="'+esc(f.key)+'" data-type="boolean" '+ck+'></div>';
+        const isSelect = f.field_type === 'select' || SELECT_OPTIONS[f.key];
+        if (f.field_type === 'boolean'){
+          const ck2 = (String(f.value).toLowerCase()==='true')?'checked':'';
+          html+='<div class="fg" style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:8px;padding:10px 14px"><label style="margin:0">'+esc(f.label)+'</label><input type="checkbox" data-key="'+esc(f.key)+'" data-type="boolean" '+ck2+'></div>';
+        } else if (isSelect){
+          const opts = SELECT_OPTIONS[f.key] || [];
+          const cur = String(f.value || '');
+          html+='<div class="fg"><label>'+esc(f.label)+'</label><select data-key="'+esc(f.key)+'" '+(f.key==='business_state'?'onchange="applyStateGating()"':'')+'>'+
+            opts.map(o => '<option value="'+esc(o)+'" '+(o===cur?'selected':'')+'>'+esc(o)+'</option>').join('') +
+            (opts.indexOf(cur) === -1 && cur ? '<option value="'+esc(cur)+'" selected>'+esc(cur)+' (custom)</option>' : '') +
+          '</select></div>';
         } else {
+          const t = f.field_type === 'number' ? 'number' : (f.field_type === 'date' ? 'date' : 'text');
           html+='<div class="fg"><label>'+esc(f.label)+'</label><input type="'+t+'" data-key="'+esc(f.key)+'" value="'+esc(f.value)+'"'+(t==='number'?' step="any"':'')+'></div>';
         }
       }
@@ -2274,6 +2382,7 @@ async function loadSettings(){
     }
     html+='</div>';
     root.innerHTML=html;
+    applyStateGating();
   } catch(e){ showError(e); }
 }
 async function saveSettings(){
