@@ -925,10 +925,36 @@ function syncTraderBanks(db, traderId, banks) {
   );
 }
 
+// Duplicate-seller check: a seller is identified by PAN (the canonical
+// taxpayer ID). If a different row already has the same PAN, the create
+// is rejected with 409 + `{duplicate: true, existing}` so the client
+// can show the operator the EXISTING row's identity instead of letting
+// them silently create a second copy. Empty PAN is intentionally NOT
+// gated — agriculturist sellers often have no PAN on file, and a
+// blanket "no two rows with empty PAN" rule would block them.
+function findDuplicateSeller(db, pan, excludeId) {
+  const cleanPan = String(pan || '').trim().toUpperCase();
+  if (!cleanPan) return null;
+  const sql = excludeId
+    ? 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(pan) = ? AND id != ? LIMIT 1'
+    : 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(pan) = ? LIMIT 1';
+  return db.get(sql, excludeId ? [cleanPan, excludeId] : [cleanPan]);
+}
+
 app.post('/api/traders', requireTraderWrite, (req, res) => {
   const t = req.body;
   const db = getDb();
-  const info = db.run(`INSERT INTO traders (name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name) 
+  // Duplicate-PAN guard. Hard block (409) so the operator goes back
+  // and edits the existing row rather than maintaining two.
+  const dup = findDuplicateSeller(db, t.pan);
+  if (dup) {
+    return res.status(409).json({
+      error: 'A seller with this PAN already exists.',
+      duplicate: true,
+      existing: dup,
+    });
+  }
+  const info = db.run(`INSERT INTO traders (name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [t.name,t.cr||'',t.pan||'',t.tel||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'']);
   // If the client sent a banks array (new multi-bank UI), persist them.
@@ -941,6 +967,16 @@ app.post('/api/traders', requireTraderWrite, (req, res) => {
 app.put('/api/traders/:id', requireTraderWrite, (req, res) => {
   const t = req.body;
   const db = getDb();
+  // Same duplicate-PAN check applied to updates, excluding the row
+  // being edited. Prevents renaming a PAN to collide with a sibling.
+  const dup = findDuplicateSeller(db, t.pan, parseInt(req.params.id, 10));
+  if (dup) {
+    return res.status(409).json({
+      error: 'Another seller already has this PAN.',
+      duplicate: true,
+      existing: dup,
+    });
+  }
   db.run(`UPDATE traders SET name=?,cr=?,pan=?,tel=?,aadhar=?,padd=?,ppla=?,pin=?,pstate=?,pst_code=?,ifsc=?,acctnum=?,holder_name=? WHERE id=?`,
     [t.name,t.cr||'',t.pan||'',t.tel||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'',req.params.id]);
   if (Array.isArray(t.banks)) {
@@ -1081,9 +1117,49 @@ app.get('/api/buyers', requireView, (req, res) => {
   }
   res.json(db.all('SELECT * FROM buyers ORDER BY buyer1 LIMIT 500'));
 });
+// Duplicate-buyer check. Buyers carry two identifiers:
+//   buyer   — primary buyer code (required, e.g. "B042")
+//   code    — optional short alias / mnemonic (e.g. "RSH")
+// Either is a collision-worthy key, so we check both. Returns the
+// EXISTING row that matches, with a `field` flag so the client can
+// show "buyer code already taken" vs "short alias already taken".
+// Both lookups are case-insensitive; empty values aren't gated.
+function findDuplicateBuyer(db, buyer, code, excludeId) {
+  const cleanBuyer = String(buyer || '').trim().toUpperCase();
+  const cleanCode  = String(code  || '').trim().toUpperCase();
+  if (cleanBuyer) {
+    const sql = excludeId
+      ? 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(buyer) = ? AND id != ? LIMIT 1'
+      : 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(buyer) = ? LIMIT 1';
+    const hit = db.get(sql, excludeId ? [cleanBuyer, excludeId] : [cleanBuyer]);
+    if (hit) return { ...hit, field: 'buyer' };
+  }
+  if (cleanCode) {
+    const sql = excludeId
+      ? "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(code) = ? AND code != '' AND id != ? LIMIT 1"
+      : "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(code) = ? AND code != '' LIMIT 1";
+    const hit = db.get(sql, excludeId ? [cleanCode, excludeId] : [cleanCode]);
+    if (hit) return { ...hit, field: 'code' };
+  }
+  return null;
+}
+
 app.post('/api/buyers', requireBuyerWrite, (req, res) => {
   const b = req.body;
-  getDb().run(`INSERT INTO buyers (
+  const db = getDb();
+  // Duplicate-by-code guard. Hard block so two buyers can't share the
+  // same primary code or short alias (both are used as lookup keys
+  // elsewhere — duplicates would make alloc / invoice flows ambiguous).
+  const dup = findDuplicateBuyer(db, b.buyer, b.code);
+  if (dup) {
+    const which = dup.field === 'code' ? 'short alias' : 'buyer code';
+    return res.status(409).json({
+      error: `A buyer with this ${which} already exists.`,
+      duplicate: true,
+      existing: dup,
+    });
+  }
+  db.run(`INSERT INTO buyers (
       buyer, buyer1, code, sbl, add1, add2, pla, pin, state, st_code,
       gstin, pan, tel, ti, sale, email, tdsq,
       cbuyer1, cadd1, cadd2, cpla, cpin, cstate, cst_code, cgstin
@@ -1095,7 +1171,18 @@ app.post('/api/buyers', requireBuyerWrite, (req, res) => {
 });
 app.put('/api/buyers/:id', requireBuyerWrite, (req, res) => {
   const b = req.body;
-  getDb().run(`UPDATE buyers SET
+  const db = getDb();
+  // Same duplicate guard on updates, excluding the row being edited.
+  const dup = findDuplicateBuyer(db, b.buyer, b.code, parseInt(req.params.id, 10));
+  if (dup) {
+    const which = dup.field === 'code' ? 'short alias' : 'buyer code';
+    return res.status(409).json({
+      error: `Another buyer already has this ${which}.`,
+      duplicate: true,
+      existing: dup,
+    });
+  }
+  db.run(`UPDATE buyers SET
       buyer=?, buyer1=?, code=?, sbl=?, add1=?, add2=?, pla=?, pin=?, state=?, st_code=?,
       gstin=?, pan=?, tel=?, ti=?, sale=?, email=?, tdsq=?,
       cbuyer1=?, cadd1=?, cadd2=?, cpla=?, cpin=?, cstate=?, cst_code=?, cgstin=?
