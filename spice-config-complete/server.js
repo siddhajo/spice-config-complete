@@ -2315,6 +2315,409 @@ app.post('/api/lots/unlock', requireAdmin, (req, res) => {
   });
 });
 
+// ══════════════════════════════════════════════════════════════
+// PRICE CHECK — reconcile uploaded price sheet vs. lots table
+// ══════════════════════════════════════════════════════════════
+// Replaces the legacy PriceCheck_VSTL.xlsm macro workbook. The
+// operator uploads a price sheet (typically the auction-floor record
+// or a third-party export) and the server reports:
+//   • status per row (match / price-diff / missing / withdrawn / etc.)
+//   • code reconciliation (file CODE vs DB buyer code)
+//   • totals: matched / mismatched / total |diff| / total signed diff
+// Used by the Price Check tab; the operator can apply fixes per-row
+// via /api/price-check/apply-fix.
+
+// Reads the uploaded XLSX into an array of plain objects. Tolerant of
+// blank rows and header-case differences. The "header row" is the
+// first row that contains a "LOT" column (case-insensitive); rows
+// above it are treated as metadata and skipped.
+function _pcReadRows(filePath) {
+  const wb = XLSX.readFile(filePath, { cellDates: true });
+  const sn = wb.SheetNames[0];
+  if (!sn) throw new Error('Workbook has no sheets');
+  const ws = wb.Sheets[sn];
+  // Walk the sheet as 2D array first to find the header row, then
+  // re-emit as objects keyed by uppercase header. XLSX.utils' raw
+  // array form is the most flexible way to handle inconsistent
+  // header positions.
+  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
+  if (!grid.length) return { rows: [], headers: [] };
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(grid.length, 30); i++) {
+    const cells = (grid[i] || []).map(c => String(c || '').trim().toUpperCase());
+    if (cells.includes('LOT')) { headerRow = i; break; }
+  }
+  if (headerRow < 0) throw new Error('Could not find a "LOT" column — first 30 rows scanned.');
+  const headers = grid[headerRow].map(c => String(c || '').trim().toUpperCase());
+  const rows = [];
+  for (let i = headerRow + 1; i < grid.length; i++) {
+    const cells = grid[i] || [];
+    // Skip rows that have NO LOT value (totals/separator lines etc.)
+    const lotIdx = headers.indexOf('LOT');
+    const lotVal = String((cells[lotIdx] || '')).trim();
+    if (!lotVal) continue;
+    const obj = {};
+    for (let c = 0; c < headers.length; c++) {
+      if (headers[c]) obj[headers[c]] = cells[c] == null ? '' : cells[c];
+    }
+    obj.__row = i + 1;   // 1-based original spreadsheet row number
+    rows.push(obj);
+  }
+  return { rows, headers };
+}
+
+// Resolve the file-row's price column. Prefer "SERVER PRICE" (the
+// canonical column on the legacy macro's output); fall back to
+// "PRICE" so operators uploading raw price files without the macro
+// post-process still get a reconciliation.
+function _pcExtractPrice(row, hasServerPriceCol) {
+  if (hasServerPriceCol) {
+    const v = row['SERVER PRICE'];
+    return (v === '' || v == null) ? null : Number(v);
+  }
+  const v = row['PRICE'];
+  return (v === '' || v == null) ? null : Number(v);
+}
+
+// Build the per-row reconciliation. Shared by /verify and /download
+// so the rendered table and the annotated XLSX agree exactly.
+function _pcBuildReport(filePath, opts) {
+  const { rows, headers } = _pcReadRows(filePath);
+  const hasServerPriceCol = headers.includes('SERVER PRICE');
+  const hasCodeCol        = headers.includes('CODE');
+  const validatedColumn   = hasServerPriceCol ? 'SERVER PRICE' : 'PRICE';
+
+  const db = getDb();
+  // Forced-auction mode: caller passed a specific auction_id, so we
+  // ignore the file's TNO/ANO columns and reconcile against that one
+  // trade. Without it, we resolve per-row via (TNO, DATE).
+  let forcedAuction = null;
+  if (opts.auctionId) {
+    forcedAuction = db.get(
+      'SELECT id, ano, date FROM auctions WHERE id = ?',
+      [parseInt(opts.auctionId, 10)]
+    );
+    if (!forcedAuction) throw new Error('Selected auction not found');
+  }
+
+  // Helper: resolve an auction by ANO (and optionally DATE) so file
+  // rows without an explicit auction_id can be paired with the right
+  // trade. Memoised within one report run.
+  const auctionByAno = new Map();
+  function findAuctionForRow(row) {
+    if (forcedAuction) return forcedAuction;
+    const ano = String(row['TNO'] || row['ANO'] || '').trim();
+    if (!ano) return null;
+    const key = ano.toUpperCase();
+    if (auctionByAno.has(key)) return auctionByAno.get(key);
+    // ANO is a text column in the DB (because lot numbers can be
+    // alphanumeric); match case-insensitively.
+    const hit = db.get('SELECT id, ano, date FROM auctions WHERE UPPER(ano) = ? ORDER BY date DESC LIMIT 1', [key]);
+    auctionByAno.set(key, hit || null);
+    return hit || null;
+  }
+
+  // Pre-load every lot for the forced auction (when set) so the
+  // per-row lookup is a map read instead of an N-queries fan-out.
+  let dbLotsByLotNo = null;   // Map<lot_no_upper, lot_row>
+  if (forcedAuction) {
+    const lots = db.all(
+      `SELECT lots.*, (SELECT b.code FROM buyers b WHERE UPPER(b.buyer) = UPPER(lots.buyer) LIMIT 1) AS buyer_code
+       FROM lots WHERE auction_id = ?`,
+      [forcedAuction.id]
+    );
+    dbLotsByLotNo = new Map();
+    for (const l of lots) {
+      const k = String(l.lot_no || '').trim().toUpperCase();
+      if (k) dbLotsByLotNo.set(k, l);
+    }
+  }
+
+  // Walk each file row, classify, and emit a result row.
+  const out = [];
+  const seenLotIds = new Set();      // lots referenced by the file (for missing_file detection)
+  for (const r of rows) {
+    const result = {
+      row: r.__row,
+      lot: String(r['LOT'] || '').trim(),
+      auction_ano: forcedAuction ? forcedAuction.ano : String(r['TNO'] || r['ANO'] || '').trim(),
+      file_server_price: _pcExtractPrice(r, hasServerPriceCol),
+      manual_price: hasServerPriceCol && r['PRICE'] !== '' && r['PRICE'] != null ? Number(r['PRICE']) : null,
+      file_code: String(r['CODE'] || '').trim(),
+      db_price: null,
+      db_code: '',
+      diff: null,
+      lot_id: null,
+      status: 'unmatched',
+      code_status: 'both_blank',
+      issues: [],
+    };
+
+    // Resolve auction first
+    const auc = findAuctionForRow(r);
+    if (!auc) { result.status = 'no_auction'; result.issues.push('no_auction'); out.push(result); continue; }
+
+    // Resolve the DB lot. If forcedAuction is set, use the pre-loaded
+    // map; otherwise hit the DB once per row.
+    let dbLot;
+    if (forcedAuction && dbLotsByLotNo) {
+      dbLot = dbLotsByLotNo.get(result.lot.toUpperCase()) || null;
+    } else {
+      dbLot = db.get(
+        `SELECT lots.*, (SELECT b.code FROM buyers b WHERE UPPER(b.buyer) = UPPER(lots.buyer) LIMIT 1) AS buyer_code
+         FROM lots WHERE auction_id = ? AND UPPER(lot_no) = ?`,
+        [auc.id, result.lot.toUpperCase()]
+      );
+    }
+    if (!dbLot) { result.status = 'missing_server'; result.issues.push('missing_server'); out.push(result); continue; }
+
+    result.lot_id = dbLot.id;
+    result.db_price = Number(dbLot.price) || 0;
+    result.db_code  = String(dbLot.buyer_code || dbLot.buyer || '').trim();
+    seenLotIds.add(dbLot.id);
+
+    // ── Price comparison ────────────────────────────────────
+    const fileP = result.file_server_price;
+    if (fileP == null) {
+      result.status = 'server_empty';
+      result.issues.push('server_empty');
+    } else if (Math.abs(fileP - result.db_price) < 0.005) {
+      result.status = 'match';
+    } else {
+      result.status = 'server_diff';
+      result.issues.push('server_diff');
+      result.diff = +(fileP - result.db_price).toFixed(2);
+    }
+
+    // ── Code comparison ─────────────────────────────────────
+    // Case-insensitive. 'WD' is the withdrawn marker — we treat
+    // it like any other code for the diff check.
+    const fc = result.file_code.toUpperCase();
+    const dc = result.db_code.toUpperCase();
+    if (!fc && !dc)        result.code_status = 'both_blank';
+    else if (!fc &&  dc)   result.code_status = 'file_blank';
+    else if ( fc && !dc)   result.code_status = 'db_blank';
+    else if ( fc === dc)   result.code_status = 'match';
+    else                   result.code_status = 'diff';
+
+    out.push(result);
+  }
+
+  // Add "missing_file" rows: lots in DB that the file didn't mention.
+  // Skipped when no forced auction (we can't enumerate DB lots without
+  // an auction_id; the file would need to span multiple auctions).
+  if (forcedAuction && dbLotsByLotNo) {
+    for (const [lotNoUpper, dbLot] of dbLotsByLotNo) {
+      if (seenLotIds.has(dbLot.id)) continue;
+      out.push({
+        row: null,
+        lot: dbLot.lot_no || '',
+        auction_ano: forcedAuction.ano,
+        file_server_price: null,
+        manual_price: null,
+        file_code: '',
+        db_price: Number(dbLot.price) || 0,
+        db_code: String(dbLot.buyer_code || dbLot.buyer || '').trim(),
+        diff: null,
+        lot_id: dbLot.id,
+        status: 'missing_file',
+        code_status: dbLot.buyer ? 'file_blank' : 'both_blank',
+        issues: ['missing_file'],
+      });
+    }
+  }
+
+  // Aggregate counters.
+  const counts = {
+    total: out.length,
+    matched: 0, mismatched: 0, missingServer: 0, missingFile: 0, noAuction: 0, serverEmpty: 0,
+    codeMatched: 0, codeMismatched: 0, codeFileBlank: 0, codeDbBlank: 0,
+    withdrawnFile: 0, withdrawnDb: 0,
+  };
+  let totalAbsDiff = 0, totalSignedDiff = 0;
+  for (const r of out) {
+    if (r.status === 'match')          counts.matched++;
+    if (r.status === 'server_diff')    counts.mismatched++;
+    if (r.status === 'missing_server') counts.missingServer++;
+    if (r.status === 'missing_file')   counts.missingFile++;
+    if (r.status === 'no_auction')     counts.noAuction++;
+    if (r.status === 'server_empty')   counts.serverEmpty++;
+    if (r.code_status === 'match')      counts.codeMatched++;
+    if (r.code_status === 'diff')       counts.codeMismatched++;
+    if (r.code_status === 'file_blank') counts.codeFileBlank++;
+    if (r.code_status === 'db_blank')   counts.codeDbBlank++;
+    if (String(r.file_code).toUpperCase() === 'WD') counts.withdrawnFile++;
+    if (String(r.db_code).toUpperCase()   === 'WD') counts.withdrawnDb++;
+    if (r.diff != null) {
+      totalAbsDiff    += Math.abs(r.diff);
+      totalSignedDiff += r.diff;
+    }
+  }
+
+  return {
+    ...counts,
+    totalAbsDiff: +totalAbsDiff.toFixed(2),
+    totalSignedDiff: +totalSignedDiff.toFixed(2),
+    hasServerPriceCol,
+    hasCodeCol,
+    validatedColumn,
+    forcedAuction,
+    rows: out,
+  };
+}
+
+// POST /api/price-check/verify — returns JSON reconciliation.
+app.post('/api/price-check/verify', requireView, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const report = _pcBuildReport(req.file.path, { auctionId: req.body.auction_id });
+    res.json(report);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    // Best-effort cleanup of the multer temp file.
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+});
+
+// POST /api/price-check/download — same data, returns an XLSX with
+// extra columns: STATUS, DB PRICE, DIFF, DB CODE, CODE STATUS. The
+// original file's structure is preserved as much as possible by
+// reading rows + writing a new workbook in the same column order.
+app.post('/api/price-check/download', requireView, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const report = _pcBuildReport(req.file.path, { auctionId: req.body.auction_id });
+    // Build a new workbook from the report. One row per result row,
+    // ordered the same way verify returns them.
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Price Check');
+    ws.columns = [
+      { header: 'Row',         key: 'row',   width: 6 },
+      { header: 'Lot',         key: 'lot',   width: 10 },
+      { header: 'Auction No',  key: 'ano',   width: 12 },
+      { header: 'File Price',  key: 'fp',    width: 14 },
+      { header: 'DB Price',    key: 'dp',    width: 14 },
+      { header: 'Diff',        key: 'diff',  width: 12 },
+      { header: 'File Code',   key: 'fc',    width: 12 },
+      { header: 'DB Code',     key: 'dc',    width: 12 },
+      { header: 'Status',      key: 'st',    width: 18 },
+      { header: 'Code Status', key: 'cs',    width: 14 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
+
+    // Per-row tint so a quick scan tells the operator what's wrong.
+    const tintByStatus = {
+      'match':         null,
+      'server_diff':   'FFFEE2E2',
+      'server_empty':  'FFFEF3C7',
+      'missing_server':'FFFEE2E2',
+      'missing_file':  'FFFEF3C7',
+      'no_auction':    'FFFEF3C7',
+    };
+    for (const r of report.rows) {
+      const row = ws.addRow({
+        row: r.row || '+',
+        lot: r.lot,
+        ano: r.auction_ano || '',
+        fp:  r.file_server_price == null ? '' : r.file_server_price,
+        dp:  r.db_price == null ? '' : r.db_price,
+        diff: r.diff == null ? '' : r.diff,
+        fc:  r.file_code || '',
+        dc:  r.db_code || '',
+        st:  r.status,
+        cs:  r.code_status,
+      });
+      const fill = tintByStatus[r.status];
+      if (fill) {
+        for (let c = 1; c <= 10; c++) {
+          row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+        }
+      }
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="price-check-result.xlsx"');
+    res.send(Buffer.from(buf));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+});
+
+// POST /api/price-check/apply-fix — apply the file's price and/or
+// code to a single lot. Body: { lot_id, price?, code? }. At least
+// ONE of price/code must be provided. When `code` is supplied we
+// look it up in the buyers master so buyer/buyer1/sale stay
+// consistent. Lock-aware via the same gate used by other lot writes.
+app.post('/api/price-check/apply-fix', requireLotWrite, (req, res) => {
+  const lotId = parseInt(req.body.lot_id, 10);
+  const price = req.body.price === undefined || req.body.price === null || req.body.price === '' ? null : Number(req.body.price);
+  const code  = req.body.code  === undefined || req.body.code  === null ? null : String(req.body.code).trim();
+  if (!Number.isFinite(lotId) || lotId <= 0) return res.status(400).json({ error: 'lot_id required' });
+  if (price == null && (code == null || code === '')) {
+    return res.status(400).json({ error: 'Provide price, code, or both' });
+  }
+  const db = getDb();
+  // Lock gate. Admins bypass.
+  const lock = getLotLock(db, lotId);
+  if (lock && lock.locked_at && !isAdminUser(req)) {
+    return res.status(423).json({
+      error: `This lot is locked${lock.locked_by ? ' by ' + lock.locked_by : ''}. Ask an admin to unlock.`,
+      locked: true,
+    });
+  }
+  const lot = db.get('SELECT id, qty, buyer FROM lots WHERE id = ?', [lotId]);
+  if (!lot) return res.status(404).json({ error: 'Lot not found' });
+
+  // Resolve buyer (if a CODE was provided). We match against either
+  // `buyers.buyer` (the primary key) OR `buyers.code` (the short
+  // alias) since price files use either form.
+  let buyerRow = null;
+  if (code) {
+    const upper = code.toUpperCase();
+    buyerRow = db.get(
+      `SELECT buyer, buyer1, sale FROM buyers
+       WHERE UPPER(buyer) = ? OR UPPER(code) = ? LIMIT 1`,
+      [upper, upper]
+    );
+    // Note: code could be 'WD' (withdrawn) — no buyer match, but
+    // we still write 'WD' into lots.code so the lot is flagged.
+    // For other unknown codes, we ALSO let the write proceed (the
+    // operator may be using a code that's not in the master yet);
+    // it just won't populate buyer1/sale.
+  }
+
+  // Build the UPDATE. Always write whatever was supplied; don't touch
+  // unrelated columns.
+  const sets = [];
+  const vals = [];
+  if (price != null) {
+    sets.push('price = ?'); vals.push(price);
+    // Re-derive amount = qty × price so totals stay coherent without
+    // a separate Calculate All click. If qty is 0 we leave amount as-is.
+    if ((Number(lot.qty) || 0) > 0) {
+      sets.push('amount = ?'); vals.push(+(Number(lot.qty) * price).toFixed(2));
+    }
+  }
+  if (code != null) {
+    sets.push('code = ?'); vals.push(code);
+    if (buyerRow) {
+      sets.push('buyer = ?');  vals.push(buyerRow.buyer || '');
+      sets.push('buyer1 = ?'); vals.push(buyerRow.buyer1 || '');
+      sets.push('sale = ?');   vals.push(buyerRow.sale || 'L');
+    }
+  }
+  vals.push(lotId);
+  db.run(`UPDATE lots SET ${sets.join(', ')} WHERE id = ?`, vals);
+  res.json({
+    success: true,
+    applied: { price, code, buyer: buyerRow ? buyerRow.buyer : null },
+  });
+});
+
 // ── Calculate all lots for an auction (GENERATE.PRG) ─────────
 app.post('/api/lots/calculate/:auctionId', requireLotWrite, (req, res) => {
   const db = getDb(); const cfg = getSettingsFlat(db);

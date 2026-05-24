@@ -2747,6 +2747,38 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div style="overflow-x:auto;max-height:500px"><table id="jr-table"><thead id="jr-head"></thead><tbody id="jr-body"></tbody></table></div>
       </div>
     </div>
+
+    <!-- Price Check — reconcile an external price sheet against the
+         live lot ledger for the selected auction. Upload accepts .xlsx
+         or .xls; verify produces a summary + per-row preview with
+         status badges (matched / mismatched / missing-server /
+         missing-file). Apply Fix is per-row so admins can update only
+         the lots they trust, leaving the rest untouched. -->
+    <div class="tc" id="tc-pricecheck">
+      <div class="card">
+        <h2>Price Check <span style="font-weight:400;font-size:12px;color:var(--text3)">Reconcile an external price sheet against the saved lot ledger</span></h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+          <div class="fg" style="margin:0;min-width:260px">
+            <label data-term-auction="singular">Auction</label>
+            <select id="pc-auction"><option value="">Loading…</option></select>
+          </div>
+          <div class="fg" style="margin:0;min-width:280px">
+            <label>Price Sheet (XLSX / XLS)</label>
+            <input type="file" id="pc-file" accept=".xlsx,.xls" onchange="pcOnFileChange()">
+          </div>
+          <button class="btn btn-g" onclick="pcVerify()">Verify Prices</button>
+          <button class="btn btn-a" onclick="pcDownload()">Download Annotated</button>
+          <button class="btn btn-o" onclick="pcClear()">Clear</button>
+        </div>
+        <div id="pc-hint" style="font-size:12px;color:var(--text3);margin-bottom:8px">
+          Upload the external price sheet, then click <b>Verify Prices</b>. The first sheet is used. Columns
+          recognised (case-insensitive): <code>Lot No</code>, <code>Price</code>, optional <code>Buyer Code</code>.
+          Existing prices on the server are never overwritten in bulk — apply each fix individually.
+        </div>
+        <div id="pc-result"></div>
+        <div id="pc-preview" style="margin-top:14px"></div>
+      </div>
+    </div>
   </div>
   </div>
 </div>
@@ -4072,6 +4104,10 @@ function go(tab){
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
     bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,tally:loadTallyAuctions,
+    // Price Check — populate the auction picker (mode-filtered server-side)
+    // on tab open. File picker + buttons remain idle until the user picks
+    // a sheet and clicks Verify.
+    pricecheck: () => { if (typeof loadPriceCheckAuctions === 'function') loadPriceCheckAuctions(); },
     // Lazy-load the Delete All audit log when Backup opens so the
     // <details> drawer shows fresh data on first expand. loadDeleteLog
     // is idempotent — re-running just re-renders the table.
@@ -7879,6 +7915,11 @@ function searchLotsDebounced(_q){
 // Non-numeric tokens (legacy "A12") are preserved verbatim — only
 // pure-digit start AND end trigger range expansion, so alphanumeric
 // lot codes don't get mangled. Ranges wider than 10,000 are clamped.
+// Expand a freeform tick-list like "001-005, 010, A12" into
+// individual lot-no tokens. For numeric ranges the padding width of
+// the input is preserved — "001-005" expands to "001","002","003",
+// "004","005" (not "1","2","3","4","5") because lot_no values are
+// typically stored with leading zeros and looked up as strings.
 function _expandLotNoTokens(raw){
   const out = [];
   const segments = String(raw || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
@@ -7887,8 +7928,9 @@ function _expandLotNoTokens(raw){
     if (m) {
       let a = parseInt(m[1], 10), b = parseInt(m[2], 10);
       if (a > b) { const t = a; a = b; b = t; }
+      const width = Math.max(m[1].length, m[2].length);
       const span = Math.min(b - a + 1, 10000);
-      for (let i = 0; i < span; i++) out.push(String(a + i));
+      for (let i = 0; i < span; i++) out.push(String(a + i).padStart(width, '0'));
     } else {
       out.push(seg);
     }
@@ -10310,6 +10352,207 @@ async function exportJournal(){
   }
   const r=await fetch(B+url,{headers:{'Authorization':'Bearer '+T}});
   const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
+
+// ── Price Check ────────────────────────────────────────────
+// External price-sheet reconciliation. The server endpoints live in
+// server.js (/api/price-check/verify, /download, /apply-fix). The
+// flow here is: pick an auction, pick the file, click Verify. The
+// JSON response shape comes from _pcBuildReport — keep this client
+// aligned with that contract.
+async function loadPriceCheckAuctions(){
+  try{
+    const d=await j('/api/auctions');
+    const sel=document.getElementById('pc-auction');
+    if(!sel)return;
+    if(!d||d.length===0){
+      sel.innerHTML='<option value="">No '+termAuction(true,true)+' available</option>';
+    }else{
+      sel.innerHTML=d.map(a=>{
+        const mt = a.mode ? ' ['+a.mode+']' : '';
+        return `<option value="${a.id}">${esc(a.ano)} — ${fmtD(a.date)} (${a.lot_count} lots)${mt}</option>`;
+      }).join('');
+    }
+  }catch(e){showError(e)}
+}
+function pcOnFileChange(){
+  // Clear stale verify output when the user swaps files; download
+  // still works because it re-uploads.
+  const res=document.getElementById('pc-result');if(res)res.innerHTML='';
+  const pv=document.getElementById('pc-preview');if(pv)pv.innerHTML='';
+}
+function pcClear(){
+  const f=document.getElementById('pc-file');if(f)f.value='';
+  const res=document.getElementById('pc-result');if(res)res.innerHTML='';
+  const pv=document.getElementById('pc-preview');if(pv)pv.innerHTML='';
+}
+async function pcVerify(){
+  const aid=document.getElementById('pc-auction').value;
+  const file=document.getElementById('pc-file').files[0];
+  if(!aid){alert('Select '+termAuction(false,true)+' first');return}
+  if(!file){alert('Pick a price sheet (.xlsx or .xls)');return}
+  const res=document.getElementById('pc-result');
+  const pv=document.getElementById('pc-preview');
+  if(res)res.innerHTML='<div style="padding:10px;color:var(--text3)">Verifying…</div>';
+  if(pv)pv.innerHTML='';
+  try{
+    const fd=new FormData();fd.append('file',file);fd.append('auction_id',aid);
+    const r=await fetch(B+'/api/price-check/verify',{method:'POST',headers:{'Authorization':'Bearer '+T},body:fd});
+    const txt=await r.text();
+    let d; try{d=JSON.parse(txt)}catch(_){d={error:txt||('HTTP '+r.status)}}
+    if(!r.ok)throw new Error(d.error||'Verify failed');
+    _pcLastReport=d;
+    _pcRenderPreview(d);
+  }catch(e){
+    if(res)res.innerHTML='<div class="alert" style="padding:10px;color:#c00">'+esc(e.message||String(e))+'</div>';
+    showError(e);
+  }
+}
+let _pcLastReport=null;
+function _pcStatusBadge(s){
+  const map={
+    match:        ['#dcfce7','#166534','MATCH'],
+    server_diff:  ['#fef3c7','#92400e','PRICE Δ'],
+    missing_server:['#fee2e2','#991b1b','MISSING IN DB'],
+    missing_file: ['#e0e7ff','#3730a3','MISSING IN FILE'],
+    no_auction:   ['#fce7f3','#9d174d','NO '+termAuction(false,true).toUpperCase()],
+    server_empty: ['#f3f4f6','#374151','FILE EMPTY'],
+    unmatched:    ['#f3f4f6','#374151','—'],
+  };
+  const [bg,fg,lbl]=map[s]||map.unmatched;
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+bg+';color:'+fg+';font-size:11px;font-weight:600">'+lbl+'</span>';
+}
+function _pcCodeBadge(s,fc,dc){
+  const map={
+    match:      ['#dcfce7','#166534','OK'],
+    diff:       ['#fef3c7','#92400e','CODE Δ'],
+    file_blank: ['#e0e7ff','#3730a3','FILE BLANK'],
+    db_blank:   ['#fee2e2','#991b1b','DB BLANK'],
+    both_blank: ['#f3f4f6','#9ca3af','—'],
+  };
+  const [bg,fg,lbl]=map[s]||map.both_blank;
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+bg+';color:'+fg+';font-size:11px;font-weight:600">'+lbl+'</span>';
+}
+function _pcRenderPreview(d){
+  const res=document.getElementById('pc-result');
+  const pv=document.getElementById('pc-preview');
+  if(!res||!pv)return;
+  const fa=d.forcedAuction?(' for <b>'+esc(d.forcedAuction.ano)+'</b>'):'';
+  const colN=d.hasServerPriceCol?'<code>SERVER PRICE</code>':'<code>PRICE</code>';
+  const tile=(lbl,val,bg)=>('<div style="background:'+(bg||'var(--bg)')+';padding:10px 14px;border-radius:8px;min-width:120px">'+
+    '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">'+lbl+'</div>'+
+    '<div style="font-size:18px;font-weight:600;margin-top:2px">'+val+'</div></div>');
+  res.innerHTML =
+    '<div style="font-size:13px;color:var(--text3);margin-bottom:8px">Validated column: '+colN+fa+'. Total file rows + DB-only rows: <b>'+d.total+'</b>.</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+      tile('Matched',d.matched,'#dcfce7')+
+      tile('Price Δ',d.mismatched,'#fef3c7')+
+      tile('Missing in DB',d.missingServer,'#fee2e2')+
+      tile('Missing in File',d.missingFile,'#e0e7ff')+
+      tile('File Empty',d.serverEmpty,'#f3f4f6')+
+      tile('Code Δ',d.codeMismatched,'#fef3c7')+
+      tile('|Σ diff|',(d.totalAbsDiff||0).toFixed(2),'#fde68a')+
+      tile('Σ diff',(d.totalSignedDiff||0).toFixed(2),'#fde68a')+
+    '</div>';
+
+  if(!d.rows||d.rows.length===0){pv.innerHTML='<div style="padding:14px;color:var(--text3)">No rows to preview.</div>';return}
+  // Sort: differences first, then missing/empty, then matches.
+  const order={server_diff:0,missing_server:1,missing_file:2,server_empty:3,no_auction:4,match:5,unmatched:6};
+  const rows=d.rows.slice().sort((a,b)=>(order[a.status]??99)-(order[b.status]??99));
+  let html='<div style="overflow-x:auto;max-height:520px;border:1px solid var(--spice-line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+    '<thead style="position:sticky;top:0;background:var(--spice-cream);z-index:1"><tr>'+
+    '<th style="text-align:left;padding:8px">Row</th>'+
+    '<th style="text-align:left;padding:8px">Lot</th>'+
+    '<th style="text-align:left;padding:8px">'+esc(termAuction(false).toUpperCase())+' No</th>'+
+    '<th style="text-align:right;padding:8px">File Price</th>'+
+    '<th style="text-align:right;padding:8px">DB Price</th>'+
+    '<th style="text-align:right;padding:8px">Δ</th>'+
+    '<th style="text-align:left;padding:8px">File Code</th>'+
+    '<th style="text-align:left;padding:8px">DB Code</th>'+
+    '<th style="text-align:left;padding:8px">Status</th>'+
+    '<th style="text-align:left;padding:8px">Code</th>'+
+    '<th style="text-align:left;padding:8px">Action</th>'+
+    '</tr></thead><tbody>';
+  for(const r of rows){
+    const tint = r.status==='server_diff'?'background:#fffbeb'
+              : r.status==='missing_server'?'background:#fef2f2'
+              : r.status==='missing_file'?'background:#eef2ff'
+              : r.status==='no_auction'?'background:#fdf2f8'
+              : '';
+    const fp=r.file_server_price==null?'':(Number(r.file_server_price)||0).toFixed(2);
+    const dp=r.db_price==null?'':(Number(r.db_price)||0).toFixed(2);
+    const df=r.diff==null?'':(r.diff>0?'+':'')+r.diff.toFixed(2);
+    let actions='';
+    if(r.lot_id){
+      const canPrice = (r.status==='server_diff' || r.status==='server_empty' && r.file_server_price!=null);
+      const canCode  = (r.code_status==='diff' || r.code_status==='db_blank');
+      if(canPrice||canCode){
+        const pArg=canPrice?(r.file_server_price):'null';
+        const cArg=canCode?("'"+String(r.file_code).replace(/'/g,"\\'")+"'"):'null';
+        actions='<button class="btn btn-g needs-lot-write" style="padding:3px 10px;font-size:12px" onclick="pcApplyFix(this,'+r.lot_id+','+pArg+','+cArg+')">Apply</button>';
+      }else{
+        actions='<span style="color:var(--text3);font-size:12px">—</span>';
+      }
+    }else{
+      actions='<span style="color:var(--text3);font-size:12px">—</span>';
+    }
+    html+='<tr style="'+tint+';border-top:1px solid var(--spice-line)">'+
+      '<td style="padding:6px 8px">'+(r.row||'')+'</td>'+
+      '<td style="padding:6px 8px"><b>'+esc(r.lot||'')+'</b></td>'+
+      '<td style="padding:6px 8px">'+esc(r.auction_ano||'')+'</td>'+
+      '<td style="padding:6px 8px;text-align:right">'+fp+'</td>'+
+      '<td style="padding:6px 8px;text-align:right">'+dp+'</td>'+
+      '<td style="padding:6px 8px;text-align:right;font-weight:600">'+df+'</td>'+
+      '<td style="padding:6px 8px">'+esc(r.file_code||'')+'</td>'+
+      '<td style="padding:6px 8px">'+esc(r.db_code||'')+'</td>'+
+      '<td style="padding:6px 8px">'+_pcStatusBadge(r.status)+'</td>'+
+      '<td style="padding:6px 8px">'+_pcCodeBadge(r.code_status,r.file_code,r.db_code)+'</td>'+
+      '<td style="padding:6px 8px">'+actions+'</td>'+
+    '</tr>';
+  }
+  html+='</tbody></table></div>';
+  pv.innerHTML=html;
+  // Re-apply permission gating to freshly minted buttons.
+  if(typeof applyPermissionAttributes==='function'){try{applyPermissionAttributes()}catch(_){}}
+}
+async function pcDownload(){
+  const aid=document.getElementById('pc-auction').value;
+  const file=document.getElementById('pc-file').files[0];
+  if(!aid){alert('Select '+termAuction(false,true)+' first');return}
+  if(!file){alert('Pick a price sheet (.xlsx or .xls)');return}
+  try{
+    const fd=new FormData();fd.append('file',file);fd.append('auction_id',aid);
+    const r=await fetch(B+'/api/price-check/download',{method:'POST',headers:{'Authorization':'Bearer '+T},body:fd});
+    if(!r.ok){
+      const txt=await r.text();let msg=txt;try{msg=JSON.parse(txt).error||txt}catch(_){}throw new Error(msg||('HTTP '+r.status));
+    }
+    const blob=await r.blob();
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='price-check-result.xlsx';a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  }catch(e){showError(e)}
+}
+async function pcApplyFix(btn,lotId,price,code){
+  if(!lotId){return}
+  const body={lot_id:lotId};
+  if(price!==null&&price!==undefined)body.price=price;
+  if(code!==null&&code!==undefined&&code!=='null')body.code=code;
+  const orig=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='…'}
+  try{
+    const r=await fetch(B+'/api/price-check/apply-fix',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+      body:JSON.stringify(body)});
+    const txt=await r.text();let d;try{d=JSON.parse(txt)}catch(_){d={error:txt}}
+    if(!r.ok){
+      if(r.status===423)throw new Error(d.error||'Lot is locked');
+      throw new Error(d.error||'Apply failed');
+    }
+    if(btn){btn.textContent='✓ Applied';btn.classList.remove('btn-g');btn.classList.add('btn-o');btn.disabled=true}
+    toast('Lot updated');
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent=orig}
+    showError(e);
+  }
+}
 
 // ── Preview (shared across Sales / Purchase / Agri) ────────
 async function previewInvoice(type){
