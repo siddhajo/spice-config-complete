@@ -3993,10 +3993,10 @@ async function loadStats(auctionId){
   ` : (A ? `
     <div class="auction-hero" style="background:var(--spice-cardamom-lt);color:var(--spice-text-main)">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px">
-        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">Current Auction</div>
+        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">Current ${termAuction()}</div>
         ${picker}
       </div>
-      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">Trade #${esc(A.ano)}</div>
+      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">${termAuction()} #${esc(A.ano)}</div>
       <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">${fmtD(A.date)} · ${esc(A.crop_type||'')}</div>
       <div class="auction-hero-stats">
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.totalLots||0}</strong>Total Lots</div>
@@ -4014,10 +4014,10 @@ async function loadStats(auctionId){
     </div>
   ` : `
     <div class="auction-hero" style="background:var(--tab-bg);color:var(--spice-text-main)">
-      <div class="auction-hero-label" style="color:var(--spice-text-mute)">No active auction</div>
-      <div class="auction-hero-number" style="color:var(--spice-text-main);font-size:22px">Create your first auction</div>
-      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Head to the Auctions tab to get started.</div>
-      <button class="btn btn-a" onclick="go('auctions')" style="margin-top:8px">+ New Auction</button>
+      <div class="auction-hero-label" style="color:var(--spice-text-mute)">No active ${termAuction(false, true)}</div>
+      <div class="auction-hero-number" style="color:var(--spice-text-main);font-size:22px">Create your first ${termAuction(false, true)}</div>
+      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Head to the ${termAuction(true)} tab to get started.</div>
+      <button class="btn btn-a" onclick="go('auctions')" style="margin-top:8px">+ New ${termAuction()}</button>
     </div>
   `);
 
@@ -6533,22 +6533,23 @@ function modeBadge(mode){
 }
 
 async function loadAuctions(){const d=await j('/api/auctions');
+  const tA = termAuction(), tALower = termAuction(false, true), tAPlLower = termAuction(true, true);
   DataTable.mount('auctions-list', d, {
-    emptyState: { icon: 'auctions', title: "No auctions yet", body: "Create your first auction (trade) from the Add Auction button to start entering lots." },
+    emptyState: { icon: 'auctions', title: 'No ' + tAPlLower + ' yet', body: 'Create your first ' + tALower + ' from the Add ' + tA + ' button to start entering lots.' },
     columns: [
-      { key:'ano', label:'Trade No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>${modeBadge(a.mode)}` },
+      { key:'ano', label:tA+' No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>${modeBadge(a.mode)}` },
       { key:'date', label:'Date', sort:'date', render:(a)=>fmtD(a.date) },
       { key:'crop_type', label:'Type', sort:'text' },
       { key:'lot_count', label:'Lots', sort:'number', numeric:true, render:(a)=>String(a.lot_count||0) },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(a)=>
-          iconBtn('edit','Edit auction',`openAuctionEdit(${JSON.stringify(a).replace(/"/g,'&quot;')})`)
-          + iconBtn('del','Delete auction',`delAuction(${a.id})`) }
+          iconBtn('edit','Edit '+tALower,`openAuctionEdit(${JSON.stringify(a).replace(/"/g,'&quot;')})`)
+          + iconBtn('del','Delete '+tALower,`delAuction(${a.id})`) }
     ]
   });
 }
 
 function openAuctionAdd(){
-  document.getElementById('auction-modal-title').textContent='New Auction';
+  document.getElementById('auction-modal-title').textContent='New ' + termAuction();
   document.getElementById('a-id').value='';
   document.getElementById('a-ano').value='';
   document.getElementById('a-date').value='';
@@ -6564,7 +6565,7 @@ function openAuctionAdd(){
   showModal('auction-modal');
 }
 function openAuctionEdit(a){
-  document.getElementById('auction-modal-title').textContent='Edit Auction';
+  document.getElementById('auction-modal-title').textContent='Edit ' + termAuction();
   document.getElementById('a-id').value=a.id;
   document.getElementById('a-ano').value=a.ano||'';
   document.getElementById('a-date').value=a.date||'';
@@ -6581,15 +6582,15 @@ async function saveAuction(){
   const id=document.getElementById('a-id').value;
   const body={ano:document.getElementById('a-ano').value,date:document.getElementById('a-date').value,
     crop_type:document.getElementById('a-crpt').value,state:document.getElementById('a-state').value};
-  if(!body.ano||!body.date){alert('Trade No and Date are required');return}
+  if(!body.ano||!body.date){alert(termAuction()+' No and Date are required');return}
   try{
     const r=await fetch(B+(id?`/api/auctions/${id}`:'/api/auctions'),{method:id?'PUT':'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(body)});
     if(!r.ok){const d=await r.json();throw new Error(d.error||'Save failed')}
-    hideModal('auction-modal');toast(id?'Auction updated':'Auction created');loadAuctions();
+    hideModal('auction-modal');toast(termAuction() + (id?' updated':' created'));loadAuctions();
   }catch(e){showError(e)}
 }
-async function delAuction(id){if(!confirm('Delete auction and ALL its lots?'))return;await j(`/api/auctions/${id}`,{method:'DELETE'});loadAuctions()}
+async function delAuction(id){if(!confirm('Delete ' + termAuction(false,true) + ' and ALL its lots?'))return;await j(`/api/auctions/${id}`,{method:'DELETE'});loadAuctions()}
 
 async function importAuction(){
   const fileInput=document.getElementById('ia-file');
@@ -6778,11 +6779,11 @@ async function loadPurEligibleSellers(){
 }
 
 function openGenInvModal(){
-  if(!document.getElementById('inv-auction').value){alert('Select an auction first');return}
+  if(!document.getElementById('inv-auction').value){alert('Select ' + termAuction(false, true) + ' first');return}
   loadInvEligibleBuyers();showModal('gen-inv-modal');
 }
 function openGenPurModal(){
-  if(!document.getElementById('pur-auction').value){alert('Select an auction first');return}
+  if(!document.getElementById('pur-auction').value){alert('Select ' + termAuction(false, true) + ' first');return}
   loadPurEligibleSellers();showModal('gen-pur-modal');
 }
 
@@ -6792,7 +6793,7 @@ async function openGenAllModal(kind){
   _genAllKind=kind;
   const aidMap={invoices:'inv-auction',purchases:'pur-auction',bills:'bill-auction'};
   const aid=document.getElementById(aidMap[kind])?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const titles={invoices:'Generate Sales Invoices for All Buyers',purchases:'Generate Purchase Invoices for All Dealers',bills:'Generate Bills of Supply for All Agriculturists'};
   const descs={
     invoices:'Creates one invoice per unique buyer with lots in this auction. Already-invoiced lots are skipped.',
@@ -6852,7 +6853,7 @@ async function diagnoseEligibility(){
   const kind=_genAllKind;
   if(kind!=='invoices'){alert('Diagnose currently supports Sales Invoices only.');return}
   const aid=document.getElementById('inv-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const diag=document.getElementById('ga-diag');
   diag.style.display='block';
   diag.textContent='Loading diagnostics…';
@@ -6930,7 +6931,7 @@ const LORRY_LABELS={lot_slip_code:'Lot Slip (Code)',truck_list:'Truck List',buye
 async function downloadLorry(type,format){
   format=format||'xlsx';
   const aid=document.getElementById('lorry-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const label=LORRY_LABELS[type]||type;
   await withOverlay(`Generating ${label} (${format.toUpperCase()})…`, async () => {
     const r=await fetch(B+`/api/lorry-reports/${type}/${aid}?format=${format}`,{headers:{'Authorization':'Bearer '+T}});
@@ -6986,7 +6987,7 @@ async function refreshLots(btn){
   const sel = document.getElementById('lot-auction');
   const aid = sel && sel.value;
   if (!aid) {
-    toast('Select an auction first');
+    toast('Select ' + termAuction(false, true) + ' first');
     return;
   }
   // Direct-click feedback: briefly animate the button so the user knows
@@ -7147,7 +7148,7 @@ async function loadLots(opts){
   // so they stay accurate; only the rendered table is windowed.
   const _lotsSlice = applyClientSidePagination(_lotsPager, 'lots-pager', gotoLotsPage, arr);
   DataTable.mount('lots-list', _lotsSlice, {
-    emptyState: { icon: 'lots', title: "No lots in this auction yet", body: "Add your first lot using the form on the left — enter Lot #, Name, Qty, and Price to get started." },  columns });
+    emptyState: { icon: 'lots', title: 'No lots in this ' + termAuction(false, true) + ' yet', body: 'Add your first lot using the form on the left — enter Lot #, Name, Qty, and Price to get started.' },  columns });
 }
 
 function openLotEdit(l){
@@ -7261,7 +7262,7 @@ async function validateLots(){
 // ── Invoices ──────────────────────────────────────────────
 async function generateInvoice(){
   const aid=document.getElementById('inv-auction').value;
-  if(!aid){alert('Please select an auction first');return}
+  if(!aid){alert('Please select ' + termAuction(false, true) + ' first');return}
   const saleType=document.getElementById('gi-sale').value;
   const startInvNo=parseInt(document.getElementById('gi-invno').value.trim(),10);
   if(!startInvNo||isNaN(startInvNo)||startInvNo<1){alert('Enter a valid starting invoice number');return}
@@ -7456,7 +7457,7 @@ async function revertInvoice(id, buyerName, invLabel){
 
 async function revertAllInvoices(){
   const aid=document.getElementById('inv-auction').value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   if(!confirm('Revert ALL invoices for this auction?\n\nEvery invoice in this auction will be deleted, and every lot will become eligible for re-invoicing. This cannot be undone.\n\nContinue?'))return;
   const typed=prompt('To confirm, type REVERT in capitals:');
   if(typed!=='REVERT'){alert('Cancelled.');return}
@@ -7856,7 +7857,7 @@ async function delInvoice(id){if(!confirm('Delete this invoice? Related lots wil
 // ── Purchases ─────────────────────────────────────────────
 async function generatePurchase(){
   const aid=document.getElementById('pur-auction').value;
-  if(!aid){alert('Please select an auction first');return}
+  if(!aid){alert('Please select ' + termAuction(false, true) + ' first');return}
   const sellerName=document.getElementById('gp-seller').value.trim();
   const invoiceNo=document.getElementById('gp-invno').value.trim();
   if(!sellerName){alert('Enter seller name');return}
@@ -8037,7 +8038,7 @@ async function loadPayments(opts){
     // so "Top sellers" reflects every seller, not just the current page.
     const _paySlice = applyClientSidePagination(_paymentsPager, 'payments-pager', gotoPaymentsPage, arr);
     DataTable.mount('payments-list', _paySlice, {
-      emptyState: { icon: 'payments', title: "No payments to summarize yet", body: "Calculate the lots in this auction to see per-seller payable amounts here." },
+      emptyState: { icon: 'payments', title: 'No payments to summarize yet', body: 'Calculate the lots in this ' + termAuction(false, true) + ' to see per-seller payable amounts here.' },
       columns: [
         { key:'name', label:'Seller', sort:'text',
           render:(p)=>`<span style="font-weight:600;color:var(--spice-text-main)">${esc(p.name||'')}</span>` },
@@ -8171,7 +8172,7 @@ function renderExportBtns(){document.getElementById('export-btns').innerHTML=Obj
 }).join('')}
 async function exportType(type,format){format=format||'xlsx';
   const aid=document.getElementById('exp-auction')?.value||document.getElementById('pay-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const label = (EXP_LABELS[type]||type);
   await withOverlay(`Exporting ${label} (${format.toUpperCase()})…`, async () => {
     // CSV exports ignore format query param — server picks ext from EXPORT_TYPES.
@@ -8439,7 +8440,7 @@ function loadTallyAuctions(){
 }
 async function tallyPreview(type){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const target=document.getElementById('tally-preview-'+type);
   if(target)target.textContent='Loading…';
   try{
@@ -8475,7 +8476,7 @@ async function tallyPreview(type){
 }
 async function tallyDownload(type){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const label=TALLY_LABELS[type]||type;
   await withOverlay(`Generating Tally ${label} XML…`, async () => {
     const r=await fetch(B+`/api/tally/export/${type}/${aid}`,{headers:{'Authorization':'Bearer '+T}});
@@ -8498,7 +8499,7 @@ async function tallyDownload(type){
 // page per buyer (continuation pages with C/D + B/F when lots overflow).
 async function downloadDebitNotePDF(){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   await withOverlay('Generating debit-note PDF…', async () => {
     const r=await fetch(B+`/api/tally/debit-note-print/${aid}`,{headers:{'Authorization':'Bearer '+T}});
     if(!r.ok){
@@ -8526,7 +8527,7 @@ const TALLY_PARTY_KIND_BG={sales:'var(--green-bg)',rd_purchase:'var(--spice-saff
 const TALLY_PARTY_KIND_CO={sales:'isp',rd_purchase:'asp',urd_purchase:'asp'};
 async function loadTallyParties(){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const list=document.getElementById('tally-party-list');
   const pvList=document.getElementById('tally-pv-list');
   const loadingHtml='<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Loading parties…</div>';
@@ -8596,7 +8597,7 @@ function renderTallyPartyList(){
 }
 async function tallyDownloadParty(kind,partyName){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   await withOverlay(`Generating ${partyName} ledger XML…`, async () => {
     const url=B+`/api/tally/party-ledger/${kind}/${aid}?name=${encodeURIComponent(partyName)}`;
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+T}});
@@ -8738,7 +8739,7 @@ function renderTallyPartyVoucherList(){
 }
 async function tallyDownloadPartyVoucher(type,partyName){
   const aid=document.getElementById('tally-auction')?.value;
-  if(!aid){alert('Select an auction first');return}
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   await withOverlay(`Generating ${TALLY_LABELS[type]||type} voucher for ${partyName}…`, async () => {
     const url=B+`/api/tally/party-voucher/${type}/${aid}?name=${encodeURIComponent(partyName)}`;
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+T}});

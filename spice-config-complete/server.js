@@ -1231,6 +1231,23 @@ function currentBusinessMode(db) {
     return row && row.value ? String(row.value) : '';
   } catch (_) { return ''; }
 }
+// User-facing noun for the active business mode.
+// e-Trade → "Trade" / "Trades"; e-Auction → "Auction" / "Auctions".
+// Accepts either a cfg object (preferred — caller already loaded
+// settings) or a db handle. Used in filenames, PDF headers, XLSX sheet
+// names, and any other human-readable string emitted by the server.
+function termAuction(cfgOrDb, plural, lower) {
+  let mode = '';
+  if (cfgOrDb && typeof cfgOrDb.business_mode === 'string') {
+    mode = cfgOrDb.business_mode;
+  } else if (cfgOrDb && typeof cfgOrDb.get === 'function') {
+    mode = currentBusinessMode(cfgOrDb);
+  }
+  if (!mode) mode = 'e-Auction';
+  const isTrade = (mode === 'e-Trade');
+  const word = isTrade ? (plural ? 'Trades' : 'Trade') : (plural ? 'Auctions' : 'Auction');
+  return lower ? word.toLowerCase() : word;
+}
 // Returns { sql, params } that filter rows to the current business mode.
 // `prefix` is the SQL prefix that resolves to the auctions row's `mode`
 // column — usually 'auctions.mode' (when the query already JOINs auctions)
@@ -1325,13 +1342,17 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), asy
 
     // Cache of resolved auctions so we don't query the DB for every row
     const auctionCache = new Map(); // key = "ano|date" → {id, ano, date}
+    // Stamp the current business mode on auctions created by import, matching
+    // the manual-create path (POST /api/auctions). Without this, imported
+    // auctions get mode='' and leak into both e-Trade and e-Auction views.
+    const importMode = currentBusinessMode(db);
     const resolveAuction = (ano, dateStr) => {
       const key = `${ano}|${dateStr}`;
       if (auctionCache.has(key)) return auctionCache.get(key);
       let auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ?', [ano, dateStr]);
       if (!auc) {
-        db.run('INSERT INTO auctions (ano, date, crop_type, state) VALUES (?,?,?,?)',
-          [ano, dateStr || new Date().toISOString().slice(0, 10), cropType, state]);
+        db.run('INSERT INTO auctions (ano, date, crop_type, state, mode) VALUES (?,?,?,?,?)',
+          [ano, dateStr || new Date().toISOString().slice(0, 10), cropType, state, importMode]);
         auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ? ORDER BY id DESC LIMIT 1', [ano, dateStr]);
       }
       auctionCache.set(key, auc);
@@ -1556,7 +1577,10 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), asy
   }
 });
 
-// ── Download Auction/Lots template XLSX ──────────────────────
+// ── Download Trade/Lots template XLSX ──────────────────────
+// Filename adapts to the active business mode so the user sees a
+// "trade-lots-template.xlsx" download in e-Trade and
+// "auction-lots-template.xlsx" in e-Auction.
 app.get('/api/auctions/template', requireExport, async (req, res) => {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Lots');
@@ -1573,7 +1597,8 @@ app.get('/api/auctions/template', requireExport, async (req, res) => {
     pqty: 0, prate: 0, puramt: 0, cgst: 0, sgst: 0, igst: 0, advance: 0, balance: 0 });
   const buf = await wb.xlsx.writeBuffer();
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="auction-lots-template.xlsx"');
+  const tName = termAuction(getDb(), false, true);   // 'trade' or 'auction'
+  res.setHeader('Content-Disposition', `attachment; filename="${tName}-lots-template.xlsx"`);
   res.send(Buffer.from(buf));
 });
 
@@ -3903,12 +3928,13 @@ app.get('/api/stats', requireView, (req, res) => {
   );
 
   // Recent invoices (last 5) — mode-filtered via the parent auction.
+  // No alias on FROM: mwInv's subquery references `invoices.auction_id`,
+  // which SQLite refuses to resolve once the table is aliased.
   const recentInvoices = db.all(
-    `SELECT i.id, i.sale, i.invo, i.buyer, i.buyer1, i.tot, i.date,
-            i.place
-     FROM invoices i
+    `SELECT id, sale, invo, buyer, buyer1, tot, date, place
+     FROM invoices
      ${mwInv.sql ? 'WHERE 1=1' + mwInv.sql : ''}
-     ORDER BY i.id DESC LIMIT 5`,
+     ORDER BY id DESC LIMIT 5`,
     mwInv.params
   );
 
