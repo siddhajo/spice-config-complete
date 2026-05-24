@@ -18,7 +18,9 @@ const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, DB_PATH, replaceFromBuffer } = require('./db');
 const { initCompanySettings, CATEGORIES, getSetting, getAllSettings, updateSettings, getSettingsFlat, getGSTRates } = require('./company-config');
-const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, listAgriSellers, getPaymentSummary, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, round2, round0 } = require('./calculations');
+const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, listAgriSellers, getPaymentSummary, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const round0 = (n) => Math.round(Number(n) || 0);
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF } = require('./invoice-pdf');
 const { EXPORT_TYPES, createExcelBuffer } = require('./exports');
 const { getCompanyHeader, writeXlsxCompanyHeader } = require('./report-formatters');
@@ -194,7 +196,7 @@ function requireAuth(req, res, next) {
   const session = db.get(
     `SELECT * FROM sessions
      WHERE token = ?
-       AND (expires_at IS NULL OR expires_at >= datetime('now','localtime'))`,
+       AND (last_used_at IS NULL OR last_used_at >= datetime('now','-${SESSION_TTL_DAYS} days'))`,
     [token]
   );
   if (!session) {
@@ -489,14 +491,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   }
   const token = crypto.randomBytes(32).toString('hex');
   db.run(
-    `INSERT INTO sessions (token, user_id, device_label, expires_at)
-     VALUES (?, ?, ?, datetime('now','localtime','+${SESSION_TTL_DAYS} days'))`,
+    `INSERT INTO sessions (token, user_id, device_label) VALUES (?, ?, ?)`,
     [token, user.id, device_label || '']
   );
   db.run(
-    `DELETE FROM sessions
-     WHERE (expires_at IS NOT NULL AND expires_at < datetime('now','localtime'))
-        OR last_used_at < datetime('now','-30 days')`
+    `DELETE FROM sessions WHERE last_used_at < datetime('now','-${SESSION_TTL_DAYS} days')`
   );
   const permissions = Array.from(ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS.viewer);
   res.json({
