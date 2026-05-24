@@ -1391,9 +1391,367 @@ app.put('/api/auctions/:id', requireAuctionWrite, (req, res) => {
 });
 app.delete('/api/auctions/:id', requireDelete, (req, res) => {
   const db = getDb();
+  // Cascade through every child table (lots, allocations) before parent.
   db.run('DELETE FROM lots WHERE auction_id = ?', [req.params.id]);
+  db.run('DELETE FROM lot_allocations WHERE auction_id = ?', [req.params.id]);
   db.run('DELETE FROM auctions WHERE id = ?', [req.params.id]);
   res.json({ success: true });
+});
+
+// ══════════════════════════════════════════════════════════════
+// LOT ALLOCATIONS
+// ══════════════════════════════════════════════════════════════
+// Per-auction, per-branch lot-number ranges. The Auctions tab opens
+// a modal (Edit + Reassign tabs) that drives these endpoints. Edit
+// rewrites the whole allocation set; Reassign moves an unused range
+// from one branch to another by re-bucketing the affected rows.
+//
+// Lot number format: anything matching ^[A-Za-z]*\d+$ (optional alpha
+// prefix + digits). We enumerate by parsing the digit tail. Lot
+// numbers with mixed prefix WITHIN a range are rejected — start_lot
+// and end_lot must share the same prefix.
+
+// Parse "001" → {prefix:'', num:1, padLen:3}, "A12" → {prefix:'A', num:12, padLen:2}.
+// Returns null on invalid input so the caller can validate.
+function parseLotNo(s) {
+  const m = String(s || '').trim().match(/^([A-Za-z]*)(\d+)$/);
+  if (!m) return null;
+  return { prefix: m[1].toUpperCase(), num: parseInt(m[2], 10), padLen: m[2].length };
+}
+// Build a normalized lot number from a prefix + integer + pad length.
+function buildLotNo(prefix, num, padLen) {
+  return prefix + String(num).padStart(padLen, '0');
+}
+// Enumerate every lot number in [start, end] inclusive. Throws if
+// start/end don't parse, have different prefixes, or end < start.
+function enumerateRange(startLot, endLot) {
+  const s = parseLotNo(startLot);
+  const e = parseLotNo(endLot);
+  if (!s) throw new Error(`Invalid start lot "${startLot}"`);
+  if (!e) throw new Error(`Invalid end lot "${endLot}"`);
+  if (s.prefix !== e.prefix) throw new Error(`Start and end must share the same prefix (${startLot} vs ${endLot})`);
+  if (e.num < s.num) throw new Error(`End lot (${endLot}) must be >= start lot (${startLot})`);
+  // Pad to the longer of the two so "1" and "100" produce "001..100"
+  const pad = Math.max(s.padLen, e.padLen);
+  const out = [];
+  for (let n = s.num; n <= e.num; n++) out.push(buildLotNo(s.prefix, n, pad));
+  return out;
+}
+
+// GET /api/auctions/:id/allocations — list. Empty array when none.
+app.get('/api/auctions/:id/allocations', requireView, (req, res) => {
+  const db = getDb();
+  const rows = db.all(
+    `SELECT id, branch, start_lot, end_lot FROM lot_allocations
+     WHERE auction_id = ? ORDER BY branch, id`,
+    [parseInt(req.params.id, 10)]
+  );
+  res.json({ allocations: rows });
+});
+
+// POST /api/auctions/:id/allocations — bulk-replace. Body: { allocations: [{branch, start_lot, end_lot}, ...] }.
+// Validation:
+//   • Every range must parse cleanly (start/end share prefix, end >= start).
+//   • Within a branch, ranges must NOT overlap.
+//   • If an existing range is being dropped AND saved lots fall inside
+//     it, the request is rejected. The operator must delete the lots
+//     first (so they aren't silently orphaned from any branch).
+app.post('/api/auctions/:id/allocations', requireAuctionWrite, (req, res) => {
+  const auctionId = parseInt(req.params.id, 10);
+  const next = Array.isArray(req.body.allocations) ? req.body.allocations : [];
+  const db = getDb();
+  try {
+    // Normalize + parse every range up-front so the validation errors
+    // include the bad input verbatim.
+    const ranges = next.map((r, i) => {
+      const branch = String(r.branch || '').trim().toUpperCase();
+      const startLot = String(r.start_lot || '').trim();
+      const endLot   = String(r.end_lot || '').trim();
+      if (!branch) throw new Error(`Row ${i + 1}: branch is required`);
+      if (!startLot || !endLot) throw new Error(`Row ${i + 1}: start and end lots required`);
+      const lots = enumerateRange(startLot, endLot);   // throws on bad data
+      return { branch, startLot, endLot, lots };
+    });
+    // Overlap check within each branch
+    const byBranch = new Map();
+    for (const r of ranges) {
+      if (!byBranch.has(r.branch)) byBranch.set(r.branch, new Set());
+      const seen = byBranch.get(r.branch);
+      for (const lot of r.lots) {
+        if (seen.has(lot)) throw new Error(`Overlap in ${r.branch}: lot ${lot} appears in two ranges`);
+        seen.add(lot);
+      }
+    }
+    // Build set of lot_no values across the NEW allocations so we can
+    // tell whether each existing saved-lot still has a home.
+    const nextLotsByBranch = new Map();
+    for (const r of ranges) {
+      if (!nextLotsByBranch.has(r.branch)) nextLotsByBranch.set(r.branch, new Set());
+      for (const l of r.lots) nextLotsByBranch.get(r.branch).add(l);
+    }
+    // Saved lots for this auction — any that fall outside the new
+    // allocation set are "orphaned" and we refuse to save.
+    const savedLots = db.all(
+      `SELECT lot_no, branch FROM lots WHERE auction_id = ?`,
+      [auctionId]
+    );
+    const orphaned = [];
+    for (const sl of savedLots) {
+      const br = String(sl.branch || '').trim().toUpperCase();
+      const lot = String(sl.lot_no || '').trim();
+      const set = nextLotsByBranch.get(br);
+      if (!set || !set.has(lot)) orphaned.push(`${br || '(no branch)'} #${lot}`);
+    }
+    if (orphaned.length) {
+      const sample = orphaned.slice(0, 6).join(', ') + (orphaned.length > 6 ? `, …+${orphaned.length - 6} more` : '');
+      throw new Error(`Cannot save: ${orphaned.length} saved lot(s) would fall outside the new allocations — delete those lots first or extend the ranges. Examples: ${sample}`);
+    }
+    // Replace the allocation set atomically.
+    db.run('DELETE FROM lot_allocations WHERE auction_id = ?', [auctionId]);
+    for (const r of ranges) {
+      db.run(
+        'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+        [auctionId, r.branch, r.startLot, r.endLot]
+      );
+    }
+    res.json({ success: true, saved: ranges.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// GET /api/auctions/:id/allocation-stats — the rich payload the modal
+// uses to render chips. For each branch + range, returns every lot
+// number in the range with `used: true|false` and (when used) the
+// seller name. Server-side enumeration avoids the client needing to
+// know how lot numbers are constructed.
+app.get('/api/auctions/:id/allocation-stats', requireView, (req, res) => {
+  const auctionId = parseInt(req.params.id, 10);
+  const db = getDb();
+  // Pull every saved lot for this auction, keyed by branch+lot_no →
+  // seller. We do one query instead of N (one per range) because the
+  // total lot count per auction is small.
+  const saved = db.all(
+    `SELECT lot_no, branch, name FROM lots WHERE auction_id = ?`,
+    [auctionId]
+  );
+  const savedMap = new Map();
+  for (const r of saved) {
+    const k = String(r.branch || '').trim().toUpperCase() + '::' + String(r.lot_no || '').trim();
+    savedMap.set(k, r.name || '');
+  }
+  const rows = db.all(
+    `SELECT id, branch, start_lot, end_lot FROM lot_allocations
+     WHERE auction_id = ? ORDER BY branch, id`,
+    [auctionId]
+  );
+  // Group ranges by branch. Each branch's `ranges` array carries the
+  // chip-level detail the UI renders.
+  const byBranch = new Map();
+  for (const row of rows) {
+    const br = String(row.branch || '').trim().toUpperCase();
+    if (!byBranch.has(br)) byBranch.set(br, { branch: br, total: 0, used: 0, ranges: [] });
+    const entry = byBranch.get(br);
+    let lots = [];
+    try {
+      lots = enumerateRange(row.start_lot, row.end_lot).map(lotNo => {
+        const key = br + '::' + lotNo;
+        const seller = savedMap.get(key);
+        // `state` is what the reassign tile UI keys colors off of:
+        //   'free'      → allocated but no lot saved (assignable)
+        //   'booked'    → a lot already exists, can't reassign
+        const used = savedMap.has(key);
+        return {
+          lot: lotNo,
+          used,
+          seller: used ? seller : '',
+          state: used ? 'booked' : 'allocated',
+          booked: used,
+        };
+      });
+    } catch (e) {
+      // A corrupted range (bad start/end) gets logged but doesn't
+      // crash the stats endpoint — the UI still shows the branch.
+      console.error(`[allocation-stats] range parse failed for auction ${auctionId} branch ${br}:`, e.message);
+      lots = [];
+    }
+    const rangeTotal = lots.length;
+    const rangeUsed  = lots.filter(l => l.used).length;
+    entry.total += rangeTotal;
+    entry.used  += rangeUsed;
+    entry.ranges.push({
+      start: row.start_lot,
+      end:   row.end_lot,
+      total: rangeTotal,
+      used:  rangeUsed,
+      lots,
+    });
+  }
+  res.json({ stats: Array.from(byBranch.values()) });
+});
+
+// POST /api/auctions/:id/reassign-lots — move the unused [start..end]
+// range from one branch to another. Body: { from_branch, to_branch,
+// start_lot, end_lot }. Refuses to move a range that has saved lots
+// (use the Edit panel + manual lot deletion for that). The source
+// branch's covering range is split around the moved range; the dest
+// branch gains a new range (or extends an existing one).
+app.post('/api/auctions/:id/reassign-lots', requireAuctionWrite, (req, res) => {
+  const auctionId = parseInt(req.params.id, 10);
+  const fromBranch = String(req.body.from_branch || '').trim().toUpperCase();
+  const toBranch   = String(req.body.to_branch || '').trim().toUpperCase();
+  const startLot   = String(req.body.start_lot || '').trim();
+  const endLot     = String(req.body.end_lot || '').trim();
+  if (!fromBranch || !toBranch) return res.status(400).json({ error: 'from_branch and to_branch required' });
+  if (fromBranch === toBranch)  return res.status(400).json({ error: 'FROM and TO branches must differ' });
+  if (!startLot || !endLot)     return res.status(400).json({ error: 'start_lot and end_lot required' });
+  const db = getDb();
+  try {
+    const moving = enumerateRange(startLot, endLot);     // throws on bad input
+    const movingSet = new Set(moving);
+    // Refuse to move a range that's booked.
+    const booked = db.all(
+      `SELECT lot_no FROM lots WHERE auction_id = ? AND UPPER(branch) = ?`,
+      [auctionId, fromBranch]
+    ).filter(r => movingSet.has(String(r.lot_no || '').trim()));
+    if (booked.length) {
+      return res.status(400).json({
+        error: `Cannot reassign — ${booked.length} lot(s) in this range already have sellers. Delete those lots first.`,
+        bookedLots: booked.map(r => r.lot_no),
+      });
+    }
+    // Load FROM branch's covering allocation. We need to find the
+    // single range that contains ALL of [start..end]. If no single
+    // range covers it, we refuse — multi-range reassign would split
+    // the responsibility and isn't worth the complexity.
+    const fromRanges = db.all(
+      `SELECT id, start_lot, end_lot FROM lot_allocations
+       WHERE auction_id = ? AND UPPER(branch) = ?`,
+      [auctionId, fromBranch]
+    );
+    let host = null;
+    let hostLots = null;
+    for (const r of fromRanges) {
+      try {
+        const lots = enumerateRange(r.start_lot, r.end_lot);
+        if (moving.every(l => lots.includes(l))) { host = r; hostLots = lots; break; }
+      } catch (_) {}
+    }
+    if (!host) {
+      return res.status(400).json({ error: `No allocation on ${fromBranch} covers the range ${startLot}-${endLot}` });
+    }
+    // Split the host range around the moved chunk:
+    //   leftover = hostLots − moving
+    //   then collapse consecutive lots into sub-ranges.
+    const movedSet = new Set(moving);
+    const keep = hostLots.filter(l => !movedSet.has(l));
+    // Group `keep` into contiguous chunks (using the same enumeration
+    // logic so we preserve prefix + padding).
+    const chunks = [];
+    if (keep.length) {
+      let chunk = [keep[0]];
+      for (let i = 1; i < keep.length; i++) {
+        const prev = parseLotNo(chunk[chunk.length - 1]);
+        const curr = parseLotNo(keep[i]);
+        if (prev && curr && prev.prefix === curr.prefix && (curr.num === prev.num + 1)) {
+          chunk.push(keep[i]);
+        } else {
+          chunks.push(chunk);
+          chunk = [keep[i]];
+        }
+      }
+      chunks.push(chunk);
+    }
+    // Apply: delete the host range, insert the leftover chunks, insert
+    // the moved range under the dest branch.
+    db.run('DELETE FROM lot_allocations WHERE id = ?', [host.id]);
+    for (const ch of chunks) {
+      db.run(
+        'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+        [auctionId, fromBranch, ch[0], ch[ch.length - 1]]
+      );
+    }
+    db.run(
+      'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+      [auctionId, toBranch, startLot, endLot]
+    );
+    res.json({
+      success: true,
+      message: `Moved ${moving.length} lot(s) from ${fromBranch} to ${toBranch}`,
+      moved: moving.length,
+      leftoverChunks: chunks.length,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /api/auctions/:id/allocations/auto-fill — synthesize allocation
+// rows from existing saved lots. Useful when a trade was imported via
+// Excel without ever having allocations configured: every imported lot
+// has a branch tag, but no `lot_allocations` row covers it. This
+// endpoint scans `lots`, groups by (branch, lot prefix), and inserts
+// a wide catch-all range per group sized to span every existing lot.
+// Existing allocations are NEVER overwritten — only gaps are filled.
+app.post('/api/auctions/:id/allocations/auto-fill', requireAuctionWrite, (req, res) => {
+  const auctionId = parseInt(req.params.id, 10);
+  const db = getDb();
+  try {
+    // Gather existing allocations into a quick "is this lot covered?" map.
+    const existing = db.all(
+      `SELECT branch, start_lot, end_lot FROM lot_allocations WHERE auction_id = ?`,
+      [auctionId]
+    );
+    const coveredByBranch = new Map();
+    for (const r of existing) {
+      const br = String(r.branch || '').trim().toUpperCase();
+      if (!coveredByBranch.has(br)) coveredByBranch.set(br, new Set());
+      try {
+        for (const lot of enumerateRange(r.start_lot, r.end_lot)) {
+          coveredByBranch.get(br).add(lot);
+        }
+      } catch (_) { /* skip malformed existing range */ }
+    }
+    // Group existing lots by branch+prefix, tracking the numeric tail range.
+    const lots = db.all(
+      `SELECT lot_no, branch FROM lots WHERE auction_id = ?`,
+      [auctionId]
+    );
+    const groups = new Map();   // key = `${branch}::${prefix}` → { branch, prefix, minN, maxN, padLen }
+    for (const l of lots) {
+      const br = String(l.branch || '').trim().toUpperCase();
+      const parsed = parseLotNo(l.lot_no);
+      if (!br || !parsed) continue;
+      const key = `${br}::${parsed.prefix}`;
+      if (!groups.has(key)) {
+        groups.set(key, { branch: br, prefix: parsed.prefix, minN: parsed.num, maxN: parsed.num, padLen: parsed.padLen });
+      } else {
+        const g = groups.get(key);
+        if (parsed.num < g.minN) g.minN = parsed.num;
+        if (parsed.num > g.maxN) g.maxN = parsed.num;
+        if (parsed.padLen > g.padLen) g.padLen = parsed.padLen;
+      }
+    }
+    // For each group, check whether every saved lot is already covered.
+    // If even one isn't, insert a catch-all range that spans min..max.
+    let created = 0;
+    for (const g of groups.values()) {
+      const set = coveredByBranch.get(g.branch) || new Set();
+      let allCovered = true;
+      for (let n = g.minN; n <= g.maxN; n++) {
+        if (!set.has(buildLotNo(g.prefix, n, g.padLen))) { allCovered = false; break; }
+      }
+      if (allCovered) continue;
+      db.run(
+        'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+        [auctionId, g.branch, buildLotNo(g.prefix, g.minN, g.padLen), buildLotNo(g.prefix, g.maxN, g.padLen)]
+      );
+      created++;
+    }
+    res.json({ success: true, created });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Import Auction + Lots from XLS/XLSX (replaces APPA.PRG) ──

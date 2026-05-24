@@ -379,6 +379,29 @@ async function initDb() {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
+  // ── LOT ALLOCATIONS ───────────────────────────────────────
+  // Per-auction, per-branch lot-number ranges. Allocations let the user
+  // reserve "lots 001-050 for BODI, 051-100 for VANDANMEDU" on a given
+  // trade, so each branch's auction-floor operator can enter lots in
+  // parallel without lot-number collisions. Ranges are stored as text
+  // because lot numbers can be alphanumeric ("A001", "001A", etc.) —
+  // the application walks the numeric tail of each end to enumerate.
+  //
+  // Bulk-replace semantics: the POST endpoint wipes and re-inserts for
+  // a given auction, so the allocation set is always consistent. The
+  // server refuses to drop a range that still contains saved lots —
+  // forces the operator to delete the lots first if they really mean it.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS lot_allocations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    auction_id INTEGER NOT NULL,
+    branch TEXT NOT NULL,
+    start_lot TEXT NOT NULL,
+    end_lot TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    FOREIGN KEY (auction_id) REFERENCES auctions(id)
+  )`);
+  wrapped.exec(`CREATE INDEX IF NOT EXISTS idx_lot_allocations_auction ON lot_allocations(auction_id)`);
+
   // ── ROUTE DISTANCES ───────────────────────────────────────
   // Maps (dispatch PIN, consignee PIN) → road km, populated manually by
   // the user via the To Tally → E-way Bill Distance UI. The user looks
