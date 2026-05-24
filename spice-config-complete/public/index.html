@@ -3014,9 +3014,28 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 <div class="modal-bg" id="lot-modal"><div class="modal" style="max-width:640px">
   <h2 id="lot-modal-title">Edit Lot</h2>
   <input type="hidden" id="l-id">
+  <!-- Hidden seller-link fields. trader_id is the FK; the rest are the
+       denormalised seller address/contact columns that live on the lot
+       row. They're written via the PUT /api/lots/:id allow-list when
+       the user picks a different seller via Change Seller. -->
+  <input type="hidden" id="l-trader-id">
+  <input type="hidden" id="l-pan">
+  <input type="hidden" id="l-tel">
+  <input type="hidden" id="l-aadhar">
+  <input type="hidden" id="l-padd">
+  <input type="hidden" id="l-ppla">
+  <input type="hidden" id="l-ppin">
+  <input type="hidden" id="l-pstate">
+  <input type="hidden" id="l-pst-code">
   <div class="sgrid">
     <div class="fg"><label>Lot No *</label><input id="l-lotno"></div>
-    <div class="fg"><label>Name</label><input id="l-name"></div>
+    <div class="fg">
+      <label style="display:flex;justify-content:space-between;align-items:center">
+        <span>Name <span id="l-trader-tag" style="color:var(--text3);font-weight:400;font-size:11px"></span></span>
+        <button type="button" class="btn btn-a" style="padding:2px 8px;font-size:11px" onclick="openLotSellerPicker()">Change Seller</button>
+      </label>
+      <input id="l-name">
+    </div>
     <div class="fg"><label>CR / GSTIN</label><input id="l-cr"></div>
     <div class="fg"><label>Branch</label><input id="l-branch"></div>
     <div class="fg"><label>Grade</label><input id="l-grade"></div>
@@ -3033,6 +3052,24 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     </div>
   </div>
   <div class="actions"><button class="btn btn-o" onclick="hideModal('lot-modal')">Cancel</button><button class="btn btn-g" onclick="saveLot()">Save</button></div>
+</div></div>
+
+<!-- Change Seller picker — opened from inside the Lot edit modal. Search
+     against /api/traders (server-side LIKE on name/cr/pan/tel/place), then
+     click a row to stage that seller. Apply writes the seller into the
+     hidden fields on the Lot modal; the actual DB write happens on lot Save. -->
+<div class="modal-bg" id="lot-seller-modal"><div class="modal" style="max-width:720px">
+  <h2>Change Seller</h2>
+  <div class="fg"><label>Search by name, GSTIN, PAN, phone or place</label>
+    <input id="ls-search" placeholder="Type to filter…" oninput="lotSellerSearchDebounced(this.value)">
+  </div>
+  <div id="ls-results" style="max-height:380px;overflow-y:auto;border:1px solid var(--spice-line);border-radius:8px">
+    <div style="padding:14px;color:var(--text3);font-size:13px">Type a few letters to search…</div>
+  </div>
+  <div style="margin-top:10px;padding:8px 10px;background:var(--spice-cream);border-radius:6px;font-size:12px;color:var(--text3)">
+    Picking a seller replaces the lot's name, CR/GSTIN, PAN, phone, Aadhar and address fields. Click <b>Save</b> on the lot edit form to persist.
+  </div>
+  <div class="actions"><button class="btn btn-o" onclick="hideModal('lot-seller-modal')">Cancel</button></div>
 </div></div>
 
 <div class="modal-bg" id="gen-inv-modal"><div class="modal" style="max-width:580px">
@@ -7840,10 +7877,19 @@ async function downloadDbfRange(type){
 }
 
 // ── Lots ──────────────────────────────────────────────────
-const L_FIELDS=['lot_no','name','cr','branch','grade','bags','litre','qty','price','amount','buyer','buyer1','code','sale'];
+// `*` denotes the visible inputs in the lot edit form. The hidden
+// seller-link fields (trader_id, pan, tel, aadhar, padd, ppla, ppin,
+// pstate, pst_code) live in dedicated <input type="hidden"> slots so
+// Change Seller can stage a replacement without forcing the user to
+// retype every address line. openLotEdit prefills them from `l.*`
+// and saveLot picks them back up via the same L_FIELDS loop.
+const L_FIELDS=['lot_no','name','cr','branch','grade','bags','litre','qty','price','amount','buyer','buyer1','code','sale',
+  'trader_id','pan','tel','aadhar','padd','ppla','ppin','pstate','pst_code'];
 const L_IDS={lot_no:'l-lotno',name:'l-name',cr:'l-cr',branch:'l-branch',grade:'l-grade',bags:'l-bags',
   litre:'l-litre',qty:'l-qty',price:'l-price',amount:'l-amount',buyer:'l-buyer',buyer1:'l-buyer1',
-  code:'l-code',sale:'l-sale'};
+  code:'l-code',sale:'l-sale',
+  trader_id:'l-trader-id',pan:'l-pan',tel:'l-tel',aadhar:'l-aadhar',padd:'l-padd',ppla:'l-ppla',
+  ppin:'l-ppin',pstate:'l-pstate',pst_code:'l-pst-code'};
 
 // Refresh wrapper: surfaces feedback so the user knows the click registered.
 // Root cause the button "did nothing" was: loadLots() silently bailed when
@@ -7944,6 +7990,34 @@ function _expandLotNoTokens(raw){
 // the whole trade so every ticked row is visible BEFORE the operator
 // runs a bulk action (otherwise getTickedLotIds — which only reads
 // rendered checkboxes — would silently drop them).
+// Ticked lot IDs persist across paginations / sorts / re-renders. The
+// checkbox column reads from this Set on every paint and updates it on
+// every click via syncLotTickedFromDom().
+window._lotsTicked = window._lotsTicked || new Set();
+
+function syncLotTickedFromDom(){
+  document.querySelectorAll('.lot-select-cb').forEach(cb => {
+    const id = Number(cb.value);
+    if (cb.checked) window._lotsTicked.add(id);
+    else window._lotsTicked.delete(id);
+  });
+  if (typeof syncLotMaster === 'function') syncLotMaster();
+}
+
+// Re-render the lots table so ticked rows float to the top, in their
+// original sequence relative to each other; un-ticked rows keep their
+// original sequence below. No re-fetch — pure client-side reorder.
+function _sortLotsTickedFirst(){
+  if (!Array.isArray(_lotsFull) || !_lotsFull.length) return;
+  const ticked = window._lotsTicked;
+  _lotsFull.sort((a, b) => {
+    const ta = ticked.has(a.id) ? 0 : 1;
+    const tb = ticked.has(b.id) ? 0 : 1;
+    if (ta !== tb) return ta - tb;
+    return 0; // stable: keep original DB order within each bucket
+  });
+}
+
 async function lotApplyPickLots(){
   const input = document.getElementById('lot-pick-lots');
   if (!input) return;
@@ -7955,48 +8029,46 @@ async function lotApplyPickLots(){
   const arr = Array.isArray(_lotsFull) ? _lotsFull : [];
   if (!arr.length) { toast('Load a trade first'); return; }
 
-  // Case-insensitive lot_no → id map. Lot numbers can be alphanumeric
-  // (e.g. "A12") so we don't coerce to int.
-  const byLotNo = new Map();
+  // Build TWO lookup maps so we can match lot numbers stored either
+  // padded ("001") or unpadded ("1"). The padded map preserves the
+  // user's intent when they type "001"; the bare-int map catches the
+  // case where lot_no is stored unpadded but the user typed "001".
+  const byLotNo = new Map();      // exact, upper-cased
+  const byLotNoInt = new Map();   // numeric value → id (only for purely-digit lot_nos)
   for (const l of arr) {
     const k = String(l.lot_no == null ? '' : l.lot_no).trim().toUpperCase();
-    if (k) byLotNo.set(k, l.id);
+    if (!k) continue;
+    byLotNo.set(k, l.id);
+    if (/^\d+$/.test(k)) byLotNoInt.set(parseInt(k, 10), l.id);
   }
 
-  const matchedIds = new Set();
+  const matched = new Set();
   const missing = [];
   for (const t of tokens) {
     const k = t.toUpperCase();
-    if (byLotNo.has(k)) matchedIds.add(byLotNo.get(k));
-    else missing.push(t);
+    if (byLotNo.has(k)) { matched.add(byLotNo.get(k)); continue; }
+    if (/^\d+$/.test(t)){
+      const n = parseInt(t, 10);
+      if (byLotNoInt.has(n)) { matched.add(byLotNoInt.get(n)); continue; }
+    }
+    missing.push(t);
   }
 
-  // Off-page matches: bump pageSize to render the entire trade so
-  // every matched checkbox exists in the DOM. The pager renders the
-  // expanded size in the dropdown automatically on next paint.
-  const visibleIds = new Set(
-    Array.from(document.querySelectorAll('.lot-select-cb')).map(cb => Number(cb.value))
-  );
-  const offPage = [...matchedIds].filter(id => !visibleIds.has(id));
-  if (offPage.length) {
-    _lotsPager.pageSize = Math.max(arr.length, _lotsPager.pageSize);
-    _lotsPager.page     = 1;
-    await loadLots({ keepPage: true });
-  }
+  // Merge newly-matched ids into the persistent ticked Set.
+  for (const id of matched) window._lotsTicked.add(id);
 
-  // Tick matched rows. Done AFTER the optional re-mount so every
-  // matched id has a freshly-rendered checkbox in the DOM.
-  document.querySelectorAll('.lot-select-cb').forEach(cb => {
-    if (matchedIds.has(Number(cb.value))) cb.checked = true;
-  });
-  if (typeof syncLotMaster === 'function') syncLotMaster();
+  // Reorder so ticked rows float to the top, jump to page 1, and
+  // re-render WITHOUT re-fetching or bumping pageSize.
+  _sortLotsTickedFirst();
+  _lotsPager.page = 1;
+  if (typeof _renderLotsTable === 'function') _renderLotsTable(_lotsFull);
+  else if (typeof loadLots === 'function') await loadLots({ keepPage: true });
 
-  // Clear the input on success so the next paste starts fresh.
-  if (matchedIds.size) input.value = '';
+  if (matched.size) input.value = '';
 
   const parts = [];
-  if (matchedIds.size) parts.push(`ticked ${matchedIds.size} lot${matchedIds.size === 1 ? '' : 's'}`);
-  if (missing.length)  parts.push(`not found: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? '…' : ''}`);
+  if (matched.size) parts.push(`ticked ${matched.size} lot${matched.size === 1 ? '' : 's'}`);
+  if (missing.length) parts.push(`not found: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? '…' : ''}`);
   toast(parts.length ? parts.join(' · ') : 'No lots matched');
 }
 
@@ -8218,7 +8290,10 @@ async function loadLots(opts){
     key:'_select', label:'',
     labelHTML:'<input type="checkbox" id="lot-select-all" onclick="event.stopPropagation();toggleAllLots(this.checked)" title="Select / clear all visible" style="cursor:pointer;width:16px;height:16px;vertical-align:middle;accent-color:var(--green)">',
     sortable:false, searchable:false,
-    render:(l)=>`<input type="checkbox" class="lot-select-cb" value="${l.id}" onclick="event.stopPropagation();syncLotMaster()" style="cursor:pointer">`
+    render:(l)=>{
+      const checked = (window._lotsTicked && window._lotsTicked.has(l.id)) ? ' checked' : '';
+      return `<input type="checkbox" class="lot-select-cb" value="${l.id}"${checked} onclick="event.stopPropagation();syncLotTickedFromDom()" style="cursor:pointer">`;
+    }
   };
   const columns = [
     selectCol,
@@ -8258,7 +8333,12 @@ function toggleAllLots(state){
   if (!body) return;
   body.querySelectorAll('.lot-select-cb').forEach(cb => {
     const row = cb.closest('tr');
-    if (row && row.style.display !== 'none') cb.checked = !!state;
+    if (row && row.style.display !== 'none') {
+      cb.checked = !!state;
+      const id = Number(cb.value);
+      if (state) window._lotsTicked.add(id);
+      else window._lotsTicked.delete(id);
+    }
   });
   syncLotMaster();
 }
@@ -8504,6 +8584,16 @@ function openLotEdit(l){
   document.getElementById('l-id').value=l.id;
   L_FIELDS.forEach(f=>{const el=document.getElementById(L_IDS[f]);if(el)el.value=l[f]!=null?l[f]:''});
 
+  // Trader-tag chip beside the Name label: reflects the linked seller
+  // FK if the lot has one. Lots imported without a trader_id (legacy
+  // free-text seller) just show "unlinked" so the user knows that
+  // Change Seller will both rewrite the address and create the FK.
+  const tagEl = document.getElementById('l-trader-tag');
+  if (tagEl) {
+    const tid = (l && l.trader_id) ? Number(l.trader_id) : 0;
+    tagEl.textContent = tid > 0 ? `— linked to seller #${tid}` : '— unlinked';
+  }
+
   // Wire field-level reactivity for the edit modal:
   //   1) Changing CODE → look up the matching buyer (by code, ti, or full
   //      buyer string) and auto-fill buyer/buyer1/cr/sale fields. Saves
@@ -8566,6 +8656,14 @@ async function saveLot(){
     const el=document.getElementById(L_IDS[f]);
     if(!el)return;
     if(['bags','qty','price','amount'].includes(f)) body[f]=parseFloat(el.value)||0;
+    else if(f==='trader_id'){
+      // trader_id is the FK to traders. Coerce to int; an empty string
+      // (legacy lots that never had a seller-master link) becomes null
+      // so the column stores NULL rather than 0, preserving the FK
+      // semantics declared in the schema.
+      const n = parseInt(el.value, 10);
+      body[f] = Number.isFinite(n) && n > 0 ? n : null;
+    }
     else body[f]=el.value;
   });
   // Optimistic UI: close the modal immediately and show a pending toast.
@@ -8590,6 +8688,102 @@ async function saveLot(){
 async function delLot(id){if(!confirm('Delete this lot?'))return;
   try{await j(`/api/lots/${id}`,{method:'DELETE'});loadLots();toast('Lot deleted')}
   catch(e){showError(e)}
+}
+
+// ── Change Seller on a lot ──────────────────────────────────
+// Opened from the Lot edit modal. Searches /api/traders server-side
+// and stages a different seller into the lot's hidden seller-link
+// fields. The actual DB write happens when the user clicks Save on
+// the lot edit form — Cancel here, or Cancel on the lot modal,
+// leaves the lot untouched.
+let _lotSellerSearchTimer = null;
+let _lotSellerFetchToken = 0;
+function openLotSellerPicker(){
+  const lotName = document.getElementById('l-name')?.value || '';
+  const inp = document.getElementById('ls-search');
+  if (inp) inp.value = lotName;
+  const res = document.getElementById('ls-results');
+  if (res) res.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:13px">Type a few letters to search…</div>';
+  showModal('lot-seller-modal');
+  // Pre-load with the current lot's name so the existing seller (or
+  // close matches) shows up first.
+  if (lotName) lotSellerSearch(lotName);
+  // Defer focus until after the modal animation so the cursor lands
+  // in the search input.
+  setTimeout(() => { if (inp) inp.focus(); }, 50);
+}
+function lotSellerSearchDebounced(q){
+  clearTimeout(_lotSellerSearchTimer);
+  _lotSellerSearchTimer = setTimeout(() => lotSellerSearch(q), 200);
+}
+async function lotSellerSearch(q){
+  const query = (q || '').trim();
+  const res = document.getElementById('ls-results');
+  if (!res) return;
+  if (!query) {
+    res.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:13px">Type a few letters to search…</div>';
+    return;
+  }
+  const myToken = ++_lotSellerFetchToken;
+  res.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:13px">Searching…</div>';
+  try {
+    const rows = await j(`/api/traders?search=${encodeURIComponent(query)}&limit=50`);
+    if (myToken !== _lotSellerFetchToken) return;
+    _lotSellerRender(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+  } catch (e) {
+    res.innerHTML = '<div style="padding:14px;color:#c00;font-size:13px">'+esc(e.message||String(e))+'</div>';
+  }
+}
+function _lotSellerRender(rows){
+  const res = document.getElementById('ls-results');
+  if (!res) return;
+  if (!rows.length) {
+    res.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:13px">No matching sellers. Add the seller from the Sellers tab first, then come back.</div>';
+    return;
+  }
+  const currentId = parseInt(document.getElementById('l-trader-id')?.value, 10) || 0;
+  res.innerHTML = rows.map(r => {
+    const isCurrent = r.id === currentId;
+    const meta = [r.cr, r.pan, r.tel, r.ppla].filter(Boolean).join(' · ');
+    return '<div class="ls-row" data-id="'+r.id+'" onclick="lotSellerPick('+r.id+')" '+
+      'style="padding:10px 14px;border-bottom:1px solid var(--spice-line);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px'+(isCurrent?';background:#ecfccb':'')+'">'+
+      '<div style="min-width:0;flex:1">'+
+        '<div style="font-weight:600;font-size:13px">'+esc(r.name||'')+(isCurrent?' <span style="font-size:10px;color:#365314;font-weight:500">— current</span>':'')+'</div>'+
+        (meta ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(meta)+'</div>' : '')+
+      '</div>'+
+      '<button type="button" class="btn btn-g" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();lotSellerPick('+r.id+')">Pick</button>'+
+    '</div>';
+  }).join('');
+}
+async function lotSellerPick(traderId){
+  if (!Number.isFinite(Number(traderId)) || Number(traderId) <= 0) return;
+  try {
+    // Fetch the full trader row so we get every denormalised field
+    // even if the list endpoint trimmed any of them.
+    const t = await j(`/api/traders/${traderId}`);
+    if (!t || !t.id) throw new Error('Seller not found');
+    const setIf = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.value = val == null ? '' : val;
+    };
+    // Note: trader.pin → lot.ppin (column renamed when denormalising).
+    // Every other field name matches one-to-one.
+    setIf('l-trader-id', t.id);
+    setIf('l-name',      t.name      || '');
+    setIf('l-cr',        t.cr        || '');
+    setIf('l-pan',       t.pan       || '');
+    setIf('l-tel',       t.tel       || '');
+    setIf('l-aadhar',    t.aadhar    || '');
+    setIf('l-padd',      t.padd      || '');
+    setIf('l-ppla',      t.ppla      || '');
+    setIf('l-ppin',      t.pin       || '');
+    setIf('l-pstate',    t.pstate    || '');
+    setIf('l-pst-code',  t.pst_code  || '');
+    const tagEl = document.getElementById('l-trader-tag');
+    if (tagEl) tagEl.textContent = '— linked to seller #'+t.id+' (staged, save to commit)';
+    hideModal('lot-seller-modal');
+    toast('Seller staged — click Save on the lot to apply');
+  } catch (e) { showError(e); }
 }
 
 async function calculateAll(){
