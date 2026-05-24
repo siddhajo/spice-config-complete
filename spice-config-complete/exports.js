@@ -77,12 +77,16 @@ function auctionMeta(db, auctionId) {
   if (!auctionId) return [];
   try {
     const a = db.get(
-      'SELECT ano, date, crop_type FROM auctions WHERE id = ?', [auctionId]
+      'SELECT ano, date, crop_type, mode FROM auctions WHERE id = ?', [auctionId]
     );
     if (!a) return [];
     const dt = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
     const meta = [];
-    if (a.ano) meta.push(`e-TRADE No: ${a.ano}`);
+    // Mode-aware: 'e-TRADE No:' or 'e-AUCTION No:' from auction.mode.
+    // Empty/legacy mode falls back to e-AUCTION (matches the historical
+    // wording exports printed before the mode tag existed).
+    const eLbl = (a.mode === 'e-Trade') ? 'e-TRADE' : 'e-AUCTION';
+    if (a.ano) meta.push(`${eLbl} No: ${a.ano}`);
     if (dt) meta.push(`Date: ${dt}`);
     return meta;
   } catch (_) { return []; }

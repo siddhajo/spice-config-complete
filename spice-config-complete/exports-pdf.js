@@ -786,14 +786,18 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   if (type === 'tds_return') {
     subtitle = `Period: ${extra.from || ''} to ${extra.to || ''}`;
   } else if (auctionId) {
-    const auction = db.get('SELECT ano, date, crop_type FROM auctions WHERE id = ?', [auctionId]);
+    const auction = db.get('SELECT ano, date, crop_type, mode FROM auctions WHERE id = ?', [auctionId]);
     if (auction) {
       const d = auction.date ? auction.date.split('-').reverse().join('/') : '';
       // Two clean meta lines, joined by " — " so renderTablePdf can split
       // them back into separate right-side rows. The crop type (ISP/ASP) is
       // omitted — the active preset is already obvious from the logo and
       // company name in the brand block.
-      subtitle = `e-TRADE No: ${auction.ano} — Date: ${d}`;
+      // Mode-aware header: shows "e-TRADE No:" or "e-AUCTION No:" based
+      // on the auction's stamped mode. Empty/legacy mode falls back to
+      // e-AUCTION wording.
+      const modeLbl = (auction.mode === 'e-Trade') ? 'e-TRADE' : 'e-AUCTION';
+      subtitle = `${modeLbl} No: ${auction.ano} — Date: ${d}`;
       if (extra.state) subtitle += ` — State: ${extra.state}`;
     }
   }

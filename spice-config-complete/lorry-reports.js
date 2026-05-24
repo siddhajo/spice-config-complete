@@ -81,11 +81,18 @@ function wrapText(doc, text, maxWidth) {
   return lines.length ? lines : [''];
 }
 
-// Pull auction header (ano + date + state) for subtitle / state-classification.
+// Pull auction header (ano + date + state + mode) for subtitle.
+// `mode` lets report headers adapt their "e-TRADE No:" vs
+// "e-AUCTION No:" label per-trade. Empty/legacy mode falls back to
+// e-AUCTION wording (matches historical reports).
 function getAuctionHeader(db, auctionId) {
-  const a = db.get('SELECT id, ano, date, crop_type, state FROM auctions WHERE id = ?', [auctionId]);
+  const a = db.get('SELECT id, ano, date, crop_type, state, mode FROM auctions WHERE id = ?', [auctionId]);
   if (!a) throw new Error('Auction not found');
   return a;
+}
+// Mode-aware label helper for the report headers below.
+function modeHdrLabel(auction) {
+  return (auction && auction.mode === 'e-Trade') ? 'e-TRADE' : 'e-AUCTION';
 }
 
 // Pull lots joined with buyer master to get state + GSTIN + firm name.
@@ -158,7 +165,7 @@ async function lotSlipCodeXlsx(db, auctionId) {
     colCount: 6,
     title: 'LOT SLIP CODE',
     metaLines: [
-      `e-TRADE No: ${auction.ano}`,
+      `${modeHdrLabel(auction)} No: ${auction.ano}`,
       `Date: ${fmtDateDMY(auction.date)}`,
     ],
   });
@@ -264,7 +271,7 @@ async function lotSlipCodePdf(db, auctionId) {
     doc.font('Helvetica').fontSize(8).fillColor('#000')
        .text(`Page: ${page}`, xOrigin, afterY, { width: halfW, align: 'right' });
     doc.font('Helvetica-Bold').fontSize(9)
-       .text(`e-TRADE No: ${auction.ano}`, xOrigin, afterY + 12, { width: halfW / 2, align: 'left' });
+       .text(`${modeHdrLabel(auction)} No: ${auction.ano}`, xOrigin, afterY + 12, { width: halfW / 2, align: 'left' });
     doc.text(`Date: ${fmtDateDMY(auction.date)}`, xOrigin + halfW / 2, afterY + 12, { width: halfW / 2, align: 'right' });
 
     // Column header row
@@ -408,7 +415,7 @@ async function truckListXlsx(db, auctionId) {
     colCount: 6,
     title: 'TRUCK LIST',
     metaLines: [
-      `e-TRADE No: ${auction.ano}`,
+      `${modeHdrLabel(auction)} No: ${auction.ano}`,
       `Date: ${fmtDateDMY(auction.date)}`,
     ],
   });
@@ -501,7 +508,7 @@ async function truckListPdf(db, auctionId) {
       x: m, y: m, width: usableW,
       title: 'TRUCK LIST',
       metaLines: [
-        `e-TRADE No: ${auction.ano}`,
+        `${modeHdrLabel(auction)} No: ${auction.ano}`,
         `Date: ${fmtDateDMY(auction.date)}`,
       ],
     });
@@ -680,7 +687,7 @@ async function buyerLotLorryXlsx(db, auctionId) {
     colCount: 6,
     title: 'BUYER LOT LORRY',
     metaLines: [
-      `e-TRADE No: ${auction.ano}`,
+      `${modeHdrLabel(auction)} No: ${auction.ano}`,
       `Date: ${fmtDateDMY(auction.date)}`,
       auction.state || '',
     ].filter(Boolean),
@@ -864,7 +871,7 @@ async function buyerLotLorryPdf(db, auctionId) {
       x: m, y: m, width: usableW,
       title: 'BUYER LOT LORRY',
       metaLines: [
-        `e-TRADE No: ${auction.ano}`,
+        `${modeHdrLabel(auction)} No: ${auction.ano}`,
         `Date: ${fmtDateDMY(auction.date)}`,
       ],
     });

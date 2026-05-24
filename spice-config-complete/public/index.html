@@ -7458,7 +7458,7 @@ async function revertInvoice(id, buyerName, invLabel){
 async function revertAllInvoices(){
   const aid=document.getElementById('inv-auction').value;
   if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
-  if(!confirm('Revert ALL invoices for this auction?\n\nEvery invoice in this auction will be deleted, and every lot will become eligible for re-invoicing. This cannot be undone.\n\nContinue?'))return;
+  if(!confirm('Revert ALL invoices for this ' + termAuction(false, true) + '?\n\nEvery invoice in this ' + termAuction(false, true) + ' will be deleted, and every lot will become eligible for re-invoicing. This cannot be undone.\n\nContinue?'))return;
   const typed=prompt('To confirm, type REVERT in capitals:');
   if(typed!=='REVERT'){alert('Cancelled.');return}
   try{

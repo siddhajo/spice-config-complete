@@ -181,11 +181,14 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
   doc.moveTo(gridSplitX, y).lineTo(gridSplitX, y + gridH).stroke();
   doc.moveTo(x0, y + gridH).lineTo(x1, y + gridH).stroke();
   doc.font('Helvetica').fontSize(8);
+  // Mode-aware: 'e-TRADE No' / 'e-AUCTION No' driven by cfg.business_mode.
+  // Defaults to e-TRADE for legacy installs where the setting is empty.
+  const eTradeLabel = (cfg.business_mode === 'e-Auction') ? 'e-AUCTION No' : 'e-TRADE No';
   const leftPairs = [
     ['TRANSPORT', invoiceData.transport || 'BY ROAD'],
     ['VEHICLE NO', invoiceData.vehicleNo || ''],
     ['STATION', invoiceData.station || (seller.place || '').toUpperCase()],
-    ['e-TRADE No', invoiceData.eTradeNo || ''],
+    [eTradeLabel, invoiceData.eTradeNo || ''],
   ];
   const rightPairs = [
     ['INVOICE NO', ''], // value blank per reference
@@ -1709,9 +1712,11 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
   doc.moveTo(x0, infoY + infoH).lineTo(x1, infoY + infoH).stroke();
   const invDate = (billData && billData.billDate) || new Date().toLocaleDateString('en-GB');
   const eTradeNo = (billData && billData.eTradeNo) || cfg.e_trade_no || '';
+  // Mode-aware: 'e-TRADE No:' or 'e-AUCTION No:' from cfg.business_mode.
+  const eTradeLabel2 = (cfg.business_mode === 'e-Auction') ? 'e-AUCTION No' : 'e-TRADE No';
   doc.font('Helvetica').fontSize(8.5);
   doc.text(`Invoice No: ${billNo || ''}`, x0 + 6, infoY + 4);
-  doc.text(`e-TRADE No: ${eTradeNo}`, x0, infoY + 4, { width: W, align: 'center' });
+  doc.text(`${eTradeLabel2}: ${eTradeNo}`, x0, infoY + 4, { width: W, align: 'center' });
   doc.text(`Date: ${invDate}`, x0, infoY + 4, { width: W - 6, align: 'right' });
   y = infoY + infoH;
 

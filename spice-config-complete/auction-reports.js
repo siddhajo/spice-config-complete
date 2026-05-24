@@ -28,6 +28,21 @@ function fmtDateDMY(iso) {
   return s;
 }
 
+// ── Mode-aware label helpers ────────────────────────────────
+// PDF report headers say "e-TRADE No: 3" or "e-AUCTION No: 3" based on
+// the auction's mode. Footer totals adapt the same way:
+//   e-Trade   → "NOT eTRADED"
+//   e-Auction → "NOT AUCTIONED"
+// Pass the auction row (which now carries `mode`) and the helpers do
+// the right thing. NULL/empty mode rows fall back to e-AUCTION so
+// legacy data prints with the historical wording.
+function modeHeaderLabel(auction) {
+  return (auction && auction.mode === 'e-Trade') ? 'e-TRADE' : 'e-AUCTION';
+}
+function modeNotXyzLabel(auction) {
+  return (auction && auction.mode === 'e-Trade') ? 'NOT eTRADED' : 'NOT AUCTIONED';
+}
+
 // Manually truncate `text` so doc.widthOfString(out) <= maxWidth, appending an
 // ellipsis when truncated. PDFKit 0.15's `lineBreak: false` + `ellipsis: true`
 // is unreliable for long single tokens — we ellipsize ourselves so multi-word
@@ -92,7 +107,11 @@ function wrapText(doc, text, maxWidth) {
 }
 
 function getAuctionHeader(db, auctionId) {
-  const a = db.get('SELECT id, ano, date, crop_type, state FROM auctions WHERE id = ?', [auctionId]);
+  // Include `mode` so PDF/XLSX headers can adapt their "e-TRADE No:" /
+  // "NOT eTRADED" labels per-trade. Mode is empty for pre-migration
+  // auctions; the mode helpers fall back to e-AUCTION wording in that
+  // case so legacy data prints with the historical labels.
+  const a = db.get('SELECT id, ano, date, crop_type, state, mode FROM auctions WHERE id = ?', [auctionId]);
   if (!a) throw new Error('Auction not found');
   return a;
 }
@@ -165,7 +184,7 @@ async function lotSlipPdf(db, auctionId, _cfg, extra) {
     doc.font('Helvetica').fontSize(8)
        .text(`Page: ${page}`, xOrigin, afterY, { width: halfW, align: 'right' });
     doc.font('Helvetica-Bold').fontSize(9)
-       .text(`e-TRADE No:${auction.ano}`, xOrigin, afterY + 12, { width: halfW / 2, align: 'left' });
+       .text(`${modeHeaderLabel(auction)} No:${auction.ano}`, xOrigin, afterY + 12, { width: halfW / 2, align: 'left' });
     doc.text(`Date:${fmtDateDMY(auction.date)}`, xOrigin + halfW / 2, afterY + 12, { width: halfW / 2, align: 'right' });
 
     const hy = BODY_TOP;
@@ -353,7 +372,7 @@ async function collectionXlsx(db, auctionId) {
   ws.getCell('A1').font = { bold: true, size: 14 };
   ws.getCell('A1').alignment = { horizontal: 'center' };
   ws.mergeCells('A2:E2');
-  ws.getCell('A2').value = `e-TRADE No: ${auction.ano}    Date: ${fmtDateDMY(auction.date)}`;
+  ws.getCell('A2').value = `${modeHeaderLabel(auction)} No: ${auction.ano}    Date: ${fmtDateDMY(auction.date)}`;
   ws.getCell('A2').font = { bold: true, size: 11 };
   ws.getCell('A2').alignment = { horizontal: 'center' };
   ws.addRow([]);
@@ -463,7 +482,7 @@ async function collectionPdf(db, auctionId) {
       x: m, y: m, width: usableW,
       title: 'COLLECTION',
       metaLines: [
-        `e-TRADE No: ${auction.ano}`,
+        `${modeHeaderLabel(auction)} No: ${auction.ano}`,
         `Date: ${fmtDateDMY(auction.date)}`,
         `Page: ${doc.bufferedPageRange().count}`,
       ],
@@ -731,7 +750,7 @@ async function tradeReportXlsx(db, auctionId) {
   ws.getCell('A2').alignment = { horizontal: 'center' };
 
   ws.mergeCells('A3:H3');
-  ws.getCell('A3').value = `e-TRADE No: ${auction.ano}    DATE: ${fmtDateDMY(auction.date)}`;
+  ws.getCell('A3').value = `${modeHeaderLabel(auction)} No: ${auction.ano}    DATE: ${fmtDateDMY(auction.date)}`;
   ws.getCell('A3').font = { bold: true, size: 11 };
   ws.getCell('A3').alignment = { horizontal: 'center' };
 
@@ -847,7 +866,7 @@ async function tradeReportXlsx(db, auctionId) {
     `AVERAGE Rs. ${fmtMoney(stats.avg_price)}`,
   );
   addFootRow(
-    `NOT eTRADED    Kgs. ${fmtQty(stats.not_qty)}  Bags. ${stats.not_bags}  Lot. ${stats.not_lots}`,
+    `${modeNotXyzLabel(auction)}    Kgs. ${fmtQty(stats.not_qty)}  Bags. ${stats.not_bags}  Lot. ${stats.not_lots}`,
     '',
   );
   addFootRow(
@@ -923,7 +942,7 @@ async function tradeReportPdf(db, auctionId) {
       x: m, y: m, width: usableW,
       title: 'BUYERS LIST FOR VERIFICATION',
       metaLines: [
-        `e-TRADE No: ${auction.ano}`,
+        `${modeHeaderLabel(auction)} No: ${auction.ano}`,
         `Date: ${fmtDateDMY(auction.date)}`,
         `Page: ${pageNum}`,
       ],
@@ -1147,7 +1166,7 @@ async function tradeReportPdf(db, auctionId) {
   leftRow('TOTAL ARRIVALS',  fmtQty(stats.arrivals_qty),  String(stats.arrivals_bags), String(stats.arrivals_lots), 0);
   leftRow('WITHDRAWN',       fmtQty(stats.withdrawn_qty), String(stats.withdrawn_bags), String(stats.withdrawn_lots), 1);
   leftRow('SOLD',            fmtQty(stats.sold_qty),      String(stats.sold_bags),     String(stats.sold_lots), 2);
-  leftRow('NOT eTRADED',     fmtQty(stats.not_qty),       String(stats.not_bags),      String(stats.not_lots), 3);
+  leftRow(modeNotXyzLabel(auction), fmtQty(stats.not_qty), String(stats.not_bags), String(stats.not_lots), 3);
 
   // Vertical column separators inside the left table
   for (let ci = 0; ci < lcW.length - 1; ci++) {
