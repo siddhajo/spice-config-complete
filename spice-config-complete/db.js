@@ -35,11 +35,19 @@ const path = require('path');
 // installation folder.
 const DB_DIR = process.env.SPICE_DATA_DIR || path.join(__dirname, 'data');
 const DB_PATH = path.join(DB_DIR, 'config.db');
+// Single-instance lockfile. sql.js loads the entire DB into memory and
+// rewrites the whole file on every debounced commit, so two server
+// processes sharing this file silently corrupt each other's writes —
+// whichever flushes last wins, and previously-saved data from the loser
+// vanishes. The lock makes that impossible: a second process refuses
+// to boot. See acquireSingleInstanceLock() below.
+const LOCK_PATH = path.join(DB_DIR, 'server.lock');
 
 let SQL = null;        // sql.js module instance (loaded once)
 let rawDb = null;       // sql.js Database instance
 let wrapped = null;     // our API wrapper
 let pendingSave = null; // debounced fs.writeFile timer
+let lockOwned = false;  // true once we've successfully acquired LOCK_PATH
 
 /**
  * Persist the in-memory DB to disk. Debounced 200ms so a burst of writes
@@ -62,19 +70,111 @@ function scheduleSave() {
 }
 
 /**
+ * Acquire the single-instance lock. Throws if another live server
+ * already owns it. Stale locks (PID no longer running) are reclaimed.
+ *
+ * Race-safe: writes the lockfile with `flag: 'wx'` (O_EXCL), so two
+ * simultaneous boots can't both think they won. The loser sees EEXIST,
+ * reads the existing PID, checks if it's alive, and either reclaims a
+ * stale lock or refuses to boot.
+ *
+ * On macOS/Linux, `process.kill(pid, 0)` is the standard "is this PID
+ * alive?" probe — sends signal 0, which the kernel uses to validate
+ * the target without delivering anything. Throws ESRCH for dead PIDs,
+ * EPERM for live-but-not-ours PIDs (also counts as "alive" — someone
+ * else's process is using the DB).
+ */
+function acquireSingleInstanceLock() {
+  const dir = path.dirname(LOCK_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const payload = JSON.stringify({
+    pid: process.pid,
+    bootAt: new Date().toISOString(),
+    host: require('os').hostname(),
+    cwd: process.cwd(),
+  });
+  // Try to write atomically; if it exists, inspect the holder.
+  try {
+    fs.writeFileSync(LOCK_PATH, payload, { flag: 'wx' });
+    lockOwned = true;
+    return;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+  // Lock exists — read it and decide whether to reclaim or refuse.
+  let holder = null;
+  try { holder = JSON.parse(fs.readFileSync(LOCK_PATH, 'utf8')); }
+  catch (_) { /* corrupt lockfile — treat as stale */ }
+  const holderPid = holder && Number(holder.pid);
+  const stale = (() => {
+    if (!holderPid) return true;             // unreadable / no pid → stale
+    if (holderPid === process.pid) return true; // our own previous boot
+    try {
+      process.kill(holderPid, 0);
+      return false;                           // pid is alive — not stale
+    } catch (err) {
+      return err.code === 'ESRCH';            // dead → reclaim; EPERM → assume alive
+    }
+  })();
+  if (!stale) {
+    const msg = [
+      `Another server is already running and owns ${LOCK_PATH}.`,
+      `  pid:     ${holderPid}`,
+      `  bootAt:  ${(holder && holder.bootAt) || 'unknown'}`,
+      `  host:    ${(holder && holder.host)   || 'unknown'}`,
+      ``,
+      `Stop that process first, OR if it's a zombie (handler swallowed SIGTERM),`,
+      `force-kill it:   kill -9 ${holderPid}`,
+      `then retry. If you're sure no server is running, delete the lock:`,
+      `   rm ${LOCK_PATH}`,
+    ].join('\n');
+    const err = new Error(msg);
+    err.code = 'EALREADY';
+    throw err;
+  }
+  // Stale lock — reclaim by overwriting.
+  fs.writeFileSync(LOCK_PATH, payload);
+  lockOwned = true;
+  console.log('[db] reclaimed stale lock from pid', holderPid);
+}
+
+/**
+ * Release the single-instance lock. Idempotent; called from flushSave.
+ * Only removes the lock if WE own it (avoids deleting another process's
+ * lock if this one was reclaimed away from us mid-flight).
+ */
+function releaseSingleInstanceLock() {
+  if (!lockOwned) return;
+  try {
+    const holder = JSON.parse(fs.readFileSync(LOCK_PATH, 'utf8'));
+    if (holder && Number(holder.pid) === process.pid) {
+      fs.unlinkSync(LOCK_PATH);
+    }
+  } catch (_) { /* lock already gone or unreadable — fine */ }
+  lockOwned = false;
+}
+
+/**
  * Force-flush any pending save synchronously. Called on shutdown/close.
+ * Also releases the single-instance lock so a clean exit always leaves
+ * the lockfile gone — next boot doesn't have to reclaim a stale lock.
  */
 function flushSave() {
   if (pendingSave) { clearTimeout(pendingSave); pendingSave = null; }
-  if (!rawDb) return;
-  try {
-    const buf = Buffer.from(rawDb.export());
-    const tmp = DB_PATH + '.tmp';
-    fs.writeFileSync(tmp, buf);
-    fs.renameSync(tmp, DB_PATH);
-  } catch (e) {
-    console.error('[db] flush failed:', e.message);
+  if (rawDb) {
+    try {
+      const buf = Buffer.from(rawDb.export());
+      const tmp = DB_PATH + '.tmp';
+      fs.writeFileSync(tmp, buf);
+      fs.renameSync(tmp, DB_PATH);
+    } catch (e) {
+      console.error('[db] flush failed:', e.message);
+    }
   }
+  // Always release the lock, even if flush failed — holding a stale
+  // lock after exit is worse than risking a partial save (which the
+  // user can investigate via the .tmp file or the data/config.db.* backups).
+  releaseSingleInstanceLock();
 }
 
 /**
@@ -86,6 +186,14 @@ async function initDb() {
 
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  // Refuse to boot if another live server is already managing this DB.
+  // sql.js's "load whole file into memory, rewrite on commit" model
+  // means two processes silently overwrite each other's writes.
+  // Throws with a clear EALREADY error that server.js's top-level
+  // catch can format and exit cleanly. Stale locks from dead PIDs
+  // are reclaimed automatically.
+  acquireSingleInstanceLock();
 
   // Load sql.js wasm runtime once
   if (!SQL) SQL = await initSqlJs();
