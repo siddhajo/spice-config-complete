@@ -166,19 +166,34 @@ function requireAdmin(req, res, next) {
 // added by including the name in the appropriate role(s) below.
 const ROLE_PERMISSIONS = {
   viewer: new Set([
-    'view',         // read any list / detail
-    'export',       // download XLSX / PDF / CSV exports
-    'self_password' // change own password
+    'view',           // read any list / detail
+    'export',         // download XLSX / PDF / CSV exports
+    'self_password',  // change own password
+    'lot_entry_view'  // also see the Lot Entry tab + its data (read-only)
+  ]),
+  // Field-staff role for the auction-hall lot entry workflow. Sees only
+  // the Lot Entry tab in the sidebar (everything else hidden via the
+  // role-scoped CSS in index.html). The narrow scope — create trades,
+  // search sellers, create/edit own lots — matches what the auction-floor
+  // workflow actually needs.
+  lot_entry: new Set([
+    'self_password',
+    'view',            // read shared trade/lot data so multi-user sessions
+                       // can all see the same in-progress entries
+    'lot_entry_view',  // Lot Entry tab + its endpoints
+    'lot_write',       // create/edit own lots
+    'auction_write'    // create new trades on-the-fly during an auction day
   ]),
   operator: new Set([
     'view', 'export', 'self_password',
+    'lot_entry_view',// operators can also use the Lot Entry tab
     'lot_write',     // create/edit lots, calculate, validate, price-import
     'invoice_write', // generate sales/purchase/bills + edit
     'trader_write',  // create/edit/delete-bank traders
     'buyer_write'    // create/edit buyers (per user decision: tax fields editable)
   ]),
   manager: new Set([
-    'view', 'export', 'self_password',
+    'view', 'export', 'self_password', 'lot_entry_view',
     'lot_write', 'invoice_write', 'trader_write', 'buyer_write',
     'auction_write',  // create/edit auctions (trades)
     'invoice_revert', // revert sales/purchase/bills (undo invoice)
@@ -186,7 +201,7 @@ const ROLE_PERMISSIONS = {
     'state_toggle'    // toggle business state TN ↔ KL
   ]),
   admin: new Set([
-    'view', 'export', 'self_password',
+    'view', 'export', 'self_password', 'lot_entry_view',
     'lot_write', 'invoice_write', 'trader_write', 'buyer_write',
     'auction_write', 'invoice_revert', 'settings_write', 'state_toggle',
     'delete',       // delete any individual record
@@ -229,9 +244,32 @@ function requirePermission(capability) {
   };
 }
 
+// Same idea but accepts ANY of a list of capabilities. Used for endpoints
+// that serve multiple roles — e.g., the trader search endpoint, which
+// general operators reach through 'view' and lot-entry users reach
+// through their own lot_entry_view capability.
+function requireAnyPermission(...capabilities) {
+  return (req, res, next) => {
+    requireAuth(req, res, (err) => {
+      if (err) return next(err);
+      if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+      const hasAny = capabilities.some(c => userHas(req.user.role, c));
+      if (!hasAny) {
+        return res.status(403).json({
+          error: `Your role (${req.user.role}) does not allow this action`,
+          required: capabilities.join(' or '),
+          role: req.user.role
+        });
+      }
+      next();
+    });
+  };
+}
+
 // Convenience aliases — readable names for the most common gate points.
 // Encapsulates the permission name so callers don't repeat string literals.
 const requireView          = requirePermission('view');
+const requireViewOrLotEntry = requireAnyPermission('view', 'lot_entry_view');
 const requireLotWrite      = requirePermission('lot_write');
 const requireInvoiceWrite  = requirePermission('invoice_write');
 const requireInvoiceRevert = requirePermission('invoice_revert');
@@ -297,7 +335,7 @@ app.post('/api/users', requireUserManage, (req, res) => {
   // Validate role against the known set. Default to 'operator' (the most
   // common and least privileged write-capable role) if missing or invalid.
   // Legacy 'user' role is mapped to 'viewer' for backward compat.
-  const VALID_ROLES = ['viewer', 'operator', 'manager', 'admin'];
+  const VALID_ROLES = ['viewer', 'lot_entry', 'operator', 'manager', 'admin'];
   let finalRole = (role || '').toLowerCase();
   if (finalRole === 'user') finalRole = 'viewer';
   if (!VALID_ROLES.includes(finalRole)) finalRole = 'operator';
@@ -316,7 +354,7 @@ app.post('/api/users', requireUserManage, (req, res) => {
 // recreating them). Admin-only — same gate as creating users.
 app.put('/api/users/:id/role', requireUserManage, (req, res) => {
   const { role } = req.body || {};
-  const VALID_ROLES = ['viewer', 'operator', 'manager', 'admin'];
+  const VALID_ROLES = ['viewer', 'lot_entry', 'operator', 'manager', 'admin'];
   let finalRole = String(role || '').toLowerCase();
   if (finalRole === 'user') finalRole = 'viewer';
   if (!VALID_ROLES.includes(finalRole)) {
@@ -992,6 +1030,84 @@ app.delete('/api/traders/:id', requireDelete, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Quick-create trader (Lot Entry hall workflow) ───────────────
+// Used by the Lot Entry tab's "Add New Seller" modal. Minimal-fields
+// form for the auction-hall flow where the field user just needs to
+// register a new seller fast — full edits can come later from the
+// Sellers tab. Permissioned for trader_write OR lot_write so both
+// office operators AND lot_entry-role users can hit it.
+app.post('/api/traders/quick', requireAnyPermission('trader_write', 'lot_write'), (req, res) => {
+  const t = req.body || {};
+  if (!t.name || !String(t.name).trim()) {
+    return res.status(400).json({ error: 'Name is required' });
+  }
+  const db = getDb();
+  // Hard duplicate-PAN block — same logic as POST /api/traders so an
+  // auction-hall user cannot accidentally re-create a seller that
+  // already exists with the same PAN under a different name spelling.
+  const panDup = findDuplicateSeller(db, t.pan);
+  if (panDup) return res.status(409).json({
+    duplicate: true, field: 'pan', existing: panDup,
+    error: `A seller with PAN "${panDup.pan}" already exists: ${panDup.name || '(unnamed)'}`,
+  });
+  // De-dupe: if a seller with the same name AND (CR or phone) already
+  // exists, return that one instead of creating a duplicate. Helps when
+  // multiple field users create the same seller around the same time.
+  let existing = null;
+  if (t.cr && String(t.cr).trim()) {
+    existing = db.get('SELECT * FROM traders WHERE name = ? AND cr = ? LIMIT 1',
+      [String(t.name).trim(), String(t.cr).trim()]);
+  }
+  if (!existing && t.tel && String(t.tel).trim()) {
+    existing = db.get('SELECT * FROM traders WHERE name = ? AND tel = ? LIMIT 1',
+      [String(t.name).trim(), String(t.tel).trim()]);
+  }
+  if (existing) {
+    return res.json({ success: true, id: existing.id, deduped: true, trader: existing });
+  }
+  const info = db.run(`INSERT INTO traders (name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      String(t.name).trim().toUpperCase(),
+      (t.cr || '').toString().trim(),
+      (t.pan || '').toString().trim().toUpperCase(),
+      (t.tel || '').toString().trim(),
+      (t.aadhar || '').toString().trim(),
+      (t.padd || '').toString().trim(),
+      (t.ppla || '').toString().trim().toUpperCase(),
+      (t.pin || '').toString().trim(),
+      (t.pstate || 'TAMIL NADU').toString().trim().toUpperCase(),
+      (t.pst_code || '33').toString().trim(),
+      '', '', ''
+    ]);
+  const created = db.get('SELECT * FROM traders WHERE id = ?', [info.lastInsertRowid]);
+  if (created) created.banks = [];
+  res.json({ success: true, id: info.lastInsertRowid, trader: created });
+});
+
+// Set a bank as the trader's default. Used by the Lot Entry bank-picker
+// so picking a bank on a lot save updates the trader's default for next
+// time. Also syncs the legacy traders.acctnum/ifsc/holder_name fields
+// since several existing exports read directly from the traders row.
+app.put('/api/traders/:id/bank-default/:bankId', requireAnyPermission('trader_write', 'lot_write'), (req, res) => {
+  const traderId = parseInt(req.params.id, 10);
+  const bankId   = parseInt(req.params.bankId, 10);
+  if (!Number.isFinite(traderId) || !Number.isFinite(bankId)) {
+    return res.status(400).json({ error: 'Invalid trader or bank id' });
+  }
+  const db = getDb();
+  const bank = db.get('SELECT * FROM trader_banks WHERE id = ? AND trader_id = ?', [bankId, traderId]);
+  if (!bank) return res.status(404).json({ error: 'Bank not found for this trader' });
+  // Clear is_default on every bank for this trader, then set it on the chosen one.
+  db.run('UPDATE trader_banks SET is_default = 0 WHERE trader_id = ?', [traderId]);
+  db.run('UPDATE trader_banks SET is_default = 1 WHERE id = ?', [bankId]);
+  // Sync the legacy single-bank fields on traders so existing DBF/XLSX
+  // exports read the chosen bank.
+  db.run('UPDATE traders SET acctnum = ?, ifsc = ?, holder_name = ? WHERE id = ?',
+    [bank.acctnum || '', bank.ifsc || '', bank.holder_name || '', traderId]);
+  res.json({ success: true });
+});
+
 // ── Import Sellers from XLS/XLSX ──────────────────────────────
 app.post('/api/traders/import', requireTraderWrite, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -1438,6 +1554,18 @@ function enumerateRange(startLot, endLot) {
   return out;
 }
 
+// True iff lotNo is in [startLot..endLot] with the same prefix. Used by
+// the Lot Entry validate-lot endpoint to gate against out-of-allocation
+// inputs.
+function isLotInRange(lotNo, startLot, endLot) {
+  const lot = parseLotNo(lotNo);
+  const s = parseLotNo(startLot);
+  const e = parseLotNo(endLot);
+  if (!lot || !s || !e) return false;
+  if (lot.prefix !== s.prefix || s.prefix !== e.prefix) return false;
+  return lot.num >= s.num && lot.num <= e.num;
+}
+
 // GET /api/auctions/:id/allocations — list. Empty array when none.
 app.get('/api/auctions/:id/allocations', requireView, (req, res) => {
   const db = getDb();
@@ -1752,6 +1880,59 @@ app.post('/api/auctions/:id/allocations/auto-fill', requireAuctionWrite, (req, r
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// Validate a single lot number against (a) duplicates and (b) the
+// branch's allocation. Returns { valid: bool, error?: string }. Used
+// by Lot Entry's lot-no input as a server-side sanity check before save.
+app.get('/api/auctions/:id/validate-lot', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const auctionId = parseInt(req.params.id, 10);
+  const lotNo = String(req.query.lot_no || '').trim();
+  const branch = String(req.query.branch || '').trim();
+  if (!lotNo) return res.json({ valid: false, error: 'Enter lot number' });
+
+  const dup = db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [auctionId, lotNo]);
+  if (dup) return res.json({ valid: false, error: 'Lot #' + lotNo + ' already exists' });
+
+  const allocs = db.all('SELECT * FROM lot_allocations WHERE auction_id = ? AND branch = ?', [auctionId, branch]);
+  if (allocs.length > 0) {
+    const inRange = allocs.some(a => isLotInRange(lotNo, a.start_lot, a.end_lot));
+    if (!inRange) {
+      const ranges = allocs.map(a => a.start_lot + '-' + a.end_lot).join(', ');
+      return res.json({ valid: false, error: 'Outside allocation (' + ranges + ')' });
+    }
+  }
+  res.json({ valid: true });
+});
+
+// Next available lot number for a branch — used by Lot Entry to
+// auto-suggest after every save and after a seller is picked. Walks the
+// branch's allocation ranges in order, returning the first lot_no not
+// already saved to the auction.
+app.get('/api/auctions/:id/next-lot/:branch', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const auctionId = parseInt(req.params.id, 10);
+  const branch = req.params.branch;
+  const allocations = db.all(
+    'SELECT * FROM lot_allocations WHERE auction_id = ? AND branch = ? ORDER BY start_lot',
+    [auctionId, branch]
+  );
+  if (!allocations.length) return res.json({ next_lot: null, error: 'No allocation for this branch' });
+
+  const usedLots = db.all('SELECT lot_no FROM lots WHERE auction_id = ?', [auctionId]).map(l => l.lot_no);
+  const usedSet = new Set(usedLots);
+
+  for (const a of allocations) {
+    const s = parseLotNo(a.start_lot);
+    const e = parseLotNo(a.end_lot);
+    if (!s || !e) continue;
+    for (let n = s.num; n <= e.num; n++) {
+      const lotNo = buildLotNo(s.prefix, n, s.padLen);
+      if (!usedSet.has(lotNo)) return res.json({ next_lot: lotNo });
+    }
+  }
+  res.json({ next_lot: null, error: 'All lots in this branch are used' });
 });
 
 // ── Import Auction + Lots from XLS/XLSX (replaces APPA.PRG) ──
@@ -2073,8 +2254,30 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
                  OR lots.invo LIKE ? OR lots.branch LIKE ?)`;
     p.push(q2, q2, q2, q2, q2, q2);
   }
+  // Paginated mode: caller passed paginated=1 (with optional limit/offset).
+  // Used by Lot Entry's recent-entries panel where the lot list can be
+  // hundreds of rows. Sort newest-first so the just-saved lot appears at
+  // the top of page 1. Returns { rows, total } so the client can paint a
+  // pager. Legacy callers (no paginated flag) still get the flat array
+  // sorted by lot_no ASC.
+  const db = getDb();
+  if (req.query.paginated === '1' || req.query.paginated === 'true') {
+    const limit  = Math.max(1, Math.min(500, parseInt(req.query.limit, 10)  || 25));
+    const offset = Math.max(0,            parseInt(req.query.offset, 10) || 0);
+    // COUNT query re-uses the same WHERE clause shape but selects COUNT
+    // instead of lots.*. Build it from the same filter helper variables
+    // so any future filter additions land in both queries together.
+    const countQ = q.replace(
+      /^SELECT[\s\S]*?FROM lots\s+WHERE/,
+      'SELECT COUNT(*) AS c FROM lots WHERE'
+    );
+    const total = (db.get(countQ, p) || { c: 0 }).c || 0;
+    q += ' ORDER BY lots.id DESC LIMIT ? OFFSET ?';
+    const rows = db.all(q, [...p, limit, offset]);
+    return res.json({ rows, total, limit, offset });
+  }
   q += ' ORDER BY lots.lot_no';
-  res.json(getDb().all(q, p));
+  res.json(db.all(q, p));
 });
 
 app.post('/api/lots', requireLotWrite, (req, res) => {
