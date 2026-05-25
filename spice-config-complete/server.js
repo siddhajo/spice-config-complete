@@ -66,6 +66,28 @@ const upload = multer({ dest: uploadDir, limits: { fileSize: 20 * 1024 * 1024 } 
 
 const hash = pw => crypto.createHash('sha256').update(pw).digest('hex');
 
+// ── Password helpers ─────────────────────────────────────────
+// Bcrypt is preferred for new/changed passwords; SHA-256 rows are
+// honored for legacy users so existing installs keep working. On a
+// successful login against a legacy row, the caller opportunistically
+// re-hashes to bcrypt (see /api/auth/login in mobile-bridge.js).
+// We use bcryptjs (pure JS) so Electron-packaged builds don't need an
+// extra native-module compile/asar-unpack step.
+const bcrypt = require('bcryptjs');
+function isLegacyHash(h) {
+  // Bcrypt hashes start with $2a$ / $2b$ / $2y$. Anything else (here:
+  // 64-char SHA-256 hex) is treated as legacy and eligible for upgrade.
+  return !h || !/^\$2[aby]\$/.test(h);
+}
+async function verifyPassword(plain, stored) {
+  if (!stored) return false;
+  if (isLegacyHash(stored)) return hash(plain) === stored;
+  return bcrypt.compare(plain, stored);
+}
+async function hashPassword(plain) {
+  return bcrypt.hash(plain, 10);
+}
+
 // ── Date helpers ──
 // Convert any date-ish input (Date object, Excel serial number, dd/mm/yyyy,
 // yyyy-mm-dd, etc.) to canonical ISO yyyy-mm-dd for storage.
@@ -286,12 +308,21 @@ const requireExport        = requirePermission('export');
 // ══════════════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════════════
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password, device_label } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
   const db = getDb();
   const user = db.get('SELECT * FROM users WHERE username = ?', [username]);
-  if (!user || user.password_hash !== hash(password)) return res.status(401).json({ error: 'Invalid credentials' });
+  const ok = user ? await verifyPassword(password, user.password_hash) : false;
+  if (!user || !ok) return res.status(401).json({ error: 'Invalid credentials' });
+  // Opportunistic upgrade: legacy SHA-256 rows get re-hashed to bcrypt on
+  // first successful desktop login so mobile + desktop stay in sync.
+  if (isLegacyHash(user.password_hash)) {
+    try {
+      const upgraded = await hashPassword(password);
+      db.run('UPDATE users SET password_hash = ? WHERE id = ?', [upgraded, user.id]);
+    } catch (_) { /* non-fatal */ }
+  }
   const token = crypto.randomBytes(32).toString('hex');
   // Create a new session row WITHOUT deleting any existing sessions —
   // this lets the same user stay logged in on multiple devices simultaneously.
@@ -327,7 +358,7 @@ app.get('/api/users', requireUserManage, (req, res) => {
   res.json(users);
 });
 
-app.post('/api/users', requireUserManage, (req, res) => {
+app.post('/api/users', requireUserManage, async (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username and password are required' });
   if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
@@ -342,9 +373,10 @@ app.post('/api/users', requireUserManage, (req, res) => {
   const db = getDb();
   const existing = db.get('SELECT id FROM users WHERE username = ?', [username]);
   if (existing) return res.status(400).json({ error: 'Username already exists' });
+  const newHash = await hashPassword(password);
   db.run(
     'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-    [username, hash(password), finalRole]
+    [username, newHash, finalRole]
   );
   const created = db.get('SELECT id, username, role FROM users WHERE username = ?', [username]);
   res.json({ success: true, id: created ? created.id : null, username, role: finalRole });
@@ -375,13 +407,14 @@ app.put('/api/users/:id/role', requireUserManage, (req, res) => {
   res.json({ success: true, username: target.username, role: finalRole });
 });
 
-app.put('/api/users/:id/password', requireUserManage, (req, res) => {
+app.put('/api/users/:id/password', requireUserManage, async (req, res) => {
   const { password } = req.body || {};
   if (!password || password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
   const db = getDb();
   const user = db.get('SELECT id, username FROM users WHERE id = ?', [req.params.id]);
   if (!user) return res.status(404).json({ error: 'User not found' });
-  db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hash(password), user.id]);
+  const newHash = await hashPassword(password);
+  db.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, user.id]);
   // Invalidate all sessions of that user (force re-login after password change)
   db.run('DELETE FROM sessions WHERE user_id = ?', [user.id]);
   res.json({ success: true, username: user.username });
@@ -402,14 +435,16 @@ app.delete('/api/users/:id', requireUserManage, (req, res) => {
 });
 
 // Change own password — shortcut that doesn't require user id
-app.put('/api/me/password', requirePermission('self_password'), (req, res) => {
+app.put('/api/me/password', requirePermission('self_password'), async (req, res) => {
   const { current_password, new_password } = req.body || {};
   if (!current_password || !new_password) return res.status(400).json({ error: 'Both current and new password required' });
   if (new_password.length < 4) return res.status(400).json({ error: 'New password must be at least 4 characters' });
   const db = getDb();
   const user = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-  if (!user || user.password_hash !== hash(current_password)) return res.status(401).json({ error: 'Current password is incorrect' });
-  db.run('UPDATE users SET password_hash = ? WHERE id = ?', [hash(new_password), user.id]);
+  const ok = user ? await verifyPassword(current_password, user.password_hash) : false;
+  if (!user || !ok) return res.status(401).json({ error: 'Current password is incorrect' });
+  const newHash = await hashPassword(new_password);
+  db.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, user.id]);
   // Kill all OTHER sessions (keep current one)
   db.run('DELETE FROM sessions WHERE user_id = ? AND token != ?', [user.id, req.session.token]);
   res.json({ success: true });
@@ -440,6 +475,19 @@ app.delete('/api/me/sessions/:tokenSuffix', requireView, (req, res) => {
   db.run('DELETE FROM sessions WHERE token = ?', [match.token]);
   res.json({ success: true });
 });
+
+// ══════════════════════════════════════════════════════════════
+// MOBILE PWA BRIDGE
+// ══════════════════════════════════════════════════════════════
+// Mount BEFORE company-settings + the rest so the bridge wins route
+// matching for /api/traders, /api/traders/:id, etc. — those are the
+// unified seller-write endpoints that both apps share. The desktop's
+// own /api/traders POST further down still loads but is shadowed.
+// Mounting here also serves /mobile (the PWA) and the /api/auth/*,
+// /api/config, /api/lots (query form), /api/logo, and receipt-print
+// routes the PWA's app.html depends on.
+const { mountMobile } = require('./mobile-bridge');
+mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS });
 
 // ══════════════════════════════════════════════════════════════
 // COMPANY SETTINGS

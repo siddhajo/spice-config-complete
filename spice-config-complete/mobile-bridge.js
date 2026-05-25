@@ -1,5 +1,5 @@
 /**
- * mobile-bridge.js â PWA compatibility layer for the merged app.
+ * mobile-bridge.js — PWA compatibility layer for the merged app.
  *
  * Mounts the mobile lot-entry UI (PWA's app.html) at `/mobile` and
  * registers the alias/shim endpoints under `/api/auth/*`, `/api/config`,
@@ -11,13 +11,13 @@
  *   - app.html is a known-good piece of code (1600+ lines). Patching ~30
  *     fetch() callsites inline would be a maintenance burden every time
  *     we re-import the PWA's UI.
- *   - All deltas live in this one file â easy to audit, easy to remove
+ *   - All deltas live in this one file — easy to audit, easy to remove
  *     later if we ever rewrite the mobile UI on spice-config's native API.
  *
  * Pass 1 scope (this file): everything app.html needs to log in, browse
  *   auctions, search/create sellers + banks, and CRUD lots.
  * Pass 2 scope (next iteration): receipt PDF, batch/seller print routes
- *   â currently stubbed with 501 so missing-feature buttons surface a
+ *   — currently stubbed with 501 so missing-feature buttons surface a
  *   clear "not yet" message instead of generic network errors.
  */
 
@@ -27,22 +27,24 @@ const crypto = require('crypto');
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
 
-// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-// RECEIPT-PRINT HELPERS â ported from PWA server.js's renderer code.
-// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ──────────────────────────────────────────────────────────────────────
+// RECEIPT-PRINT HELPERS — ported from PWA server.js's renderer code.
+// ──────────────────────────────────────────────────────────────────────
 // All field-name remappings live here so the renderer can stay agnostic:
-//   spice-config column â PWA renderer expects
-//     lots.gross_wt     â lot.gross_weight
-//     lots.sample_wt    â lot.sample_weight
-//     lots.name         â lot.trader_name (denormalised seller name)
-//     lots.ppin         â lot.pin
+//   spice-config column → PWA renderer expects
+//     lots.gross_wt     → lot.gross_weight
+//     lots.sample_wt    → lot.sample_weight
+//     lots.name         → lot.trader_name (denormalised seller name)
+//     lots.ppin         → lot.pin
 // The query selects these aliased fields directly so renderSellerReceipt
 // (which is a verbatim port) doesn't need to know about the rename.
 
-// Spice-config logo location (single-company build â always ispl.png).
+// Spice-config logo location (single-company build → always ispl.png).
+// resolveLogoPath checks SPICE_DATA_DIR/logos first so cloud-persisted
+// uploads aren't shadowed by the bundled default of the same name.
+const { resolveLogoPath: _rlpMb } = require('./logo-paths');
 function getLogoPath() {
-  const p = path.join(__dirname, 'public', 'logo-ispl.png');
-  return fs.existsSync(p) ? p : null;
+  return _rlpMb('logo-ispl.png');
 }
 
 // Mask an account number for the receipt according to admin-set policy.
@@ -83,7 +85,7 @@ function getReceiptConfig(db) {
   };
 }
 
-// ââ HEADER (full size: ~340pt wide) ââââââââââââââââââââââââââââââ
+// ── HEADER (full size: ~340pt wide) ──────────────────────────────
 function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo) {
   const w = 300, m = 20;
   const logoPath = getLogoPath();
@@ -108,7 +110,7 @@ function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo) {
   doc.moveDown(0.4);
 }
 
-// ââ HEADER (compact: ~180pt wide, thermal-printer friendly) ââââââ
+// ── HEADER (compact: ~180pt wide, thermal-printer friendly) ──────
 function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo) {
   const w = 160, m = 10;
   const logoPath = getLogoPath();
@@ -131,7 +133,7 @@ function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo) {
   doc.moveDown(0.2);
 }
 
-// ââ RENDERER (full) ââââââââââââââââââââââââââââââââââââââââââââââ
+// ── RENDERER (full) ──────────────────────────────────────────────
 function renderSellerReceipt(doc, sellerLots, cfg) {
   const w = 300, m = 20;
   const lot = sellerLots[0];
@@ -215,7 +217,7 @@ function renderSellerReceipt(doc, sellerLots, cfg) {
      .text('** THANK YOU **', m, doc.y, { width: w, align: 'center' });
 }
 
-// ââ RENDERER (compact, thermal-printer / ~2.5"Ã3.5") âââââââââââââ
+// ── RENDERER (compact, thermal-printer / ~2.5"×3.5") ─────────────
 function renderSellerReceiptCompact(doc, sellerLots, cfg) {
   const w = 160, m = 10;
   const lot = sellerLots[0];
@@ -306,7 +308,7 @@ function pickReceiptRenderer(fmt) {
     : { render: renderSellerReceipt,        pageSize: [340, 550], compact: false };
 }
 
-// ââ LOT SELECT â single helper used by every print endpoint âââââ
+// ── LOT SELECT — single helper used by every print endpoint ─────
 // Spice-config has denormalised seller fields on the lots row
 // (lots.name, lots.cr, lots.ppla, lots.ppin, lots.tel) so we don't
 // strictly need the traders join, BUT joining gives us the freshest
@@ -343,10 +345,10 @@ const LOT_SELECT_SQL = `
 function mountMobile(app, deps) {
   const { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS } = deps;
 
-  // ââ 0. LAZY SELF-HEAL SCHEMA ââââââââââââââââââââââââââââââââââââââ
-  // The bridge owns these tables/columns â declare them here so the
+  // ── 0. LAZY SELF-HEAL SCHEMA ──────────────────────────────────────
+  // The bridge owns these tables/columns — declare them here so the
   // bridge works even if db.js wasn't updated on this install. Runs on
-  // the first request that needs it (NOT at mount time â initDb() hasn't
+  // the first request that needs it (NOT at mount time — initDb() hasn't
   // finished yet when mountMobile runs). Cached via a closure flag so
   // it only runs once per process. All operations idempotent.
   let _healed = false;
@@ -362,20 +364,24 @@ function mountMobile(app, deps) {
         user_agent TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now','localtime'))
       )`);
-      // Unified seller schema â whatsapp/email must exist for the
+      // Unified seller schema — whatsapp/email must exist for the
       // mobile create/edit flow. Add if missing; harmless if already
       // there (each ALTER wrapped in its own try/catch).
       try { db.exec("ALTER TABLE traders ADD COLUMN whatsapp TEXT DEFAULT ''"); } catch (_) {}
       try { db.exec("ALTER TABLE traders ADD COLUMN email TEXT DEFAULT ''"); } catch (_) {}
       // Mobile lot-entry pins a specific seller bank per lot via bank_id.
-      // The spice-config base schema doesn't have this column â adding it
+      // The spice-config base schema doesn't have this column — adding it
       // here so the bridge's SELECTs (`l.bank_id` in the bank subqueries)
       // don't fail with "no such column" and the My Lots panel comes up
       // empty. Idempotent: harmless if already present.
       try { db.exec("ALTER TABLE lots ADD COLUMN bank_id INTEGER"); } catch (_) {}
+      // The change-password handler clears must_change_password on success.
+      // Spice-config doesn't seed this column, so add it here (default 0 =
+      // not gated) and the UPDATE in /api/auth/change-password won't fail.
+      try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch (_) {}
       _healed = true;
     } catch (e) {
-      // Not fatal â log and continue; the handler will surface the
+      // Not fatal — log and continue; the handler will surface the
       // underlying error if the schema really is broken.
       console.warn('[mobile-bridge] self-heal deferred:', e.message);
     }
@@ -383,13 +389,13 @@ function mountMobile(app, deps) {
   // Express middleware: heal once before the first /api/* request.
   app.use('/api', (req, _res, next) => { ensureBridgeSchema(); next(); });
 
-  // ââ 0b. requireAuthFlex â accepts Authorization header OR ?token= â
+  // ── 0b. requireAuthFlex — accepts Authorization header OR ?token= ─
   // Print URLs are opened via window.open() (the only way mobile browsers
   // give us a real print dialog with a renderable PDF preview). window.open
   // can NOT set the Authorization header, so the mobile UI appends the
   // token as a query string. Spice-config's native requireAuth only reads
   // the header, so query-string tokens 401 there. This helper closes that
-  // gap for the print routes ONLY â every other route stays on the strict
+  // gap for the print routes ONLY — every other route stays on the strict
   // header-only requireAuth.
   function requireAuthFlex(req, res, next) {
     const hdr = (req.headers.authorization || '').replace('Bearer ', '');
@@ -397,7 +403,7 @@ function mountMobile(app, deps) {
     if (!tok) return res.status(401).json({ error: 'No token' });
     const db = getDb();
     const session = db.get('SELECT * FROM sessions WHERE token = ?', [tok]);
-    if (!session) return res.status(403).json({ error: 'Session expired â please sign in again' });
+    if (!session) return res.status(403).json({ error: 'Session expired — please sign in again' });
     const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
     if (!user) return res.status(403).json({ error: 'Unauthorized' });
     db.run(`UPDATE sessions SET last_used_at = datetime('now','localtime') WHERE token = ?`, [tok]);
@@ -406,17 +412,17 @@ function mountMobile(app, deps) {
     next();
   }
 
-  // ââ 1. STATIC MOUNT ââââââââââââââââââââââââââââââââââââââââââââââ
+  // ── 1. STATIC MOUNT ──────────────────────────────────────────────
   // Serves /mobile, /mobile/app.html, /mobile/manifest.json, /mobile/icon.svg.
   // Phones will install the PWA from /mobile/ (manifest scope = /mobile/).
   const mobileDir = path.join(__dirname, 'public-mobile');
   // The explicit route MUST be registered BEFORE express.static. Otherwise
-  // static() auto-redirects `/mobile` â `/mobile/` with a 301 (its built-in
+  // static() auto-redirects `/mobile` → `/mobile/` with a 301 (its built-in
   // directory-handling) before our app.get gets a chance to run.
   app.get('/mobile', (_req, res) => res.sendFile(path.join(mobileDir, 'app.html')));
   app.use('/mobile', express.static(mobileDir, { maxAge: 0 }));
 
-  // ââ 2. AUTH ALIASES âââââââââââââââââââââââââââââââââââââââââââââ
+  // ── 2. AUTH ALIASES ─────────────────────────────────────────────
   // PWA uses /api/auth/* paths. spice-config uses /api/login etc.
   // We wrap login/me so the response shape matches what app.html expects
   // ({user: {...}, token} rather than {token, role, username}).
@@ -428,7 +434,7 @@ function mountMobile(app, deps) {
     }
     const db = getDb();
     const user = db.get('SELECT * FROM users WHERE username = ?', [username]);
-    // Bcrypt verify â matches the desktop admin's /api/login flow.
+    // Bcrypt verify — matches the desktop admin's /api/login flow.
     // verifyPassword tolerates both legacy SHA-256 rows AND bcrypt rows
     // so a user who logged in via the desktop and got their hash
     // upgraded to bcrypt earlier can still log in here.
@@ -437,7 +443,7 @@ function mountMobile(app, deps) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
     // Opportunistic rehash to bcrypt if the stored hash is legacy SHA-256.
-    // Same logic as desktop /api/login â first successful mobile login
+    // Same logic as desktop /api/login — first successful mobile login
     // also upgrades the row.
     if (isLegacyHash(user.password_hash)) {
       try {
@@ -446,7 +452,7 @@ function mountMobile(app, deps) {
       } catch (_) { /* non-fatal */ }
     }
     const token = crypto.randomBytes(32).toString('hex');
-    // Multi-device sessions â DON'T delete existing sessions. Field staff
+    // Multi-device sessions — DON'T delete existing sessions. Field staff
     // can keep the desktop admin UI logged in while using the phone too.
     db.run(
       'INSERT INTO sessions (token, user_id, device_label) VALUES (?, ?, ?)',
@@ -499,14 +505,14 @@ function mountMobile(app, deps) {
     }
     const db = getDb();
     const user = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
-    // Same bcrypt verify as desktop /api/me/password â accepts legacy
+    // Same bcrypt verify as desktop /api/me/password — accepts legacy
     // SHA-256 rows so the first password change after upgrade still works.
     const ok = user ? await verifyPassword(current_password, user.password_hash) : false;
     if (!user || !ok) {
       return res.status(401).json({ error: 'Current password is incorrect' });
     }
     const newHash = await hashPassword(new_password);
-    // Clear must_change_password alongside the hash update â without
+    // Clear must_change_password alongside the hash update — without
     // this the user stays gated behind the forced-change wall even
     // after a successful change. The desktop endpoint (/api/me/password
     // in server.js) does the same in one UPDATE.
@@ -519,23 +525,23 @@ function mountMobile(app, deps) {
     res.json({ success: true });
   });
 
-  // ââ 3. CONFIG SHIM (branches / crop types / title / settings) ââ
+  // ── 3. CONFIG SHIM (branches / crop types / title / settings) ──
   // The PWA's app.html hits GET /api/config (no query string) on every
   // login + session start, and expects a SINGLE FLAT OBJECT with every
   // setting it cares about. Build that shape from spice-config's
   // company_settings table.
   //
   // PWA-expected fields:
-  //   branches[]      â br1..br9 (skip blanks)
-  //   cropTypes[]     â default_crop_type + sensible fallbacks
-  //   title           â trade_name
-  //   sampleWeight    â sample_weight (lot_entry category)
-  //   showMoisture    â show_moisture
-  //   defaultLitre    â default_litre
-  //   editEnabled     â edit_enabled (boolean)
-  //   editTimeout     â edit_timeout_sec
-  //   labels{}        â reserved; safe to leave empty (PWA has defaults)
-  //   pageLimit, showUsername, tradeTileTitle, acctMask â defaults
+  //   branches[]      → br1..br9 (skip blanks)
+  //   cropTypes[]     → default_crop_type + sensible fallbacks
+  //   title           → trade_name
+  //   sampleWeight    → sample_weight (lot_entry category)
+  //   showMoisture    → show_moisture
+  //   defaultLitre    → default_litre
+  //   editEnabled     → edit_enabled (boolean)
+  //   editTimeout     → edit_timeout_sec
+  //   labels{}        → reserved; safe to leave empty (PWA has defaults)
+  //   pageLimit, showUsername, tradeTileTitle, acctMask → defaults
   app.get('/api/config', (req, res) => {
     const db = getDb();
     const type = String(req.query.type || '').toLowerCase();
@@ -552,7 +558,7 @@ function mountMobile(app, deps) {
       return v === 'true' || v === '1';
     };
 
-    // Branch list â keys br1..br9, blank values dropped
+    // Branch list — keys br1..br9, blank values dropped
     const brRows = db.all(
       `SELECT key, value FROM company_settings
        WHERE category = 'branches' AND key LIKE 'br_'
@@ -566,7 +572,7 @@ function mountMobile(app, deps) {
         sort_order: i,
       }));
 
-    // Crop types â synthesise from default_crop_type + fallbacks
+    // Crop types — synthesise from default_crop_type + fallbacks
     const defCrop = String(get('default_crop_type', '')).trim().toUpperCase();
     const cropSet = new Set();
     if (defCrop) cropSet.add(defCrop);
@@ -581,7 +587,7 @@ function mountMobile(app, deps) {
     if (type === 'crop_type') return res.json({ items: cropTypes });
     if (type === 'title')     return res.json({ items: [{ id: 1, type: 'title', value: get('trade_name', 'Spice Auction'), sort_order: 0 }] });
 
-    // Full config object â what app.html expects from a no-arg GET.
+    // Full config object — what app.html expects from a no-arg GET.
     res.json({
       branches,
       cropTypes,
@@ -591,7 +597,7 @@ function mountMobile(app, deps) {
       sampleWeight:    getNum('sample_weight', 0),
       showMoisture:    getBool('show_moisture', false),
       defaultLitre:    get('default_litre', ''),
-      // PWA defaults â surfaced here for completeness; not currently
+      // PWA defaults — surfaced here for completeness; not currently
       // backed by spice-config settings, so static-ish values are fine.
       pageLimit:       20,
       showUsername:    false,
@@ -601,7 +607,7 @@ function mountMobile(app, deps) {
     });
   });
 
-  // ââ 4. AUCTIONS ENVELOPE ââââââââââââââââââââââââââââââââââââââââ
+  // ── 4. AUCTIONS ENVELOPE ────────────────────────────────────────
   // PWA's app.html does `const trades = d.auctions || [];` so it expects
   // an envelope object, not the flat array spice-config returns natively.
   // Wrap the native array in {auctions: [...]} for the mobile client.
@@ -620,15 +626,15 @@ function mountMobile(app, deps) {
     }
   });
 
-  // ââ 4. STATUS ALIAS âââââââââââââââââââââââââââââââââââââââââââââ
+  // ── 4. STATUS ALIAS ─────────────────────────────────────────────
   // PWA's app.html pings /api/status on boot to detect "logged out vs
   // server unreachable". spice-config has /api/health; alias it.
   app.get('/api/status', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-  // ââ 5. LOGO ALIAS âââââââââââââââââââââââââââââââââââââââââââââââ
+  // ── 5. LOGO ALIAS ───────────────────────────────────────────────
   // PWA loads the brand logo via `<img src="/api/logo">`, which means
   // the response MUST be a raw image, not JSON. Redirect to the
-  // /logo-ispl.png path â server.js has a route handler that falls
+  // /logo-ispl.png path — server.js has a route handler that falls
   // through to the bundled default (logo_kj.png) when the user hasn't
   // uploaded a custom logo, so this works for both fresh installs and
   // ones with a custom upload. The previous redirect to /api/branding
@@ -638,7 +644,7 @@ function mountMobile(app, deps) {
     res.redirect(302, '/logo-ispl.png');
   });
 
-  // ââ 6. LOTS â query-string filter form ââââââââââââââââââââââââââ
+  // ── 6. LOTS — query-string filter form ──────────────────────────
   // PWA: GET /api/lots?auction_id=N&branch=X (returns {lots, stats}).
   // Spice-config: GET /api/lots/:auctionId  (returns flat array).
   // We add a new endpoint at the PWA path that reshapes to PWA's expected
@@ -735,7 +741,7 @@ function mountMobile(app, deps) {
     });
   });
 
-  // ââ 7. LOT DETAIL (for edit modal) âââââââââââââââââââââââââââââ
+  // ── 7. LOT DETAIL (for edit modal) ──────────────────────────────
   // PWA pre-fills the edit form's gross/sample weights from this endpoint.
   app.get('/api/lots/:id/detail', requireAuth, (req, res) => {
     const db = getDb();
@@ -752,16 +758,16 @@ function mountMobile(app, deps) {
     });
   });
 
-  // ââ 8. TRADER QUICK-CREATE (PWA POST /api/traders) âââââââââââââ
+  // ── 8. TRADER QUICK-CREATE (PWA POST /api/traders) ─────────────
   // Single unified seller-create path used by BOTH apps. Mobile PWA hits
   // /api/traders directly; desktop's "Add Seller" buttons also reach here
   // (the bridge mounts before the native /api/traders POST, so the bridge
   // wins the route).
   //
   // Strong uniqueness:
-  //   - GSTIN (cr) â if present, must be unique across all traders
-  //   - PAN        â if present, must be unique
-  //   - Phone (tel) + Name â same combo treated as a duplicate
+  //   - GSTIN (cr) — if present, must be unique across all traders
+  //   - PAN        — if present, must be unique
+  //   - Phone (tel) + Name — same combo treated as a duplicate
   // These checks run BEFORE insert so neither app can race two creates
   // for the same person.
   app.post('/api/traders', requireAuth, (req, res) => {
@@ -779,7 +785,7 @@ function mountMobile(app, deps) {
     const panTrim  = String(t.pan || '').trim().toUpperCase();
     const telTrim  = String(t.tel || '').trim();
 
-    // Strict uniqueness â GSTIN (cr) is the strongest identifier
+    // Strict uniqueness — GSTIN (cr) is the strongest identifier
     if (crTrim) {
       const dup = db.get('SELECT * FROM traders WHERE cr = ? COLLATE NOCASE LIMIT 1', [crTrim]);
       if (dup) {
@@ -799,7 +805,7 @@ function mountMobile(app, deps) {
         return res.json({ trader: dup, deduped: true, reason: 'PAN match' });
       }
     }
-    // Soft dedup â same name + same phone is treated as a single person
+    // Soft dedup — same name + same phone is treated as a single person
     if (telTrim) {
       const dup = db.get('SELECT * FROM traders WHERE name = ? AND tel = ? LIMIT 1',
         [nameTrim, telTrim]);
@@ -830,12 +836,22 @@ function mountMobile(app, deps) {
         emailClean,
       ]
     );
-    const created = db.get('SELECT * FROM traders WHERE id = ?', [info.lastInsertRowid]);
-    if (created) created.banks = [];
+    const newId = info.lastInsertRowid;
+    // Desktop UI sends `banks` as part of the trader payload. Persist
+    // them now so the response carries the populated array. PWA omits
+    // `banks` here and writes them via /api/traders/:id/banks instead,
+    // so the no-op branch in the helper covers that path.
+    syncTraderBanksFromArray(db, newId, t.banks);
+    const created = db.get('SELECT * FROM traders WHERE id = ?', [newId]);
+    if (created) {
+      created.banks = db.all(
+        'SELECT * FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id', [newId]
+      );
+    }
     res.status(201).json({ trader: created });
   });
 
-  // ââ 8b. TRADER UPDATE (PWA PUT /api/traders/:id) âââââââââââââââ
+  // ── 8b. TRADER UPDATE (PWA PUT /api/traders/:id) ───────────────
   // Mobile PWA hits this to update whatsapp/email/contact fields. Desktop
   // also hits the same path. Single write path = single source of truth.
   //
@@ -864,7 +880,7 @@ function mountMobile(app, deps) {
         [String(t.pan).trim().toUpperCase(), id]);
       if (dup) return res.status(409).json({ error: 'Another seller already has this PAN' });
     }
-    // Partial update â only write fields that were sent. Mobile sends a
+    // Partial update — only write fields that were sent. Mobile sends a
     // subset (just acctnum/ifsc/whatsapp/email on edit-from-banks);
     // desktop sends the full record.
     const sets = []; const vals = [];
@@ -886,11 +902,21 @@ function mountMobile(app, deps) {
     setField('holder_name', t.holder_name, (v) => String(v).trim());
     setField('whatsapp',    t.whatsapp,    (v) => String(v).trim());
     if (emailClean !== null) { sets.push('email = ?'); vals.push(emailClean); }
-    if (sets.length === 0) {
+    // No flat-field changes is fine — we may still have a `banks` array
+    // to sync below. Only short-circuit when neither flat fields nor
+    // banks were sent.
+    if (sets.length > 0) {
+      vals.push(id);
+      db.run(`UPDATE traders SET ${sets.join(', ')} WHERE id = ?`, vals);
+    } else if (!Array.isArray(t.banks)) {
       return res.json({ success: true, noop: true, trader });
     }
-    vals.push(id);
-    db.run(`UPDATE traders SET ${sets.join(', ')} WHERE id = ?`, vals);
+    // Desktop sends the whole banks array on every edit; persist it
+    // here so the bridge handler (which wins route-matching over
+    // server.js) keeps trader_banks in sync. Mobile PWA omits `banks`
+    // and edits rows individually via /api/traders/:id/banks, so the
+    // no-op branch in the helper covers that path.
+    syncTraderBanksFromArray(db, id, t.banks);
     const updated = db.get('SELECT * FROM traders WHERE id = ?', [id]);
     updated.banks = db.all(
       'SELECT * FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id', [id]
@@ -898,7 +924,7 @@ function mountMobile(app, deps) {
     res.json({ success: true, trader: updated });
   });
 
-  // ââ 8c. TRADER GET BY ID â ensures fresh fetch ââââââââââââââââââ
+  // ── 8c. TRADER GET BY ID — ensures fresh fetch ──────────────────
   // Mobile uses this after edits to refresh the displayed trader. Always
   // reads from the DB (no cache); both apps see the same data.
   app.get('/api/traders/:id', requireAuth, (req, res) => {
@@ -916,7 +942,7 @@ function mountMobile(app, deps) {
     res.json(trader);
   });
 
-  // ââ 9. TRADER LAST-LOT + BANKS (PWA helper) ââââââââââââââââââââ
+  // ── 9. TRADER LAST-LOT + BANKS (PWA helper) ────────────────────
   app.get('/api/traders/:id/last-lot', requireAuth, (req, res) => {
     const db = getDb();
     const traderId = parseInt(req.params.id, 10);
@@ -953,9 +979,52 @@ function mountMobile(app, deps) {
     res.json({ lastLot: lot || null, banks });
   });
 
-  // ââ 10. TRADER BANK CRUD âââââââââââââââââââââââââââââââââââââââ
+  // ── 10. TRADER BANK CRUD ───────────────────────────────────────
   // PWA exposes per-trader bank management. Spice-config does this through
   // a different route shape; replicate the PWA contract here.
+  // Replace the trader's bank-account rows from a `banks` array on the
+  // parent payload. Mirrors server.js's syncTraderBanks: clear existing
+  // rows, insert what was sent, then copy the FIRST bank back into the
+  // legacy traders.ifsc/acctnum/holder_name columns so callers that
+  // haven't been migrated to read trader_banks still see a valid
+  // primary account.
+  //
+  // The desktop UI sends the whole array in one shot via POST/PUT
+  // /api/traders ({...trader, banks: [...]}); the mobile PWA sends
+  // individual rows via /api/traders/:id/banks below. This helper is
+  // the single source of truth — keep both paths consistent.
+  //
+  // Skips entirely when `banks` is missing or not an array, so the PWA
+  // payload (which doesn't include `banks`) is unchanged.
+  function syncTraderBanksFromArray(db, traderId, banks) {
+    if (!Array.isArray(banks)) return;
+    const arr = banks.filter(b => b && (b.acctnum || b.ifsc));
+    db.run('DELETE FROM trader_banks WHERE trader_id = ?', [traderId]);
+    for (const b of arr) {
+      db.run(
+        `INSERT INTO trader_banks (trader_id, bank_name, acctnum, ifsc, holder_name)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          traderId,
+          String(b.bank_name || '').trim(),
+          String(b.acctnum || '').trim(),
+          String(b.ifsc || '').trim().toUpperCase(),
+          String(b.holder_name || '').trim(),
+        ]
+      );
+    }
+    const first = arr[0] || {};
+    db.run(
+      'UPDATE traders SET ifsc = ?, acctnum = ?, holder_name = ? WHERE id = ?',
+      [
+        String(first.ifsc || '').trim().toUpperCase(),
+        String(first.acctnum || '').trim(),
+        String(first.holder_name || '').trim(),
+        traderId,
+      ]
+    );
+  }
+
   app.post('/api/traders/:id/banks', requireAuth, (req, res) => {
     const db = getDb();
     const traderId = parseInt(req.params.id, 10);
@@ -1056,7 +1125,7 @@ function mountMobile(app, deps) {
     res.json({ success: true });
   });
 
-  // ââ 11. LOTS â CLEAR MINE âââââââââââââââââââââââââââââââââââââââ
+  // ── 11. LOTS — CLEAR MINE ───────────────────────────────────────
   // PWA admin button: delete all of MY lots in the current auction.
   app.post('/api/lots/clear-mine', requireAuth, (req, res) => {
     const db = getDb();
@@ -1069,12 +1138,12 @@ function mountMobile(app, deps) {
     res.json({ success: true, deleted: result.changes });
   });
 
-  // ââ 11b. SELLER HISTORY (existing bookings panel) âââââââââââââââ
-  // The lot-entry screen shows a "ð EXISTING BOOKINGS" box once a
+  // ── 11b. SELLER HISTORY (existing bookings panel) ───────────────
+  // The lot-entry screen shows a "📋 EXISTING BOOKINGS" box once a
   // seller is selected, listing every lot already booked for that
   // seller in the current trade across ALL branches (so a field user
   // in NEDUMKANDAM sees that the same seller already has lots in
-  // PAMPUPARA). PWA had /api/reports/seller-history/:traderId â port
+  // PAMPUPARA). PWA had /api/reports/seller-history/:traderId — port
   // it here over spice-config's schema.
   //
   // Response shape (matches PWA so app.html parses unchanged):
@@ -1085,7 +1154,7 @@ function mountMobile(app, deps) {
     const traderId  = parseInt(req.params.traderId, 10);
     const auctionId = parseInt(req.query.auction_id, 10);
     if (!traderId || !auctionId) {
-      // Return an empty-but-valid shape rather than 400 â the mobile UI
+      // Return an empty-but-valid shape rather than 400 — the mobile UI
       // gracefully shows "None in this trade" for empty arrays and the
       // worst we'd accomplish with 400 is the same "Failed to load"
       // message that prompted this fix.
@@ -1105,27 +1174,27 @@ function mountMobile(app, deps) {
       acc.lot_count  += 1;
       return acc;
     }, { total_qty: 0, total_bags: 0, lot_count: 0 });
-    // No-cache: this panel must always be fresh â bookings can be added
+    // No-cache: this panel must always be fresh — bookings can be added
     // by another field user a moment ago.
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.set('Pragma', 'no-cache');
     res.json({ lots, summary });
   });
 
-  // ââ 12. PRINT / RECEIPT ENDPOINTS (Pass 2) ââââââââââââââââââââââ
-  // Six routes â receipt for one lot, batch by lot-id list, all lots for
+  // ── 12. PRINT / RECEIPT ENDPOINTS (Pass 2) ──────────────────────
+  // Six routes — receipt for one lot, batch by lot-id list, all lots for
   // a single seller, all lots for all sellers in an auction. Both GET and
   // POST variants for the batch/seller calls so the mobile UI can use
   // window.open() (GET) for the print dialog while desktop callers can
   // POST a JSON array of ids if they prefer.
 
-  // (1) Single-lot receipt â printed right after a save from the mobile UI.
+  // (1) Single-lot receipt — printed right after a save from the mobile UI.
   app.get('/api/lots/:id/receipt', requireAuthFlex, (req, res) => {
     const db = getDb();
     const lot = db.get(LOT_SELECT_SQL + ' WHERE l.id = ?', [parseInt(req.params.id, 10)]);
     if (!lot) return res.status(404).json({ error: 'Lot not found' });
 
-    // If a branch was passed, enforce it â prevents printing a receipt
+    // If a branch was passed, enforce it — prevents printing a receipt
     // whose header would lie about which branch the lot lives in.
     const branch = req.query && req.query.branch;
     if (branch && lot.branch !== branch) {
@@ -1144,7 +1213,7 @@ function mountMobile(app, deps) {
     doc.end();
   });
 
-  // Shared helper â groups arbitrary lot rows by seller, then renders
+  // Shared helper — groups arbitrary lot rows by seller, then renders
   // one receipt page per seller. Used by print-batch and print-all-sellers.
   function streamGroupedReceipts(lots, req, res, cfg, filename) {
     const r = pickReceiptRenderer(req.query.format || (req.body && req.body.format));
@@ -1188,7 +1257,7 @@ function mountMobile(app, deps) {
     handlePrintBatch(ids, req, res);
   });
 
-  // (3) All lots for one seller in one auction â "ð All by Seller"
+  // (3) All lots for one seller in one auction — "📋 All by Seller"
   function handlePrintSeller(traderId, auctionId, req, res) {
     const db = getDb();
     if (!traderId || !auctionId) {
@@ -1225,7 +1294,7 @@ function mountMobile(app, deps) {
   app.get('/api/lots/print-seller', requireAuthFlex, (req, res) =>
     handlePrintSeller(req.query.trader_id, req.query.auction_id, req, res));
 
-  // (4) Every seller in an auction (optionally branch-scoped) â admin's
+  // (4) Every seller in an auction (optionally branch-scoped) — admin's
   // end-of-day bulk print.
   app.get('/api/lots/print-all-sellers/:auctionId', requireAuthFlex, (req, res) => {
     const db = getDb();

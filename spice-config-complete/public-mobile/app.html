@@ -18,7 +18,7 @@ body{font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif
 .screen.active{display:flex}
 #s-lots,#s-mylots{height:calc(100dvh - 56px)}
 
-/* ââ APPBAR ââ */
+/* ── APPBAR ── */
 .appbar{background:var(--appbar);padding:10px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;min-height:50px;box-shadow:0 4px 20px rgba(13,124,95,.3);position:relative;z-index:2}
 .appbar::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent)}
 .appbar h1{flex:1;font-size:14px;color:#fff;font-weight:700;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.02em}
@@ -27,17 +27,17 @@ body{font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,sans-serif
 .appbar .btn-icon:active{background:rgba(255,255,255,.25);transform:scale(.92)}
 .scroll{flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch}
 
-/* ââ LABELS ââ */
+/* ── LABELS ── */
 .lb{font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.6px;text-transform:uppercase;margin-bottom:5px;margin-top:14px}
 .elb{font-size:8px;font-weight:800;color:var(--text3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:3px}
 .lb:first-child{margin-top:0}
 
-/* ââ INPUTS ââ */
+/* ── INPUTS ── */
 .ein{width:100%;height:34px;border-radius:8px;border:1.5px solid var(--border);padding:0 10px;font-size:14px;font-family:inherit;outline:none;background:var(--input-bg);color:var(--text);-webkit-appearance:none;transition:all .25s}
 .ein:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(13,124,95,.1);transform:translateY(-1px)}
 input[type=text],input[type=password],input[type=tel],input[type=email],input[type=number],input[type=search]{width:100%;height:44px;border-radius:var(--radius);border:1.5px solid var(--border);padding:0 14px;font-size:14px;font-family:inherit;outline:none;background:var(--input-bg);color:var(--text);-webkit-appearance:none;transition:all .25s}
-/* Mobile search inputs â left-anchored magnifying glass + native
-   browser clear (Ã) on the right. Same visual language as the
+/* Mobile search inputs — left-anchored magnifying glass + native
+   browser clear (×) on the right. Same visual language as the
    desktop app so dad sees the icons either device he uses. */
 input[type=search]{padding-left:36px !important;padding-right:34px !important;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230d7c5f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");background-repeat:no-repeat;background-position:12px center;background-size:16px 16px}
 input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;height:18px;width:18px;cursor:pointer;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c0392b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='15' y1='9' x2='9' y2='15'/><line x1='9' y1='9' x2='15' y2='15'/></svg>");background-size:contain;background-repeat:no-repeat;opacity:.7}
@@ -47,14 +47,14 @@ input::placeholder{color:#bbb}
 select{width:100%;height:44px;border-radius:var(--radius);border:1.5px solid var(--border);padding:0 12px;font-size:14px;font-family:inherit;background:var(--input-bg);color:var(--text);outline:none;-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' fill='none' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;transition:all .2s}
 select:focus{border-color:var(--green)}
 
-/* ââ LOT CHIPS ââ */
+/* ── LOT CHIPS ── */
 .lot-chip{display:inline-flex;align-items:center;justify-content:center;min-width:40px;height:30px;padding:0 6px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:2px dashed var(--border2);background:var(--bg2);color:var(--text2);transition:all .2s cubic-bezier(.34,1.56,.64,1);user-select:none;-webkit-tap-highlight-color:transparent;letter-spacing:-.02em;position:relative;overflow:hidden}
 .lot-chip:active{transform:scale(.88)}
 .lot-chip.used{background:#0d7c5f;color:#fff;cursor:not-allowed;font-size:10px;border:2px solid #0a6a50;opacity:.8}
 .lot-chip.selected{background:#e85d26;color:#fff;border:2px solid #d04d1a;box-shadow:0 3px 14px rgba(232,93,38,.4);transform:scale(1.1)}
 .lot-chip.selected::after{content:'';position:absolute;inset:-2px;border-radius:10px;border:2px solid rgba(255,255,255,.5);animation:chipRing 1.5s ease-out infinite}
 
-/* ââ BUTTONS ââ */
+/* ── BUTTONS ── */
 .btn{width:100%;height:48px;border-radius:var(--radius);border:none;background:var(--stat-bg);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:18px;box-shadow:0 4px 14px rgba(13,124,95,.25);transition:all .2s;letter-spacing:-.01em;position:relative;overflow:hidden}
 .btn::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.1) 0%,transparent 50%);pointer-events:none}
 .btn:active{transform:scale(.97);box-shadow:0 2px 8px rgba(13,124,95,.2)}
@@ -63,19 +63,19 @@ select:focus{border-color:var(--green)}
 .btn-outline{background:#fff;color:var(--green);border:1.5px solid var(--green);box-shadow:none}
 .btn-outline::after{display:none}
 
-/* ââ SELLER CARD ââ */
+/* ── SELLER CARD ── */
 .tc{background:var(--green-light);border-radius:var(--radius);border:1.5px solid var(--green);padding:10px 12px;margin-top:6px;display:flex;gap:8px;margin-bottom:6px;position:relative;overflow:hidden}
 .tc::before{content:'';position:absolute;top:0;right:0;width:60px;height:60px;background:radial-gradient(circle,rgba(13,124,95,.08) 0%,transparent 70%);pointer-events:none}
 .tc .ti{flex:1}.tc .tn{font-size:13px;font-weight:700;color:var(--green)}.tc .td{font-size:10px;color:var(--text2);line-height:1.5;margin-top:2px}
 .tc .tx{background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:2px}
 
-/* ââ STATUS BAR ââ */
+/* ── STATUS BAR ── */
 .sb{background:var(--stat-bg);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative}
 .sb::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent)}
 .sc{font-size:12px;font-weight:700;color:#fff}.sl{font-size:9px;color:rgba(255,255,255,.55);font-weight:500}
 .st{font-size:12px;font-weight:700;text-align:right;color:#fff}
 
-/* ââ BOTTOM NAV (fixed, outside screens) ââ */
+/* ── BOTTOM NAV (fixed, outside screens) ── */
 .bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);box-shadow:0 -4px 16px rgba(0,0,0,.06);height:56px;align-items:stretch;z-index:999}
 .bnav.visible{display:flex}
 .bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0;cursor:pointer;font-size:9px;color:var(--text3);gap:3px;font-weight:700;transition:all .15s;-webkit-tap-highlight-color:transparent;user-select:none;height:100%;letter-spacing:.3px;text-transform:uppercase;position:relative;touch-action:manipulation;background:none;border:none;outline:none}
@@ -87,13 +87,13 @@ select:focus{border-color:var(--green)}
 .bnav-item svg{width:20px;height:20px;transition:transform .15s}
 .bnav-item:active svg{transform:scale(.85)}
 
-/* ââ RECENT STRIP ââ */
+/* ── RECENT STRIP ── */
 .recent-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px}
 .recent-item .ri-lot{font-weight:800;color:var(--green);min-width:40px;font-size:13px}
 .recent-item .ri-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
 .recent-item .ri-qty{font-weight:700;color:var(--text2);white-space:nowrap;font-size:11px}
 
-/* ââ MISC ââ */
+/* ── MISC ── */
 .qi{font-size:18px!important;font-weight:800!important;color:var(--green)!important;letter-spacing:-.02em}
 .eb{background:#fef1f1;border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--red);margin-top:10px;border:1px solid #f5c6c6}
 .logo{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:50px;color:var(--green)}
@@ -116,7 +116,7 @@ select:focus{border-color:var(--green)}
 @keyframes menuSlide{from{opacity:0;transform:translateY(-8px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
 .mi{padding:13px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);font-weight:500;transition:all .15s}.mi:last-child{border-bottom:none}.mi:active{background:var(--green-light);padding-left:20px}.mi.dg{color:var(--red)}
 
-/* ââ MY LOTS ââ */
+/* ── MY LOTS ── */
 .ml-fixed{flex-shrink:0;padding:12px 14px 0}
 .ml-scroll{flex:1;overflow-y:auto;padding:0 14px 14px;-webkit-overflow-scrolling:touch}
 .lot-stats{display:flex;gap:6px;margin-bottom:10px}
@@ -141,7 +141,7 @@ select:focus{border-color:var(--green)}
 .lot-empty{text-align:center;padding:40px 16px;color:var(--text3);font-size:13px;font-weight:500}
 .undo-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
 .appbar-logo{height:30px;width:30px;object-fit:cover;margin-right:8px;vertical-align:middle;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:2px solid rgba(255,255,255,.3)}
-/* ââ Shared searchbox: icon + clear ââ */
+/* ── Shared searchbox: icon + clear ── */
 .sx{position:relative;display:block;width:100%}
 .sx>input{width:100%;padding-left:34px !important;padding-right:32px !important}
 .sx-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--text3);pointer-events:none;display:flex;align-items:center;justify-content:center}
@@ -162,7 +162,7 @@ select:focus{border-color:var(--green)}
 .undo-item .ui-info{flex:1;font-size:12px}
 .undo-item .ui-restore{background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
 
-/* ââ MODALS ââ */
+/* ── MODALS ── */
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);z-index:1000;display:none;align-items:center;justify-content:center;backdrop-filter:blur(3px);padding:20px}
 .modal-overlay.show{display:flex}
 .modal{background:var(--bg);border-radius:16px;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;animation:modalUp .3s ease-out;overflow:hidden}
@@ -173,12 +173,12 @@ select:focus{border-color:var(--green)}
 .modal-body{flex:1;overflow-y:auto;padding:14px 16px;min-height:0}
 .modal-foot{padding:10px 16px;border-top:1px solid var(--border);background:var(--bg2);display:flex;gap:8px;flex-shrink:0;border-radius:0 0 16px 16px}
 
-/* ââ ANIMATIONS ââ */
+/* ── ANIMATIONS ── */
 @keyframes chipPop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1.1)}}
 @keyframes chipRing{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.3)}}
 .lot-chip.selected{animation:chipPop .25s cubic-bezier(.34,1.56,.64,1)}
 
-/* ââ DARK MODE ââ */
+/* ── DARK MODE ── */
 [data-theme="dark"] .appbar{background:var(--appbar)}
 [data-theme="dark"] .sb{background:var(--stat-bg)}
 [data-theme="dark"] .lot-stat{background:var(--stat-bg)}
@@ -194,7 +194,7 @@ select:focus{border-color:var(--green)}
 [data-theme="dark"] .lot-card:nth-child(odd){background:var(--bg2)}
 [data-theme="dark"] .lot-card:nth-child(even){background:var(--card-even)}
 
-/* ââ RESPONSIVE ââ */
+/* ── RESPONSIVE ── */
 @media(max-width:360px){.scroll{padding:10px}.ml-fixed{padding:10px 10px 0}.ml-scroll{padding:0 10px 10px}input[type=text],input[type=password],input[type=tel],input[type=email],input[type=number]{height:38px;font-size:13px}select{height:38px;font-size:13px}.btn{height:40px;font-size:13px}.lot-stat{padding:6px 2px}.lot-stat .val{font-size:12px}.lot-stat .lbl{font-size:8px}.fr{gap:6px}.lot-chip{min-width:36px;height:26px;font-size:10px}}
 @media(max-height:500px){.sb{display:none}.bnav{display:none!important}#s-lots,#s-mylots{height:100dvh}}
 @media(min-width:600px){.screen{max-width:480px;margin:0 auto;left:0;right:0;border-left:1px solid var(--border);border-right:1px solid var(--border)}.bnav{max-width:480px;margin:0 auto;left:0;right:0}}
@@ -208,7 +208,7 @@ select:focus{border-color:var(--green)}
   </div>
   <div class="sub">Login to start entering lots</div>
   <div class="lb">USERNAME</div><input type="text" id="l-user" placeholder="Enter username" autocomplete="username" autocapitalize="none">
-  <div class="lb">PASSWORD</div><div style="position:relative"><input type="password" id="l-pass" placeholder="Enter password" autocomplete="current-password" style="padding-right:40px"><button type="button" onclick="togglePwdVis('l-pass',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:4px" title="Show password">ð</button></div>
+  <div class="lb">PASSWORD</div><div style="position:relative"><input type="password" id="l-pass" placeholder="Enter password" autocomplete="current-password" style="padding-right:40px"><button type="button" onclick="togglePwdVis('l-pass',this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text3);font-size:16px;padding:4px" title="Show password">👁</button></div>
   <div id="l-err"></div><button class="btn" id="l-btn" onclick="doLogin()">Login</button>
 </div></div>
 
@@ -225,7 +225,7 @@ select:focus{border-color:var(--green)}
 </div>
 
 <div class="screen" id="s-lots">
-  <div class="appbar"><h1 id="le-title"><img id="app-logo" class="appbar-logo" src="" style="display:none"><span id="le-title-text">Trade #1</span></h1><span class="badge" id="le-user"></span><button class="btn-icon" onclick="refreshConfig();toast('Config refreshed',false)" title="Refresh settings">ð</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
+  <div class="appbar"><h1 id="le-title"><img id="app-logo" class="appbar-logo" src="" style="display:none"><span id="le-title-text">Trade #1</span></h1><span class="badge" id="le-user"></span><button class="btn-icon" onclick="refreshConfig();toast('Config refreshed',false)" title="Refresh settings">🔄</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
 
   <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0">
     <!-- Alloc bar -->
@@ -265,7 +265,7 @@ select:focus{border-color:var(--green)}
           <div class="sx">
             <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
             <input type="search" id="le-name" placeholder="Search seller by name, phone, GSTIN..." autocomplete="off" onfocus="showSaveBtn()" oninput="searchTrader(this.value)" style="height:36px;font-size:13px">
-            <button type="button" class="sx-clear" id="le-name-clear" aria-label="Clear search">â</button>
+            <button type="button" class="sx-clear" id="le-name-clear" aria-label="Clear search">✕</button>
           </div>
           <div class="sr" id="le-res" style="display:none"></div>
         </div>
@@ -277,8 +277,8 @@ select:focus{border-color:var(--green)}
             <select id="le-bank-select" style="flex:1;height:32px;border-radius:6px;border:1px solid var(--border2);padding:0 6px;font-size:11px;font-family:inherit;background:var(--input-bg);color:var(--text)" onchange="onBankSelect(this)">
               <option value="">No bank</option>
             </select>
-            <button onclick="editSelectedBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:13px" title="Edit bank">â</button>
-            <button onclick="deleteSelectedBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px" title="Delete bank">â</button>
+            <button onclick="editSelectedBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:13px" title="Edit bank">✎</button>
+            <button onclick="deleteSelectedBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px" title="Delete bank">✕</button>
             <button onclick="showAddBank()" title="Add bank" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:700;cursor:pointer">+Add</button>
           </div>
           <div id="le-bank-info" style="font-size:10px;color:var(--text3);margin-top:1px"></div>
@@ -325,14 +325,14 @@ select:focus{border-color:var(--green)}
 
         <!-- Buttons -->
         <div id="le-btn-save" style="display:flex;gap:8px">
-          <button class="btn" id="le-save" onclick="saveLot()" title="Save lot" style="flex:2;height:40px;margin-top:0;font-size:14px;border-radius:10px">â Save</button>
-          <button onclick="clearEntryForm()" title="Clear form" style="flex:1;height:40px;border-radius:10px;border:1.5px solid var(--border2);background:var(--input-bg);color:var(--text2);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">â Clear</button>
+          <button class="btn" id="le-save" onclick="saveLot()" title="Save lot" style="flex:2;height:40px;margin-top:0;font-size:14px;border-radius:10px">✓ Save</button>
+          <button onclick="clearEntryForm()" title="Clear form" style="flex:1;height:40px;border-radius:10px;border:1.5px solid var(--border2);background:var(--input-bg);color:var(--text2);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">✕ Clear</button>
         </div>
         <div id="le-btn-saved" style="display:none">
           <div style="display:flex;gap:6px;align-items:center;background:var(--green-light);border:1.5px solid rgba(13,124,95,.2);border-radius:10px;padding:6px 10px">
-            <span style="font-size:12px;font-weight:700;color:var(--green);flex:1" id="le-saved-label">â Saved #001</span>
-            <button onclick="printLastLot()" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">ð¨ This Lot</button>
-            <button onclick="printLastSeller()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">ð All by Seller</button>
+            <span style="font-size:12px;font-weight:700;color:var(--green);flex:1" id="le-saved-label">✓ Saved #001</span>
+            <button onclick="printLastLot()" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🖨 This Lot</button>
+            <button onclick="printLastSeller()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📋 All by Seller</button>
           </div>
         </div>
 
@@ -354,16 +354,16 @@ select:focus{border-color:var(--green)}
   </div>
 
 <div class="mo" id="menu" onclick="toggleMenu()"><div class="md" onclick="event.stopPropagation()">
-    <div class="mi" onclick="toggleDarkMode()"><span id="dm-icon">ð</span> <span id="dm-label">Dark Mode</span></div>
-    <div class="mi" id="menu-undo" style="display:none" onclick="showUndoHistory()">â© Undo History</div>
-    <div class="mi" onclick="togglePrintFormat()">ð¨ Print format: <span id="pf-label">Full</span></div>
-    <div class="mi" onclick="showChangePassword()">ð Change Password</div>
+    <div class="mi" onclick="toggleDarkMode()"><span id="dm-icon">🌙</span> <span id="dm-label">Dark Mode</span></div>
+    <div class="mi" id="menu-undo" style="display:none" onclick="showUndoHistory()">↩ Undo History</div>
+    <div class="mi" onclick="togglePrintFormat()">🖨 Print format: <span id="pf-label">Full</span></div>
+    <div class="mi" onclick="showChangePassword()">🔒 Change Password</div>
     <div class="mi" onclick="changeSession()">Change session</div>
     <div class="mi dg" onclick="doLogout()">Logout</div>
   </div></div>
 
 <div class="screen" id="s-mylots">
-  <div class="appbar"><h1 id="ml-title"><img class="appbar-logo" src="" style="display:none"><span id="ml-title-text">My Lots</span></h1><span class="badge" id="ml-user"></span><button class="btn-icon" onclick="refreshConfig();loadMyLots();toast('Refreshed',false)" title="Refresh">ð</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
+  <div class="appbar"><h1 id="ml-title"><img class="appbar-logo" src="" style="display:none"><span id="ml-title-text">My Lots</span></h1><span class="badge" id="ml-user"></span><button class="btn-icon" onclick="refreshConfig();loadMyLots();toast('Refreshed',false)" title="Refresh">🔄</button><button class="btn-icon" onclick="toggleMenu()" title="Open menu">&#x22EE;</button></div>
   <div id="ml-alloc-bar" style="display:none;background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch"></div>
   <div class="ml-fixed">
     <div class="lot-stats">
@@ -374,20 +374,20 @@ select:focus{border-color:var(--green)}
     <div class="lot-search"><div class="sx">
       <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
       <input type="search" id="ml-search" placeholder="Search seller name..." oninput="filterMyLots(this.value)">
-      <button type="button" class="sx-clear" id="ml-search-clear" aria-label="Clear search">â</button>
+      <button type="button" class="sx-clear" id="ml-search-clear" aria-label="Clear search">✕</button>
     </div></div>
     <div id="ml-actions" style="display:none;margin-bottom:8px;gap:6px;align-items:center;flex-wrap:wrap">
-      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">ð¨ Print selected</button>
-      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">ð¨ Print all by seller</button>
-      <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">ð Delete Selected</button>
+      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">🖨 Print selected</button>
+      <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">🖨 Print all by seller</button>
+      <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">🗑 Delete Selected</button>
       <span style="font-size:11px;color:var(--text3)" id="ml-sel-count"></span>
     </div>
   </div>
   <div class="ml-scroll" id="ml-scroll">
     <div id="ml-top"></div>
-    <div style="text-align:right;padding:2px 12px"><a onclick="document.getElementById('ml-bottom').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">â¬ Bottom</a></div>
+    <div style="text-align:right;padding:2px 12px"><a onclick="document.getElementById('ml-bottom').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">⬇ Bottom</a></div>
     <div id="ml-list"></div>
-    <div style="text-align:right;padding:4px 12px" id="ml-bottom"><a onclick="document.getElementById('ml-top').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">â¬ Top</a></div>
+    <div style="text-align:right;padding:4px 12px" id="ml-bottom"><a onclick="document.getElementById('ml-top').scrollIntoView({behavior:'smooth'})" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;color:#fff;font-weight:700;cursor:pointer;background:var(--green);padding:3px 10px;border-radius:16px">⬆ Top</a></div>
   </div>
 </div>
 
@@ -411,7 +411,7 @@ select:focus{border-color:var(--green)}
         <div class="sx">
           <span class="sx-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
           <input type="search" id="ed-seller-input" placeholder="Search seller by name, phone..." oninput="searchEditSeller(this.value)" autocomplete="off">
-          <button type="button" class="sx-clear" id="ed-seller-input-clear" aria-label="Clear search">â</button>
+          <button type="button" class="sx-clear" id="ed-seller-input-clear" aria-label="Clear search">✕</button>
         </div>
         <div class="sr" id="ed-seller-res" style="display:none"></div>
       </div>
@@ -425,8 +425,8 @@ select:focus{border-color:var(--green)}
           <select id="ed-bank-select" style="flex:1;height:36px;border-radius:6px;border:1px solid var(--border2);padding:0 8px;font-size:12px;font-family:inherit;background:var(--input-bg);color:var(--text)" onchange="onEditBankSelect(this)">
             <option value="">No bank account</option>
           </select>
-          <button onclick="editSelectedEditBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:15px" title="Edit selected bank account">â</button>
-          <button onclick="deleteSelectedEditBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px" title="Delete selected bank account">â</button>
+          <button onclick="editSelectedEditBank()" style="background:none;border:none;color:var(--green);cursor:pointer;font-size:15px" title="Edit selected bank account">✎</button>
+          <button onclick="deleteSelectedEditBank()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px" title="Delete selected bank account">✕</button>
           <button onclick="showEditBankAdd()" title="Add new bank account" style="background:var(--green);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap">+ Add</button>
         </div>
         <div id="ed-bank-info" style="margin-top:4px;font-size:11px;color:var(--text3)"></div>
@@ -479,7 +479,7 @@ select:focus{border-color:var(--green)}
 
 <!-- Offline banner -->
 <div id="offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;background:#E67E22;color:#fff;text-align:center;padding:6px 10px;font-size:12px;font-weight:600;z-index:300;display:none;align-items:center;justify-content:center;gap:8px">
-  <span>â¡ Offline <span id="offline-count"></span></span>
+  <span>⚡ Offline <span id="offline-count"></span></span>
   <button onclick="syncOfflineQueue()" style="background:rgba(255,255,255,.3);border:none;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">Sync now</button>
 </div>
 
@@ -487,7 +487,7 @@ select:focus{border-color:var(--green)}
 <div class="modal-overlay" id="undo-modal"><div class="modal">
   <div class="modal-hdr"><h2>Undo History</h2><button class="modal-close" onclick="document.getElementById('undo-modal').classList.remove('show')">&#x2715;</button></div>
   <div class="modal-body">
-    <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Last 10 deleted lots â click Restore to bring back</p>
+    <p style="font-size:11px;color:var(--text3);margin-bottom:10px">Last 10 deleted lots — click Restore to bring back</p>
     <div id="undo-list"></div>
   </div>
 </div></div>
@@ -518,7 +518,7 @@ const ICO_EDIT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V2
 const ICO_DEL='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 const ICO_PRINT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>';
 
-function togglePwdVis(id,btn){var inp=document.getElementById(id);if(inp.type==='password'){inp.type='text';btn.textContent='ð'}else{inp.type='password';btn.textContent='ð'}}
+function togglePwdVis(id,btn){var inp=document.getElementById(id);if(inp.type==='password'){inp.type='text';btn.textContent='🙈'}else{inp.type='password';btn.textContent='👁'}}
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');var bn=document.getElementById('global-bnav');if(bn){if(id==='s-lots'||id==='s-mylots'){bn.classList.add('visible')}else{bn.classList.remove('visible')}}}
 document.addEventListener('click',function(){var el=document.getElementById('le-recent');if(el){el.querySelectorAll('[style*="position:absolute"]').forEach(function(p){p.style.display='none'})}});
 function ah(){return{'Authorization':'Bearer '+token,'Content-Type':'application/json'}}
@@ -604,7 +604,7 @@ async function loadAvailableTrades(){
           // Without this they'd be stuck looking at the warning with
           // no obvious way back to the form.
           if (info) {
-            info.innerHTML = 'You must change your password before loading trades. <a href="#" onclick="event.preventDefault();showChangePassword();" style="color:var(--green,#0E8A5F);font-weight:600;text-decoration:underline">Change password now â</a>';
+            info.innerHTML = 'You must change your password before loading trades. <a href="#" onclick="event.preventDefault();showChangePassword();" style="color:var(--green,#0E8A5F);font-weight:600;text-decoration:underline">Change password now →</a>';
           }
           showChangePassword();
           // Pre-fill the error banner inside the modal so it's clear
@@ -742,7 +742,7 @@ function renderRecentLots(){
   var el=document.getElementById('le-recent');
   if(!lastSavedLot){el.innerHTML='';return}
   var l=lastSavedLot;
-  // Print actions live in the green "Saved" bar above â keep this row passive to avoid duplication.
+  // Print actions live in the green "Saved" bar above — keep this row passive to avoid duplication.
   el.innerHTML='<div class="recent-item" style="background:rgba(29,158,117,.06)"><span class="ri-lot">#'+l.lot_no+'</span><span class="ri-name">'+(l.trader_name||'')+'</span><span class="ri-qty">'+Number(l.qty).toFixed(3)+' kg</span></div>';
 }
 
@@ -751,14 +751,14 @@ function printAndClose(url){
   var w=window.open('','_blank','width=420,height=620');
   if(!w){window.open(url,'_blank');return}
   var html='<!DOCTYPE html><html><head><title>Print Receipt</title><style>html,body{margin:0;padding:0;height:100%;background:#fff;font-family:system-ui,Arial,sans-serif}.bar{padding:8px 12px;background:#0d7c5f;color:#fff;font-size:12px;display:flex;gap:8px;align-items:center}.bar button{margin-left:auto;background:#fff;color:#0d7c5f;border:0;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}iframe{border:0;width:100%;height:calc(100% - 34px)}<\/style></head><body>'
-    +'<div class="bar">Receipt â auto-closes after print<button onclick="window.close()">Close</button></div>'
+    +'<div class="bar">Receipt — auto-closes after print<button onclick="window.close()">Close</button></div>'
     +'<iframe id="pf" src="'+url+'"></iframe>'
     +'<script>var f=document.getElementById("pf");var done=false,printed=false;function finish(){if(done)return;done=true;setTimeout(function(){window.close()},400)}window.onafterprint=function(){if(printed)finish()};f.onload=function(){setTimeout(function(){try{f.contentWindow.focus();f.contentWindow.print();printed=true}catch(e){try{window.print();printed=true}catch(_){}}},600)}<\/script>'
     +'</body></html>';
   w.document.open();w.document.write(html);w.document.close();
 }
 function printFmt(){return localStorage.getItem('sa_print_format')==='compact'?'compact':'full'}
-function applyPrintFmtLabel(){var el=document.getElementById('pf-label');if(el)el.textContent=printFmt()==='compact'?'Compact (2.5Ã3.5)':'Full'}
+function applyPrintFmtLabel(){var el=document.getElementById('pf-label');if(el)el.textContent=printFmt()==='compact'?'Compact (2.5×3.5)':'Full'}
 function togglePrintFormat(){localStorage.setItem('sa_print_format',printFmt()==='compact'?'full':'compact');applyPrintFmtLabel();toast('Print format: '+(printFmt()==='compact'?'Compact':'Full'),false)}
 applyPrintFmtLabel();
 async function printSellerLots(traderId){
@@ -773,7 +773,7 @@ function editRecentLot(lotId){
   openEdit(l.id,String(l.lot_no),tn,String(l.grade||''),l.bags,l.litre,l.qty,l.trader_id,l.bank_id||null);
 }
 
-function goLots(){document.getElementById('le-title-text').textContent='Trade #'+tno+' â '+br;document.getElementById('le-user').textContent=user;document.getElementById('ml-title-text').textContent='Lots â '+br;document.getElementById('ml-user').textContent=user;document.getElementById('menu-undo').style.display=userRole==='admin'?'block':'none';loadAppLogo();refreshConfig();updUI();resetForm();show('s-lots')}
+function goLots(){document.getElementById('le-title-text').textContent='Trade #'+tno+' — '+br;document.getElementById('le-user').textContent=user;document.getElementById('ml-title-text').textContent='Lots — '+br;document.getElementById('ml-user').textContent=user;document.getElementById('menu-undo').style.display=userRole==='admin'?'block':'none';loadAppLogo();refreshConfig();updUI();resetForm();show('s-lots')}
 function updUI(){updProgress()}
 function updProgress(){
   var el=document.getElementById('le-progress');if(!el)return;
@@ -784,27 +784,27 @@ function updProgress(){
   el.classList.toggle('over',over);
   el.style.display='block';
   el.innerHTML='<div class="pp-row">'
-    +'<div><div class="pp-lbl">Received</div><div class="pp-val">'+(over?'ð© ':'')+received+' / '+planned+' lots</div></div>'
+    +'<div><div class="pp-lbl">Received</div><div class="pp-val">'+(over?'🚩 ':'')+received+' / '+planned+' lots</div></div>'
     +'<div><div class="pp-lbl">Net Wt</div><div class="pp-val">'+tq.toFixed(3)+' kg</div></div>'
     +'<span class="pp-pct">'+pct+'%</span>'
     +'</div>'
     +'<div class="pp-bar"><div style="width:'+Math.min(100,pct)+'%"></div></div>'
-    +(over?'<div class="pp-warn">â  Allocated lot limit exceeded</div>':'');
+    +(over?'<div class="pp-warn">⚠ Allocated lot limit exceeded</div>':'');
 }
 
 function searchTrader(q){clearTimeout(stm);const el=document.getElementById('le-res');lastSearchQuery=q;if(q.length<2){el.style.display='none';return}stm=setTimeout(async()=>{
 // Try online first, fall back to cache
 var ts=[];
 try{const r=await fetch(B+'/api/traders?search='+encodeURIComponent(q),{headers:ah()});const d=await r.json();ts=Array.isArray(d)?d:(d.traders||[]);ts.forEach(cacheTrader)}catch(e){ts=searchTraderCache(q)}
-const qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');let html=ts.map((t,i)=>{const h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');const loc=[t.ppla,t.pin].filter(Boolean).join(', ');const info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' â '+info:'')+'</div></div>'}).join('');const isPhone=/^\d{4,}$/.test(q.trim());if(!ts.length){html+='<div class="si add-new" onclick="openSellerModal(\''+(isPhone?'':q.toUpperCase().replace(/'/g,"\\'"))+'\',\''+(isPhone?q.trim():'')+'\')">&#43; Add new seller'+(isPhone?'':' &quot;'+q.toUpperCase()+'&quot;')+'</div>'}else if(!isPhone){html+='<div class="si add-new" onclick="openSellerModal(\''+q.toUpperCase().replace(/'/g,"\\'")+'\',\'\')">&#43; Add new seller &quot;'+q.toUpperCase()+'&quot;</div>'}el.innerHTML=html;el.style.display='block';el._traders=ts;el.querySelectorAll('.si:not(.add-new)').forEach(item=>{item.onclick=function(){pickTrader(el._traders[parseInt(this.dataset.idx)])}})},200)}
+const qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');let html=ts.map((t,i)=>{const h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');const loc=[t.ppla,t.pin].filter(Boolean).join(', ');const info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' — '+info:'')+'</div></div>'}).join('');const isPhone=/^\d{4,}$/.test(q.trim());if(!ts.length){html+='<div class="si add-new" onclick="openSellerModal(\''+(isPhone?'':q.toUpperCase().replace(/'/g,"\\'"))+'\',\''+(isPhone?q.trim():'')+'\')">&#43; Add new seller'+(isPhone?'':' &quot;'+q.toUpperCase()+'&quot;')+'</div>'}else if(!isPhone){html+='<div class="si add-new" onclick="openSellerModal(\''+q.toUpperCase().replace(/'/g,"\\'")+'\',\'\')">&#43; Add new seller &quot;'+q.toUpperCase()+'&quot;</div>'}el.innerHTML=html;el.style.display='block';el._traders=ts;el.querySelectorAll('.si:not(.add-new)').forEach(item=>{item.onclick=function(){pickTrader(el._traders[parseInt(this.dataset.idx)])}})},200)}
 
 function pickTrader(t){selT=t;document.getElementById('le-res').style.display='none';document.getElementById('le-sw').style.display='none';
 var loc=[t.ppla,t.pin].filter(Boolean).join(', ');
 var cr=(t.cr||'').trim();
-// Auto-grade: starts with CR. â Grade 1, has GSTIN (number prefix) â Grade 2
+// Auto-grade: starts with CR. → Grade 1, has GSTIN (number prefix) → Grade 2
 var grade='1';
 if(cr.length>5 && !cr.toUpperCase().startsWith('CR.'))grade='2';
-document.getElementById('le-tc').innerHTML='<div class="tc"><div class="ti"><div class="tn">'+t.name+'</div><div class="td">'+loc+(cr?' â '+cr:'')+'</div></div><button class="tx" onclick="clearTrader()">&#x2715;</button></div>';document.getElementById('le-tc').style.display='block';
+document.getElementById('le-tc').innerHTML='<div class="tc"><div class="ti"><div class="tn">'+t.name+'</div><div class="td">'+loc+(cr?' — '+cr:'')+'</div></div><button class="tx" onclick="clearTrader()">&#x2715;</button></div>';document.getElementById('le-tc').style.display='block';
 document.getElementById('le-grade').value=grade;
 cacheTrader(t);
 fetchSellerTemplate(t.id);
@@ -812,7 +812,7 @@ loadSellerBookings(t.id);
 document.getElementById('le-bags').focus()}
 function clearTrader(){selT=null;document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';document.getElementById('le-name').value='';var leClr=document.getElementById('le-name-clear');if(leClr)leClr.classList.remove('show');document.getElementById('le-res').style.display='none';hideSellerBookings();document.getElementById('le-name').focus()}
 
-// Shared search-clear wiring: toggles â visibility based on value, clears + re-fires input on click.
+// Shared search-clear wiring: toggles ✕ visibility based on value, clears + re-fires input on click.
 function attachSearchClear(inputId, onAfterClear){
   var inp=document.getElementById(inputId); if(!inp)return;
   var btn=document.getElementById(inputId+'-clear'); if(!btn)return;
@@ -841,20 +841,20 @@ async function loadSellerBookings(traderId){
   var hdr=document.getElementById('le-seller-lots-hdr');
   var body=document.getElementById('le-seller-lots-body');
   box.style.display='block';
-  hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Loadingâ¦</span>';
+  hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Loading…</span>';
   body.innerHTML='';
   try{
     var r=await fetch(B+'/api/reports/seller-history/'+traderId+'?auction_id='+encodeURIComponent(aid),{headers:ah()});
     if(token!==sellerBookingsReq)return;
-    if(!r.ok){hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Failed to load</span>';return}
+    if(!r.ok){hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Failed to load</span>';return}
     var d=await r.json();
     if(token!==sellerBookingsReq)return;
     var lots=(d.lots||[]).slice().sort(function(a,b){return (parseInt(a.lot_no)||0)-(parseInt(b.lot_no)||0)});
-    if(!lots.length){hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">None in this trade</span>';body.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--text3)">No prior lots booked for this seller in the current trade.</div>';return}
+    if(!lots.length){hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">None in this trade</span>';body.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--text3)">No prior lots booked for this seller in the current trade.</div>';return}
     var s=d.summary||{};
     var totQty=Number(s.total_qty||0).toFixed(3);
     var totBags=s.total_bags||0;
-    hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--green);font-weight:700">'+lots.length+' lot'+(lots.length>1?'s':'')+' â¢ '+totBags+' bags â¢ '+totQty+' kg</span>';
+    hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--green);font-weight:700">'+lots.length+' lot'+(lots.length>1?'s':'')+' • '+totBags+' bags • '+totQty+' kg</span>';
     var rows=lots.map(function(l){
       var when=(l.created_at||'').slice(11,16);
       return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:11px">'
@@ -869,7 +869,7 @@ async function loadSellerBookings(traderId){
     body.innerHTML=rows;
   }catch(e){
     if(token!==sellerBookingsReq)return;
-    hdr.innerHTML='<span>ð EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Offline</span>';
+    hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">Offline</span>';
   }
 }
 
@@ -908,12 +908,12 @@ async function saveNewSeller(){
       // 409 = duplicate PAN. On phones the modal is tall, the
       // keyboard may still be up, and toasts can be hidden behind
       // either. We force a native alert() so the user is guaranteed
-      // to see what happened â they MUST tap OK to continue. The
+      // to see what happened — they MUST tap OK to continue. The
       // inline banner stays for reference after they dismiss.
       if(r.status===409 && d && d.duplicate){
         var ex=d.existing||{};
         var existingLine = 'Existing: '+(ex.name||'(unnamed)')+
-          ' Â· PAN '+(ex.pan||'â')+' Â· phone '+(ex.tel||'â');
+          ' · PAN '+(ex.pan||'—')+' · phone '+(ex.tel||'—');
         er.innerHTML='<div class="eb"><b>'+(d.error||'Duplicate seller')+'</b>'+
           '<br><span style="opacity:.85">'+existingLine+'</span>'+
           '<br>Cancel and pick that seller from the search list.</div>';
@@ -922,7 +922,7 @@ async function saveNewSeller(){
           '\n\nCancel and pick that seller from the search list.');
         return;
       }
-      // Any other non-OK response â same alert-first pattern so the
+      // Any other non-OK response — same alert-first pattern so the
       // user can't think the popup "did nothing".
       er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';
       try { er.scrollIntoView({block:'center',behavior:'smooth'}); } catch(_) {}
@@ -945,7 +945,7 @@ function validateLotNo(val){
   // No longer needed - lot grid handles validation visually
 }
 
-// ââ INPUT SANITIZERS ââ
+// ── INPUT SANITIZERS ──
 
 function sanitizeInt(inp) {
   // Allow only digits, strip everything else
@@ -988,10 +988,10 @@ function checkAcctMatch(prefix) {
   // Check match
   if (confirmEl.style.display !== 'none' && confirmEl.value.trim()) {
     if (acct === confirmEl.value.trim()) {
-      matchEl.textContent = 'â Account numbers match';
+      matchEl.textContent = '✓ Account numbers match';
       matchEl.style.color = 'var(--green)';
     } else {
-      matchEl.textContent = 'â Account numbers do not match';
+      matchEl.textContent = '✕ Account numbers do not match';
       matchEl.style.color = 'var(--red)';
     }
     matchEl.style.display = 'block';
@@ -1007,7 +1007,7 @@ function lookupIFSC(inp, infoId) {
   var infoEl = document.getElementById(infoId);
   if (!code || code.length < 11) { infoEl.style.display = 'none'; return; }
   if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) {
-    infoEl.textContent = 'â Invalid IFSC format';
+    infoEl.textContent = '✕ Invalid IFSC format';
     infoEl.style.color = 'var(--red)';
     infoEl.style.display = 'block';
     return;
@@ -1020,15 +1020,15 @@ function lookupIFSC(inp, infoId) {
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(d) {
         if (d && d.BANK) {
-          infoEl.textContent = 'ð¦ ' + d.BANK + (d.BRANCH ? ' â ' + d.BRANCH : '');
+          infoEl.textContent = '🏦 ' + d.BANK + (d.BRANCH ? ' — ' + d.BRANCH : '');
           infoEl.style.color = 'var(--green)';
         } else {
-          infoEl.textContent = 'â IFSC not found';
+          infoEl.textContent = '✕ IFSC not found';
           infoEl.style.color = 'var(--red)';
         }
       })
       .catch(function() {
-        infoEl.textContent = 'â Format valid (lookup unavailable)';
+        infoEl.textContent = '✓ Format valid (lookup unavailable)';
         infoEl.style.color = 'var(--text3)';
       });
   }, 400);
@@ -1068,9 +1068,9 @@ async function saveLot(){
     lastId=d.lot?.id;
     lastSavedLot={id:d.lot?.id,lot_no:lotNo,trader_name:selT.name,trader_id:selT.id,qty:qty};
     if(navigator.vibrate)navigator.vibrate(50);
-    toast('Lot #'+lotNo+' saved â',false,true);
-    // Show inline print buttons â stays until user starts next entry
-    document.getElementById('le-saved-label').textContent='â Saved #'+lotNo;
+    toast('Lot #'+lotNo+' saved ✓',false,true);
+    // Show inline print buttons — stays until user starts next entry
+    document.getElementById('le-saved-label').textContent='✓ Saved #'+lotNo;
     document.getElementById('le-btn-save').style.display='none';
     document.getElementById('le-btn-saved').style.display='block';
     await loadStats();updUI();
@@ -1103,11 +1103,11 @@ function resetFormKeepSeller(){
 // Full reset (Clear button)
 function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
 
-// ââ MY LOTS (by branch) ââ
+// ── MY LOTS (by branch) ──
 async function loadMyLots(){if(!aid)return;try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();allMyLots=d.lots||[];const stats=d.stats||{};document.getElementById('ml-cnt').textContent=stats.lotCount||0;document.getElementById('ml-bags').textContent=stats.totalBags||0;document.getElementById('ml-qty').textContent=(stats.totalQty||0).toFixed(3);document.getElementById('ml-search').value='';renderMyLots(allMyLots)}catch(e){}}
 function filterMyLots(q){if(!q||q.length<2){renderMyLots(allMyLots);return}const f=q.toUpperCase();renderMyLots(allMyLots.filter(l=>(l.trader_name||'').toUpperCase().includes(f)))}
 function renderMyLots(lots){const list=document.getElementById('ml-list');if(!lots.length){list.innerHTML='<div class="lot-empty">No lots found</div>';return}
-list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';return`<div class="lot-card"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span></label><span style="font-size:10px;color:var(--text3)">${l.user_id} Â· ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> Â· ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
+list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';return`<div class="lot-card"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span></label><span style="font-size:10px;color:var(--text3)">${l.user_id} · ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> · ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
 
 function updateMySelCount(){const checked=document.querySelectorAll('.ml-cb:checked').length;const bar=document.getElementById('ml-actions');const cnt=document.getElementById('ml-sel-count');const hasLots=allMyLots&&allMyLots.length>0;bar.style.display=hasLots?'flex':'none';cnt.textContent=checked>0?checked+' selected':''}
 
@@ -1126,7 +1126,7 @@ function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTra
 function closeEdit(){document.getElementById('edit-modal').classList.remove('show');editId=null;editTraderId=null}
 function editSellerMode(){document.getElementById('ed-seller-card').style.display='none';document.getElementById('ed-seller-search').style.display='block';document.getElementById('ed-seller-input').value='';document.getElementById('ed-seller-input').focus()}
 let edStm;
-function searchEditSeller(q){clearTimeout(edStm);var el=document.getElementById('ed-seller-res');if(q.length<2){el.style.display='none';return}edStm=setTimeout(async function(){try{var r=await fetch(B+'/api/traders?search='+encodeURIComponent(q),{headers:ah()});var d=await r.json();var ts=Array.isArray(d)?d:(d.traders||[]);var qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');el.innerHTML=ts.map(function(t,i){var h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');var loc=[t.ppla,t.pin].filter(Boolean).join(', ');var info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' â '+info:'')+'</div></div>'}).join('')||'<div style="padding:10px;color:var(--text3);font-size:12px">No sellers found</div>';el.style.display='block';el._traders=ts;el.querySelectorAll('.si').forEach(function(item){item.onclick=function(){pickEditSeller(el._traders[parseInt(this.dataset.idx)])}})}catch(e){}},200)}
+function searchEditSeller(q){clearTimeout(edStm);var el=document.getElementById('ed-seller-res');if(q.length<2){el.style.display='none';return}edStm=setTimeout(async function(){try{var r=await fetch(B+'/api/traders?search='+encodeURIComponent(q),{headers:ah()});var d=await r.json();var ts=Array.isArray(d)?d:(d.traders||[]);var qu=q.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');el.innerHTML=ts.map(function(t,i){var h=(t.name||'').replace(new RegExp('('+qu+')','gi'),'<mark>$1</mark>');var loc=[t.ppla,t.pin].filter(Boolean).join(', ');var info=[t.cr,t.tel].filter(Boolean).join(' | ');return'<div class="si" data-idx="'+i+'"><div class="sn">'+h+'</div><div class="sd">'+loc+(info?' — '+info:'')+'</div></div>'}).join('')||'<div style="padding:10px;color:var(--text3);font-size:12px">No sellers found</div>';el.style.display='block';el._traders=ts;el.querySelectorAll('.si').forEach(function(item){item.onclick=function(){pickEditSeller(el._traders[parseInt(this.dataset.idx)])}})}catch(e){}},200)}
 function pickEditSeller(t){editTraderId=t.id;editLotBankId=null;document.getElementById('ed-seller-name').textContent=t.name;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';var cr=(t.cr||'').trim();var grade='1';if(cr.length>5&&!cr.toUpperCase().startsWith('CR.'))grade='2';document.getElementById('ed-grade').value=grade;loadEditBanks(t.id)}
 
 async function loadEditBanks(traderId){
@@ -1158,7 +1158,7 @@ function renderEditBankList(){
 function onEditBankSelect(sel){
   var info=document.getElementById('ed-bank-info');
   var b=editBanks.find(function(x){return x.id==sel.value});
-  info.textContent=b?'IFSC: '+(b.ifsc||'â'):'';
+  info.textContent=b?'IFSC: '+(b.ifsc||'—'):'';
 }
 
 function editSelectedEditBank(){
@@ -1261,7 +1261,7 @@ async function deleteSelectedMyLots(){
   for(var i=0;i<ids.length;i++){
     try{var r=await fetch(B+'/api/lots/'+ids[i],{method:'DELETE',headers:ah()});if(r.ok)ok++;else fail++}catch(e){fail++}
   }
-  toast(ok+' deleted'+(fail?' Â· '+fail+' failed':''),fail>0);
+  toast(ok+' deleted'+(fail?' · '+fail+' failed':''),fail>0);
   loadMyLots();await loadStats();updUI();
 }
 
@@ -1269,18 +1269,18 @@ let tt;function toast(m,e,u){clearTimeout(tt);const t=document.getElementById('t
 function toggleMenu(fc){const m=document.getElementById('menu');m.style.display=(fc||m.style.display==='block')?'none':'block'}
 function changeSession(){toggleMenu(true);goSession()}
 document.addEventListener('keydown',e=>{if(e.key==='Enter'){const a=document.activeElement;if(a.id==='l-pass')doLogin();else if(a.id==='le-name'){}else if(a.id==='le-grade')document.getElementById('le-bags').focus();else if(a.id==='le-bags')document.getElementById('le-litre').focus();else if(a.id==='le-litre')document.getElementById('le-qty').focus();else if(a.id==='le-qty')saveLot();else if(a.id==='ed-grade')document.getElementById('ed-bags').focus();else if(a.id==='ed-bags')document.getElementById('ed-litre').focus();else if(a.id==='ed-litre')document.getElementById('ed-qty').focus();else if(a.id==='ed-qty')saveEdit()}});
-// ââ DARK MODE ââ
+// ── DARK MODE ──
 function toggleDarkMode(){
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   document.documentElement.setAttribute('data-theme', isDark ? '' : 'dark');
-  document.getElementById('dm-icon').textContent = isDark ? 'ð' : 'âï¸';
+  document.getElementById('dm-icon').textContent = isDark ? '🌙' : '☀️';
   document.getElementById('dm-label').textContent = isDark ? 'Dark Mode' : 'Light Mode';
   localStorage.setItem('sa_dark', isDark ? '' : 'dark');
   toggleMenu(true);
 }
 if(localStorage.getItem('sa_dark')==='dark'){document.documentElement.setAttribute('data-theme','dark')}
 
-// ââ TRADER CACHE (for offline search) ââ
+// ── TRADER CACHE (for offline search) ──
 function cacheTrader(t) {
   var cache = JSON.parse(localStorage.getItem('sa_trader_cache') || '{}');
   cache[t.id] = { id: t.id, name: t.name, cr: t.cr, pan: t.pan, tel: t.tel, ppla: t.ppla, pin: t.pin, pstate: t.pstate };
@@ -1297,7 +1297,7 @@ function searchTraderCache(q) {
   }).slice(0, 8);
 }
 
-// ââ SELLER TEMPLATE (auto-fill from last lot) ââ
+// ── SELLER TEMPLATE (auto-fill from last lot) ──
 var sellerBanks = [];
 
 async function fetchSellerTemplate(traderId) {
@@ -1307,7 +1307,7 @@ async function fetchSellerTemplate(traderId) {
     var d = await r.json();
     if (d.lastLot) {
       if (d.lastLot.grade) document.getElementById('le-grade').value = d.lastLot.grade;
-      // Litre weight intentionally NOT auto-populated â same seller may bring different grades.
+      // Litre weight intentionally NOT auto-populated — same seller may bring different grades.
     }
     sellerBanks = d.banks || [];
     renderBankList();
@@ -1334,7 +1334,7 @@ function onBankSelect(sel) {
   var info = document.getElementById('le-bank-info');
   var b = sellerBanks.find(function(x) { return x.id == sel.value; });
   if (b) {
-    var parts = ['IFSC: ' + (b.ifsc || 'â')];
+    var parts = ['IFSC: ' + (b.ifsc || '—')];
     if (b.holder_name) parts.push('Holder: ' + b.holder_name);
     info.textContent = parts.join(' | ');
   } else { info.textContent = ''; }
@@ -1421,7 +1421,7 @@ async function saveBankAccount() {
   var needConfirm = !editId || (editId && acct !== orig);
   if (needConfirm && acct !== confirmVal) {
     var matchEl = document.getElementById('le-acct-match');
-    matchEl.textContent = 'â Account numbers do not match';
+    matchEl.textContent = '✕ Account numbers do not match';
     matchEl.style.display = 'block'; matchEl.style.color = 'var(--red)';
     toast('Account numbers do not match', true); return;
   }
@@ -1460,16 +1460,16 @@ async function setBankDefault(bankId) {
   } catch (e) {}
 }
 
-function maskPII(val, show) { show = show || 4; if (!val || val.length <= show) return val || 'â'; return 'â'.repeat(val.length - show) + val.slice(-show); }
+function maskPII(val, show) { show = show || 4; if (!val || val.length <= show) return val || '—'; return '●'.repeat(val.length - show) + val.slice(-show); }
 
 function showBankPop(e, name, acct, ifsc, tel, cr) {
   var pop = document.getElementById('user-bank-pop');
-  // Always show full details on screen â masking only applies to printed receipts.
-  var da = acct || 'â';
-  var di = ifsc || 'â';
-  var dt = tel || 'â';
-  var dc = cr || 'â';
-  var telLink = tel ? '<a href="tel:' + tel + '" style="color:var(--green);text-decoration:none;font-weight:700">ð Call</a>' : '';
+  // Always show full details on screen — masking only applies to printed receipts.
+  var da = acct || '—';
+  var di = ifsc || '—';
+  var dt = tel || '—';
+  var dc = cr || '—';
+  var telLink = tel ? '<a href="tel:' + tel + '" style="color:var(--green);text-decoration:none;font-weight:700">📞 Call</a>' : '';
   pop.innerHTML = '<div style="font-weight:700;font-size:13px;margin-bottom:6px">' + name + '<button onclick="this.parentElement.parentElement.style.display=\'none\'" style="float:right;background:none;border:none;font-size:14px;cursor:pointer;color:var(--text3)">&times;</button></div>'
     + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">A/C</span> <strong>' + da + '</strong></div>'
     + '<div style="font-size:12px"><span style="color:var(--text3);width:50px;display:inline-block">IFSC</span> <strong>' + di + '</strong></div>'
@@ -1497,7 +1497,7 @@ function loadAppLogo() {
   }).catch(function() {});
 }
 
-// ââ OFFLINE QUEUE ââ
+// ── OFFLINE QUEUE ──
 var offlineQueue = JSON.parse(localStorage.getItem('sa_offline_queue') || '[]');
 
 function saveOfflineQueue() { localStorage.setItem('sa_offline_queue', JSON.stringify(offlineQueue)); }
@@ -1506,7 +1506,7 @@ function showOfflineBar() {
   var bar = document.getElementById('offline-bar');
   if (offlineQueue.length > 0) {
     bar.style.display = 'flex';
-    document.getElementById('offline-count').textContent = 'â ' + offlineQueue.length + ' lot(s) queued';
+    document.getElementById('offline-count').textContent = '— ' + offlineQueue.length + ' lot(s) queued';
   } else if (!navigator.onLine) {
     bar.style.display = 'flex';
     document.getElementById('offline-count').textContent = '';
@@ -1544,7 +1544,7 @@ async function syncOfflineQueue() {
 window.addEventListener('online', function() { showOfflineBar(); setTimeout(syncOfflineQueue, 1000); });
 window.addEventListener('offline', function() { showOfflineBar(); });
 
-// ââ UNDO HISTORY (admin only) ââ
+// ── UNDO HISTORY (admin only) ──
 var undoHistory = JSON.parse(localStorage.getItem('sa_undo_history') || '[]');
 
 function saveUndoHistory() {
@@ -1579,7 +1579,7 @@ function showUndoHistory() {
     list.innerHTML = undoHistory.slice().reverse().map(function(item, idx) {
       var l = item.lot;
       var realIdx = undoHistory.length - 1 - idx;
-      return '<div class="undo-item"><div class="ui-info"><strong>Lot #' + l.lot_no + '</strong> â ' + (l.trader_name || 'Unknown') + '<br>' + l.branch + ' | ' + l.bags + ' bags | ' + Number(l.qty).toFixed(3) + ' kg<br><span style="color:var(--text3)">Deleted: ' + item.deletedAt + ' by ' + item.deletedBy + '</span></div><button class="ui-restore" onclick="restoreFromHistory(' + realIdx + ')">Restore</button></div>';
+      return '<div class="undo-item"><div class="ui-info"><strong>Lot #' + l.lot_no + '</strong> — ' + (l.trader_name || 'Unknown') + '<br>' + l.branch + ' | ' + l.bags + ' bags | ' + Number(l.qty).toFixed(3) + ' kg<br><span style="color:var(--text3)">Deleted: ' + item.deletedAt + ' by ' + item.deletedBy + '</span></div><button class="ui-restore" onclick="restoreFromHistory(' + realIdx + ')">Restore</button></div>';
     }).join('');
   }
   document.getElementById('undo-modal').classList.add('show');
@@ -1619,14 +1619,14 @@ function renderAllocBars(){
   document.getElementById('le-alloc-bar').innerHTML=html;
   document.getElementById('le-alloc-bar').style.display=html?'block':'none';
   updProgress();
-  // My Lots â show all branches with expandable grids
+  // My Lots — show all branches with expandable grids
   var allHtml='';
   allocStats.forEach(function(s,si){
     var pct=s.total>0?Math.round((s.used/s.total)*100):0;
     var barColor=pct>=90?'#C62828':pct>=70?'#E67E22':'var(--green)';
     var isMine=s.branch===br;
     allHtml+='<div style="margin-bottom:8px'+(isMine?';background:rgba(29,158,117,.06);border-radius:6px;padding:4px 6px':'')+'">';
-    allHtml+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:2px"><strong style="color:var(--text)">'+s.branch+(isMine?' â':'')+'</strong><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--text3);font-size:10px">'+s.used+'/'+s.total+'</span><button onclick="toggleUserGrid(\'mlg-'+si+'\',this)" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:9px;font-weight:700;cursor:pointer;font-family:inherit">â¼ Lots</button></div></div>';
+    allHtml+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:2px"><strong style="color:var(--text)">'+s.branch+(isMine?' ★':'')+'</strong><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--text3);font-size:10px">'+s.used+'/'+s.total+'</span><button onclick="toggleUserGrid(\'mlg-'+si+'\',this)" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:9px;font-weight:700;cursor:pointer;font-family:inherit">▼ Lots</button></div></div>';
     allHtml+='<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:3px"></div></div>';
     // Grid
     var gridHtml='';
@@ -1643,7 +1643,7 @@ function renderAllocBars(){
   document.getElementById('ml-alloc-bar').style.display=allHtml?'block':'none';
 }
 
-function toggleUserGrid(id,btn){var el=document.getElementById(id);if(!el)return;if(el.style.display==='none'){el.style.display='block';if(btn)btn.textContent='â² Hide'}else{el.style.display='none';if(btn)btn.textContent='â¼ Lots'}}
+function toggleUserGrid(id,btn){var el=document.getElementById(id);if(!el)return;if(el.style.display==='none'){el.style.display='block';if(btn)btn.textContent='▲ Hide'}else{el.style.display='none';if(btn)btn.textContent='▼ Lots'}}
 
 function refreshAllocAfterSave(){
   if(!aid)return;
@@ -1652,7 +1652,7 @@ function refreshAllocAfterSave(){
   }).catch(function(){});
 }
 
-// ââ CHANGE PASSWORD ââ
+// ── CHANGE PASSWORD ──
 
 function showChangePassword() {
   toggleMenu(true);
@@ -1696,12 +1696,12 @@ async function appChangePassword() {
   } catch (e) { er.innerHTML = '<div class="eb">Failed to connect</div>'; }
 }
 
-// ââ SESSION TIMEOUT (30 min inactivity) ââ
+// ── SESSION TIMEOUT (30 min inactivity) ──
 var sessionTimer;
 function resetSessionTimer() {
   clearTimeout(sessionTimer);
   sessionTimer = setTimeout(function() {
-    if (token) { toast('Session expired â please login again', true); setTimeout(doLogout, 1500); }
+    if (token) { toast('Session expired — please login again', true); setTimeout(doLogout, 1500); }
   }, 30 * 60 * 1000);
 }
 ['click','touchstart','keydown','scroll'].forEach(function(ev) { document.addEventListener(ev, resetSessionTimer, { passive: true }); });

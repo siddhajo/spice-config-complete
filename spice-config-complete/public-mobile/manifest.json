@@ -1,18 +1,19 @@
 {
   "name": "Spice Auction",
-  "short_name": "Auction",
-  "description": "Multi-user spice auction lot entry",
+  "short_name": "Spice Auction",
+  "description": "Mobile lot-entry app for the auction floor",
   "start_url": "/mobile/",
   "scope": "/mobile/",
   "display": "standalone",
-  "background_color": "#f4f3ef",
-  "theme_color": "#1D9E75",
   "orientation": "portrait",
+  "background_color": "#f6f5f1",
+  "theme_color": "#0d7c5f",
   "icons": [
     {
       "src": "/mobile/icon.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }
