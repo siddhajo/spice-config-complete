@@ -2267,6 +2267,24 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
           <select id="pur-auction" onchange="loadPurchases();loadPurEligibleSellers()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px"></select>
 
+          <!-- Cross-trade search across invoice no, seller name, GSTIN, place.
+               Server-side LIKE, debounced 200ms. When non-empty, the URL
+               builder drops the auction_id filter so the search spans
+               every trade. -->
+          <input type="search" id="pur-search" placeholder="Search invoice no, seller, GSTIN, place…" oninput="searchPurchasesDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <!-- Sale-type filter. Purchases don't have a sale column —
+               server derives it from the GST split on each row:
+                 L = CGST+SGST > 0, IGST = 0
+                 I = IGST > 0, no sale='E' lot for this dealer
+                 E = IGST > 0, ≥1 sale='E' lot for this dealer -->
+          <select id="pur-sale-filter" onchange="loadPurchases()" title="Filter purchase invoices by dealer sale type" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px">
+            <option value="">All sale types</option>
+            <option value="L">Local (L)</option>
+            <option value="I">Inter-state (I)</option>
+            <option value="E">Export (E)</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="needs-invoice-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenPurModal()">+ Generate Purchase</button>
             <button class="needs-invoice-write btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('purchases')">⚡ Generate for All Dealers</button>
@@ -2276,8 +2294,12 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <button class="btn" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedPurchases()" title="Print all ticked purchase invoices">🖨 Print Selected</button>
           </div>
 
-          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
-            <button class="needs-delete-all btn" style="height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteAll('purchases','Purchase Invoices')">🗑 Delete All</button>
+          <!-- Bulk actions group — Delete Selected only (no lorry no on
+               purchases). Hidden until ≥1 row is ticked; visibility
+               driven by _updatePurBulkToolbar() called from
+               syncPurchaseMaster + on each checkbox change. -->
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
+            <button id="pur-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedPurchases()" title="Delete all ticked purchase invoices">🗑 Delete Selected <span id="pur-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
           </div>
         </div>
 
@@ -9920,16 +9942,73 @@ function toggleAllPurchases(state){
 }
 function syncPurchaseMaster(){
   const master=document.getElementById('pur-select-all');
-  if(!master)return;
   const body=document.getElementById('purchases-list');
-  if(!body){master.checked=false;master.indeterminate=false;return}
+  if(!body){
+    if(master){master.checked=false;master.indeterminate=false}
+    _updatePurBulkToolbar(0);
+    return;
+  }
   const visible=Array.from(body.querySelectorAll('.pur-select-cb')).filter(cb=>{
     const row=cb.closest('tr');return row && row.style.display !== 'none';
   });
   const ticked=visible.filter(cb=>cb.checked).length;
-  master.indeterminate = ticked>0 && ticked<visible.length;
-  master.checked       = visible.length>0 && ticked===visible.length;
+  if(master){
+    master.indeterminate = ticked>0 && ticked<visible.length;
+    master.checked       = visible.length>0 && ticked===visible.length;
+  }
+  _updatePurBulkToolbar(ticked);
 }
+// Show/hide the Delete Selected pill based on ticked count. Permission
+// CSS uses !important on display, so we go through _bulkBtnSetVisible
+// when available — mirrors the invoices-tab pattern.
+function _updatePurBulkToolbar(ticked){
+  const del = document.getElementById('pur-bulk-del');
+  const counter = document.getElementById('pur-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(del, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
+}
+
+// Cross-trade search debouncer for purchases. Each keystroke delays a
+// loadPurchases() reload by 200ms; loadPurchases reads the input live
+// and appends search= to the API URL.
+let _purSearchTimer = null;
+function searchPurchasesDebounced(_q){
+  clearTimeout(_purSearchTimer);
+  _purSearchTimer = setTimeout(() => loadPurchases(), 200);
+}
+
+// Delete Selected — bulk-delete ticked purchases via the bulk endpoint.
+// Two-click confirm via confirmTwoClick when available, plain confirm()
+// otherwise so the flow works on builds without the helper.
+async function deleteSelectedPurchases(){
+  const body = document.getElementById('purchases-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.pur-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more purchase invoices first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  const btn = document.getElementById('pur-bulk-del');
+  const proceed = (typeof confirmTwoClick === 'function')
+    ? await confirmTwoClick('purBulkDelete', btn, {
+        confirmLabel: `⚠ Click again to DELETE ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}`,
+        fallbackMessage: `Delete ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
+      })
+    : confirm(`Delete ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
+  if (!proceed) return;
+  try {
+    const r = await j('/api/purchases/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    const n = r.deleted || 0;
+    toast(`Deleted ${n} purchase invoice${n === 1 ? '' : 's'}`);
+    loadPurchases({ keepPage: true });
+    if (typeof loadPurEligibleSellers === 'function') loadPurEligibleSellers();
+  } catch (e) { showError(e); }
+}
+
 async function printSelectedPurchases(){
   const body=document.getElementById('purchases-list');
   if(!body){alert('No purchases list found');return}
@@ -10042,8 +10121,17 @@ function gotoPurchasesPage(p){
 }
 async function loadPurchases(opts){
   if (!opts || !opts.keepPage) _purchasesPager.page = 1;
-  const aid=document.getElementById('pur-auction')?.value;
-  const url=aid?`/api/purchases?auction_id=${aid}`:'/api/purchases';
+  const aid    = document.getElementById('pur-auction')?.value;
+  const search = (document.getElementById('pur-search')?.value || '').trim();
+  const sale   = (document.getElementById('pur-sale-filter')?.value || '').trim();
+  // Build URL from filters. Search bypasses auction_id so cross-trade
+  // lookups work; saleType is server-derived from GST columns since
+  // purchases don't have a sale column.
+  const qs = [];
+  if (aid && !search) qs.push(`auction_id=${encodeURIComponent(aid)}`);
+  if (search)         qs.push(`search=${encodeURIComponent(search)}`);
+  if (sale)           qs.push(`sale=${encodeURIComponent(sale)}`);
+  const url = qs.length ? `/api/purchases?${qs.join('&')}` : '/api/purchases';
   const d=await j(url);
   const arr = Array.isArray(d) ? d : [];
 

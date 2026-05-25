@@ -3859,12 +3859,56 @@ app.post('/api/invoices/purchase-pdf-bulk', requireView, async (req, res) => {
 // PURCHASES (GSTKBILT.PRG — registered dealer invoices)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/purchases', requireView, (req, res) => {
-  const { auction_id, ano, from, to } = req.query;
+  const { auction_id, ano, from, to, sale, search } = req.query;
   const db = getDb();
   let q = 'SELECT * FROM purchases WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
+  // Free-text search across invoice no, seller name, GSTIN. Bypasses
+  // the auction filter so cross-trade lookups work — the URL builder on
+  // the client drops auction_id when search is non-empty.
+  const searchTerm = String(search || '').trim();
+  if (searchTerm) {
+    const wild = `%${searchTerm}%`;
+    q += ` AND (
+            COALESCE(invo,'')  LIKE ?
+            OR COALESCE(name,'')  LIKE ?
+            OR COALESCE(gstin,'') LIKE ?
+            OR COALESCE(place,'') LIKE ?
+          )`;
+    p.push(wild, wild, wild, wild);
+  }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  // Sale-type filter (L / I / E). Purchases don't carry a sale column,
+  // but the GST split on each row is deterministic:
+  //   • L (Local / intra-state)  → CGST + SGST > 0, IGST = 0
+  //   • I (Inter-state)          → IGST > 0, dealer has NO sale='E' lot
+  //                                in the same auction
+  //   • E (Export)               → IGST > 0, dealer HAS ≥1 sale='E' lot
+  //                                in the same auction
+  // Inferring directly from a sale column on purchases would fail —
+  // that column doesn't exist. The GST-column approach is data-driven
+  // and always correct as long as lots.sale was populated upstream.
+  const saleNorm = String(sale || '').trim().toUpperCase();
+  if (saleNorm === 'L') {
+    q += ' AND COALESCE(igst,0) = 0 AND (COALESCE(cgst,0) > 0 OR COALESCE(sgst,0) > 0)';
+  } else if (saleNorm === 'I') {
+    q += ' AND COALESCE(igst,0) > 0';
+    q += ` AND NOT EXISTS (
+            SELECT 1 FROM lots l
+             WHERE l.auction_id = purchases.auction_id
+               AND UPPER(TRIM(COALESCE(l.name,''))) = UPPER(TRIM(COALESCE(purchases.name,'')))
+               AND UPPER(TRIM(COALESCE(l.sale,''))) = 'E'
+          )`;
+  } else if (saleNorm === 'E') {
+    q += ' AND COALESCE(igst,0) > 0';
+    q += ` AND EXISTS (
+            SELECT 1 FROM lots l
+             WHERE l.auction_id = purchases.auction_id
+               AND UPPER(TRIM(COALESCE(l.name,''))) = UPPER(TRIM(COALESCE(purchases.name,'')))
+               AND UPPER(TRIM(COALESCE(l.sale,''))) = 'E'
+          )`;
+  }
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=purchases.auction_id)');
   q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC LIMIT 500';
@@ -3966,6 +4010,22 @@ app.put('/api/purchases/:id', requireInvoiceWrite, (req, res) => {
 app.delete('/api/purchases/:id', requireDelete, (req, res) => {
   getDb().run('DELETE FROM purchases WHERE id=?', [req.params.id]);
   res.json({ success: true });
+});
+
+// ── BULK DELETE — selected purchases ──
+// Body: { ids: [1,2,3] }. Single round-trip replacement for the old
+// per-trade Delete All flow. Returns the count actually deleted.
+app.post('/api/purchases/bulk-delete', requireDelete, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid purchase IDs' });
+  const db = getDb();
+  const placeholders = cleanIds.map(() => '?').join(',');
+  const r = db.run(`DELETE FROM purchases WHERE id IN (${placeholders})`, cleanIds);
+  res.json({ ok: true, deleted: r.changes });
 });
 
 // ── Purchase Invoice PDF ─────────────────────────────────────
