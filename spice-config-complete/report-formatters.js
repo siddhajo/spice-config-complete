@@ -55,6 +55,56 @@ function fmtQty(n) { return fmtIndian(n, 3); }
 // Per-kg price (also rupees): same as money — 2 decimals, Indian commas.
 function fmtPrice(n) { return fmtIndian(n, 2); }
 
+// ── Date formatting (settings-driven) ───────────────────────
+// Accepts ISO `yyyy-mm-dd[Thh:mm:ss]`, dd/mm/yyyy, dd-mm-yyyy, a JS Date, or an
+// Excel serial number, and renders per the operator's `date_format` setting.
+// Mirrors the front-end's fmtD() so a date round-trips identically from list
+// view to PDF/XLSX. Unknown inputs return the input as-is.
+const _MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _parseDateParts(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) {
+    const pad = x => String(x).padStart(2, '0');
+    return { y: String(v.getFullYear()), m: pad(v.getMonth() + 1), d: pad(v.getDate()) };
+  }
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return { y: iso[1], m: iso[2], d: iso[3] };
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) return { y: dmy[3], m: dmy[2].padStart(2, '0'), d: dmy[1].padStart(2, '0') };
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n > 0 && n < 80000) {
+      const ms = (n - 25569) * 86400 * 1000;
+      const date = new Date(ms);
+      if (!isNaN(date)) {
+        const pad = x => String(x).padStart(2, '0');
+        return {
+          y: String(date.getUTCFullYear()),
+          m: pad(date.getUTCMonth() + 1),
+          d: pad(date.getUTCDate()),
+        };
+      }
+    }
+  }
+  return null;
+}
+function formatDateForDisplay(input, fmt) {
+  const parts = _parseDateParts(input);
+  if (!parts) return input == null ? '' : String(input);
+  const { y, m, d } = parts;
+  const mmm = _MONTH_ABBR[Number(m) - 1] || m;
+  const want = String(fmt || 'dd/mm/yyyy').toLowerCase();
+  switch (want) {
+    case 'mm/dd/yyyy':   return `${m}/${d}/${y}`;
+    case 'yyyy-mm-dd':   return `${y}-${m}-${d}`;
+    case 'dd-mmm-yyyy':  return `${d}-${mmm}-${y}`;
+    case 'dd mmm yyyy':  return `${d} ${mmm} ${y}`;
+    case 'dd/mm/yyyy':
+    default:             return `${d}/${m}/${y}`;
+  }
+}
+
 // ── Company header (logo + name + address) ──────────────────
 
 // Resolve the active company branding from company_settings. Falls back to
@@ -582,6 +632,7 @@ function writeXlsxCompanyHeader(wb, ws, header, opts) {
 
 module.exports = {
   fmtMoney, fmtQty, fmtPrice, fmtIndian,
+  formatDateForDisplay,
   getCompanyHeader, drawCompanyHeader,
   xlsxNumFmtForHeader, writeXlsxCompanyHeader,
 };

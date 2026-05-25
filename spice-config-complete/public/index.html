@@ -442,6 +442,14 @@ body:not([data-feat-bills="1"]) .feat-bills{display:none !important}
 body:not([data-feat-debit-notes="1"]) .feat-debit-notes{display:none !important}
 body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:none !important}
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
+/* Spice Board reports — sidebar entry + tab content carry
+   .mode-eauction-only and are visible only when the saved business
+   mode is "e-Auction" (set by applyModeLabels() at boot + on mode
+   change). Hidden by default to avoid a flash on initial render. */
+.mode-eauction-only{display:none !important}
+body[data-business-mode="e-Auction"] .mode-eauction-only{display:flex !important}
+body[data-business-mode="e-Auction"] .tc.mode-eauction-only{display:none !important}
+body[data-business-mode="e-Auction"] .tc.mode-eauction-only.active{display:block !important}
 
 /* ── .needs-lot-entry-view permission gate ──
    Mirrors existing .needs-* perm classes: hidden by default, shown
@@ -1482,6 +1490,113 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   .qa-grid{grid-template-columns:1fr}
   .content{padding:18px 16px}
 }
+
+/* ── Reports Hub ──────────────────────────────────────────
+   The Reports Hub tab is a landing page: a top "hub" tile grid
+   linking to every other report, then the per-trade Trade
+   Summary card (with a sticky filter row), then the lifetime
+   Branch Comparison card with chart + optional data table. */
+.reports-hub{
+  background:linear-gradient(135deg,#F0FDF4 0%,#FFFBEB 100%);
+  border:1px solid #BBF7D0;border-radius:16px;
+  padding:24px 26px;margin-bottom:20px;
+}
+.reports-hub-head{margin-bottom:18px}
+.reports-tile-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;
+}
+.report-tile{
+  display:block;text-decoration:none;color:inherit;
+  background:#fff;border:1px solid var(--spice-line);border-radius:12px;
+  padding:18px 18px 16px;cursor:pointer;
+  transition:transform .15s,box-shadow .15s,border-color .15s;
+  position:relative;overflow:hidden;
+}
+.report-tile::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:4px;
+  background:var(--spice-cardamom);border-radius:12px 0 0 12px;
+  transition:width .15s;
+}
+.report-tile[data-accent="cardamom"]::before{background:var(--spice-cardamom)}
+.report-tile[data-accent="turmeric"]::before{background:var(--spice-turmeric,#F59E0B)}
+.report-tile[data-accent="saffron"]::before{background:var(--spice-saffron,#F97316)}
+.report-tile[data-accent="chili"]::before{background:var(--spice-chili,#DC2626)}
+.report-tile:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(31,25,21,.08);border-color:#A7F3D0}
+.report-tile:hover::before{width:6px}
+.report-tile-icon{
+  width:42px;height:42px;border-radius:10px;background:#F0FDF4;
+  display:inline-flex;align-items:center;justify-content:center;font-size:22px;
+  margin-bottom:10px;
+}
+.report-tile-title{
+  font-size:15px;font-weight:700;color:var(--text);
+  margin-bottom:4px;letter-spacing:-.2px;
+}
+.report-tile-desc{font-size:12.5px;line-height:1.45;color:var(--text3)}
+.report-tile-stat{
+  margin-top:10px;padding-top:10px;border-top:1px dashed var(--spice-line);
+  font-size:11.5px;font-weight:600;color:var(--spice-text-mute);
+  letter-spacing:.2px;line-height:1.4;
+}
+.report-tile-stat strong{color:var(--spice-cardamom-dk);font-weight:700;font-size:13px}
+
+/* Collapsible sections inside Trade Summary + Branch Comparison.
+   Each section has a click-to-toggle head with a chevron and an
+   inline "meta" caption — the body holds a scrollable table. */
+.rep-section{
+  border:1px solid var(--spice-line);border-radius:10px;
+  margin-bottom:14px;overflow:hidden;background:#fff;
+}
+.rep-section-head{
+  display:flex;align-items:center;gap:10px;cursor:pointer;
+  padding:12px 16px;user-select:none;
+  background:linear-gradient(180deg,#F8FAFC 0%,#F1F5F9 100%);
+  border-bottom:1px solid transparent;transition:background .12s;
+}
+.rep-section[data-open="1"] .rep-section-head{
+  border-bottom-color:var(--spice-line);
+  background:linear-gradient(180deg,#F0FDF4 0%,#ECFCCB 100%);
+}
+.rep-section-head:hover{background:linear-gradient(180deg,#F0FDF4 0%,#ECFDF5 100%)}
+.rep-section-head h3{
+  margin:0;font-size:14px;font-weight:700;color:var(--spice-text-main);
+  letter-spacing:-.2px;flex:0 0 auto;
+}
+.rep-section-meta{
+  flex:1;font-size:11.5px;color:var(--spice-text-mute);font-weight:500;
+  text-transform:uppercase;letter-spacing:.5px;
+}
+.rep-section-chev{
+  font-size:14px;color:var(--spice-text-mute);font-weight:700;
+  width:20px;text-align:center;flex-shrink:0;
+}
+.rep-section-body{padding:0}
+.rep-section-scroll{
+  max-height:380px;overflow:auto;padding:14px 16px;
+}
+.rep-section-scroll table{margin:0;width:100%}
+.rep-section-scroll thead{position:sticky;top:0;background:#fff;z-index:1}
+.rep-section-scroll thead th{background:var(--bg)}
+
+/* Branch Comparison — chart card body */
+.bc-chart-wrap{
+  position:relative;height:280px;
+  background:#fff;border:1px solid var(--spice-line);border-radius:10px;
+  padding:14px 16px 10px;margin-bottom:12px;
+}
+.bc-toggle-data{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;font-size:12px;font-weight:600;
+  background:#fff;color:var(--spice-text-mute);
+  border:1px solid var(--spice-line);border-radius:6px;cursor:pointer;
+  transition:background .12s,color .12s,border-color .12s;
+}
+.bc-toggle-data:hover{background:#F8FAFC;color:var(--spice-text-main);border-color:#CBD5E1}
+.bc-data-table{margin-top:10px;border:1px solid var(--spice-line);border-radius:8px;overflow:auto;max-height:380px}
+.bc-data-table table{margin:0;width:100%}
+.bc-data-table thead{position:sticky;top:0;background:#F8FAFC;z-index:1}
+.bc-data-table thead th{background:#F8FAFC;border-bottom:1px solid var(--spice-line)}
+
 </style>
 <!-- Chart.js for dashboard + payments charts. Loaded from cdnjs to keep
      the app fully self-contained on Railway (no build step needed).
@@ -1669,6 +1784,15 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <button class="side-item" data-tab="tally" onclick="go('tally')">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
           To Tally
+        </button>
+        <!-- Spice Board reports — Buyers Statement / FORM-D / FORM-C.
+             Visibility is gated to business_mode === "e-Auction" via the
+             .mode-eauction-only CSS class (see applyModeLabels()). When
+             the saved mode is anything else the entry collapses to
+             display:none and the tab content stays unreachable. -->
+        <button class="side-item mode-eauction-only" data-tab="spicesboard" onclick="go('spicesboard')">
+          <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+          Spice Board
         </button>
         <!-- Import Old Data — admin only. Target tab (tc-importold) not
              yet wired; clicks no-op until added. -->
@@ -2382,6 +2506,89 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       </div>
     </div>
 
+    <!-- ── REPORTS HUB ────────────────────────────────────────────
+         Landing page: tile grid linking to every report generator,
+         then a per-trade Trade Summary card with optional branch
+         filter and "Open PDF" affordance, then a lifetime Branch
+         Comparison card with chart + collapsible data table.
+         All three blocks lazily fetch from /api/reports/*. -->
+    <div class="tc" id="tc-reports">
+      <!-- Hub tile grid -->
+      <div class="reports-hub">
+        <div class="reports-hub-head">
+          <h2 style="margin:0;font-size:22px;font-weight:800">Reports &amp; Insights</h2>
+          <p style="color:var(--text3);margin:6px 0 0;font-size:13px">All auction analytics in one place — pick a report below to drill in.</p>
+        </div>
+        <div class="reports-tile-grid">
+          <a class="report-tile" href="#" onclick="event.preventDefault();document.getElementById('rep-trade-summary').scrollIntoView({behavior:'smooth'})" data-accent="cardamom">
+            <div class="report-tile-icon">📊</div>
+            <div class="report-tile-title">Trade Summary</div>
+            <div class="report-tile-desc">Per-branch &amp; per-seller breakdown for any single trade.</div>
+            <div class="report-tile-stat" id="rt-stat-trades">…</div>
+          </a>
+          <a class="report-tile" href="#" onclick="event.preventDefault();document.getElementById('rep-branch-card').scrollIntoView({behavior:'smooth'});loadBranchComparison()" data-accent="turmeric">
+            <div class="report-tile-icon">🏪</div>
+            <div class="report-tile-title">Branch Comparison</div>
+            <div class="report-tile-desc">Lifetime performance side-by-side across every branch.</div>
+            <div class="report-tile-stat" id="rt-stat-branches">…</div>
+          </a>
+          <a class="report-tile" href="#" onclick="event.preventDefault();go('journals')" data-accent="chili">
+            <div class="report-tile-icon">📕</div>
+            <div class="report-tile-title">Sales / Purchase Journals</div>
+            <div class="report-tile-desc">Invoice-by-invoice registers for filing &amp; audit.</div>
+            <div class="report-tile-stat" id="rt-stat-journals">…</div>
+          </a>
+          <a class="report-tile" href="#" onclick="event.preventDefault();go('tally')" data-accent="cardamom">
+            <div class="report-tile-icon">📤</div>
+            <div class="report-tile-title">Tally XML Export</div>
+            <div class="report-tile-desc">Sales, purchases, debit notes — ready to import into Tally.</div>
+            <div class="report-tile-stat" id="rt-stat-tally">…</div>
+          </a>
+          <a class="report-tile" href="#" onclick="event.preventDefault();go('exports')" data-accent="turmeric">
+            <div class="report-tile-icon">⬇</div>
+            <div class="report-tile-title">Other Exports</div>
+            <div class="report-tile-desc">Bank payments, lot slips, collection, pooler register…</div>
+            <div class="report-tile-stat" id="rt-stat-exports">…</div>
+          </a>
+        </div>
+      </div>
+
+      <!-- Per-trade summary card. Filter row is sticky so it stays
+           in reach while scrolling through the long breakdown tables
+           below it. -->
+      <div class="card" id="rep-trade-summary">
+        <div class="rep-summary-filter" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;background:var(--card);z-index:5;padding:4px 0 10px;margin:-4px 0 6px;border-bottom:1px solid var(--spice-line)">
+          <h2 style="margin:0;flex:1">Trade Summary</h2>
+          <select id="rep-auction" onchange="loadTradeSummary()" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border);min-width:220px"></select>
+          <select id="rep-branch" onchange="loadTradeSummary()" title="Filter Sold/Withdrawn/Min/Max/Avg by branch" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border);min-width:160px">
+            <option value="">All Branches</option>
+          </select>
+          <button class="btn btn-g btn-sm" onclick="openTradeSummaryPdf()" id="rep-pdf-btn" disabled>📄 Open PDF</button>
+        </div>
+        <p style="color:var(--spice-text-mute);font-size:13px;margin:6px 0 16px">Per-branch and per-seller breakdown for the selected trade.</p>
+        <div id="rep-summary-totals" style="display:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px"></div>
+        <div id="rep-summary-body">
+          <div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Pick a trade above to see its breakdown.</div>
+        </div>
+      </div>
+
+      <!-- Lifetime branch comparison — chart-first, with a "Show
+           data table" toggle below each chart. Auto-loads on first
+           Reports tab visit (handled in loadReports()), refreshes
+           on demand. -->
+      <div class="card" id="rep-branch-card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <h2 style="margin:0;flex:1">Branch Comparison (Lifetime)</h2>
+          <span id="rep-branch-stamp" style="font-size:11.5px;color:var(--spice-text-hint)"></span>
+          <button class="btn btn-sm" onclick="loadBranchComparison()">↻ Refresh</button>
+        </div>
+        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">How each branch has performed across every auction in the database.</p>
+        <div id="rep-branch-body">
+          <div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>
+        </div>
+      </div>
+    </div>
+
     <!-- EXPORTS -->
     <div class="tc" id="tc-exports">
       <div class="card">
@@ -2948,6 +3155,112 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <button class="btn btn-a" onclick="exportJournal()">Export XLSX</button>
         </div>
         <div style="overflow-x:auto;max-height:500px"><table id="jr-table"><thead id="jr-head"></thead><tbody id="jr-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- SPICE BOARD — statutory cardamom-auction reports (Buyers
+         Statement / FORM-D / FORM-C). Visible only when business mode
+         is e-Auction (see .mode-eauction-only CSS rule). Front-end
+         calls /api/spice-board-reports/* endpoints. -->
+    <div class="tc mode-eauction-only" id="tc-spicesboard">
+      <div class="card">
+        <h2 style="display:flex;align-items:center;gap:10px">
+          <span style="width:32px;height:32px;border-radius:10px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--spice-saffron)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+          </span>
+          Reports — Spice Board
+        </h2>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:12px">Statutory cardamom-auction reports submitted to the Spices Board (Cardamom Marketing Rules).</div>
+
+        <!-- Report selector -->
+        <div class="sgrid" style="margin-bottom:14px">
+          <div class="fg"><label>Report</label>
+            <select id="sb-type" onchange="onSbTypeChange()">
+              <option value="buyers_statement">Report 1 — Buyers Statement</option>
+              <option value="form_d">Report 2 — FORM-D (Advance Auction Report)</option>
+              <option value="form_c">Report 3 — FORM-C (Auction Report)</option>
+              <option value="eauction_csv">Report 4 — e-Auction (Spices Board) CSV</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Filters: Trade, Branch, Seller, Buyer, Place (Form-D only) -->
+        <div class="sgrid" style="margin-bottom:14px">
+          <div class="fg"><label>Auction</label>
+            <select id="sb-auction" onchange="onSbAuctionChange()"></select>
+          </div>
+          <div class="fg"><label>Branch</label>
+            <select id="sb-branch"><option value="">— All branches —</option></select>
+          </div>
+          <div class="fg" id="sb-seller-fg"><label>Seller</label>
+            <select id="sb-seller"><option value="">— All sellers —</option></select>
+          </div>
+          <div class="fg" id="sb-buyer-fg"><label>Buyer</label>
+            <select id="sb-buyer"><option value="">— All buyers —</option></select>
+          </div>
+          <!-- Form-D only: Place of auction picker. Hidden by
+               onSbTypeChange() unless the selected report is form_d.
+               Options are sourced from the formd_places setting
+               (Settings → Spice Board Reports). -->
+          <div class="fg" id="sb-place-fg" style="display:none"><label>Place of Auction</label>
+            <select id="sb-place"><option value="">— Use configured branch —</option></select>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+          <button class="btn btn-g" onclick="sbLoadPreview()">Preview</button>
+          <button class="btn btn-a" onclick="sbDownload('xlsx')" id="sb-btn-xlsx">Excel</button>
+          <button class="btn btn-a" onclick="sbDownload('pdf')"  id="sb-btn-pdf">PDF</button>
+          <button class="btn btn-o" onclick="sbPrint()"          id="sb-btn-print">Print</button>
+          <button class="btn btn-a" onclick="sbDownload('csv')"  id="sb-btn-csv" style="display:none">CSV</button>
+        </div>
+
+        <div id="sb-meta" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+        <div id="sb-preview" style="overflow-x:auto;max-height:600px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
+      </div>
+    </div>
+
+    <!-- IMPORT OLD DATA — admin only. Re-imports legacy XLS/XLSX exports
+         back into the system. Used to migrate FoxPro / older data or
+         restore specific tables from a backup file without restoring
+         the entire DB. Drives /api/import-old-data/* endpoints.
+         New "Auctions / Trades" module covers the auctions table (one
+         entity, two labels depending on business_mode). -->
+    <div class="tc" id="tc-importold">
+      <div class="card">
+        <h2>Import Old Data <span style="font-weight:400;font-size:12px;color:var(--text3)">Upload legacy XLS/XLSX exports back into the system</span></h2>
+        <div class="sgrid" style="margin-bottom:14px">
+          <div class="fg"><label>Module</label>
+            <select id="imp-module">
+              <option value="auctions">Auctions / Trades</option>
+              <option value="sales_invoice">Sales Invoices</option>
+              <option value="purchase">Purchase Invoices</option>
+              <option value="bills">Bills of Supply</option>
+              <option value="debit_notes">Debit Notes</option>
+              <option value="sellers">Sellers</option>
+              <option value="buyers">Buyers</option>
+            </select>
+          </div>
+          <div class="fg"><label>File (.xlsx / .xls)</label>
+            <input type="file" id="imp-file" accept=".xls,.xlsx">
+          </div>
+          <div class="fg" style="display:flex;align-items:end">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+              <input type="checkbox" id="imp-dryrun" checked> Dry-run (validate only, do not write)
+            </label>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn btn-g" onclick="impPreview()">1. Preview &amp; Detect Mapping</button>
+          <button class="btn btn-a" onclick="impVerify()">2. Verify Against Database</button>
+          <button class="btn btn-a" onclick="impRun()">3. Run Import</button>
+          <button class="btn btn-o" onclick="impLoadHistory()">View History</button>
+          <button class="btn btn-o" onclick="impClear()" style="margin-left:auto" title="Clear file, reset module pick, hide preview / verify panels">Clear</button>
+        </div>
+        <div id="imp-result" style="margin-bottom:14px;font-size:12.5px;color:var(--text2)"></div>
+        <div id="imp-preview" style="overflow-x:auto;max-height:300px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px"></div>
+        <div id="imp-verify" style="overflow-x:auto;max-height:520px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px;display:none"></div>
+        <div id="imp-history" style="overflow-x:auto;max-height:300px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
       </div>
     </div>
 
@@ -4707,8 +5020,9 @@ function go(tab){
   const el=document.getElementById('tc-'+tab);if(el)el.classList.add('active');
   const loaders={dash:loadStats,settings:loadSettings,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
-    payments:loadPayAuctions,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
+    payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
     bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,tally:loadTallyAuctions,
+    spicesboard:loadSpiceBoard,
     // Price Check — populate the auction picker (mode-filtered server-side)
     // on tab open. File picker + buttons remain idle until the user picks
     // a sheet and clicks Verify.
@@ -4722,7 +5036,11 @@ function go(tab){
     // Lazy-load the Delete All audit log when Backup opens so the
     // <details> drawer shows fresh data on first expand. loadDeleteLog
     // is idempotent — re-running just re-renders the table.
-    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); }};
+    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); },
+    // Import Old Data — pre-loads recent imports so the History panel
+    // is populated on first open without a separate click. Preview /
+    // verify / run remain user-triggered.
+    importold: () => { if (typeof impLoadHistory === 'function') impLoadHistory(); }};
   if(loaders[tab]){
     try{
       const r=loaders[tab]();
@@ -5213,6 +5531,454 @@ async function loadStats(auctionId){
   }
 }
 
+// ─────────────────────────────────────────────────────────
+// Reports Hub
+// ─────────────────────────────────────────────────────────
+// Drives the Reports tab. Three things on screen, three server
+// endpoints behind them:
+//   • Hub tile grid    ← /api/stats?auction_id=all  (counts)
+//   • Trade Summary    ← /api/reports/trade-summary/:id?branch=
+//   • Branch Comparison← /api/reports/branch-comparison
+// PDF download for the Trade Summary opens via window.open() with
+// the auth token in the querystring — see openTradeSummaryPdf().
+
+var _repAuctions = [];
+// Tracks when Branch Comparison was last computed so the auto-load
+// skips re-running on every tab switch and the footer shows
+// "computed Nm ago".
+var _bcLastLoadedAt = 0;
+function _bcStamp(){
+  const el = document.getElementById('rep-branch-stamp');
+  if (!el) return;
+  if (!_bcLastLoadedAt) { el.textContent = ''; return; }
+  const ageSec = Math.round((Date.now() - _bcLastLoadedAt) / 1000);
+  let age;
+  if (ageSec < 60) age = 'just now';
+  else if (ageSec < 3600) age = Math.floor(ageSec / 60) + ' min ago';
+  else age = Math.floor(ageSec / 3600) + ' hr ago';
+  el.textContent = 'computed ' + age;
+}
+setInterval(_bcStamp, 30000);
+
+// Live counts on each hub tile — driven by /api/stats. Fire-and-
+// forget; failures fall back to the "…" placeholder so the tiles
+// never look broken.
+async function loadReportsHubStats(){
+  try {
+    const d = await j('/api/stats?auction_id=all');
+    const c = d.counts || {};
+    const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+    set('rt-stat-trades',   `<strong>${c.auctions||0}</strong> trade${c.auctions===1?'':'s'} · <strong>${c.lots||0}</strong> lots`);
+    set('rt-stat-branches', `<strong>${(d.branchTotals||[]).length}</strong> branch${(d.branchTotals||[]).length===1?'':'es'} tracked`);
+    set('rt-stat-journals', `<strong>${c.invoices||0}</strong> sales · <strong>${c.purchases||0}</strong> purchases`);
+    set('rt-stat-tally',    `<strong>${(c.invoices||0)+(c.purchases||0)+(c.debit_notes||0)}</strong> vouchers ready`);
+    set('rt-stat-exports',  `<strong>${c.bills||0}</strong> bills · <strong>${c.debit_notes||0}</strong> DN${c.debit_notes===1?'':'s'}`);
+  } catch (_) { /* leave placeholders */ }
+}
+
+async function loadReports(){
+  // Populate the trade picker, default to the most recent trade so
+  // the page lands on real data instead of an empty-state prompt.
+  // /api/auctions returns newest first — option[1] (after the
+  // placeholder) is what we want.
+  try {
+    _repAuctions = await j('/api/auctions');
+    // /api/auctions returns either a flat array or a paginated envelope.
+    // Handle both so the picker populates either way.
+    const arr = Array.isArray(_repAuctions) ? _repAuctions : (_repAuctions && _repAuctions.rows) || [];
+    _repAuctions = arr;
+    const sel = document.getElementById('rep-auction');
+    sel.innerHTML = '<option value="">— Select a trade —</option>' +
+      arr.map(a => `<option value="${a.id}">Trade #${esc(a.ano)} · ${esc((a.date||'').split('T')[0])}${a.crop_type?' · '+esc(a.crop_type):''}</option>`).join('');
+    if (arr.length && !sel.value) {
+      sel.value = String(arr[0].id);
+      loadTradeSummary();
+    } else if (sel.value) {
+      loadTradeSummary();
+    }
+    // Kick off live tile stats + Branch Comparison in parallel
+    // (both fire-and-forget).
+    if (typeof loadReportsHubStats === 'function') loadReportsHubStats();
+    if (typeof loadBranchComparison === 'function' && !_bcLastLoadedAt) loadBranchComparison();
+  } catch (e) {
+    if (typeof showError === 'function') showError(e);
+    else if (typeof toast === 'function') toast(e.message || 'Failed to load reports');
+  }
+}
+
+// Branch dropdown — derived from the current Trade Summary's branch
+// list. We populate AFTER the summary loads so the dropdown only
+// offers branches that actually have data in this trade. The empty
+// "All Branches" option resets the filter to no scope.
+function _populateRepBranchSelect(branchWise){
+  const sel = document.getElementById('rep-branch');
+  if (!sel) return;
+  const cur = sel.value || '';
+  const branches = (branchWise || []).map(b => b.branch).filter(b => b && b !== '(unspecified)');
+  sel.innerHTML = '<option value="">All Branches</option>' +
+    branches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  if (cur && branches.includes(cur)) sel.value = cur;
+}
+
+// Auction Summary card. Branch filter restricts the Sold/Withdrawn/
+// Min/Max/Avg aggregates only — the breakdown tables always show
+// every branch so the user can pivot quickly.
+async function loadTradeSummary(){
+  const aid = document.getElementById('rep-auction').value;
+  const branchSel = document.getElementById('rep-branch');
+  const branch = branchSel ? branchSel.value : '';
+  const totalsBox = document.getElementById('rep-summary-totals');
+  const body = document.getElementById('rep-summary-body');
+  document.getElementById('rep-pdf-btn').disabled = !aid;
+  if (!aid) {
+    totalsBox.style.display = 'none';
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Pick a trade above to see its breakdown.</div>';
+    return;
+  }
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>';
+  try {
+    const qs = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+    const d = await j('/api/reports/trade-summary/' + aid + qs);
+    // Refresh the branch dropdown from THIS trade's branches so the
+    // filter only offers values that actually exist.
+    _populateRepBranchSelect(d.branchWise);
+
+    // Totals strip
+    const t = d.totals || {};
+    const items = [
+      { l: 'Lots',     v: t.lot_count || 0 },
+      { l: 'Bags',     v: t.total_bags || 0 },
+      { l: 'Qty (kg)', v: Number(t.total_qty || 0).toFixed(3) },
+      { l: 'Sellers',  v: t.seller_count || 0 },
+      { l: 'Branches', v: t.branch_count || 0 },
+    ];
+    totalsBox.style.display = 'grid';
+    totalsBox.innerHTML = items.map(i =>
+      `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:22px;font-weight:700;color:var(--green)">${i.v}</div><div style="font-size:11px;color:var(--spice-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-top:4px">${i.l}</div></div>`).join('');
+
+    // Branch-filtered aggregates
+    const ba = d.branchAggregates || {};
+    const baScope = ba.branch ? `Branch: ${esc(ba.branch)}` : 'All Branches';
+    const aggCells = [
+      { l: 'Sold (kg)',      v: Number((ba.sold && ba.sold.qty) || 0).toFixed(3) },
+      { l: 'Withdrawn (kg)', v: Number((ba.withdrawn && ba.withdrawn.qty) || 0).toFixed(3) },
+      { l: 'Min Price',      v: Number(ba.min || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) },
+      { l: 'Max Price',      v: Number(ba.max || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) },
+      { l: 'Avg Price',      v: Number(ba.avg || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) },
+    ];
+    const aggHtml = `<div style="margin:14px 0 4px;font-size:12px;color:var(--spice-text-mute);text-transform:uppercase;letter-spacing:.5px">${baScope}</div>`
+      + `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">`
+      + aggCells.map(i => `<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center"><div style="font-size:20px;font-weight:700;color:var(--green)">${i.v}</div><div style="font-size:11px;color:var(--spice-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-top:4px">${i.l}</div></div>`).join('')
+      + `</div>`;
+
+    // Collapsible section helper — each block has a click-to-toggle
+    // header. First section (Per-Branch) opens by default.
+    let _secId = 0;
+    const section = (title, meta, payload, opts) => {
+      opts = opts || {};
+      _secId++;
+      const open = opts.open !== false;
+      return '<div class="rep-section" data-open="' + (open ? 1 : 0) + '">'
+        + '<div class="rep-section-head" onclick="toggleRepSection(this)">'
+        +   '<h3>' + title + '</h3>'
+        +   (meta ? '<span class="rep-section-meta">' + meta + '</span>' : '')
+        +   '<span class="rep-section-chev">' + (open ? '▾' : '▸') + '</span>'
+        + '</div>'
+        + '<div class="rep-section-body" style="' + (open ? '' : 'display:none') + '">'
+        +   '<div class="rep-section-scroll">' + payload + '</div>'
+        + '</div></div>';
+    };
+
+    let html = aggHtml;
+
+    // Per-branch table
+    const bw = d.branchWise || [];
+    let branchTable = '<table><thead><tr><th>Branch</th><th style="text-align:right">Lots</th><th style="text-align:right">Sold (kg)</th><th style="text-align:right">Withdrawn (kg)</th><th style="text-align:right">Min</th><th style="text-align:right">Max</th><th style="text-align:right">Avg</th><th style="text-align:right">Sellers</th></tr></thead><tbody>';
+    if (!bw.length) branchTable += '<tr><td colspan="8" style="text-align:center;padding:14px;color:var(--spice-text-hint)">No lots yet</td></tr>';
+    bw.forEach(b => {
+      const minP = Number(b.min_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const maxP = Number(b.max_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const avgP = Number(b.avg_price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      branchTable += `<tr><td><strong>${esc(b.branch || '-')}</strong></td><td style="text-align:right">${b.lot_count}</td><td style="text-align:right;font-weight:600">${Number(b.sold_qty || 0).toFixed(3)}</td><td style="text-align:right">${Number(b.withdrawn_qty || 0).toFixed(3)}</td><td style="text-align:right">${minP}</td><td style="text-align:right">${maxP}</td><td style="text-align:right">${avgP}</td><td style="text-align:right">${b.seller_count || 0}</td></tr>`;
+    });
+    branchTable += '</tbody></table>';
+    html += section('Per-Branch', bw.length + ' branch' + (bw.length === 1 ? '' : 'es'), branchTable, { open: true });
+
+    // Per-grade
+    const gw = d.gradeWise || [];
+    if (gw.length) {
+      let gradeTable = '<table><thead><tr><th>Grade</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th><th style="text-align:right">Sellers</th></tr></thead><tbody>';
+      gw.forEach(g => { gradeTable += `<tr><td>${esc(g.grade || '-')}</td><td style="text-align:right">${g.lot_count}</td><td style="text-align:right">${g.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(g.total_qty || 0).toFixed(3)}</td><td style="text-align:right">${g.seller_count || 0}</td></tr>`; });
+      gradeTable += '</tbody></table>';
+      html += section('By Grade', gw.length + ' grade' + (gw.length === 1 ? '' : 's'), gradeTable, { open: false });
+    }
+
+    // Top sellers — user-controlled row cap (persists across reloads)
+    const sw = d.sellerWise || [];
+    if (sw.length) {
+      const savedLimit = (function () {
+        try { return localStorage.getItem('rep_top_sellers_limit') || '25'; }
+        catch (_) { return '25'; }
+      })();
+      const lim = savedLimit === 'all' ? sw.length : Math.min(parseInt(savedLimit, 10) || 25, sw.length);
+      const visible = savedLimit === 'all' ? sw : sw.slice(0, lim);
+      let sellerTable = '<table><thead><tr><th style="width:32px;text-align:right">#</th><th>Seller</th><th>Branch</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th></tr></thead><tbody>';
+      visible.forEach((s, i) => { sellerTable += `<tr><td style="text-align:right;color:var(--text3);font-size:11px">${i + 1}</td><td><strong>${esc(s.seller_name)}</strong></td><td>${esc(s.branch || '')}</td><td style="text-align:right">${s.lot_count}</td><td style="text-align:right">${s.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(s.total_qty || 0).toFixed(3)}</td></tr>`; });
+      sellerTable += '</tbody></table>';
+      const opts = ['5', '10', '25', '50', '100', 'all'].map(v => {
+        const lbl = v === 'all' ? 'All' : 'Top ' + v;
+        const sel = v === savedLimit ? ' selected' : '';
+        return `<option value="${v}"${sel}>${lbl}</option>`;
+      }).join('');
+      const limitCtrl = `Showing ${visible.length} of ${sw.length}`
+        + ` &nbsp;<select onchange="event.stopPropagation();repSetTopSellersLimit(this.value)" onclick="event.stopPropagation()"`
+        + ` style="height:24px;padding:0 6px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:11.5px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text);margin-left:6px">${opts}</select>`;
+      html += section('Top Sellers', limitCtrl, sellerTable, { open: false });
+    }
+
+    // Hourly pace
+    const hr = d.hourly || [];
+    if (hr.length) {
+      const maxQty = Math.max(...hr.map(h => Number(h.total_qty) || 0), 1);
+      let hourlyBars = '<div style="display:flex;gap:4px;align-items:flex-end;height:120px;padding:6px;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow-x:auto">';
+      hr.forEach(h => {
+        const pct = (Number(h.total_qty) || 0) / maxQty * 100;
+        hourlyBars += `<div style="flex:1;min-width:36px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end"><div title="${h.lot_count} lots · ${Number(h.total_qty || 0).toFixed(1)} kg" style="width:100%;height:${pct}%;background:var(--green);border-radius:3px 3px 0 0;min-height:2px"></div><div style="font-size:10px;color:var(--spice-text-mute);margin-top:4px">${esc(h.hour)}h</div></div>`;
+      });
+      hourlyBars += '</div>';
+      html += section('Hourly Pace', hr.length + ' hour' + (hr.length === 1 ? '' : 's'), hourlyBars, { open: false });
+    }
+
+    // Per-user (only if show_username is on)
+    const uw = d.userWise || [];
+    if (d.showUsername && uw.length) {
+      let userTable = '<table><thead><tr><th>User</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th></tr></thead><tbody>';
+      uw.forEach(u => { userTable += `<tr><td><strong>${esc(u.user_id || '')}</strong></td><td style="text-align:right">${u.lot_count}</td><td style="text-align:right">${u.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(u.total_qty || 0).toFixed(3)}</td></tr>`; });
+      userTable += '</tbody></table>';
+      html += section('By Operator', uw.length + ' operator' + (uw.length === 1 ? '' : 's'), userTable, { open: false });
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div style="text-align:center;padding:30px;color:#b91c1c">${esc(e.message || 'Failed to load')}</div>`;
+  }
+}
+
+// Persist the user's Top-Sellers cap so it survives reloads.
+function repSetTopSellersLimit(v){
+  try { localStorage.setItem('rep_top_sellers_limit', String(v)); } catch (_) {}
+  loadTradeSummary();
+}
+
+// Collapsible section toggle — shared between Auction Summary and
+// Branch Comparison panels.
+function toggleRepSection(head){
+  const sec = head.closest('.rep-section');
+  if (!sec) return;
+  const body = sec.querySelector('.rep-section-body');
+  const chev = sec.querySelector('.rep-section-chev');
+  const open = sec.getAttribute('data-open') === '1';
+  const next = !open;
+  sec.setAttribute('data-open', next ? '1' : '0');
+  if (body) body.style.display = next ? '' : 'none';
+  if (chev) chev.textContent  = next ? '▾' : '▸';
+}
+
+function openTradeSummaryPdf(){
+  const aid = document.getElementById('rep-auction').value;
+  if (!aid) return;
+  const br = document.getElementById('rep-branch')?.value || '';
+  const branchQs = br ? `&branch=${encodeURIComponent(br)}` : '';
+  // Token-in-querystring because window.open() can't set
+  // Authorization. The server's /summary-pdf route reads ?token=
+  // via an inline shim — see reports section of server.js.
+  window.open(`${B}/api/reports/summary-pdf/${aid}?token=${T}${branchQs}`, '_blank');
+}
+
+// ── Branch Comparison ────────────────────────────────────
+// Muted single-hue palette so branches read as distinct bars
+// without rainbowing. Same shades reused for the stacked-by-trade
+// chart.
+const BC_PALETTE = [
+  '#0F766E','#0E7490','#1E40AF','#4338CA','#6D28D9',
+  '#9D174D','#9F1239','#7C2D12','#854D0E','#3F6212',
+  '#166534','#365314',
+];
+function bcBranchColor(name, fallbackIdx){
+  const s = String(name || '-');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return BC_PALETTE[(h + (fallbackIdx || 0)) % BC_PALETTE.length];
+}
+
+// Toggle the data-table panel under a chart.
+function bcToggleData(btn, panelId){
+  const el = document.getElementById(panelId);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? 'Show data table' : 'Hide data table';
+}
+
+async function loadBranchComparison(){
+  const body = document.getElementById('rep-branch-body');
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>';
+  try {
+    const d = await j('/api/reports/branch-comparison');
+    const overall = d.overall || [];
+    const data = d.data || [];
+    if (!overall.length) {
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">No lot data yet.</div>';
+      return;
+    }
+    let _bcSec = 0;
+    const bcSection = (title, meta, payload, opts) => {
+      opts = opts || {};
+      _bcSec++;
+      const open = opts.open !== false;
+      return '<div class="rep-section" data-open="' + (open ? 1 : 0) + '">'
+        + '<div class="rep-section-head" onclick="toggleRepSection(this)">'
+        +   '<h3>' + title + '</h3>'
+        +   (meta ? '<span class="rep-section-meta">' + meta + '</span>' : '')
+        +   '<span class="rep-section-chev">' + (open ? '▾' : '▸') + '</span>'
+        + '</div>'
+        + '<div class="rep-section-body" style="' + (open ? '' : 'display:none') + '">'
+        +   '<div class="rep-section-scroll">' + payload + '</div>'
+        + '</div></div>';
+    };
+    let html = '';
+    window._bcOverall = overall;
+    window._bcData = data;
+
+    // Lifetime Totals — chart on top, optional data table below
+    let lifetimePayload =
+      '<div class="bc-chart-wrap"><canvas id="bc-lifetime-chart"></canvas></div>'
+      + '<button class="bc-toggle-data" type="button" onclick="bcToggleData(this,\'bc-lifetime-data\')">'
+      + 'Show data table</button>'
+      + '<div id="bc-lifetime-data" class="bc-data-table" style="display:none">'
+      +   '<table><thead><tr><th>Branch</th><th style="text-align:right">Auctions</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th><th style="text-align:right">Unique Sellers</th></tr></thead><tbody>'
+      +   overall.map(b => `<tr><td><strong>${esc(b.branch || '-')}</strong></td><td style="text-align:right">${b.trade_count || 0}</td><td style="text-align:right">${b.lot_count}</td><td style="text-align:right">${b.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(b.total_qty || 0).toFixed(3)}</td><td style="text-align:right">${b.seller_count || 0}</td></tr>`).join('')
+      +   '</tbody></table>'
+      + '</div>';
+    html += bcSection('Lifetime Totals', overall.length + ' branch' + (overall.length === 1 ? '' : 'es'), lifetimePayload, { open: true });
+
+    if (data.length) {
+      // Aggregate per-trade for the stacked chart (limit to recent 50)
+      const recent = data.slice(0, 50);
+      const tradeMap = new Map();
+      for (const r of recent) {
+        const key = r.ano + '|' + (r.date || '');
+        if (!tradeMap.has(key)) tradeMap.set(key, { ano: r.ano, date: r.date, crop: r.crop_type, total: 0, byBranch: {} });
+        const t = tradeMap.get(key);
+        const q = Number(r.total_qty) || 0;
+        t.total += q;
+        t.byBranch[r.branch || '-'] = (t.byBranch[r.branch || '-'] || 0) + q;
+      }
+      const trades = Array.from(tradeMap.values()).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+      window._bcTrades = trades;
+
+      let byTradePayload =
+        '<div class="bc-chart-wrap" style="height:340px"><canvas id="bc-by-trade-chart"></canvas></div>'
+        + '<button class="bc-toggle-data" type="button" onclick="bcToggleData(this,\'bc-trade-data\')">'
+        + 'Show data table</button>'
+        + '<div id="bc-trade-data" class="bc-data-table" style="display:none">'
+        +   '<table><thead><tr><th>Date</th><th>Auction</th><th>Crop</th><th>Branch</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th></tr></thead><tbody>'
+        +   recent.map(r => `<tr><td style="font-family:monospace;font-size:12px">${esc((r.date || '').split('T')[0])}</td><td>#${esc(r.ano || '')}</td><td><span style="font-size:11px;padding:1px 6px;background:var(--bg);border-radius:4px">${esc(r.crop_type || '-')}</span></td><td><strong>${esc(r.branch || '-')}</strong></td><td style="text-align:right">${r.lot_count}</td><td style="text-align:right">${r.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(r.total_qty || 0).toFixed(3)}</td></tr>`).join('')
+        +   '</tbody></table>'
+        + '</div>';
+      html += bcSection('By Trade', Math.min(50, data.length) + ' most recent of ' + data.length, byTradePayload, { open: true });
+    }
+    body.innerHTML = html;
+
+    // Charts mount AFTER innerHTML lands (canvas needs to exist).
+    requestAnimationFrame(() => bcRenderCharts());
+    _bcLastLoadedAt = Date.now();
+    _bcStamp();
+  } catch (e) {
+    body.innerHTML = `<div style="text-align:center;padding:30px;color:#b91c1c">${esc(e.message || 'Failed to load')}</div>`;
+  }
+}
+
+// Two charts: lifetime vertical bars + per-trade stacked. Both
+// rendered after the canvases exist in the DOM.
+function bcRenderCharts(){
+  if (typeof Chart === 'undefined') return;
+  const overall = window._bcOverall || [];
+  const trades = window._bcTrades || [];
+
+  // 1) Lifetime Totals — one bar per branch, sorted by qty desc.
+  const cv1 = document.getElementById('bc-lifetime-chart');
+  if (cv1) {
+    if (cv1._chart) { cv1._chart.destroy(); cv1._chart = null; }
+    const ordered = overall.slice().sort((a, b) => (Number(b.total_qty) || 0) - (Number(a.total_qty) || 0));
+    const labels = ordered.map(b => b.branch || '-');
+    const qtys = ordered.map(b => Number(b.total_qty) || 0);
+    const colors = labels.map((b, i) => bcBranchColor(b, i));
+    cv1._chart = new Chart(cv1.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Quantity (kg)', data: qtys, backgroundColor: colors, borderRadius: 4, maxBarThickness: 48 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0F172A', padding: 10,
+            callbacks: { label: (c) => Number(c.parsed.y).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kg' }
+          }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 11, weight: '600' }, color: '#475569' } },
+          y: { grid: { color: '#F1F5F9' }, ticks: { font: { size: 11 }, color: '#64748B', callback: (v) => Number(v).toLocaleString('en-IN') } }
+        }
+      }
+    });
+  }
+
+  // 2) By Trade — stacked vertical bars, one stack per trade.
+  const cv2 = document.getElementById('bc-by-trade-chart');
+  if (cv2 && trades.length) {
+    if (cv2._chart) { cv2._chart.destroy(); cv2._chart = null; }
+    const branches = Array.from(new Set(trades.flatMap(t => Object.keys(t.byBranch)))).sort();
+    const labels = trades.map(t => '#' + (t.ano || ''));
+    const datasets = branches.map((b, i) => ({
+      label: b || '-',
+      data: trades.map(t => Number(t.byBranch[b] || 0)),
+      backgroundColor: bcBranchColor(b, i),
+      borderRadius: 3,
+      maxBarThickness: 36,
+    }));
+    cv2._chart = new Chart(cv2.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { font: { size: 11, weight: '600' }, color: '#475569', boxWidth: 12, boxHeight: 12, padding: 12, usePointStyle: true, pointStyle: 'rectRounded' }
+          },
+          tooltip: {
+            backgroundColor: '#0F172A', padding: 10,
+            callbacks: {
+              title: (items) => {
+                const t = trades[items[0].dataIndex];
+                const d = String(t.date || '').split('T')[0];
+                return 'Trade ' + items[0].label + (d ? ' · ' + d : '');
+              },
+              label: (c) => c.dataset.label + ': ' + Number(c.parsed.y).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kg',
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#475569', maxRotation: 0, autoSkip: true } },
+          y: { stacked: true, grid: { color: '#F1F5F9' }, ticks: { font: { size: 11 }, color: '#64748B', callback: (v) => Number(v).toLocaleString('en-IN') } }
+        }
+      }
+    });
+  }
+}
+
 // ── Users & Sessions ─────────────────────────────────────
 async function loadUsers(){
   const uname = document.getElementById('user-lbl')?.textContent || '';
@@ -5471,6 +6237,15 @@ function applyModeLabels(){
     }
     if (!swapped) btn.appendChild(document.createTextNode(' ' + label));
   }
+  // Mode gate: every element tagged `.mode-eauction-only` is visible
+  // only when the saved business_mode is "e-Auction". The Spice Board
+  // sidebar entry and its tab content carry this class — everything
+  // else (Trade-mode flows like Lorry, Tally, etc.) stays untouched.
+  // We stamp a body attribute so the rule is pure CSS, no flicker.
+  const mode = (typeof getCurrentBusinessMode === 'function')
+    ? (getCurrentBusinessMode() || 'e-Auction')
+    : 'e-Auction';
+  document.body.setAttribute('data-business-mode', mode);
   // Static HTML strings tagged with data-term-auction
   applyTermLabels();
 }
@@ -8424,6 +9199,255 @@ async function downloadLorry(type,format){
     a.download=`${type}_${aid}.${format}`;a.click();
     URL.revokeObjectURL(a.href);
   });
+}
+
+// ── Spice Board Reports ───────────────────────────────────
+// Three statutory cardamom-auction reports + one CSV export:
+//   buyers_statement | form_d | form_c → preview + xlsx + pdf + print
+//   eauction_csv                       → CSV only (Spices Board portal)
+// Filters (Trade, Branch, Seller, Buyer, Place) layer onto a shared
+// query layer in spice-board-reports.js.
+function sbCurrent(){ return document.getElementById('sb-type')?.value || 'buyers_statement'; }
+function sbAuctionId(){ return document.getElementById('sb-auction')?.value || ''; }
+function sbQueryString(extra){
+  const q = new URLSearchParams();
+  q.set('auctionId', sbAuctionId());
+  const branch = document.getElementById('sb-branch')?.value || '';
+  const seller = document.getElementById('sb-seller')?.value || '';
+  const buyer  = document.getElementById('sb-buyer')?.value || '';
+  const place  = document.getElementById('sb-place')?.value || '';
+  if (branch) q.set('branch', branch);
+  if (seller) q.set('sellerId', seller);
+  if (buyer)  q.set('buyerCode', buyer);
+  // Place override only applies to Form-D; gate so other report types
+  // don't carry a stray query param.
+  if (place && sbCurrent() === 'form_d') q.set('place', place);
+  if (extra) for (const k of Object.keys(extra)) q.set(k, extra[k]);
+  return q.toString();
+}
+// Populate the Place of Auction dropdown from the formd_places setting
+// (newline-separated). Empty/blank lines skipped. Admin edits the
+// setting in Settings → Spice Board Reports.
+async function sbLoadPlaces(){
+  const sel = document.getElementById('sb-place');
+  if (!sel) return;
+  try {
+    const cfg = await j('/api/company-settings/flat');
+    const raw = String((cfg && cfg.formd_places) || '');
+    const places = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    sel.innerHTML = '<option value="">— Use configured branch —</option>' +
+      places.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  } catch (_) { /* non-fatal — dropdown stays at its default option */ }
+}
+async function loadSpiceBoard(){
+  await fillAucSelect('sb-auction');
+  await onSbAuctionChange();
+  await sbLoadPlaces();
+  onSbTypeChange();
+}
+async function onSbAuctionChange(){
+  const aid = sbAuctionId();
+  if (!aid) return;
+  try {
+    const f = await j('/api/spice-board-reports/filters?auctionId=' + encodeURIComponent(aid));
+    const branchSel = document.getElementById('sb-branch');
+    const sellerSel = document.getElementById('sb-seller');
+    const buyerSel  = document.getElementById('sb-buyer');
+    if (branchSel) branchSel.innerHTML = '<option value="">— All branches —</option>' +
+      (f.branches||[]).map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+    if (sellerSel) sellerSel.innerHTML = '<option value="">— All sellers —</option>' +
+      (f.sellers||[]).map(s => `<option value="${s.id}">${esc(s.name||'')}</option>`).join('');
+    if (buyerSel)  buyerSel.innerHTML  = '<option value="">— All buyers —</option>' +
+      (f.buyers||[]).map(b => `<option value="${esc(b.code)}">${esc(b.name||b.code)}</option>`).join('');
+  } catch (e) { /* keep filters at defaults */ }
+}
+function onSbTypeChange(){
+  const t = sbCurrent();
+  // Hide Buyer filter for FORM-C (planter/dealer level), Seller filter
+  // for Buyers Statement. Place picker is Form-D only.
+  const sellerFg = document.getElementById('sb-seller-fg');
+  const buyerFg  = document.getElementById('sb-buyer-fg');
+  const placeFg  = document.getElementById('sb-place-fg');
+  if (sellerFg) sellerFg.style.display = (t === 'buyers_statement') ? 'none' : '';
+  if (buyerFg)  buyerFg.style.display  = (t === 'form_c')           ? 'none' : '';
+  if (placeFg)  placeFg.style.display  = (t === 'form_d')           ? '' : 'none';
+  // Toggle action buttons — eauction_csv is CSV-only; the others get
+  // Excel/PDF/Print but no CSV.
+  const isCsv = (t === 'eauction_csv');
+  const show = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v ? '' : 'none'; };
+  show('sb-btn-xlsx',  !isCsv);
+  show('sb-btn-pdf',   !isCsv);
+  show('sb-btn-print', !isCsv);
+  show('sb-btn-csv',   isCsv);
+  document.getElementById('sb-preview').innerHTML = '';
+  document.getElementById('sb-meta').textContent = '';
+}
+async function sbLoadPreview(){
+  if (!sbAuctionId()) { alert('Select an auction first'); return; }
+  const t = sbCurrent();
+  if (t === 'eauction_csv') {
+    document.getElementById('sb-meta').textContent = 'CSV export — no on-screen preview. Click CSV to download.';
+    document.getElementById('sb-preview').innerHTML = '';
+    return;
+  }
+  await withOverlay('Loading preview…', async () => {
+    try {
+      const data = await j(`/api/spice-board-reports/${t}/data?${sbQueryString()}`);
+      sbRenderPreview(t, data);
+    } catch (e) {
+      toast('Preview failed: ' + (e.message || e));
+    }
+  });
+}
+async function sbDownload(format){
+  if (!sbAuctionId()) { alert('Select an auction first'); return; }
+  const t = sbCurrent();
+  await withOverlay(`Generating (${format.toUpperCase()})…`, async () => {
+    const r = await fetch(B + `/api/spice-board-reports/${t}/export?${sbQueryString({format})}`,
+      { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) {
+      let m = 'Export failed';
+      try { const e = await r.json(); if (e.error) m = e.error; } catch (_) {}
+      toast(m);
+      return;
+    }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${t}_${sbAuctionId()}.${format}`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+}
+async function sbPrint(){
+  if (!sbAuctionId()) { alert('Select an auction first'); return; }
+  const t = sbCurrent();
+  // inline=1 makes the browser keep the tab open so print preview can fire.
+  const url = B + `/api/spice-board-reports/${t}/export?${sbQueryString({format: 'pdf', inline: '1'})}`;
+  await withOverlay('Preparing print…', async () => {
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { toast('Print failed'); return; }
+    const blob = await r.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const w = window.open(blobUrl);
+    if (w) w.addEventListener('load', () => { try { w.focus(); w.print(); } catch(_) {} });
+  });
+}
+function sbRenderPreview(type, data){
+  const meta = document.getElementById('sb-meta');
+  const root = document.getElementById('sb-preview');
+  const a = data.auction || {};
+  meta.textContent = `${data.title} — Auction No: ${a.ano||''} · Date: ${a.date||''}${a.state?(' · '+a.state):''}`;
+  if (type === 'form_d') { root.innerHTML = sbRenderFormD(data); return; }
+  // Buyers Statement + FORM-C share a sectioned table layout.
+  const cols = data.columns || [];
+  const fmtCell = (v, c) => {
+    if (v == null || v === '') return '';
+    if (c && c.numeric) {
+      const n = Number(v);
+      if (!isNaN(n)) {
+        if (c.fmt === 'qty')   return n.toLocaleString('en-IN', {minimumFractionDigits:3, maximumFractionDigits:3});
+        if (c.fmt === 'price' || c.fmt === 'money') return n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+      }
+    }
+    return esc(String(v));
+  };
+  const noWrap = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  let html = '<table style="width:100%;font-size:12px;border-collapse:collapse;table-layout:fixed"><thead><tr>';
+  cols.forEach(c => { html += `<th style="text-align:${c.align||'left'};padding:6px;border-bottom:2px solid var(--spice-line);background:var(--spice-cream);${noWrap}" title="${esc(c.header)}">${esc(c.header)}</th>`; });
+  html += '</tr></thead><tbody>';
+  (data.sections || []).forEach(sec => {
+    html += `<tr><td colspan="${cols.length}" style="padding:8px;background:#FFF3CD;font-weight:700;${noWrap}">${esc(sec.title)}</td></tr>`;
+    (sec.rows || []).forEach(r => {
+      html += '<tr>';
+      cols.forEach(c => {
+        const v = fmtCell(r[c.key], c);
+        html += `<td style="text-align:${c.align||'left'};padding:5px 6px;border-bottom:1px solid #eee;${noWrap}" title="${v}">${v}</td>`;
+      });
+      html += '</tr>';
+    });
+    if (sec.totals) {
+      html += '<tr style="font-weight:700;background:#F7F5F2">';
+      cols.forEach((c, i) => {
+        let v = '';
+        if (i === 1 && sec.totals.label) v = sec.totals.label;
+        else if (sec.totals[c.key] != null) v = sec.totals[c.key];
+        const out = fmtCell(v, c);
+        html += `<td style="text-align:${c.align||'left'};padding:6px;border-top:1px solid #ddd;border-bottom:2px solid #ddd;${noWrap}" title="${out}">${out}</td>`;
+      });
+      html += '</tr>';
+    }
+  });
+  if (data.grand) {
+    html += '<tr style="font-weight:700;background:#FFF3CD">';
+    cols.forEach((c, i) => {
+      let v = '';
+      if (i === 1 && data.grand.label) v = data.grand.label;
+      else if (data.grand[c.key] != null) v = data.grand[c.key];
+      const out = fmtCell(v, c);
+      html += `<td style="text-align:${c.align||'left'};padding:8px;border-top:2px double #9A6700;border-bottom:2px double #9A6700;${noWrap}" title="${out}">${out}</td>`;
+    });
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  root.innerHTML = html;
+}
+function sbRenderFormD(data){
+  const s = data.summary || {};
+  const fmt = (n, dec) => {
+    const v = Number(n);
+    if (isNaN(v)) return esc(String(n||''));
+    return v.toLocaleString('en-IN', {minimumFractionDigits: dec, maximumFractionDigits: dec});
+  };
+  const rows = [
+    ['Name and Address of the auctioneer:', s.auctioneer || ''],
+    ['', s.address || ''],
+    ['e-Auction Licence No.', s.licence || ''],
+    ['(s) Season', s.season || ''],
+    ['(t) Auction Number', s.auctionNo || ''],
+    ['(u) Date of auction', s.auctionDate || ''],
+    ['(v) Place of auction', s.place || ''],
+    ['(w) Quantity carried over from previous auction (kgs)', s.carriedOver || 'NIL'],
+    ['(x) Fresh arrivals (kgs)', fmt(s.freshArrivals, 3)],
+    ['(y) Total quantity put for auction (kgs)', fmt(s.totalForAuction, 3)],
+    ['(z) Total quantity sold (kgs)', fmt(s.totalSold, 3)],
+    ['(zz) Quantity Not Auctioned (kgs)', s.notAuctioned || 'NIL'],
+    ['(aa) Quantity withdrawn (kgs)', fmt(s.withdrawn, 3)],
+    ['(bb) Quantity returned to planter (kgs)', fmt(s.returnedToPlanter, 3)],
+    ['(cc) Balance with the auctioneer (kgs)', s.balance || 'NIL'],
+    ['(dd) Total value of the sales (Rs)', fmt(s.totalValue, 2)],
+    ['(ee) Maximum price (Rs/kg)', `${fmt(s.maxRate,2)} / kgs ${fmt(s.maxKg,3)}`],
+    ['(ff) Minimum price (Rs/kg)', `${fmt(s.minRate,2)} / kgs ${fmt(s.minKg,3)}`],
+    ['(gg) Average price (Rs/kg)', fmt(s.avgRate, 2)],
+  ];
+  let html = '<div style="border:1px solid var(--spice-line);border-radius:8px;padding:16px;background:#fff">';
+  html += '<h3 style="text-align:center;margin:0 0 4px">FORM - D</h3>';
+  html += '<div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:12px">[See rule 10(1)(1)] — Advance Auction Report</div>';
+  html += '<table style="width:100%;font-size:13px;border-collapse:collapse">';
+  rows.forEach(r => {
+    html += `<tr><td style="padding:5px 8px;color:var(--text2);width:55%">${esc(r[0])}</td><td style="padding:5px 8px;font-weight:600">${esc(String(r[1]||''))}</td></tr>`;
+  });
+  html += '</table>';
+  html += '<h4 style="text-align:center;margin:16px 0 8px">Name of 5 Highest Buyers</h4>';
+  html += '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr>';
+  ['Sl.No', 'Buyer Name', 'Kilos', 'Value'].forEach((h, i) => {
+    html += `<th style="text-align:${i>=2?'right':(i===0?'center':'left')};padding:6px;border-bottom:2px solid var(--spice-line);background:var(--spice-cream)">${h}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  (data.top5 || []).forEach(b => {
+    html += `<tr><td style="text-align:center;padding:5px 8px;border-bottom:1px solid #eee">${b.slNo}</td>`;
+    html += `<td style="padding:5px 8px;border-bottom:1px solid #eee">${esc(b.name||'')}</td>`;
+    html += `<td style="text-align:right;padding:5px 8px;border-bottom:1px solid #eee">${fmt(b.kilos,3)}</td>`;
+    html += `<td style="text-align:right;padding:5px 8px;border-bottom:1px solid #eee">${fmt(b.value,2)}</td></tr>`;
+  });
+  if (data.top5Totals) {
+    html += '<tr style="font-weight:700;background:#FFF3CD">';
+    html += `<td colspan="2" style="text-align:center;padding:8px">${esc(data.top5Totals.label||'TOTAL')}</td>`;
+    html += `<td style="text-align:right;padding:8px">${fmt(data.top5Totals.kilos,3)}</td>`;
+    html += `<td style="text-align:right;padding:8px">${fmt(data.top5Totals.value,2)}</td></tr>`;
+  }
+  html += '</tbody></table></div>';
+  return html;
 }
 
 // ── DBF Export Helpers ────────────────────────────────────
@@ -14197,6 +15221,600 @@ if (document.readyState === 'loading') {
     });
   }
 })();
+
+/* ─── IMPORT OLD DATA — frontend (state, preview, verify, run, history, undo)
+   Calls /api/import-old-data/* — admin-only on the server.
+   ─────────────────────────────────────────────────────────────────────── */
+let _impLastMapping = null;
+let _impLastHeaders = [];
+// State for the live "projected DB rows" preview — re-rendered every
+// time the user edits a mapping so they can see how the file actually
+// lands in each DB column before clicking Run Import.
+let _impLastFields  = [];
+let _impLastKeyCols = [];
+let _impLastRows    = [];
+let _impLastAutoFillAuctionId = false;
+let _impLastVerify = null;
+
+// Reset the Import Old Data screen back to its first-load state.
+function impClear(){
+  const fileEl = document.getElementById('imp-file');
+  if (fileEl) fileEl.value = '';
+  _impLastMapping = null;
+  _impLastHeaders = [];
+  _impLastFields  = [];
+  _impLastKeyCols = [];
+  _impLastRows    = [];
+  _impLastAutoFillAuctionId = false;
+  _impLastVerify = null;
+  const result  = document.getElementById('imp-result');
+  const preview = document.getElementById('imp-preview');
+  const verify  = document.getElementById('imp-verify');
+  if (result)  result.innerHTML  = '';
+  if (preview) preview.innerHTML = '';
+  if (verify)  { verify.innerHTML = ''; verify.style.display = 'none'; }
+  const dry = document.getElementById('imp-dryrun');
+  if (dry) dry.checked = true;
+  if (typeof toast === 'function') toast('Cleared');
+}
+
+async function impPreview(){
+  const fileEl = document.getElementById('imp-file');
+  const moduleKey = document.getElementById('imp-module').value;
+  const result = document.getElementById('imp-result');
+  const preview = document.getElementById('imp-preview');
+  if (!fileEl.files || !fileEl.files[0]) {
+    result.innerHTML = '<span style="color:#c00">Select a file first.</span>';
+    return;
+  }
+  result.innerHTML = 'Reading file…';
+  preview.innerHTML = '';
+  // Drop any prior verification result — mapping may change after
+  // preview, which would invalidate it.
+  _impLastVerify = null;
+  const vhost = document.getElementById('imp-verify');
+  if (vhost) { vhost.innerHTML = ''; vhost.style.display = 'none'; }
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  fd.append('module', moduleKey);
+  try {
+    const r = await fetch(B + '/api/import-old-data/preview', {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      result.innerHTML = '<span style="color:#c00">Error: '+_escImp(data.error||'preview failed')+'</span>';
+      return;
+    }
+    _impLastMapping = Object.assign({}, data.detectedMapping || {});
+    _impLastHeaders = data.headers || [];
+    _impLastRows    = Array.isArray(data.preview) ? data.preview : [];
+    _impLastFields  = Array.isArray(data.fields) ? data.fields : [];
+    _impLastKeyCols = Array.isArray(data.keyCols) ? data.keyCols : [];
+    _impLastAutoFillAuctionId = !!data.autoFillAuctionId;
+    const missing  = data.missingFields || [];
+    const allFields = _impLastFields.length
+      ? _impLastFields
+      : Array.from(new Set([...(Object.keys(_impLastMapping)), ...missing]));
+    const keyCols  = new Set(_impLastKeyCols);
+    let html = '<div><b>'+_escImp(data.label||moduleKey)+'</b> — '+data.total+' rows · '+(data.headers||[]).length+' columns</div>';
+    if (missing.length) html += '<div style="color:#c80;margin-top:4px">⚠ Missing required field mapping for: '+missing.map(_escImp).join(', ')+'</div>';
+    result.innerHTML = html;
+
+    // Mapping editor — one row per DB field. Auto-detected source col
+    // is pre-selected; user can pick any header from the file (or
+    // "— skip —") and the override is sent verbatim on Run Import.
+    let mapHtml = '<div style="margin:8px 0"><b>Mapping</b> <span style="color:#999;font-size:11px">(edit if needed before Run — required fields marked with *)</span></div>';
+    mapHtml += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f4f4f4">'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">DB Field</th>'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">Source Column</th></tr></thead><tbody>';
+    allFields.forEach(f => {
+      const cur = _impLastMapping[f] || '';
+      const req = keyCols.has(f);
+      let opts = '<option value="">— skip —</option>';
+      _impLastHeaders.forEach(h => {
+        opts += '<option value="'+_escImp(h)+'"'+(h===cur?' selected':'')+'>'+_escImp(h)+'</option>';
+      });
+      mapHtml += '<tr><td style="padding:3px 6px;border:1px solid #ddd"><code>'+_escImp(f)+'</code>'+(req?'<span style="color:#c00;font-weight:700"> *</span>':'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #ddd"><select data-impfield="'+_escImp(f)+'" onchange="_impMapChange(this)">'+opts+'</select></td></tr>';
+    });
+    mapHtml += '</tbody></table>';
+
+    // Raw rows preview — collapsible because the projected view is
+    // usually the one the operator wants.
+    if (_impLastRows.length) {
+      mapHtml += '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">Raw file rows (first '+_impLastRows.length+')</summary>';
+      mapHtml += '<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px"><thead><tr style="background:#fafafa">';
+      _impLastHeaders.forEach(h => { mapHtml += '<th style="text-align:left;padding:3px 6px;border:1px solid #eee;white-space:nowrap">'+_escImp(h)+'</th>'; });
+      mapHtml += '</tr></thead><tbody>';
+      _impLastRows.forEach(row => {
+        mapHtml += '<tr>';
+        _impLastHeaders.forEach(h => {
+          const v = row[h]; const t = (v==null?'':String(v));
+          mapHtml += '<td style="padding:2px 6px;border:1px solid #f0f0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">'+_escImp(t)+'</td>';
+        });
+        mapHtml += '</tr>';
+      });
+      mapHtml += '</tbody></table></details>';
+    }
+
+    // Anchor for the live "projected DB rows" table.
+    mapHtml += '<div id="imp-projected" style="margin-top:14px"></div>';
+
+    preview.innerHTML = mapHtml;
+    _impRenderProjected();
+  } catch (e) {
+    result.innerHTML = '<span style="color:#c00">Error: '+_escImp(e.message||String(e))+'</span>';
+  }
+}
+
+// Render the "this is how it will land in the DB" table. Reads the
+// raw rows already returned by /preview and projects them through the
+// CURRENT _impLastMapping. Re-rendered after every mapping change.
+function _impRenderProjected(){
+  const host = document.getElementById('imp-projected');
+  if (!host) return;
+  if (!_impLastFields.length || !_impLastRows.length) { host.innerHTML = ''; return; }
+  const keyCols = new Set(_impLastKeyCols);
+  let html = '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap">'+
+    '<b style="font-size:13px">Projected DB rows</b>'+
+    '<span style="font-size:11px;color:#666">' +
+      'how each row will land in the database with your current mapping · '+
+      'required fields marked with <span style="color:#c00;font-weight:700">*</span>'+
+    '</span></div>';
+  html += '<div style="overflow:auto;max-height:300px;border:1px solid var(--border);border-radius:6px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#f4f4f4;position:sticky;top:0">';
+  _impLastFields.forEach(f => {
+    const req = keyCols.has(f);
+    html += '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd;white-space:nowrap;font-weight:700"><code>'+_escImp(f)+'</code>'+(req?'<span style="color:#c00"> *</span>':'')+'</th>';
+  });
+  html += '</tr></thead><tbody>';
+  _impLastRows.forEach((row, rowIdx) => {
+    html += '<tr style="background:'+(rowIdx % 2 ? '#fafafa' : '#fff')+'">';
+    _impLastFields.forEach(f => {
+      const src = _impLastMapping[f];
+      let val, cellStyle = '';
+      if (f === 'auction_id' && _impLastAutoFillAuctionId) {
+        const anoSrc = _impLastMapping['ano'];
+        const ano = anoSrc ? row[anoSrc] : '';
+        val = ano ? '↳ from ano="'+String(ano).trim()+'"' : '↳ from ano (missing!)';
+        cellStyle = ano ? 'color:#0369a1;font-style:italic' : 'color:#c00;font-style:italic';
+      } else if (!src) {
+        val = '— skipped —';
+        cellStyle = 'color:#9ca3af;font-style:italic';
+        if (keyCols.has(f)) cellStyle = 'color:#c00;font-weight:700;background:#fee2e2'; // required + skipped = bad
+      } else {
+        const v = row[src];
+        val = (v == null) ? '' : String(v);
+        if (!val.trim() && keyCols.has(f)) {
+          cellStyle = 'color:#c00;background:#fee2e2'; // required but blank
+        }
+      }
+      html += '<td style="padding:3px 8px;border:1px solid #f0f0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;'+cellStyle+'">'+_escImp(val)+'</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Validation summary — count rows the server would reject because a
+  // required cell is blank. "Ready to import?" signal.
+  let badRows = 0;
+  for (const row of _impLastRows) {
+    for (const f of _impLastKeyCols) {
+      const src = _impLastMapping[f];
+      const v   = src ? row[src] : null;
+      if (v == null || String(v).trim() === '') { badRows++; break; }
+    }
+  }
+  if (badRows) {
+    html += '<div style="margin-top:6px;font-size:11.5px;color:#c00"><b>⚠ '+badRows+' of '+_impLastRows.length+'</b> preview rows are missing one or more required values — they will be skipped or fail on import. Fix the mapping or the source file.</div>';
+  } else {
+    html += '<div style="margin-top:6px;font-size:11.5px;color:#15803d">✓ All required fields are populated for the previewed rows.</div>';
+  }
+  host.innerHTML = html;
+}
+
+function _impMapChange(sel){
+  const field = sel.getAttribute('data-impfield');
+  const v = sel.value;
+  _impLastMapping = _impLastMapping || {};
+  // Always set the value (including '' for skip) so the server sees an
+  // explicit override rather than falling back to auto-detection.
+  _impLastMapping[field] = v;
+  _impRenderProjected();
+  // Any prior verification was computed against the old mapping and is
+  // now stale — drop it so the operator must re-verify.
+  if (_impLastVerify) {
+    _impLastVerify = null;
+    const vhost = document.getElementById('imp-verify');
+    if (vhost) {
+      vhost.innerHTML = '<em style="color:#a16207">Mapping changed — click "Verify Against Database" again to refresh.</em>';
+    }
+    const r = document.getElementById('imp-result');
+    if (r) r.innerHTML = '<span style="color:#a16207">Mapping changed — re-verify before importing.</span>';
+  }
+}
+
+// Ask the server to dry-resolve the file against the live DB using
+// the CURRENT mapping. Renders per-row breakdown + accurate totals.
+async function impVerify(){
+  const fileEl = document.getElementById('imp-file');
+  const moduleKey = document.getElementById('imp-module').value;
+  const result = document.getElementById('imp-result');
+  const host = document.getElementById('imp-verify');
+  if (!fileEl.files || !fileEl.files[0]) {
+    result.innerHTML = '<span style="color:#c00">Select a file first.</span>';
+    return;
+  }
+  if (!_impLastFields.length) {
+    result.innerHTML = '<span style="color:#c00">Click "Preview &amp; Detect Mapping" first.</span>';
+    return;
+  }
+  result.innerHTML = 'Verifying against database…';
+  host.style.display = 'block';
+  host.innerHTML = '<em>Loading…</em>';
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  fd.append('module', moduleKey);
+  if (_impLastMapping) fd.append('mapping', JSON.stringify(_impLastMapping));
+  try {
+    const r = await fetch(B + '/api/import-old-data/verify', {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      result.innerHTML = '<span style="color:#c00">Verify failed: '+_escImp(data.error||'unknown error')+'</span>';
+      host.innerHTML = '';
+      _impLastVerify = null;
+      return;
+    }
+    _impLastVerify = data;
+    _impRenderVerify(data);
+    const c = data.counts || {};
+    const totalInvalid = (c.invalidAno||0) + (c.invalidRequired||0);
+    result.innerHTML = '<b>Verification complete</b> · total='+data.total+
+      ' · new='+ (c.new||0) +
+      ' · duplicates='+ (c.duplicate||0) +
+      (c.duplicateChanged ? ' ('+c.duplicateChanged+' with changes)' : '') +
+      ' · invalid='+ totalInvalid +
+      ' &nbsp;<span style="color:'+(totalInvalid?'#c00':'#15803d')+'">'+
+        (totalInvalid ? '⚠ Fix invalid rows or adjust mapping before importing.' : '✓ Ready to import.')+
+      '</span>';
+  } catch (e) {
+    result.innerHTML = '<span style="color:#c00">Verify failed: '+_escImp(e.message||String(e))+'</span>';
+    host.innerHTML = '';
+    _impLastVerify = null;
+  }
+}
+
+// Render the verification panel — summary cards + sample rows from
+// each status bucket.
+function _impRenderVerify(data){
+  const host = document.getElementById('imp-verify');
+  if (!host) return;
+  const c = data.counts || {};
+  const samples = data.samples || null;
+  const legacyRows = Array.isArray(data.rows) ? data.rows : [];
+  const newRows     = samples && Array.isArray(samples.new)        ? samples.new        : legacyRows.filter(rw => rw.status === 'new');
+  const invalidRows = samples && Array.isArray(samples.invalid)    ? samples.invalid    : legacyRows.filter(rw => rw.status === 'invalid');
+  const dupChanges   = samples && Array.isArray(samples.dupChanges)   ? samples.dupChanges   : legacyRows.filter(rw => rw.status === 'duplicate' && rw.diff && Object.keys(rw.diff).length);
+  const dupIdentical = samples && Array.isArray(samples.dupIdentical) ? samples.dupIdentical : legacyRows.filter(rw => rw.status === 'duplicate' && (!rw.diff || !Object.keys(rw.diff || {}).length));
+  const fields = Array.isArray(data.fields) ? data.fields : [];
+  const keyCols = new Set(Array.isArray(data.keyCols) ? data.keyCols : []);
+  const card = (label, value, color) =>
+    '<div style="flex:1;min-width:120px;padding:10px 12px;border:1px solid '+color+';border-radius:8px;background:'+color+'1a">'+
+      '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.4px">'+label+'</div>'+
+      '<div style="font-size:22px;font-weight:700;color:'+color+'">'+value+'</div>'+
+    '</div>';
+
+  let html = '';
+  if (data.targetTable && typeof data.targetRowCount === 'number') {
+    const expected = (c.duplicate || 0);
+    const stale = data.targetRowCount > 0 && expected > 0;
+    html += '<div style="margin:0 0 10px 0;font-size:12px;background:'+(stale?'#fff7ed':'#f5f5f5')+
+      ';border:1px solid '+(stale?'#fed7aa':'#e5e7eb')+';border-radius:6px;padding:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+
+      '<span style="font-weight:700">'+(stale?'⚠ ':'')+'Target table:</span> '+
+      '<code>'+_escImp(data.targetTable)+'</code> currently holds '+
+      '<b>'+data.targetRowCount+'</b> row(s) in the database.';
+    if (stale) {
+      html += ' <span style="color:#9a3412">If you expected zero, the listing tab is hiding rows behind a filter — bulk-delete only deletes ticked rows. Use the dark-red <b>🚨 Delete All</b> button in the target tab\'s toolbar (admin only).</span>';
+    }
+    html += '</div>';
+  }
+
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+    card('Total rows', data.total, '#374151')+
+    card('Will insert', c.new||0, '#15803d')+
+    card('Duplicates (skip)', c.duplicate||0, '#a16207')+
+    card('Invalid', (c.invalidAno||0)+(c.invalidRequired||0), '#c00')+
+    '</div>';
+
+  if (c.duplicateChanged) {
+    html += '<div style="margin:0 0 10px 0;font-size:12px;color:#a16207;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px">'+
+      '<b>⚠ '+c.duplicateChanged+' duplicate row(s)</b> have different values than what\'s already in the database. '+
+      'These will be SKIPPED — not updated. If you want to overwrite, delete the existing rows first or adjust the source file.'+
+      '</div>';
+  }
+  if (c.invalidAno) {
+    html += '<div style="margin:0 0 10px 0;font-size:12px;color:#c00;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px">'+
+      '<b>✗ '+c.invalidAno+' row(s)</b> reference an <code>ano</code> with no matching trade in the database. Create those auctions first.'+
+      '</div>';
+  }
+  if (c.invalidRequired) {
+    html += '<div style="margin:0 0 10px 0;font-size:12px;color:#c00;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px">'+
+      '<b>✗ '+c.invalidRequired+' row(s)</b> are missing a required value — those won\'t be inserted. Check the mapping for the columns marked <span style="color:#c00">*</span>.'+
+      '</div>';
+  }
+
+  // Primary table — ONLY rows that will actually be inserted. The
+  // server returns up to `sampleLimit` NEW rows so files dominated
+  // by duplicates at the start still surface concrete NEW rows.
+  const totalNew = c.new || 0;
+  const headerNote = totalNew > newRows.length
+    ? ' <span style="font-size:11px;color:#666">(showing first '+newRows.length+' of '+totalNew+')</span>'
+    : '';
+  html += '<details open style="margin-top:6px"><summary style="cursor:pointer;font-weight:600;color:#15803d">Rows that will be inserted ('+totalNew+')'+headerNote+'</summary>';
+  if (!newRows.length) {
+    html += '<div style="padding:10px;color:#666;font-style:italic">'+
+      (totalNew === 0
+        ? 'No rows will be inserted — every row in the file is either a duplicate or invalid.'
+        : 'No sample available.')+
+      '</div>';
+  } else {
+    html += '<div style="overflow:auto;max-height:320px;border:1px solid #bbf7d0;border-radius:6px;margin-top:6px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#ecfdf5;position:sticky;top:0">';
+    html += '<th style="text-align:left;padding:4px 8px;border:1px solid #bbf7d0;white-space:nowrap">Row</th>';
+    fields.forEach(f => {
+      const req = keyCols.has(f);
+      html += '<th style="text-align:left;padding:4px 8px;border:1px solid #bbf7d0;white-space:nowrap"><code>'+_escImp(f)+'</code>'+(req?'<span style="color:#c00"> *</span>':'')+'</th>';
+    });
+    html += '</tr></thead><tbody>';
+    newRows.forEach(rw => {
+      html += '<tr>'+
+        '<td style="padding:3px 8px;border:1px solid #f0f0f0;font-family:monospace">'+rw.row+'</td>';
+      fields.forEach(f => {
+        const v = rw.values && rw.values[f];
+        const t = v == null ? '' : String(v);
+        html += '<td style="padding:3px 8px;border:1px solid #f0f0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px">'+_escImp(t)+'</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</details>';
+
+  if (invalidRows.length) {
+    const totalInvalid = (c.invalidAno||0) + (c.invalidRequired||0);
+    const invNote = totalInvalid > invalidRows.length
+      ? ' <span style="font-size:11px;color:#666">(showing first '+invalidRows.length+' of '+totalInvalid+')</span>'
+      : '';
+    html += '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;color:#c00">Invalid rows ('+totalInvalid+') — won\'t be inserted'+invNote+'</summary>';
+    html += '<div style="overflow:auto;max-height:280px;border:1px solid #fecaca;border-radius:6px;margin-top:6px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#fef2f2;position:sticky;top:0">'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fecaca;white-space:nowrap">Row</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fecaca">Why it\'s invalid</th>'+
+      '</tr></thead><tbody>';
+    invalidRows.forEach(rw => {
+      const detail = (rw.reasons && rw.reasons.length) ? rw.reasons.map(_escImp).join(' · ') : '(no reason)';
+      html += '<tr>'+
+        '<td style="padding:3px 8px;border:1px solid #fff;font-family:monospace;background:#fef2f2">'+rw.row+'</td>'+
+        '<td style="padding:3px 8px;border:1px solid #fff;background:#fef2f2;color:#7f1d1d">'+detail+'</td>'+
+        '</tr>';
+    });
+    html += '</tbody></table></div></details>';
+  }
+
+  if (dupChanges.length) {
+    const totalDupChanged = c.duplicateChanged || 0;
+    const dupNote = totalDupChanged > dupChanges.length
+      ? ' <span style="font-size:11px;color:#666">(showing first '+dupChanges.length+' of '+totalDupChanged+')</span>'
+      : '';
+    html += '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;color:#a16207">Duplicates with changes — what would be overwritten if you imported these ('+totalDupChanged+')'+dupNote+'</summary>';
+    html += '<div style="overflow:auto;max-height:320px;border:1px solid #fed7aa;border-radius:6px;margin-top:6px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#fff7ed;position:sticky;top:0">'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa;white-space:nowrap">Row</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa;white-space:nowrap">Field</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa">In database (kept)</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa">In file (discarded)</th>'+
+      '</tr></thead><tbody>';
+    dupChanges.forEach(rw => {
+      const diffFields = Object.keys(rw.diff);
+      diffFields.forEach((f, idx) => {
+        const d = rw.diff[f];
+        html += '<tr>'+
+          '<td style="padding:3px 8px;border:1px solid #fff;font-family:monospace;background:#fffbeb">'+(idx===0?rw.row:'')+'</td>'+
+          '<td style="padding:3px 8px;border:1px solid #fff;background:#fffbeb"><code>'+_escImp(f)+'</code></td>'+
+          '<td style="padding:3px 8px;border:1px solid #fff;background:#ecfdf5;color:#065f46">'+_escImp(d.old==null?'':String(d.old))+'</td>'+
+          '<td style="padding:3px 8px;border:1px solid #fff;background:#fef2f2;color:#7f1d1d;text-decoration:line-through">'+_escImp(d.new==null?'':String(d.new))+'</td>'+
+          '</tr>';
+      });
+    });
+    html += '</tbody></table></div></details>';
+  }
+
+  if (dupIdentical.length) {
+    const totalDupIdentical = (c.duplicate || 0) - (c.duplicateChanged || 0);
+    const idNote = totalDupIdentical > dupIdentical.length
+      ? ' <span style="font-size:11px;color:#666">(showing first '+dupIdentical.length+' of '+totalDupIdentical+')</span>'
+      : '';
+    html += '<details style="margin-top:10px"><summary style="cursor:pointer;font-weight:600;color:#a16207">Identical duplicates — already in the database ('+totalDupIdentical+')'+idNote+'</summary>';
+    html += '<div style="overflow:auto;max-height:280px;border:1px solid #fed7aa;border-radius:6px;margin-top:6px">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:#fff7ed;position:sticky;top:0">'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa;white-space:nowrap">File row</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa;white-space:nowrap">DB id</th>'+
+      '<th style="text-align:left;padding:4px 8px;border:1px solid #fed7aa">Matching key values</th>'+
+      '</tr></thead><tbody>';
+    dupIdentical.forEach(rw => {
+      const keyParts = [];
+      (Array.isArray(data.keyCols) ? data.keyCols : []).forEach(k => {
+        const v = rw.existing && rw.existing[k];
+        keyParts.push('<code>'+_escImp(k)+'</code>=<b>'+_escImp(v==null?'':String(v))+'</b>');
+      });
+      const dbId = rw.existing && rw.existing.id != null ? rw.existing.id : '—';
+      html += '<tr>'+
+        '<td style="padding:3px 8px;border:1px solid #fff;font-family:monospace;background:#fffbeb">'+rw.row+'</td>'+
+        '<td style="padding:3px 8px;border:1px solid #fff;font-family:monospace;background:#fffbeb">'+_escImp(String(dbId))+'</td>'+
+        '<td style="padding:3px 8px;border:1px solid #fff;background:#fffbeb">'+(keyParts.join(' · ') || '<i>(no key cols)</i>')+'</td>'+
+        '</tr>';
+    });
+    html += '</tbody></table></div></details>';
+  }
+
+  host.innerHTML = html;
+}
+
+async function impRun(){
+  const fileEl = document.getElementById('imp-file');
+  const moduleKey = document.getElementById('imp-module').value;
+  const dryRun = document.getElementById('imp-dryrun').checked;
+  const result = document.getElementById('imp-result');
+  if (!fileEl.files || !fileEl.files[0]) {
+    result.innerHTML = '<span style="color:#c00">Select a file first.</span>';
+    return;
+  }
+  if (!dryRun) {
+    let msg;
+    if (_impLastVerify) {
+      const c = _impLastVerify.counts || {};
+      const inv = (c.invalidAno||0) + (c.invalidRequired||0);
+      msg = 'About to INSERT into the database:\n' +
+        '  • ' + (c.new||0) + ' new row(s)\n' +
+        '  • ' + (c.duplicate||0) + ' duplicate(s) will be skipped\n' +
+        '  • ' + inv + ' invalid row(s) will fail';
+      if (inv > 0) msg += '\n\n⚠ You have invalid rows. They will be reported as failures.';
+      msg += '\n\nContinue?';
+    } else {
+      msg = 'You have not run "Verify Against Database" yet.\n\nWithout verification you can\'t see how the file will land in the DB. Continue anyway?';
+    }
+    if (!confirm(msg)) return;
+  }
+  result.innerHTML = (dryRun?'Validating…':'Importing…');
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  fd.append('module', moduleKey);
+  fd.append('dryRun', dryRun ? 'true' : 'false');
+  if (_impLastMapping) fd.append('mapping', JSON.stringify(_impLastMapping));
+  try {
+    const r = await fetch(B + '/api/import-old-data/run', {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      result.innerHTML = '<span style="color:#c00">Error: '+_escImp(data.error||'import failed')+'</span>';
+      return;
+    }
+    let h = '<div style="padding:8px;background:'+(dryRun?'#fff8e1':'#e8f5e9')+';border-radius:6px">';
+    h += '<b>'+(dryRun?'Dry-run complete':'Import complete')+'</b> · ';
+    h += 'total='+data.total+' · imported='+data.imported+' · skipped(dup)='+data.skipped+' · failed='+data.failed;
+    h += '</div>';
+    if (data.errors && data.errors.length) {
+      h += '<div style="margin-top:8px"><b>Errors (first '+data.errors.length+'):</b><ul style="margin:4px 0 0 18px;font-size:12px">';
+      data.errors.forEach(e => { h += '<li>Row '+e.row+': '+_escImp(e.error)+'</li>'; });
+      h += '</ul></div>';
+    }
+    result.innerHTML = h;
+    impLoadHistory();
+  } catch (e) {
+    result.innerHTML = '<span style="color:#c00">Error: '+_escImp(e.message||String(e))+'</span>';
+  }
+}
+
+async function impLoadHistory(){
+  const box = document.getElementById('imp-history');
+  if (!box) return;
+  box.innerHTML = 'Loading…';
+  try {
+    const r = await fetch(B + '/api/import-old-data/history?_=' + Date.now(), {
+      headers: { 'Authorization': 'Bearer ' + T },
+      cache: 'no-store',
+    });
+    const rows = await r.json();
+    const stamp = new Date().toLocaleTimeString();
+    if (!Array.isArray(rows) || !rows.length) {
+      box.innerHTML = '<i>No imports yet.</i> <span style="color:#999;font-size:11px">(loaded at '+stamp+')</span>';
+      return;
+    }
+    let h = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f4f4f4">'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">When</th>'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">User</th>'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">Module</th>'+
+      '<th style="text-align:left;padding:4px 6px;border:1px solid #ddd">File</th>'+
+      '<th style="text-align:right;padding:4px 6px;border:1px solid #ddd">Total</th>'+
+      '<th style="text-align:right;padding:4px 6px;border:1px solid #ddd">Imported</th>'+
+      '<th style="text-align:right;padding:4px 6px;border:1px solid #ddd">Skipped</th>'+
+      '<th style="text-align:right;padding:4px 6px;border:1px solid #ddd">Failed</th>'+
+      '<th style="text-align:center;padding:4px 6px;border:1px solid #ddd">Dry?</th>'+
+      '<th style="text-align:center;padding:4px 6px;border:1px solid #ddd">Action</th>'+
+      '</tr></thead><tbody>';
+    rows.forEach(r => {
+      let action;
+      if (r.undone_at) {
+        action = '<span style="color:#888;font-style:italic" title="Rolled back at '+_escImp(r.undone_at)+'">⏶ Undone</span>';
+      } else if (r.undoable) {
+        action = '<button class="btn" style="height:24px;padding:0 10px;font-size:11px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D" '+
+          'onclick="impUndo('+r.id+', '+JSON.stringify(r.filename||'').replace(/"/g,'&quot;')+', '+JSON.stringify(r.module||'').replace(/"/g,'&quot;')+', '+(r.inserted_count||0)+')" '+
+          'title="Delete the '+(r.inserted_count||0)+' row(s) this import created">⏶ Undo ('+(r.inserted_count||0)+')</button>';
+      } else if (r.dry_run) {
+        action = '<span style="color:#bbb" title="Dry-run inserts no rows">Dry-run</span>';
+      } else if ((r.imported || 0) > 0 && (r.inserted_count || 0) === 0) {
+        action = '<span style="color:#a16207;cursor:help" title="This import ran before per-import Undo was added. Row IDs weren\'t recorded. To clear it, use Backup → Delete All for the target table.">Pre-update</span>';
+      } else {
+        action = '<span style="color:#bbb" title="No rows were inserted by this run">—</span>';
+      }
+      h += '<tr'+(r.undone_at?' style="opacity:.55"':'')+'>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;white-space:nowrap">'+_escImp(r.created_at||'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.username||'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.module||'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.filename||'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:right">'+(r.total||0)+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:right;color:#080">'+(r.imported||0)+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:right;color:#888">'+(r.skipped||0)+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:right;color:'+(r.failed?'#c00':'#888')+'">'+(r.failed||0)+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:center">'+(r.dry_run?'✓':'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;text-align:center;white-space:nowrap">'+action+'</td>'+
+        '</tr>';
+    });
+    h += '</tbody></table>';
+    h = '<div style="font-size:11px;color:#999;margin-bottom:6px">Showing '+rows.length+' most recent imports — loaded at '+stamp+'</div>' + h;
+    box.innerHTML = h;
+  } catch (e) {
+    box.innerHTML = '<span style="color:#c00">Error: '+_escImp(e.message||String(e))+'</span>';
+  }
+}
+
+async function impUndo(logId, filename, moduleKey, insertedCount){
+  const labelFile = filename || 'this import';
+  const msg = 'Undo import "' + labelFile + '"?\n\n' +
+    'The server will snapshot the database first, then DELETE the ' +
+    insertedCount + ' row(s) inserted by this run from the target table of "' + moduleKey + '".\n\n' +
+    'Rows inserted by OTHER imports stay untouched. The snapshot lets you Restore if needed.\n\n' +
+    'Continue?';
+  if (!confirm(msg)) return;
+  const typed = prompt('Type DELETE (in capitals) to confirm:');
+  if (typed !== 'DELETE') { alert('Cancelled.'); return; }
+  try {
+    const r = await fetch(B + '/api/import-old-data/undo/' + encodeURIComponent(logId), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Undo failed');
+    const bp = d.backupPath ? '\n\nSnapshot: ' + d.backupPath : '';
+    alert('Undone — deleted ' + (d.deleted || 0) + ' of ' + (d.requested || 0) + ' row(s) from ' + (d.table || moduleKey) + '.' + bp);
+    impLoadHistory();
+  } catch (e) {
+    if (typeof showError === 'function') showError(e);
+    else alert('Error: ' + (e.message || String(e)));
+  }
+}
+
+// Local-name helper so this block can stand alone if other modules
+// later rename their `esc`/`escAttr` exports. Strips HTML-significant
+// chars + matches the prompt's existing helpers' behaviour.
+function _escImp(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 </script>
 </body>

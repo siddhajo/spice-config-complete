@@ -145,7 +145,10 @@ const DEFAULTS = [
   { key: 'flag_export',     value: 'false',          category: 'flags',     label: 'Export Invoices',          type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
-  { key: 'business_mode',   value: 'e-Trade',        category: 'mode',      label: 'Business Mode',            type: 'select' },
+  // Single-mode e-Auction build. Default flipped from 'e-Trade' to 'e-Auction'
+  // so fresh installs match the readonly UI input on the Settings → Business
+  // Mode panel and the Spice Board sidebar entry shows up immediately.
+  { key: 'business_mode',   value: 'e-Auction',      category: 'mode',      label: 'Business Mode',            type: 'select' },
   { key: 'business_state',  value: 'TAMIL NADU',     category: 'mode',      label: 'Business State',           type: 'select' },
 
   // ── INTEGRATIONS ───────────────────────────────────────────
@@ -293,6 +296,16 @@ const DEFAULTS = [
   // option is pre-selected. "compact" = thermal-printer slip;
   // "detailed" = A4-style with seller bank details.
   { key: 'lot_receipt_format', value: 'detailed', category: 'lot_entry', label: 'Lot Receipt Format (compact|detailed)', type: 'text' },
+
+  // ── SPICE BOARD REPORTS ───────────────────────────────────
+  // Statutory cardamom-auction reports submitted to the Spices Board.
+  // formd_places drives the "Place of Auction" dropdown on the Spice
+  // Board → FORM-D panel — one place per line. When the operator picks
+  // a value there, it overrides the configured branch on the printed
+  // Form-D for that one report run.
+  { key: 'formd_places', value: '', category: 'spice_board',
+    label: 'FORM-D Place of Auction (one per line)',
+    type: 'textarea' },
 ];
 
 const CATEGORIES = {
@@ -311,6 +324,7 @@ const CATEGORIES = {
   lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, default crop, moisture visibility, edit window, and receipt format.' },
   integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },
+  spice_board:{ order: 14, title: 'Spice Board Reports',   icon: '🌶', description: 'Statutory cardamom-auction reports. Place values entered below populate the Place of Auction dropdown on the FORM-D report.' },
 };
 
 function initCompanySettings(db) {
@@ -372,6 +386,19 @@ function initCompanySettings(db) {
   } else {
     db.prepare('DELETE FROM company_settings WHERE key = ?').run('dispatched_through');
   }
+
+  // Migration: business_mode was historically seeded as 'e-Trade' on older
+  // installs, but this build is e-Auction only (the UI input is readonly
+  // and forces 'e-Auction' on save). Silently rewrite any legacy value
+  // so the Spice Board sidebar gate works without forcing every operator
+  // to open Settings → Save once.
+  try {
+    const cur = db.prepare('SELECT value FROM company_settings WHERE key = ?').get('business_mode');
+    if (cur && cur.value && String(cur.value).trim() !== 'e-Auction') {
+      db.prepare('UPDATE company_settings SET value = ? WHERE key = ?').run('e-Auction', 'business_mode');
+      console.log('Migrated business_mode "%s" → "e-Auction" (single-mode build)', cur.value);
+    }
+  } catch (_) { /* non-fatal */ }
 
   console.log('Company settings ready (%d defaults)', DEFAULTS.length);
 }

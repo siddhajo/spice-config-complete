@@ -14,6 +14,8 @@ const { EXPORT_TYPES } = require('./exports');
 const { exportPdf: exportAnyPdf } = require('./exports-pdf');
 const { DBF_EXPORTS } = require('./dbf-exports');
 const { REPORTS: LORRY_REPORTS } = require('./lorry-reports');
+const { REPORTS: SPICE_BOARD_REPORTS, getReportFilters: getSpiceBoardFilters } = require('./spice-board-reports');
+const { getTradeSummary, getBranchComparison, generateTradeSummaryPDF } = require('./reports');
 const {
   generSalesXML, generSalesIspXML, generSalesAspXML, generIspPurchaseXML,
   generRDPurchaseXML, generURDPurchaseXML, generDebitNoteXML, generLedgerXML,
@@ -4683,6 +4685,102 @@ app.get('/api/lorry-reports/:type/:auctionId', requireExport, async (req, res) =
 });
 
 // ══════════════════════════════════════════════════════════════
+// SPICE BOARD REPORTS — statutory cardamom-auction reports
+// ══════════════════════════════════════════════════════════════
+// All four report types share one dispatcher:
+//   buyers_statement / form_d / form_c → json + xlsx + pdf
+//   eauction_csv                       → csv only (Spices Board portal)
+//
+// The data layer is keyed off `auctionId` with optional branch / seller /
+// buyer / place overrides — picked up by getReportContext() in
+// spice-board-reports.js.
+
+function _sbBuildOpts(req) {
+  return {
+    auctionId: req.query.auctionId || req.params.auctionId,
+    branch:    req.query.branch    || null,
+    sellerId:  req.query.sellerId  || null,
+    buyerCode: req.query.buyerCode || null,
+    dateFrom:  req.query.dateFrom  || null,
+    dateTo:    req.query.dateTo    || null,
+    place:     req.query.place     || null,
+  };
+}
+
+// Filter dropdowns for the Spice Board tab — branches, sellers, buyers
+// seen in the picked auction.
+app.get('/api/spice-board-reports/filters', requireAuth, (req, res) => {
+  try {
+    const aid = req.query.auctionId;
+    if (!aid) return res.status(400).json({ error: 'auctionId is required' });
+    const db = getDb();
+    res.json(getSpiceBoardFilters(db, aid));
+  } catch (e) {
+    console.error('spice-board-reports filters error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// JSON preview — returns the full report shape rendered by the front-end.
+// CSV-only reports (eauction_csv) have no json() so we 400 there.
+app.get('/api/spice-board-reports/:type/data', requireAuth, (req, res) => {
+  const { type } = req.params;
+  const def = SPICE_BOARD_REPORTS[type];
+  if (!def) return res.status(400).json({ error: 'Unknown report type', available: Object.keys(SPICE_BOARD_REPORTS) });
+  if (!def.json) return res.status(400).json({ error: 'No JSON preview for ' + type });
+  try {
+    const db = getDb();
+    const out = def.json(db, _sbBuildOpts(req));
+    res.json(out);
+  } catch (e) {
+    console.error('spice-board-reports data error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Export — xlsx | pdf | csv depending on the report. `inline=1` keeps the
+// browser in-tab so the print dialog can fire (used by sbPrint() on the
+// front end).
+app.get('/api/spice-board-reports/:type/export', requireExport, async (req, res) => {
+  const { type } = req.params;
+  const def = SPICE_BOARD_REPORTS[type];
+  if (!def) return res.status(400).json({ error: 'Unknown report type', available: Object.keys(SPICE_BOARD_REPORTS) });
+  const format = String(req.query.format || (def.csv ? 'csv' : 'xlsx')).toLowerCase();
+  const inline = String(req.query.inline || '') === '1';
+  const opts = _sbBuildOpts(req);
+  if (!opts.auctionId) return res.status(400).json({ error: 'auctionId is required' });
+  try {
+    const db = getDb();
+    const name = def.name || type;
+    const dispo = (mime, ext) => {
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition',
+        `${inline ? 'inline' : 'attachment'}; filename="${name}_${opts.auctionId}.${ext}"`);
+    };
+    if (format === 'csv') {
+      if (!def.csv) return res.status(400).json({ error: 'CSV not supported for ' + type });
+      const buf = await def.csv(db, opts);
+      dispo('text/csv; charset=utf-8', 'csv');
+      return res.send(buf);
+    }
+    if (format === 'pdf') {
+      if (!def.pdf) return res.status(400).json({ error: 'PDF not supported for ' + type });
+      const buf = await def.pdf(db, opts);
+      dispo('application/pdf', 'pdf');
+      return res.send(buf);
+    }
+    // default: xlsx
+    if (!def.xlsx) return res.status(400).json({ error: 'XLSX not supported for ' + type });
+    const buf = await def.xlsx(db, opts);
+    dispo('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx');
+    return res.send(Buffer.from(buf));
+  } catch (e) {
+    console.error('spice-board-reports export error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // DBF EXPORTS (FoxPro-compatible format)
 // ══════════════════════════════════════════════════════════════
 
@@ -5499,6 +5597,783 @@ app.get('/api/stats', requireView, (req, res) => {
       lastMonthRevenue: lastMonthTot,
     }
   });
+});
+
+// ══════════════════════════════════════════════════════════════
+// IMPORT OLD DATA — admin-only, generic XLSX → DB importer
+// ══════════════════════════════════════════════════════════════
+// Replaces the ad-hoc per-resource importers for legacy migration.
+// Five endpoints share one config-driven flow:
+//   POST /api/import-old-data/preview      — header detection + sample rows
+//   POST /api/import-old-data/verify       — dry-resolve vs. live DB (no writes)
+//   POST /api/import-old-data/run          — actual INSERT (or dry-run validation)
+//   GET  /api/import-old-data/history      — recent imports for the History panel
+//   POST /api/import-old-data/undo/:id     — rollback a single live import
+//
+// Each MODULE describes a target table: which columns to write, which
+// columns are the natural key (used for duplicate detection), and
+// alias lists for auto-mapping fuzzy spreadsheet headers. The user
+// can override the auto-map in the UI before clicking Run Import.
+//
+// Modules covered:
+//   auctions       — Auctions / Trades (one entity, two labels via business_mode)
+//   sales_invoice  — INV.DBF style sales invoices
+//   purchase       — Purchase invoices (registered dealer)
+//   bills          — Agriculturist Bills of Supply
+//   debit_notes    — Discount debit notes
+//   sellers        — NAM.DBF sellers/poolers
+//   buyers         — SBL.DBF buyers/dealers
+const IMPORT_MODULES = {
+  // NEW: Auctions / Trades. In this app the same `auctions` table
+  // surfaces under two labels depending on business_mode (Auctions in
+  // e-Auction, Trades in e-Trade), so one module covers both. The
+  // `mode` column is auto-stamped from current settings when blank so
+  // imported rows don't leak across the two views.
+  auctions: {
+    label: 'Auctions / Trades',
+    table: 'auctions',
+    // Natural key: ano + date. ano alone can repeat across years/states.
+    keyCols: ['ano', 'date'],
+    fields: ['ano', 'date', 'crop_type', 'state', 'mode'],
+    aliases: {
+      ano: ['ano', 'auction_no', 'auctionno', 'auction', 'trade_no', 'tradeno', 'trade', 'tno', 'no'],
+      date: ['date', 'auction_date', 'trade_date', 'tdate'],
+      crop_type: ['crop_type', 'crpt', 'crop', 'type'],
+      state: ['state', 'auction_state'],
+      mode: ['mode', 'business_mode'],
+    },
+    // Server-computed defaults applied when the field is unmapped OR
+    // its source value is blank. Keeps imported rows from leaking
+    // across e-Auction/e-Trade views when the source file omits mode.
+    defaults: (db) => ({
+      mode: currentBusinessMode(db),
+    }),
+  },
+  sales_invoice: {
+    label: 'Sales Invoices',
+    table: 'invoices',
+    keyCols: ['invo', 'sale'],
+    // auction_id is derived from `ano` at import time so the imported
+    // rows show up under the matching trade in the Sales tab (the list
+    // filters by auction_id, not ano).
+    autoFillAuctionId: true,
+    fields: ['auction_id','ano','date','state','sale','invo','buyer','buyer1','gstin','place',
+             'bag','qty','amount','gunny','pava_hc','ins','cgst','sgst','igst','tcs','rund','tot'],
+    aliases: {
+      ano: ['ano','auction_no','trade'],
+      date: ['date','invoice_date','inv_date'],
+      sale: ['sale','sale_type','type'],
+      invo: ['invo','invoice','invoice_no','invno'],
+      buyer: ['buyer','buyer_code','code'],
+      buyer1: ['buyer1','buyer_name','name'],
+      gstin: ['gstin','gst','gst_no'],
+      place: ['place','city','pla'],
+      bag: ['bag','bags','no_of_bags'],
+      qty: ['qty','kilos','weight','kgs'],
+      amount: ['amount','cardamom','value'],
+      tot: ['tot','total','grand_total','invoice_amount'],
+    },
+  },
+  purchase: {
+    label: 'Purchase Invoices',
+    table: 'purchases',
+    keyCols: ['invo'],
+    autoFillAuctionId: true,
+    fields: ['auction_id','ano','date','state','br','name','add_line','place','gstin','invo',
+             'qty','amount','cgst','sgst','igst','rund','total','tds'],
+    aliases: {
+      invo:    ['invo','invoice','invoice_no'],
+      name:    ['name','seller','dealer'],
+      gstin:   ['gstin','gst','gst_no','cr','registration'],
+      place:   ['place','city','pla'],
+      add_line:['add_line','address','add','add1','address1'],
+      br:      ['br','branch'],
+      qty:     ['qty','kilos','weight','kgs'],
+      amount:  ['amount','cardamom','value'],
+      total:   ['total','grand_total','invoice_amount'],
+      rund:    ['rund','round','round_off'],
+      tds:     ['tds','tds_amount'],
+    },
+  },
+  bills: {
+    label: 'Bills of Supply',
+    table: 'bills',
+    keyCols: ['bil'],
+    autoFillAuctionId: true,
+    fields: ['auction_id','ano','date','state','br','crpt','bil','name','add_line','pla',
+             'pstate','st_code','crr','pan','qty','cost','igst','net'],
+    aliases: {
+      bil: ['bil','bill','bill_no'],
+      name: ['name','seller','planter'],
+      qty: ['qty','kilos','weight','kgs'],
+      cost: ['cost','amount','cardamom'],
+      net: ['net','nett','net_amount'],
+    },
+  },
+  debit_notes: {
+    label: 'Debit Notes',
+    table: 'debit_notes',
+    keyCols: ['note_no','ano'],
+    fields: ['ano','date','state','name','note_no','amount','cgst','sgst','igst','total'],
+    aliases: {
+      note_no: ['note_no','note','dn_no'],
+      name: ['name','dealer','buyer'],
+    },
+  },
+  sellers: {
+    label: 'Sellers',
+    table: 'traders',
+    keyCols: ['name','cr'],
+    fields: ['name','cr','pan','tel','aadhar','padd','ppla','pin','pstate','pst_code',
+             'ifsc','acctnum','holder_name'],
+    aliases: {
+      name: ['name','seller','planter','trader'],
+      cr: ['cr','gstin'],
+      padd: ['padd','address','add','add1','address1'],
+      ppla: ['ppla','place','pla','city'],
+      pin: ['pin','pincode','zip'],
+    },
+  },
+  buyers: {
+    label: 'Buyers',
+    table: 'buyers',
+    keyCols: ['buyer','code'],
+    fields: ['buyer','buyer1','code','sbl','add1','add2','pla','pin','state',
+             'st_code','gstin','pan','tel','ti','sale','email'],
+    aliases: {
+      buyer: ['buyer','buyer_code','code'],
+      buyer1: ['buyer1','buyer_name','name'],
+      pla: ['pla','place','city'],
+      pin: ['pin','pincode','zip'],
+    },
+  },
+};
+
+// Header → field mapping. Normalises both sides (lowercase, collapse
+// separators) before matching aliases. Returns { fieldName: srcHeader }
+// for fields the importer auto-detected.
+function _importMapHeaders(headers, moduleDef) {
+  const norm = s => String(s || '').trim().toLowerCase().replace(/[\s\-/]+/g, '_');
+  const out = {};
+  for (const field of moduleDef.fields) {
+    const aliases = (moduleDef.aliases && moduleDef.aliases[field]) || [field];
+    for (const h of headers) {
+      if (aliases.includes(norm(h))) { out[field] = h; break; }
+    }
+  }
+  return out;
+}
+
+// POST /preview — read headers, detect mapping, return first 50 rows.
+// No DB writes. Idempotent — used repeatedly as the user adjusts the
+// mapping in the UI.
+app.post('/api/import-old-data/preview', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const moduleKey = req.body.module;
+  const def = IMPORT_MODULES[moduleKey];
+  if (!def) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'Unknown module', available: Object.keys(IMPORT_MODULES) });
+  }
+  try {
+    const wb = XLSX.readFile(req.file.path);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('No worksheet found');
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const headers = rows.length ? Object.keys(rows[0]) : [];
+    const mapping = _importMapHeaders(headers, def);
+    res.json({
+      module: moduleKey,
+      label: def.label,
+      total: rows.length,
+      headers,
+      // Full DB field list so the UI can render a mapping editor for
+      // every column, not just the auto-detected ones.
+      fields:  def.fields,
+      keyCols: def.keyCols,
+      autoFillAuctionId: !!def.autoFillAuctionId,
+      detectedMapping: mapping,
+      missingFields: def.fields.filter(f => !mapping[f] && def.keyCols.includes(f)),
+      preview: rows.slice(0, 50),
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    if (req.file) fs.unlink(req.file.path, () => {});
+  }
+});
+
+// POST /verify — dry-resolve the entire file against the live DB
+// using the user's mapping. Returns per-row status (new / duplicate /
+// invalid), reasons for invalids, the field-by-field diff vs. any
+// existing row, and accurate summary counts. NO DB WRITES.
+//
+// Differs from /preview (header detection only) and /run (actually
+// writes): same validation /run does, against the same mapping the
+// user chose, but with zero side effects. Lets the operator catch
+// wrong mappings, missing trades, or accidental overwrites before
+// hitting production data.
+app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const moduleKey = req.body.module;
+  const def = IMPORT_MODULES[moduleKey];
+  if (!def) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'Unknown module' });
+  }
+  let userMapping = {};
+  if (req.body.mapping) {
+    try { userMapping = JSON.parse(req.body.mapping) || {}; } catch (_) {}
+  }
+  const PER_BUCKET_LIMIT = 50;
+  const db = getDb();
+  try {
+    const wb = XLSX.readFile(req.file.path);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('No worksheet found');
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    const total = rows.length;
+    if (!total) {
+      fs.unlink(req.file.path, () => {});
+      return res.json({
+        module: moduleKey, label: def.label, total: 0,
+        fields: def.fields, keyCols: def.keyCols,
+        autoFillAuctionId: !!def.autoFillAuctionId,
+        sampleLimit: PER_BUCKET_LIMIT,
+        counts: { new: 0, duplicate: 0, duplicateChanged: 0, invalidAno: 0, invalidRequired: 0 },
+        samples: { new: [], invalid: [], dupChanges: [], dupIdentical: [] },
+      });
+    }
+
+    const headers = Object.keys(rows[0]);
+    // Merge user overrides on top of auto-detected mapping. An
+    // explicit '' from the user means SKIP this field — pop it from
+    // the merged map so /run and /verify agree on what gets written.
+    const autoDetected = _importMapHeaders(headers, def);
+    const mapping = Object.assign({}, autoDetected, userMapping);
+    for (const k of Object.keys(userMapping || {})) {
+      const v = userMapping[k];
+      if (v === '' || v === null) delete mapping[k];
+    }
+    const fieldSources = def.fields.map(f => [f, mapping[f] || null]);
+    const auctionIdSlot = def.fields.indexOf('auction_id');
+
+    // Cached ano→auction_id resolver. One DB call per distinct ano.
+    const auctionIdCache = new Map();
+    const resolveAuctionId = (ano) => {
+      const key = String(ano || '').trim();
+      if (!key) return null;
+      if (auctionIdCache.has(key)) return auctionIdCache.get(key);
+      const row = db.get('SELECT id FROM auctions WHERE ano = ? LIMIT 1', [key]);
+      const id  = row ? row.id : null;
+      auctionIdCache.set(key, id);
+      return id;
+    };
+
+    let cntNew = 0, cntDup = 0, cntDupChanged = 0, cntInvAno = 0, cntInvReq = 0;
+    // Four independent sample buckets so the UI shows concrete rows
+    // from each non-empty status even when one bucket dominates the
+    // first 100 rows of the file. Counts are always over the whole file.
+    const sampleNew = [];
+    const sampleInvalid = [];
+    const sampleDupChanges = [];
+    const sampleDupIdentical = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const values = {};
+      for (const [f, src] of fieldSources) {
+        values[f] = src ? r[src] : '';
+      }
+      // Apply server-computed defaults for fields whose mapped value
+      // came back blank. Lets the auctions module stamp `mode` from
+      // current business settings without forcing the user to map it.
+      if (def.defaults) {
+        try {
+          const defaults = def.defaults(db) || {};
+          for (const k of Object.keys(defaults)) {
+            const cur = values[k];
+            if (cur == null || String(cur).trim() === '') values[k] = defaults[k];
+          }
+        } catch (_) { /* non-fatal — module defaults are advisory */ }
+      }
+
+      const reasons = [];
+
+      let anoResolutionFailed = false;
+      if (def.autoFillAuctionId && auctionIdSlot >= 0) {
+        const anoSrc = mapping.ano;
+        const anoVal = anoSrc ? r[anoSrc] : '';
+        const aid = resolveAuctionId(anoVal);
+        if (aid == null) {
+          anoResolutionFailed = true;
+          reasons.push('No trade found for ano="' + String(anoVal || '').trim() + '" — create the auction first or fix the mapping.');
+        } else {
+          values.auction_id = aid;
+        }
+      }
+
+      // Required-field check uses the same keyCols /run uses for dup
+      // detection. A row missing any of them can't be inserted (and
+      // can't be checked for duplicates).
+      const missingKeys = [];
+      for (const k of def.keyCols) {
+        const src = mapping[k];
+        const v = src ? r[src] : null;
+        if (v == null || String(v).trim() === '') missingKeys.push(k);
+      }
+      const requiredMissing = missingKeys.length > 0;
+      if (requiredMissing) {
+        reasons.push('Missing required value(s): ' + missingKeys.join(', '));
+      }
+
+      // Duplicate detection — only meaningful when every keyCol resolves
+      // to a non-blank value. Mirrors /run's gate so verify counts are
+      // accurate.
+      let existing = null;
+      let diff = null;
+      if (!requiredMissing) {
+        const keyVals = def.keyCols.map(k => r[mapping[k]]);
+        const whereSql = def.keyCols.map(k => `${k} = ?`).join(' AND ');
+        existing = db.get(`SELECT * FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyVals);
+        if (existing) {
+          diff = {};
+          for (const f of def.fields) {
+            const newVal = values[f];
+            const oldVal = existing[f];
+            const a = oldVal == null ? '' : String(oldVal);
+            const b = newVal == null ? '' : String(newVal);
+            if (a !== b) {
+              diff[f] = {
+                old: oldVal == null ? '' : oldVal,
+                new: newVal == null ? '' : newVal,
+              };
+            }
+          }
+          if (Object.keys(diff).length === 0) diff = null;
+        }
+      }
+
+      let status;
+      if (requiredMissing) {
+        status = 'invalid';
+        cntInvReq++;
+      } else if (anoResolutionFailed) {
+        status = 'invalid';
+        cntInvAno++;
+      } else if (existing) {
+        status = 'duplicate';
+        cntDup++;
+        if (diff) cntDupChanged++;
+      } else {
+        status = 'new';
+        cntNew++;
+      }
+
+      const entry = {
+        row: i + 2,
+        status,
+        reasons,
+        values,
+        existing: existing || null,
+        diff,
+      };
+      if (status === 'new' && sampleNew.length < PER_BUCKET_LIMIT) {
+        sampleNew.push(entry);
+      } else if (status === 'invalid' && sampleInvalid.length < PER_BUCKET_LIMIT) {
+        sampleInvalid.push(entry);
+      } else if (status === 'duplicate' && diff && sampleDupChanges.length < PER_BUCKET_LIMIT) {
+        sampleDupChanges.push(entry);
+      } else if (status === 'duplicate' && !diff && sampleDupIdentical.length < PER_BUCKET_LIMIT) {
+        sampleDupIdentical.push(entry);
+      }
+    }
+
+    // Diagnostic: how many rows live in the target table right now?
+    // Helps the operator confirm a "Delete All" actually emptied the
+    // target before re-importing.
+    let targetRowCount = 0;
+    try {
+      const r = db.get(`SELECT COUNT(*) as c FROM ${def.table}`);
+      targetRowCount = r ? Number(r.c || 0) : 0;
+    } catch (_) { /* table missing — leave at 0 */ }
+
+    fs.unlink(req.file.path, () => {});
+    res.json({
+      module: moduleKey,
+      label: def.label,
+      total,
+      fields: def.fields,
+      keyCols: def.keyCols,
+      autoFillAuctionId: !!def.autoFillAuctionId,
+      sampleLimit: PER_BUCKET_LIMIT,
+      targetTable: def.table,
+      targetRowCount,
+      counts: {
+        new: cntNew,
+        duplicate: cntDup,
+        duplicateChanged: cntDupChanged,
+        invalidAno: cntInvAno,
+        invalidRequired: cntInvReq,
+      },
+      samples: {
+        new: sampleNew,
+        invalid: sampleInvalid,
+        dupChanges: sampleDupChanges,
+        dupIdentical: sampleDupIdentical,
+      },
+    });
+  } catch (e) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /run — actually insert (or dry-run validate). Records every
+// run in import_log so the History panel can show + offer Undo.
+// On success, returns counts + the new import_log id so the client
+// can reference it for follow-up actions.
+app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const moduleKey = req.body.module;
+  const def = IMPORT_MODULES[moduleKey];
+  if (!def) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: 'Unknown module' });
+  }
+  const dryRun = String(req.body.dryRun || '').toLowerCase() === 'true';
+  let userMapping = {};
+  if (req.body.mapping) {
+    try { userMapping = JSON.parse(req.body.mapping) || {}; } catch (_) {}
+  }
+
+  const db = getDb();
+  let imported = 0, skipped = 0, failed = 0;
+  const errors = [];
+  let total = 0;
+  // Captured for /undo so we can roll back a specific import's inserts.
+  // Lives outside the try block so the audit-log INSERT below can see
+  // it (an earlier bug had this scoped inside the try and successful
+  // imports never made it into history).
+  const insertedIds = [];
+
+  try {
+    const wb = XLSX.readFile(req.file.path);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('No worksheet found');
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    total = rows.length;
+    if (!total) throw new Error('File is empty');
+
+    const headers  = Object.keys(rows[0]);
+    // Two distinct user signals merged on top of auto-detected mapping:
+    //   • field absent       → keep auto-detected (no opinion)
+    //   • field explicit ''  → SKIP this field (user picked "— skip —")
+    // Without honoring explicit '', picking "— skip —" on an auto-
+    // detected field has no effect.
+    const autoDetected = _importMapHeaders(headers, def);
+    const mapping = Object.assign({}, autoDetected, userMapping);
+    for (const k of Object.keys(userMapping || {})) {
+      const v = userMapping[k];
+      if (v === '' || v === null) delete mapping[k];
+    }
+
+    const fieldSources = def.fields.map(f => [f, mapping[f] || null]);
+    const valuePlaceholders = def.fields.map(() => '?').join(',');
+    const insertSql = `INSERT INTO ${def.table} (${def.fields.join(',')}) VALUES (${valuePlaceholders})`;
+
+    // ano→auction_id cache for autoFillAuctionId modules — single DB
+    // call per distinct ano across the whole file.
+    const auctionIdCache = new Map();
+    const resolveAuctionId = (ano) => {
+      const key = String(ano || '').trim();
+      if (!key) return null;
+      if (auctionIdCache.has(key)) return auctionIdCache.get(key);
+      const row = db.get('SELECT id FROM auctions WHERE ano = ? LIMIT 1', [key]);
+      const id  = row ? row.id : null;
+      auctionIdCache.set(key, id);
+      return id;
+    };
+    const auctionIdSlot = def.fields.indexOf('auction_id');
+
+    // Snapshot module defaults once per request so each row can pick
+    // them up without re-calling the function.
+    const moduleDefaults = (typeof def.defaults === 'function')
+      ? (() => { try { return def.defaults(db) || {}; } catch (_) { return {}; } })()
+      : {};
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      try {
+        // Duplicate detection — skip if every keyCol resolves AND a
+        // matching row already exists.
+        const keyChecks = def.keyCols.map(k => mapping[k] ? r[mapping[k]] : null).filter(v => v != null && v !== '');
+        if (keyChecks.length === def.keyCols.length) {
+          const whereSql = def.keyCols.map(k => `${k} = ?`).join(' AND ');
+          const dup = db.get(`SELECT 1 FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyChecks);
+          if (dup) { skipped++; continue; }
+        }
+
+        // Build positional values from the source mapping. `date` is
+        // normalised to ISO yyyy-mm-dd so downstream code (Tally XML,
+        // date BETWEEN filters) sees a canonical value regardless of
+        // spreadsheet format (Excel serial, dd-mm-yyyy, etc.).
+        const values = fieldSources.map(([fname, src]) => {
+          const v = src ? r[src] : '';
+          if (fname === 'date') return normalizeDate(v);
+          return v;
+        });
+
+        // Apply module defaults to any positional slot whose value
+        // came back blank. e.g. auctions.mode gets the current
+        // business mode when the source file omits it.
+        for (let s = 0; s < def.fields.length; s++) {
+          const fname = def.fields[s];
+          if (!(fname in moduleDefaults)) continue;
+          const cur = values[s];
+          if (cur == null || String(cur).trim() === '') {
+            values[s] = moduleDefaults[fname];
+          }
+        }
+
+        if (def.autoFillAuctionId && auctionIdSlot >= 0) {
+          const anoSrc = mapping.ano;
+          const anoVal = anoSrc ? r[anoSrc] : '';
+          const aid    = resolveAuctionId(anoVal);
+          if (aid == null) {
+            failed++;
+            if (errors.length < 50) errors.push({
+              row: i + 2,
+              error: `No trade found for ano="${String(anoVal || '').trim()}" — create the auction first or fix the column.`
+            });
+            continue;
+          }
+          values[auctionIdSlot] = aid;
+        }
+        if (!dryRun) {
+          const info = db.run(insertSql, values);
+          if (info && info.lastInsertRowid != null) insertedIds.push(Number(info.lastInsertRowid));
+        }
+        imported++;
+      } catch (e) {
+        failed++;
+        if (errors.length < 50) errors.push({ row: i + 2, error: e.message });
+      }
+    }
+  } catch (e) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({ error: e.message });
+  }
+
+  // Back-fill auction_id on any pre-existing rows the user imported
+  // before this fix landed. Idempotent — touches only NULL slots with
+  // a matching auctions.ano. Runs even on dryRun so the fix applies
+  // without a second pass.
+  if (def.autoFillAuctionId) {
+    try {
+      getDb().run(
+        `UPDATE ${def.table}
+            SET auction_id = (SELECT id FROM auctions WHERE auctions.ano = ${def.table}.ano)
+          WHERE auction_id IS NULL
+            AND ano IS NOT NULL AND ano != ''
+            AND EXISTS (SELECT 1 FROM auctions WHERE auctions.ano = ${def.table}.ano)`
+      );
+    } catch (_) { /* non-fatal */ }
+  }
+
+  // Repair any malformed `date` values from earlier imports (before
+  // per-row normalize was added). Idempotent and cheap.
+  if (!dryRun) {
+    try { repairBadDates(db); } catch (_) { /* non-fatal */ }
+  }
+
+  // Log this run regardless of outcome. Dry-runs get an empty
+  // inserted_ids so the Undo button stays disabled for that entry.
+  let importLogId = null;
+  try {
+    const info = db.run(`INSERT INTO import_log
+      (module, filename, dry_run, total, imported, skipped, failed, errors, inserted_ids, user_id, username)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [moduleKey, req.file.originalname || '', dryRun ? 1 : 0,
+       total, imported, skipped, failed, JSON.stringify(errors).slice(0, 4000),
+       dryRun ? '' : JSON.stringify(insertedIds),
+       (req.user && req.user.id) || null, (req.user && req.user.username) || '']);
+    if (info && info.lastInsertRowid != null) importLogId = Number(info.lastInsertRowid);
+  } catch (e) {
+    console.error('[import-old-data] Failed to write import_log entry:', e && e.message ? e.message : e);
+  }
+
+  fs.unlink(req.file.path, () => {});
+  res.json({
+    success: true, module: moduleKey, dryRun,
+    total, imported, skipped, failed,
+    errors, importLogId,
+  });
+});
+
+// GET /history — recent imports for the History panel. Cache-busted
+// so the panel always shows fresh state after an import lands.
+app.get('/api/import-old-data/history', requireAdmin, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  const rows = getDb().all(
+    `SELECT id, module, filename, dry_run, total, imported, skipped, failed,
+            errors, inserted_ids, undone_at, username, created_at
+       FROM import_log ORDER BY id DESC LIMIT 200`
+  );
+  res.json(rows.map(r => {
+    const ids = r.inserted_ids ? _safeImportJSON(r.inserted_ids) : [];
+    return {
+      id: r.id, module: r.module, filename: r.filename,
+      dry_run: !!r.dry_run, total: r.total, imported: r.imported,
+      skipped: r.skipped, failed: r.failed,
+      errors: r.errors ? _safeImportJSON(r.errors) : [],
+      undone_at: r.undone_at || '',
+      // Undo is available iff this wasn't a dry-run, actually inserted
+      // rows, and hasn't already been rolled back.
+      undoable: !r.dry_run && Array.isArray(ids) && ids.length > 0 && !r.undone_at,
+      inserted_count: Array.isArray(ids) ? ids.length : 0,
+      username: r.username, created_at: r.created_at,
+    };
+  }));
+});
+
+// POST /undo/:id — roll back a single live import. DELETEs every row
+// captured in import_log.inserted_ids after snapshotting the DB so
+// the rollback itself is reversible. Marks the entry as undone so a
+// second click is a no-op.
+app.post('/api/import-old-data/undo/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  const logId = Number(req.params.id);
+  if (!Number.isFinite(logId)) return res.status(400).json({ error: 'Invalid import id' });
+  const logRow = db.get('SELECT * FROM import_log WHERE id = ?', [logId]);
+  if (!logRow) return res.status(404).json({ error: 'Import not found' });
+  if (logRow.undone_at) return res.status(400).json({ error: 'This import has already been undone at ' + logRow.undone_at });
+  if (logRow.dry_run)   return res.status(400).json({ error: 'Dry-run imports did not insert any rows — nothing to undo' });
+
+  const def = IMPORT_MODULES[logRow.module];
+  if (!def) return res.status(400).json({ error: 'Unknown module on this import — cannot resolve target table' });
+
+  let ids = [];
+  try { ids = JSON.parse(logRow.inserted_ids || '[]'); } catch (_) {}
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({
+      error: 'This import did not record its inserted row IDs (was it run before per-import Undo was added?). To clear it, use the Backup tab → Delete All for ' + def.table + '.',
+    });
+  }
+
+  // Snapshot first — undo of an undo is a Restore from the file we drop
+  // at this path. The existing snapshotDbToFile helper handles the
+  // backups/ directory + filename stamp.
+  const backupPath = snapshotDbToFile('undo-import-' + logRow.module + '-' + logId);
+  if (!backupPath) {
+    return res.status(500).json({ error: 'Backup snapshot failed; refusing to undo. Check disk space and try again.' });
+  }
+
+  // Bulk-delete by id, chunked. SQLite caps parameter count per
+  // statement (default 999), so chunk for large imports.
+  let deleted = 0;
+  const CHUNK = 500;
+  try {
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK).filter(n => Number.isFinite(Number(n)));
+      if (!slice.length) continue;
+      const placeholders = slice.map(() => '?').join(',');
+      const info = db.run(`DELETE FROM ${def.table} WHERE id IN (${placeholders})`, slice);
+      if (info && typeof info.changes === 'number') deleted += info.changes;
+    }
+    db.run('UPDATE import_log SET undone_at = datetime("now","localtime") WHERE id = ?', [logId]);
+  } catch (e) {
+    return res.status(500).json({ error: 'Undo failed mid-way; partial deletions may have occurred. Backup at: ' + backupPath + ' — ' + (e.message || e) });
+  }
+
+  res.json({
+    success: true,
+    importLogId: logId,
+    module: logRow.module,
+    table: def.table,
+    requested: ids.length,
+    deleted,
+    backupPath,
+  });
+});
+
+// Helper — JSON.parse that returns [] on malformed input. Used by
+// /history to defensively unpack the errors / inserted_ids columns.
+function _safeImportJSON(s) {
+  try { return JSON.parse(s); } catch (_) { return []; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// REPORTS HUB
+// ══════════════════════════════════════════════════════════════
+// Three endpoints that back the Reports tab in the Admin Console:
+//   • Per-trade summary (in-tab data table + KPIs)
+//   • Lifetime branch comparison (chart-first card)
+//   • Trade summary PDF (clickable "Open PDF" button on the card)
+//
+// The PDF endpoint accepts ?token= because window.open() can't set
+// an Authorization header — the token-query path is wired explicitly
+// here rather than poking requireAuth, so the relaxation is confined
+// to a single route.
+
+app.get('/api/reports/trade-summary/:id', requireView, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'Invalid auction id' });
+  try {
+    const data = getTradeSummary(getDb(), id, req.query.branch || '');
+    res.json(data);
+  } catch (e) {
+    if (e && e.status === 404) return res.status(404).json({ error: e.message });
+    console.error('trade-summary error:', e);
+    res.status(500).json({ error: e.message || 'Failed to build summary' });
+  }
+});
+
+app.get('/api/reports/branch-comparison', requireView, (req, res) => {
+  try {
+    const data = getBranchComparison(getDb());
+    res.json(data);
+  } catch (e) {
+    console.error('branch-comparison error:', e);
+    res.status(500).json({ error: e.message || 'Failed to build comparison' });
+  }
+});
+
+// Summary PDF — window.open() can't set Authorization, so we accept
+// the token via the querystring. Validates the token by hand because
+// the framework's requireView only reads the header.
+app.get('/api/reports/summary-pdf/:id', (req, res, next) => {
+  const headerTok = (req.headers.authorization || '').replace('Bearer ', '');
+  const queryTok  = String(req.query.token || '');
+  const token = headerTok || queryTok;
+  if (!token) return res.status(401).json({ error: 'No token' });
+  const db = getDb();
+  const session = db.get('SELECT * FROM sessions WHERE token = ?', [token]);
+  if (!session) return res.status(403).json({ error: 'Session expired — please sign in again' });
+  const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
+  if (!user) return res.status(403).json({ error: 'Unauthorized' });
+  if (!userHas(user.role, 'view')) {
+    return res.status(403).json({ error: 'Your role does not allow viewing reports', role: user.role });
+  }
+  // Touch last_used_at — same housekeeping the normal requireAuth does.
+  db.run(`UPDATE sessions SET last_used_at = datetime('now','localtime') WHERE token = ?`, [token]);
+  req.user = user;
+  req.session = session;
+  next();
+}, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'Invalid auction id' });
+  try {
+    const pdf = await generateTradeSummaryPDF(getDb(), id, req.query.branch || '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="TradeSummary_${id}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    if (e && e.status === 404) return res.status(404).json({ error: e.message });
+    console.error('summary-pdf error:', e);
+    res.status(500).json({ error: e.message || 'PDF generation failed' });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════
