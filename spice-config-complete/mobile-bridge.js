@@ -345,12 +345,15 @@ const LOT_SELECT_SQL = `
 function mountMobile(app, deps) {
   const { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS } = deps;
 
-  // ── 0. LAZY SELF-HEAL SCHEMA ──────────────────────────────────────
-  // The bridge owns these tables/columns — declare them here so the
-  // bridge works even if db.js wasn't updated on this install. Runs on
-  // the first request that needs it (NOT at mount time — initDb() hasn't
-  // finished yet when mountMobile runs). Cached via a closure flag so
-  // it only runs once per process. All operations idempotent.
+  // ── 0. LAZY SELF-HEAL SCHEMA (defence in depth) ───────────────────
+  // db.js is now the canonical source for every column/table the bridge
+  // needs (login_history, traders.whatsapp/email, lots.bank_id,
+  // users.must_change_password). These ALTERs are kept as a safety net
+  // so the bridge still functions if someone ever loads it against an
+  // older db.js (forked install, partial upgrade) — every statement is
+  // idempotent and silently no-ops once the columns already exist.
+  // Runs on the first /api/* request rather than at mount time because
+  // initDb() finishes after mountMobile is called.
   let _healed = false;
   function ensureBridgeSchema() {
     if (_healed) return;
@@ -364,25 +367,12 @@ function mountMobile(app, deps) {
         user_agent TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now','localtime'))
       )`);
-      // Unified seller schema — whatsapp/email must exist for the
-      // mobile create/edit flow. Add if missing; harmless if already
-      // there (each ALTER wrapped in its own try/catch).
       try { db.exec("ALTER TABLE traders ADD COLUMN whatsapp TEXT DEFAULT ''"); } catch (_) {}
       try { db.exec("ALTER TABLE traders ADD COLUMN email TEXT DEFAULT ''"); } catch (_) {}
-      // Mobile lot-entry pins a specific seller bank per lot via bank_id.
-      // The spice-config base schema doesn't have this column — adding it
-      // here so the bridge's SELECTs (`l.bank_id` in the bank subqueries)
-      // don't fail with "no such column" and the My Lots panel comes up
-      // empty. Idempotent: harmless if already present.
       try { db.exec("ALTER TABLE lots ADD COLUMN bank_id INTEGER"); } catch (_) {}
-      // The change-password handler clears must_change_password on success.
-      // Spice-config doesn't seed this column, so add it here (default 0 =
-      // not gated) and the UPDATE in /api/auth/change-password won't fail.
       try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); } catch (_) {}
       _healed = true;
     } catch (e) {
-      // Not fatal — log and continue; the handler will surface the
-      // underlying error if the schema really is broken.
       console.warn('[mobile-bridge] self-heal deferred:', e.message);
     }
   }

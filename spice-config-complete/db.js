@@ -25,6 +25,7 @@
 
 const initSqlJs = require('sql.js');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -109,26 +110,40 @@ async function initDb() {
   process.on('beforeExit', onExit);
 
   // ── SESSIONS ───────────────────────────────────────────────
+  // expires_at caps the lifetime of a leaked Authorization header even
+  // if the holder keeps it warm via the sliding last_used_at sweep.
+  // Pre-migration rows have NULL → grandfathered in (relies on the
+  // 30-day idle sweep); new rows get a 30-day cap from creation.
   wrapped.exec(`CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
     created_at TEXT DEFAULT (datetime('now','localtime')),
     last_used_at TEXT DEFAULT (datetime('now','localtime')),
+    expires_at TEXT,
     device_label TEXT DEFAULT '',
     FOREIGN KEY(user_id) REFERENCES users(id)
   )`);
 
   // ── USERS ──────────────────────────────────────────────────
+  // must_change_password is the force-rotate gate. When non-zero, the
+  // server's requireAuth blocks every endpoint except whoami / change-
+  // password until the user picks a new password — closes the default-
+  // creds attack window for both the seeded admin and any admin-reset
+  // user. See FORCED_CHANGE_ALLOWED in server.js for the allowlist.
   wrapped.exec(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
     token TEXT,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
   // ── TRADERS (NAM.DBF — sellers/poolers) ────────────────────
+  // whatsapp / email added for the mobile PWA's seller create/edit flow.
+  // The desktop sellers tab also exposes them via the unified write
+  // path in mobile-bridge.js (POST/PUT /api/traders).
   wrapped.exec(`CREATE TABLE IF NOT EXISTS traders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -144,6 +159,8 @@ async function initDb() {
     ifsc TEXT DEFAULT '',
     acctnum TEXT DEFAULT '',
     holder_name TEXT DEFAULT '',
+    whatsapp TEXT DEFAULT '',
+    email TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
@@ -191,6 +208,15 @@ async function initDb() {
   )`);
 
   // ── AUCTIONS (trade sessions) ──────────────────────────────
+  // Tri-state price-check gate:
+  //   price_check_first_passed_at — stamped on the FIRST successful
+  //     verify and never cleared. Tells us the operator has reconciled
+  //     this auction at least once (separates 'never' from 'stale').
+  //   price_checked_at — stamped on every successful verify, cleared
+  //     by any endpoint that mutates a lot's price/code. Tells us the
+  //     reconciliation is still current.
+  // The pair drives the gate states ('off' | 'never' | 'stale' | 'clean')
+  // used by the calc / invoice / purchase / bill / debit-note generators.
   wrapped.exec(`CREATE TABLE IF NOT EXISTS auctions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ano TEXT NOT NULL,
@@ -199,7 +225,23 @@ async function initDb() {
     state TEXT DEFAULT 'TAMIL NADU',
     start_time TEXT,
     end_time TEXT,
+    price_checked_at TEXT DEFAULT '',
+    price_check_first_passed_at TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
+  // ── GENERATION OVERRIDES ──────────────────────────────────
+  // One-shot admin grants that allow a single regeneration after the
+  // doc-type's first generate has already happened. Consumed (deleted)
+  // by the generate endpoint the next time it runs successfully for the
+  // (auction_id, doc_type) pair. Without a row, generation is allowed
+  // by default; the row only exists when there's an active allowance.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS generation_overrides (
+    auction_id INTEGER NOT NULL,
+    doc_type   TEXT NOT NULL,
+    granted_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    granted_by TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (auction_id, doc_type)
   )`);
 
   // ── LOTS (CPA1.DBF — main lot data, before + after trade) ─
@@ -254,12 +296,18 @@ async function initDb() {
     bilamt REAL DEFAULT 0,
     paid TEXT DEFAULT '',
     user_id TEXT DEFAULT '',
+    bank_id INTEGER,
     created_at TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (auction_id) REFERENCES auctions(id),
     FOREIGN KEY (trader_id) REFERENCES traders(id)
   )`);
 
   // ── INVOICES (INV.DBF — sales invoices) ────────────────────
+  // addl_chg / addl_name = optional "Additional Charge" row that sits
+  // below Round on/off — sum(cardamom) × cfg.addl_charge_value with a
+  // user-defined ledger label (also used as the Tally ledger name in XML).
+  // lorry_no = per-invoice vehicle number for the e-way bill
+  // <VEHICLENUMBER> field. Set via the Sales tab's bulk-action button.
   wrapped.exec(`CREATE TABLE IF NOT EXISTS invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     auction_id INTEGER,
@@ -286,6 +334,9 @@ async function initDb() {
     tcs REAL DEFAULT 0,
     rund REAL DEFAULT 0,
     tot REAL DEFAULT 0,
+    addl_chg REAL DEFAULT 0,
+    addl_name TEXT DEFAULT '',
+    lorry_no TEXT,
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
@@ -379,6 +430,44 @@ async function initDb() {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
+  // ── LOGIN HISTORY (mobile + desktop sign-in audit) ────────
+  // One row per successful login from either app. Captures the IP and
+  // a coarse device-type tag ('Mobile' vs 'Desktop') derived from the
+  // User-Agent — finer-grained device labelling stays on sessions.
+  // Used by the admin console to spot anomalous access and by the
+  // mobile-bridge's /api/auth/login flow.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS login_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    ip TEXT DEFAULT '',
+    user_agent TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
+  // ── IMPORT LOG (Import Old Data audit trail) ──────────────
+  // One row per upload (preview or run, dry-run or live) from the
+  // Import Old Data tool. inserted_ids holds the JSON-encoded list of
+  // newly-inserted row PKs so the History panel's Undo button can roll
+  // back a specific import; undone_at is set when undo runs so the
+  // button stays disabled on a second click.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS import_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module TEXT NOT NULL,
+    filename TEXT DEFAULT '',
+    dry_run INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    imported INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    errors TEXT DEFAULT '',
+    inserted_ids TEXT DEFAULT '',
+    undone_at TEXT DEFAULT '',
+    user_id INTEGER,
+    username TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
   // ── LOT ALLOCATIONS ───────────────────────────────────────
   // Per-auction, per-branch lot-number ranges. Allocations let the user
   // reserve "lots 001-050 for BODI, 051-100 for VANDANMEDU" on a given
@@ -434,6 +523,16 @@ async function initDb() {
     'CREATE INDEX IF NOT EXISTS idx_bills_name ON bills(name)',
     'CREATE INDEX IF NOT EXISTS idx_buyers_buyer ON buyers(buyer)',
     'CREATE INDEX IF NOT EXISTS idx_buyers_buyer1 ON buyers(buyer1)',
+    // Surfaces locked rows for the Lots tab's filter/sort without
+    // scanning every lot. The auction_id index already covers cascade-
+    // lock lookups (which are scoped by auction_id), so this index is
+    // narrow and only pays off for "show locked rows across the DB."
+    'CREATE INDEX IF NOT EXISTS idx_lots_locked ON lots(locked_at)',
+    // FK child-side index. SQLite auto-indexes the parent (traders.id
+    // is PK) but NOT the child column, so DELETE FROM traders triggers
+    // a full scan of trader_banks per row to check for orphans. Without
+    // this, bulk seller deletion is O(N·M) — quadratic.
+    'CREATE INDEX IF NOT EXISTS idx_trader_banks_trader ON trader_banks(trader_id)',
   ];
   for (const idx of indexes) { try { wrapped.exec(idx); } catch (e) {} }
 
@@ -505,11 +604,55 @@ async function initDb() {
     // tab. NULL = unlocked (default).
     "ALTER TABLE lots ADD COLUMN locked_at TEXT",
     "ALTER TABLE lots ADD COLUMN locked_by TEXT",
+    // Mobile-bridge canonical columns. The bridge's ensureBridgeSchema
+    // self-heal will still attempt these idempotently as defence in
+    // depth on installs that boot mobile-bridge before db.js migrations
+    // settle, but they belong in the canonical schema now.
+    "ALTER TABLE traders ADD COLUMN whatsapp TEXT DEFAULT ''",
+    "ALTER TABLE traders ADD COLUMN email TEXT DEFAULT ''",
+    "ALTER TABLE lots ADD COLUMN bank_id INTEGER",
+    // Forced password change — gates seeded admin + admin-reset users
+    // through the change-password screen on first login. See
+    // FORCED_CHANGE_ALLOWED in server.js.
+    "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+    // Hard expiry cap on sessions. Pre-migration rows get NULL and
+    // are grandfathered in (last_used_at sliding sweep still applies);
+    // new rows get a 30-day cap at INSERT time in server.js so a
+    // leaked Authorization header has a bounded lifetime even if
+    // the holder keeps it warm.
+    "ALTER TABLE sessions ADD COLUMN expires_at TEXT",
+    // Price-check gate timestamps (see auctions CREATE TABLE for the
+    // tri-state semantics). Backfill below stamps first_passed_at on
+    // any auction that was already verified before the column existed
+    // so the gate doesn't drop to 'never' for previously-verified data.
+    "ALTER TABLE auctions ADD COLUMN price_checked_at TEXT DEFAULT ''",
+    "ALTER TABLE auctions ADD COLUMN price_check_first_passed_at TEXT DEFAULT ''",
+    // Additional charge row + per-invoice lorry number. See invoices
+    // CREATE TABLE comment for what they carry.
+    "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",
+    "ALTER TABLE invoices ADD COLUMN addl_name TEXT DEFAULT ''",
+    "ALTER TABLE invoices ADD COLUMN lorry_no TEXT",
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
     catch (e) { /* column already exists — ignore */ }
   }
+
+  // Price-check backfill: any auction that was already verified BEFORE
+  // the price_check_first_passed_at column existed gets its first-pass
+  // stamp set to the current-verify stamp. Without this, every
+  // previously-verified auction would re-enter the 'never' state on
+  // upgrade and force a one-off re-verify. Idempotent — only touches
+  // rows where the first-pass stamp is missing.
+  try {
+    wrapped.run(
+      `UPDATE auctions
+          SET price_check_first_passed_at = price_checked_at
+        WHERE price_checked_at IS NOT NULL
+          AND price_checked_at != ''
+          AND (price_check_first_passed_at IS NULL OR price_check_first_passed_at = '')`
+    );
+  } catch (_) { /* table or columns may not exist on fresh DB */ }
 
   // One-time data fix: legacy ASP-only lots (where invo==asp_invo) had their
   // `sale` field set during the old ASP-generation logic. The current logic
@@ -574,30 +717,45 @@ async function initDb() {
 
   const row = wrapped.get('SELECT COUNT(*) as cnt FROM users');
   if (!row || row.cnt === 0) {
-    const hash = crypto.createHash('sha256').update('admin123').digest('hex');
-    wrapped.run('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', ['admin', hash, 'admin']);
-    console.log('Default admin created (admin / admin123)');
+    // bcrypt cost 12 → ~250ms hash, only paid on first run. The seeded
+    // admin is forced through the change-password screen on first sign-in
+    // (must_change_password=1) so the default 'admin123' can't survive
+    // into production.
+    const hash = bcrypt.hashSync('admin123', 12);
+    wrapped.run(
+      'INSERT INTO users (username, password_hash, role, must_change_password) VALUES (?, ?, ?, 1)',
+      ['admin', hash, 'admin']
+    );
+    console.log('Default admin created (admin / admin123) — MUST be changed on first login');
   }
 
   // One-shot admin password reset for environments where the DB persists
   // across deploys (e.g. Railway volume) and the admin password has drifted
   // from the default. Set RESET_ADMIN_PASSWORD on the host, restart to apply,
   // sign in, then UNSET the var — otherwise the password resets on every boot.
+  // Hash is bcrypt to match the rest of the auth path; legacy SHA-256 rows
+  // still verify on login and get opportunistically rehashed there.
   if (process.env.RESET_ADMIN_PASSWORD) {
-    const newHash = crypto.createHash('sha256').update(process.env.RESET_ADMIN_PASSWORD).digest('hex');
+    const newHash = bcrypt.hashSync(process.env.RESET_ADMIN_PASSWORD, 12);
     const existing = wrapped.get('SELECT id FROM users WHERE username = ?', ['admin']);
     if (existing) {
-      wrapped.run('UPDATE users SET password_hash = ?, role = ? WHERE username = ?', [newHash, 'admin', 'admin']);
+      wrapped.run(
+        'UPDATE users SET password_hash = ?, role = ?, must_change_password = 1 WHERE username = ?',
+        [newHash, 'admin', 'admin']
+      );
       wrapped.run('DELETE FROM sessions WHERE user_id = ?', [existing.id]);
       console.log('[reset] admin password reset from RESET_ADMIN_PASSWORD — unset this env var after signing in');
     } else {
-      wrapped.run('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', ['admin', newHash, 'admin']);
+      wrapped.run(
+        'INSERT INTO users (username, password_hash, role, must_change_password) VALUES (?, ?, ?, 1)',
+        ['admin', newHash, 'admin']
+      );
       console.log('[reset] admin user created from RESET_ADMIN_PASSWORD — unset this env var after signing in');
     }
     scheduleSave();
   }
 
-  console.log('Database ready at', DB_PATH, '(better-sqlite3, WAL mode)');
+  console.log('Database ready at', DB_PATH, '(sql.js, in-memory + debounced disk persist)');
   return wrapped;
 }
 
