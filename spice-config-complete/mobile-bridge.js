@@ -601,15 +601,32 @@ function mountMobile(app, deps) {
   // PWA's app.html does `const trades = d.auctions || [];` so it expects
   // an envelope object, not the flat array spice-config returns natively.
   // Wrap the native array in {auctions: [...]} for the mobile client.
+  //
+  // Mode filter (mirrors the desktop's /api/auctions): rows whose
+  // `mode` column matches the current company_settings.business_mode
+  // setting, OR rows whose mode is NULL/empty (legacy data pre-mode
+  // column, kept visible during soft cutover). Without this, switching
+  // a phone-toting field user's install from e-Auction to e-Trade
+  // doesn't hide the old e-Auction trades from the picker.
+  //
   // Errors are caught and surfaced as JSON so the mobile client sees
   // an actual diagnostic instead of a generic "Failed to load".
   app.get('/api/mobile/auctions', requireAuth, (_req, res) => {
     try {
-      const rows = getDb().all(
+      const db = getDb();
+      const modeRow = db.get("SELECT value FROM company_settings WHERE key = 'business_mode'");
+      const mode = modeRow && modeRow.value ? String(modeRow.value) : '';
+      const whereSql = mode
+        ? `WHERE (auctions.mode = ? OR auctions.mode IS NULL OR auctions.mode = '')`
+        : '';
+      const params = mode ? [mode] : [];
+      const rows = db.all(
         `SELECT *, (SELECT COUNT(*) FROM lots WHERE auction_id=auctions.id) AS lot_count
-         FROM auctions ORDER BY date DESC, ano DESC LIMIT 100`
+         FROM auctions ${whereSql}
+         ORDER BY date DESC, ano DESC LIMIT 100`,
+        params
       );
-      res.json({ auctions: rows });
+      res.json({ auctions: rows, businessMode: mode });
     } catch (e) {
       console.error('[/api/mobile/auctions] failed:', e && (e.stack || e.message || e));
       res.status(500).json({ error: e && (e.message || String(e)) || 'Failed to load auctions' });
