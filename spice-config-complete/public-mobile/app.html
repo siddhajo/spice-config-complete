@@ -323,6 +323,17 @@ select:focus{border-color:var(--green)}
         <!-- Moisture (conditional, compact) -->
         <div id="le-moisture-wrap" style="display:none;margin-bottom:6px;margin-top:-2px"><div style="width:33%"><div class="elb" id="elb-moisture">MOISTURE %</div><input type="text" id="le-moisture" placeholder="0.0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"></div></div>
 
+        <!-- e-Auction extras (Crop Receipt / Reserved Price).
+             Each wrapper is independently toggled via cfgShowCropReceipt /
+             cfgShowReservedPrice (server-driven; AND'ed with business_mode
+             === 'e-Auction' on the server side). Crop Receipt
+             auto-increments per save (saveLot resets to prior+1);
+             Reserved Price is typed per lot with no auto-increment. -->
+        <div id="le-eauction-row" style="display:none;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <div id="le-crpt-wrap" style="display:none"><div class="elb">CROP RCPT</div><input type="text" id="le-crpt" placeholder="01208" autocomplete="off" class="ein"></div>
+          <div id="le-reserved-wrap" style="display:none"><div class="elb">RSRV PRICE</div><input type="text" id="le-reserved-price" placeholder="0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"></div>
+        </div>
+
         <!-- Buttons -->
         <div id="le-btn-save" style="display:flex;gap:8px">
           <button class="btn" id="le-save" onclick="saveLot()" title="Save lot" style="flex:2;height:40px;margin-top:0;font-size:14px;border-radius:10px">✓ Save</button>
@@ -450,6 +461,14 @@ select:focus{border-color:var(--green)}
     <div class="fr" style="margin-top:12px"><div><div class="lb">BAGS</div><input type="text" id="ed-bags" inputmode="numeric" oninput="sanitizeInt(this)"></div><div><div class="lb">LITRE</div><input type="text" id="ed-litre" inputmode="numeric" oninput="sanitizeInt(this)"></div></div>
     <div class="lb">QUANTITY (KG)</div><input type="text" id="ed-qty" inputmode="decimal" class="qi" oninput="sanitizeDec(this);calcEditGross()">
     <div class="fr" style="margin-top:8px"><div><div class="lb">SAMPLE WT</div><input type="text" id="ed-sample" inputmode="decimal" oninput="sanitizeDec(this);calcEditGross()" readonly style="background:var(--bg);color:var(--text3)"></div><div><div class="lb">GROSS WT</div><input type="text" id="ed-gross" readonly style="background:var(--bg);color:var(--green);font-weight:700"></div></div>
+    <!-- e-Auction extras (mirror of entry form). Visibility synced
+         with cfgShowCropReceipt / cfgShowReservedPrice each time the
+         modal opens so toggling the flag in Settings reflects on the
+         next open without a reload. -->
+    <div id="ed-eauction-row" style="display:none;margin-top:8px"><div class="fr">
+      <div id="ed-crpt-wrap" style="display:none"><div class="lb">CROP RCPT</div><input type="text" id="ed-crpt" placeholder="01208" autocomplete="off"></div>
+      <div id="ed-reserved-wrap" style="display:none"><div class="lb">RSRV PRICE</div><input type="text" id="ed-reserved-price" placeholder="0" inputmode="decimal" oninput="sanitizeDec(this)"></div>
+    </div></div>
     <div id="ed-err"></div>
   </div>
   <div class="modal-foot"><button class="btn btn-sm btn-outline" onclick="closeEdit()" style="flex:1">Cancel</button><button class="btn btn-sm" onclick="saveEdit()" id="ed-save" style="flex:2">Save</button></div>
@@ -513,6 +532,40 @@ let selT=null,lastId=null,stm=null,editId=null;
 let appTitle='Spice Auction',lastSearchQuery='',editTimeoutMinutes=0;
 let allMyLots=[],editEnabled=true;
 let cfgDefaultLitre='';
+// e-Auction-only fields. Server returns these in /api/config already
+// AND'ed with business_mode === 'e-Auction', so the client only needs
+// to mirror the boolean into the DOM via applyEAuctionVisibility().
+let cfgShowCropReceipt=false, cfgShowReservedPrice=false;
+
+// Toggle the entry-form + edit-modal e-Auction rows + their two cells.
+// Each cell wraps its own .display so the outer row can stay flex when
+// only one is on; the row hides entirely when both are off.
+function applyEAuctionVisibility(){
+  var row=document.getElementById('le-eauction-row');
+  var c1=document.getElementById('le-crpt-wrap');
+  var c2=document.getElementById('le-reserved-wrap');
+  if(c1) c1.style.display=cfgShowCropReceipt?'block':'none';
+  if(c2) c2.style.display=cfgShowReservedPrice?'block':'none';
+  if(row) row.style.display=(cfgShowCropReceipt||cfgShowReservedPrice)?'grid':'none';
+  var erow=document.getElementById('ed-eauction-row');
+  var e1=document.getElementById('ed-crpt-wrap');
+  var e2=document.getElementById('ed-reserved-wrap');
+  if(e1) e1.style.display=cfgShowCropReceipt?'block':'none';
+  if(e2) e2.style.display=cfgShowReservedPrice?'block':'none';
+  if(erow) erow.style.display=(cfgShowCropReceipt||cfgShowReservedPrice)?'block':'none';
+}
+
+// Crop-receipt auto-increment helper. Preserves the input's
+// zero-padding width: "01208" → "01209". Any non-digit prefix is
+// kept verbatim. Blank or non-numeric → '' so the chain restarts.
+function _incrementCrpt(prev){
+  var s=String(prev==null?'':prev).trim();if(!s)return '';
+  var m=s.match(/^(\D*?)(\d+)$/);if(!m)return '';
+  var prefix=m[1]||'',num=m[2];
+  var next=(BigInt(num)+1n).toString();
+  var padded=next.length>=num.length?next:next.padStart(num.length,'0');
+  return prefix+padded;
+}
 
 const ICO_EDIT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 const ICO_DEL='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
@@ -548,6 +601,8 @@ async function refreshConfig(){
     if(d.sampleWeight!=cfgSampleWeight){cfgSampleWeight=d.sampleWeight||0;changed=true}
     if(d.showMoisture!=cfgShowMoisture){cfgShowMoisture=d.showMoisture||false;changed=true}
     if(d.defaultLitre!=cfgDefaultLitre){cfgDefaultLitre=d.defaultLitre||'';changed=true}
+    if(d.showCropReceipt!=cfgShowCropReceipt){cfgShowCropReceipt=!!d.showCropReceipt;changed=true}
+    if(d.showReservedPrice!=cfgShowReservedPrice){cfgShowReservedPrice=!!d.showReservedPrice;changed=true}
     if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
     if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
     if(d.labels&&JSON.stringify(d.labels)!==JSON.stringify(cfgLabels)){
@@ -557,6 +612,7 @@ async function refreshConfig(){
     if(changed){
       document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
       document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';
+      applyEAuctionVisibility();
       // Update litre if empty or still showing old default
       var litreEl=document.getElementById('le-litre');
       if(litreEl&&(litreEl.value===''||litreEl.value===oldLitre)){litreEl.value=cfgDefaultLitre||''}
@@ -577,9 +633,9 @@ function applyLabels(){
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -639,8 +695,8 @@ async function loadAvailableTrades(){
 }
 
 async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select a trade</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
-// Reload config for sample weight + moisture
-try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none'}catch(e){}
+// Reload config for sample weight + moisture + e-Auction extras
+try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
 await loadStats();goLots()}
 
 var allocStats=null;
@@ -1060,7 +1116,15 @@ async function saveLot(){
   var selBankId=document.getElementById('le-bank-select')?document.getElementById('le-bank-select').value:'';
 
   document.getElementById('le-save').disabled=true;
-  var lotData={auction_id:aid,trader_id:selT.id,branch:br,grade:grade,bags:bags,litre:litre,qty:qty,lot_no:lotNo,state:'TAMIL NADU',bank_id:selBankId?parseInt(selBankId):null,gross_weight:grossWt,sample_weight:sampleWt,moisture:moisture};
+  // e-Auction extras — always captured regardless of visibility so a
+  // hidden value typed before the flag was flipped isn't lost.
+  // crpt rides through as a string (preserves leading zeros);
+  // reserved_price is normalised to a number on the wire so the
+  // server's REAL column gets a clean numeric value.
+  var crptRaw=(document.getElementById('le-crpt')?.value||'').trim();
+  var rpRaw=(document.getElementById('le-reserved-price')?.value||'').trim();
+  var reservedPrice=rpRaw===''?0:(parseFloat(rpRaw)||0);
+  var lotData={auction_id:aid,trader_id:selT.id,branch:br,grade:grade,bags:bags,litre:litre,qty:qty,lot_no:lotNo,state:'TAMIL NADU',bank_id:selBankId?parseInt(selBankId):null,gross_weight:grossWt,sample_weight:sampleWt,moisture:moisture,crpt:crptRaw,reserved_price:reservedPrice};
   try{
     var r=await fetch(B+'/api/lots',{method:'POST',headers:ah(),body:JSON.stringify(lotData)});
     var d=await r.json();
@@ -1096,12 +1160,18 @@ function resetFormKeepSeller(){
   document.getElementById('le-gross').value='';
   document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
   if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  // Crop Receipt auto-increments per save (preserves zero-padding
+  // width). Reserved Price clears so the operator types per lot.
+  var crptEl=document.getElementById('le-crpt');
+  if(crptEl)crptEl.value=_incrementCrpt(crptEl.value);
+  var rpEl=document.getElementById('le-reserved-price');
+  if(rpEl)rpEl.value='';
   renderLotGrid();
   selectNextAvailableLot();
 }
 
 // Full reset (Clear button)
-function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
+function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';/* hard clear of e-Auction extras — auto-increment chain restarts on the next save */ var _le_crpt=document.getElementById('le-crpt');if(_le_crpt)_le_crpt.value='';var _le_rp=document.getElementById('le-reserved-price');if(_le_rp)_le_rp.value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
 
 // ── MY LOTS (by branch) ──
 async function loadMyLots(){if(!aid)return;try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();allMyLots=d.lots||[];const stats=d.stats||{};document.getElementById('ml-cnt').textContent=stats.lotCount||0;document.getElementById('ml-bags').textContent=stats.totalBags||0;document.getElementById('ml-qty').textContent=(stats.totalQty||0).toFixed(3);document.getElementById('ml-search').value='';renderMyLots(allMyLots)}catch(e){}}
@@ -1122,7 +1192,7 @@ function printLot(id){printAndClose(B+'/api/lots/'+id+'/receipt?branch='+encodeU
 
 var editBanks=[],editTraderId=null;
 var editLotBankId=null;
-function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';calcEditGross()}}).catch(()=>{calcEditGross()})}
+function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';/* Reset e-Auction extras + refresh visibility (flag may have flipped since last open) */ var _ed_crpt=document.getElementById('ed-crpt');if(_ed_crpt)_ed_crpt.value='';var _ed_rp=document.getElementById('ed-reserved-price');if(_ed_rp)_ed_rp.value='';applyEAuctionVisibility();document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';/* Populate crpt + reserved_price from the loaded lot. Number coerce w/ blank-as-zero so a 0/null reserved_price renders empty (no stuck "0" placeholder). */if(_ed_crpt)_ed_crpt.value=d.lot.crpt||'';if(_ed_rp){var rp=Number(d.lot.reserved_price);_ed_rp.value=(Number.isFinite(rp)&&rp!==0)?rp:''}calcEditGross()}}).catch(()=>{calcEditGross()})}
 function closeEdit(){document.getElementById('edit-modal').classList.remove('show');editId=null;editTraderId=null}
 function editSellerMode(){document.getElementById('ed-seller-card').style.display='none';document.getElementById('ed-seller-search').style.display='block';document.getElementById('ed-seller-input').value='';document.getElementById('ed-seller-input').focus()}
 let edStm;
@@ -1225,7 +1295,7 @@ async function saveEditBankAccount(){
   }catch(e){toast('Failed',true)}
 }
 function calcEditGross(){var net=parseFloat(document.getElementById('ed-qty').value)||0;var sample=parseFloat(document.getElementById('ed-sample').value)||0;document.getElementById('ed-gross').value=(net+sample).toFixed(3)}
-async function saveEdit(){const lotNo=document.getElementById('ed-lotno').value.trim(),grade=document.getElementById('ed-grade').value.trim()||'1',bags=parseInt(document.getElementById('ed-bags').value),litre=parseInt(document.getElementById('ed-litre').value),qty=parseFloat(document.getElementById('ed-qty').value),sampleWt=parseFloat(document.getElementById('ed-sample').value)||0,grossWt=parseFloat(document.getElementById('ed-gross').value)||0,er=document.getElementById('ed-err');er.innerHTML='';if(!lotNo||!bags||!litre||!qty){er.innerHTML='<div class="eb">Fill all fields</div>';return}document.getElementById('ed-save').disabled=true;try{const body={lot_no:lotNo,grade,bags,litre,qty,sample_weight:sampleWt,gross_weight:grossWt};if(editTraderId)body.trader_id=editTraderId;var edBankSel=document.getElementById('ed-bank-select');if(edBankSel)body.bank_id=edBankSel.value?parseInt(edBankSel.value):null;const r=await fetch(B+'/api/lots/'+editId,{method:'PUT',headers:ah(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';return}toast('Lot updated',false);closeEdit();loadMyLots();await loadStats();updUI()}catch(e){er.innerHTML='<div class="eb">Failed</div>'}finally{document.getElementById('ed-save').disabled=false}}
+async function saveEdit(){const lotNo=document.getElementById('ed-lotno').value.trim(),grade=document.getElementById('ed-grade').value.trim()||'1',bags=parseInt(document.getElementById('ed-bags').value),litre=parseInt(document.getElementById('ed-litre').value),qty=parseFloat(document.getElementById('ed-qty').value),sampleWt=parseFloat(document.getElementById('ed-sample').value)||0,grossWt=parseFloat(document.getElementById('ed-gross').value)||0,er=document.getElementById('ed-err');er.innerHTML='';if(!lotNo||!bags||!litre||!qty){er.innerHTML='<div class="eb">Fill all fields</div>';return}document.getElementById('ed-save').disabled=true;try{const body={lot_no:lotNo,grade,bags,litre,qty,sample_weight:sampleWt,gross_weight:grossWt};/* e-Auction extras — always written even when the flag is off; the value sitting in a hidden input typed under a different mode is still valid data we should round-trip. crpt as string preserves zero-padding; reserved_price coerced to number. */ var _ed_crpt2=document.getElementById('ed-crpt');if(_ed_crpt2)body.crpt=(_ed_crpt2.value||'').trim();var _ed_rp2=document.getElementById('ed-reserved-price');if(_ed_rp2){var _rp2=(_ed_rp2.value||'').trim();body.reserved_price=_rp2===''?0:(parseFloat(_rp2)||0)}if(editTraderId)body.trader_id=editTraderId;var edBankSel=document.getElementById('ed-bank-select');if(edBankSel)body.bank_id=edBankSel.value?parseInt(edBankSel.value):null;const r=await fetch(B+'/api/lots/'+editId,{method:'PUT',headers:ah(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';return}toast('Lot updated',false);closeEdit();loadMyLots();await loadStats();updUI()}catch(e){er.innerHTML='<div class="eb">Failed</div>'}finally{document.getElementById('ed-save').disabled=false}}
 async function deleteLot(id,n){if(!confirm('Delete Lot #'+n+'?'))return;try{await fetch(B+'/api/lots/'+id,{method:'DELETE',headers:ah()});toast('Deleted',false);loadMyLots();await loadStats();updUI()}catch(e){}}
 
 function clearEntryForm(){
@@ -1240,6 +1310,10 @@ function clearEntryForm(){
   document.getElementById('le-gross').value='';
   document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
   if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  // Hard clear of e-Auction extras — Clear button restarts the
+  // crpt chain (next save starts whatever the operator types).
+  var _ce_crpt=document.getElementById('le-crpt');if(_ce_crpt)_ce_crpt.value='';
+  var _ce_rp=document.getElementById('le-reserved-price');if(_ce_rp)_ce_rp.value='';
   document.getElementById('le-res').style.display='none';
   document.getElementById('le-tc').style.display='none';
   document.getElementById('le-bank').style.display='none';

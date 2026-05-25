@@ -577,6 +577,13 @@ function mountMobile(app, deps) {
     if (type === 'crop_type') return res.json({ items: cropTypes });
     if (type === 'title')     return res.json({ items: [{ id: 1, type: 'title', value: get('trade_name', 'Spice Auction'), sort_order: 0 }] });
 
+    // e-Auction-only fields. Both inputs are AND-gated by the flag
+    // AND business_mode === 'e-Auction' so flipping the mode away
+    // hides the inputs even if an admin leaves the flag on.
+    const isEAuc = String(get('business_mode', 'e-Auction')).toLowerCase() === 'e-auction';
+    const showCropReceipt   = isEAuc && getBool('flag_crop_receipt',   false);
+    const showReservedPrice = isEAuc && getBool('flag_reserved_price', false);
+
     // Full config object — what app.html expects from a no-arg GET.
     res.json({
       branches,
@@ -587,6 +594,8 @@ function mountMobile(app, deps) {
       sampleWeight:    getNum('sample_weight', 0),
       showMoisture:    getBool('show_moisture', false),
       defaultLitre:    get('default_litre', ''),
+      showCropReceipt,
+      showReservedPrice,
       // PWA defaults — surfaced here for completeness; not currently
       // backed by spice-config settings, so static-ish values are fine.
       pageLimit:       20,

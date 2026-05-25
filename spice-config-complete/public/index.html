@@ -442,6 +442,12 @@ body:not([data-feat-bills="1"]) .feat-bills{display:none !important}
 body:not([data-feat-debit-notes="1"]) .feat-debit-notes{display:none !important}
 body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:none !important}
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
+/* e-Auction-only fields. Gated by applyFeatureFlags() — sets the body
+   attribute to "1" only when the matching flag is ON in Settings AND
+   business_mode === 'e-Auction'. Flipping the mode to anything else
+   collapses the inputs regardless of the flag value. */
+body:not([data-feat-crop-receipt="1"]) .feat-crop-receipt{display:none !important}
+body:not([data-feat-reserved-price="1"]) .feat-reserved-price{display:none !important}
 /* Spice Board reports — sidebar entry + tab content carry
    .mode-eauction-only and are visible only when the saved business
    mode is "e-Auction" (set by applyModeLabels() at boot + on mode
@@ -2517,13 +2523,13 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       <div class="reports-hub">
         <div class="reports-hub-head">
           <h2 style="margin:0;font-size:22px;font-weight:800">Reports &amp; Insights</h2>
-          <p style="color:var(--text3);margin:6px 0 0;font-size:13px">All auction analytics in one place — pick a report below to drill in.</p>
+          <p style="color:var(--text3);margin:6px 0 0;font-size:13px">All <span data-term-auction="singular-lower">auction</span> analytics in one place — pick a report below to drill in.</p>
         </div>
         <div class="reports-tile-grid">
           <a class="report-tile" href="#" onclick="event.preventDefault();document.getElementById('rep-trade-summary').scrollIntoView({behavior:'smooth'})" data-accent="cardamom">
             <div class="report-tile-icon">📊</div>
-            <div class="report-tile-title">Trade Summary</div>
-            <div class="report-tile-desc">Per-branch &amp; per-seller breakdown for any single trade.</div>
+            <div class="report-tile-title"><span data-term-auction="singular">Trade</span> Summary</div>
+            <div class="report-tile-desc">Per-branch &amp; per-seller breakdown for any single <span data-term-auction="singular-lower">trade</span>.</div>
             <div class="report-tile-stat" id="rt-stat-trades">…</div>
           </a>
           <a class="report-tile" href="#" onclick="event.preventDefault();document.getElementById('rep-branch-card').scrollIntoView({behavior:'smooth'});loadBranchComparison()" data-accent="turmeric">
@@ -2558,17 +2564,17 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
            below it. -->
       <div class="card" id="rep-trade-summary">
         <div class="rep-summary-filter" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;background:var(--card);z-index:5;padding:4px 0 10px;margin:-4px 0 6px;border-bottom:1px solid var(--spice-line)">
-          <h2 style="margin:0;flex:1">Trade Summary</h2>
+          <h2 style="margin:0;flex:1"><span data-term-auction="singular">Trade</span> Summary</h2>
           <select id="rep-auction" onchange="loadTradeSummary()" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border);min-width:220px"></select>
           <select id="rep-branch" onchange="loadTradeSummary()" title="Filter Sold/Withdrawn/Min/Max/Avg by branch" style="height:34px;padding:0 10px;border-radius:6px;border:1px solid var(--border);min-width:160px">
             <option value="">All Branches</option>
           </select>
           <button class="btn btn-g btn-sm" onclick="openTradeSummaryPdf()" id="rep-pdf-btn" disabled>📄 Open PDF</button>
         </div>
-        <p style="color:var(--spice-text-mute);font-size:13px;margin:6px 0 16px">Per-branch and per-seller breakdown for the selected trade.</p>
+        <p style="color:var(--spice-text-mute);font-size:13px;margin:6px 0 16px">Per-branch and per-seller breakdown for the selected <span data-term-auction="singular-lower">trade</span>.</p>
         <div id="rep-summary-totals" style="display:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px"></div>
         <div id="rep-summary-body">
-          <div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Pick a trade above to see its breakdown.</div>
+          <div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Pick a <span data-term-auction="singular-lower">trade</span> above to see its breakdown.</div>
         </div>
       </div>
 
@@ -2582,7 +2588,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <span id="rep-branch-stamp" style="font-size:11.5px;color:var(--spice-text-hint)"></span>
           <button class="btn btn-sm" onclick="loadBranchComparison()">↻ Refresh</button>
         </div>
-        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">How each branch has performed across every auction in the database.</p>
+        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">How each branch has performed across every <span data-term-auction="singular-lower">auction</span> in the database.</p>
         <div id="rep-branch-body">
           <div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>
         </div>
@@ -3478,6 +3484,25 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <input type="number" id="le-moisture" step="0.1" min="0" max="100" placeholder="e.g. 12.5" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px">
         </div>
 
+        <!-- e-Auction-only row. Each cell is independently hidden by
+             its feat-* wrapper, so any combination works:
+               both off   → row collapses to 0-height (no children)
+               crpt only  → single column
+               both on    → two columns
+             Crop Receipt auto-increments per save (leSaveLot resets
+             the field to the prior value + 1). Reserved Price is typed
+             per lot with no auto-increment by design. -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div class="feat-crop-receipt">
+            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Crop Receipt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— auto-increments</span></div>
+            <input type="text" id="le-crpt" placeholder="e.g. 01208" autocomplete="off" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:monospace">
+          </div>
+          <div class="feat-reserved-price">
+            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Reserved Price</div>
+            <input type="number" id="le-reserved-price" step="any" min="0" placeholder="e.g. 1500" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px">
+          </div>
+        </div>
+
         <div id="le-err" style="display:none;padding:8px 12px;background:#FEE2E2;color:#991B1B;border-radius:6px;font-size:13px;margin-bottom:12px"></div>
 
         <div style="display:flex;gap:10px;align-items:center">
@@ -3927,6 +3952,12 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <div class="fg"><label>Sale Type</label>
       <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option></select>
     </div>
+    <!-- e-Auction-only fields. Each cell wraps the entire .fg so the
+         label + input collapse together when the flag is OFF (.feat-*
+         CSS hides the whole .fg block). Visibility is driven by
+         applyFeatureFlags() which AND's flag_* with business_mode. -->
+    <div class="fg feat-crop-receipt"><label>Crop Receipt</label><input id="l-crpt" placeholder="e.g. 01208" autocomplete="off"></div>
+    <div class="fg feat-reserved-price"><label>Reserved Price (₹)</label><input id="l-reserved-price" type="number" step="any" min="0" placeholder="e.g. 1500"></div>
   </div>
   <div class="actions"><button class="btn btn-o" onclick="hideModal('lot-modal')">Cancel</button><button class="btn btn-g" onclick="saveLot()">Save</button></div>
 </div></div>
@@ -5568,7 +5599,10 @@ async function loadReportsHubStats(){
     const d = await j('/api/stats?auction_id=all');
     const c = d.counts || {};
     const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
-    set('rt-stat-trades',   `<strong>${c.auctions||0}</strong> trade${c.auctions===1?'':'s'} · <strong>${c.lots||0}</strong> lots`);
+    // Auctions / Trades count uses termAuction() so the noun matches
+    // the active business mode.
+    const aN = c.auctions || 0;
+    set('rt-stat-trades',   `<strong>${aN}</strong> ${termAuction(aN !== 1, true)} · <strong>${c.lots||0}</strong> lots`);
     set('rt-stat-branches', `<strong>${(d.branchTotals||[]).length}</strong> branch${(d.branchTotals||[]).length===1?'':'es'} tracked`);
     set('rt-stat-journals', `<strong>${c.invoices||0}</strong> sales · <strong>${c.purchases||0}</strong> purchases`);
     set('rt-stat-tally',    `<strong>${(c.invoices||0)+(c.purchases||0)+(c.debit_notes||0)}</strong> vouchers ready`);
@@ -5588,14 +5622,21 @@ async function loadReports(){
     const arr = Array.isArray(_repAuctions) ? _repAuctions : (_repAuctions && _repAuctions.rows) || [];
     _repAuctions = arr;
     const sel = document.getElementById('rep-auction');
-    sel.innerHTML = '<option value="">— Select a trade —</option>' +
-      arr.map(a => `<option value="${a.id}">Trade #${esc(a.ano)} · ${esc((a.date||'').split('T')[0])}${a.crop_type?' · '+esc(a.crop_type):''}</option>`).join('');
+    // Picker noun follows current business mode — "Trade" in e-Trade
+    // mode, "Auction" in e-Auction mode.
+    const noun = termAuction(false);
+    sel.innerHTML = `<option value="">— Select a ${noun.toLowerCase()} —</option>` +
+      arr.map(a => `<option value="${a.id}">${noun} #${esc(a.ano)} · ${esc((a.date||'').split('T')[0])}${a.crop_type?' · '+esc(a.crop_type):''}</option>`).join('');
     if (arr.length && !sel.value) {
       sel.value = String(arr[0].id);
       loadTradeSummary();
     } else if (sel.value) {
       loadTradeSummary();
     }
+    // Static markup carries data-term-auction placeholders; sweep
+    // them so the cached "Trade" text gets swapped if the mode
+    // changed while the tab wasn't active.
+    if (typeof applyTermLabels === 'function') applyTermLabels();
     // Kick off live tile stats + Branch Comparison in parallel
     // (both fire-and-forget).
     if (typeof loadReportsHubStats === 'function') loadReportsHubStats();
@@ -5876,16 +5917,18 @@ async function loadBranchComparison(){
       const trades = Array.from(tradeMap.values()).sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
       window._bcTrades = trades;
 
+      // "By Auction" / "By Trade" — caption swaps with mode.
+      const _aucWord = termAuction(false);
       let byTradePayload =
         '<div class="bc-chart-wrap" style="height:340px"><canvas id="bc-by-trade-chart"></canvas></div>'
         + '<button class="bc-toggle-data" type="button" onclick="bcToggleData(this,\'bc-trade-data\')">'
         + 'Show data table</button>'
         + '<div id="bc-trade-data" class="bc-data-table" style="display:none">'
-        +   '<table><thead><tr><th>Date</th><th>Auction</th><th>Crop</th><th>Branch</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th></tr></thead><tbody>'
+        +   `<table><thead><tr><th>Date</th><th>${esc(_aucWord)}</th><th>Crop</th><th>Branch</th><th style="text-align:right">Lots</th><th style="text-align:right">Bags</th><th style="text-align:right">Qty (kg)</th></tr></thead><tbody>`
         +   recent.map(r => `<tr><td style="font-family:monospace;font-size:12px">${esc((r.date || '').split('T')[0])}</td><td>#${esc(r.ano || '')}</td><td><span style="font-size:11px;padding:1px 6px;background:var(--bg);border-radius:4px">${esc(r.crop_type || '-')}</span></td><td><strong>${esc(r.branch || '-')}</strong></td><td style="text-align:right">${r.lot_count}</td><td style="text-align:right">${r.total_bags || 0}</td><td style="text-align:right;font-weight:600">${Number(r.total_qty || 0).toFixed(3)}</td></tr>`).join('')
         +   '</tbody></table>'
         + '</div>';
-      html += bcSection('By Trade', Math.min(50, data.length) + ' most recent of ' + data.length, byTradePayload, { open: true });
+      html += bcSection(`By ${_aucWord}`, Math.min(50, data.length) + ' most recent of ' + data.length, byTradePayload, { open: true });
     }
     body.innerHTML = html;
 
@@ -5964,7 +6007,7 @@ function bcRenderCharts(){
               title: (items) => {
                 const t = trades[items[0].dataIndex];
                 const d = String(t.date || '').split('T')[0];
-                return 'Trade ' + items[0].label + (d ? ' · ' + d : '');
+                return termAuction(false) + ' ' + items[0].label + (d ? ' · ' + d : '');
               },
               label: (c) => c.dataset.label + ': ' + Number(c.parsed.y).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' kg',
             }
@@ -6309,6 +6352,7 @@ async function loadSettings(){
     // effectiveCompany() picks the right set based on state + mode.
     applyModeLabels();
     applyLogoBadge();
+    applyFeatureFlags();   // flip data-feat-* on body now that _sdata is loaded
     renderSettingsNav();
     // Open first category by default
     const firstKey=Object.keys(_cats).sort((a,b)=>_cats[a].order-_cats[b].order).find(k=>(_sdata[k]||[]).length);
@@ -6404,6 +6448,28 @@ function applyAspContextVisibility(){
   const state = String(getCurrentBusinessState() || '').toUpperCase();
   const isASP = (mode === 'e-Trade' && state === 'KERALA');
   btn.style.display = isASP ? '' : 'none';
+}
+
+// Apply per-install feature flags to <body> so the matching CSS rules
+// take effect. AND'ed with business_mode === 'e-Auction' so the
+// Crop Receipt + Reserved Price fields stay hidden when the operator
+// flips to e-Trade, regardless of the underlying flag value. Called
+// from loadSettings() (after _sdata is populated) and from
+// onBusinessModeChanged() (so the toggle reacts live to a mode flip).
+function applyFeatureFlags(){
+  const flagsArr = (_sdata && _sdata.flags) || [];
+  const lookupFlag = (key) => {
+    const f = flagsArr.find(x => x && x.key === key);
+    return f && String(f.value).toLowerCase() === 'true';
+  };
+  const mode  = (typeof getCurrentBusinessMode === 'function') ? getCurrentBusinessMode() : 'e-Auction';
+  const isEAuc = String(mode || '').toLowerCase() === 'e-auction';
+  const setFlag = (attr, on) => {
+    if (on) document.body.setAttribute(attr, '1');
+    else    document.body.removeAttribute(attr);
+  };
+  setFlag('data-feat-crop-receipt',   isEAuc && lookupFlag('flag_crop_receipt'));
+  setFlag('data-feat-reserved-price', isEAuc && lookupFlag('flag_reserved_price'));
 }
 
 // Hide the off-mode widgets in the To Tally tab. When the active company
@@ -6793,6 +6859,9 @@ function onBusinessModeChanged(newMode){
   applyModeLabels();
   // Logo code may have flipped (ASP ↔ ISP)
   applyLogoBadge();
+  // e-Auction-only fields show/hide live so the Lot Entry tab reflects
+  // the new mode without a tab switch
+  applyFeatureFlags();
   toast(`Mode: ${newMode}`);
 }
 
@@ -7353,6 +7422,9 @@ async function saveSettings(){
   if (_companyDirty && _presets && _presets.active) {
     try { await saveActivePreset(/*silent=*/true); } catch (_) {}
   }
+  // Re-apply feat-* body attrs so flag toggles (flag_crop_receipt /
+  // flag_reserved_price) take visual effect without a page reload.
+  if (typeof applyFeatureFlags === 'function') applyFeatureFlags();
   toast('Settings saved');
 }
 async function exportSettings(){const d=await j('/api/company-settings/export');const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
@@ -9482,11 +9554,18 @@ async function downloadDbfRange(type){
 // Change Seller can stage a replacement without forcing the user to
 // retype every address line. openLotEdit prefills them from `l.*`
 // and saveLot picks them back up via the same L_FIELDS loop.
+// crpt + reserved_price are persisted unconditionally — server stores
+// them regardless of the flag state so a future flag flip doesn't
+// wipe data. The UI hides the inputs via .feat-* gating when the
+// flag is off (or business_mode != 'e-Auction'), but the round-trip
+// through L_FIELDS keeps existing values intact on every save.
 const L_FIELDS=['lot_no','name','cr','branch','grade','bags','litre','qty','price','amount','buyer','buyer1','code','sale',
+  'crpt','reserved_price',
   'trader_id','pan','tel','aadhar','padd','ppla','ppin','pstate','pst_code'];
 const L_IDS={lot_no:'l-lotno',name:'l-name',cr:'l-cr',branch:'l-branch',grade:'l-grade',bags:'l-bags',
   litre:'l-litre',qty:'l-qty',price:'l-price',amount:'l-amount',buyer:'l-buyer',buyer1:'l-buyer1',
   code:'l-code',sale:'l-sale',
+  crpt:'l-crpt',reserved_price:'l-reserved-price',
   trader_id:'l-trader-id',pan:'l-pan',tel:'l-tel',aadhar:'l-aadhar',padd:'l-padd',ppla:'l-ppla',
   ppin:'l-ppin',pstate:'l-pstate',pst_code:'l-pst-code'};
 
@@ -10261,6 +10340,15 @@ async function saveLot(){
     const el=document.getElementById(L_IDS[f]);
     if(!el)return;
     if(['bags','qty','price','amount'].includes(f)) body[f]=parseFloat(el.value)||0;
+    else if(f==='reserved_price'){
+      // Numeric coercion + blank-as-zero: an empty input flows through
+      // as 0, matching what the server's INSERT default would store.
+      // Without this the server's dynamic UPDATE would write the empty
+      // string into a REAL column, leaving the value as 0 anyway but
+      // taking a wider trip.
+      const v = String(el.value || '').trim();
+      body[f] = v === '' ? 0 : (parseFloat(v) || 0);
+    }
     else if(f==='trader_id'){
       // trader_id is the FK to traders. Coerce to int; an empty string
       // (legacy lots that never had a seller-master link) becomes null
@@ -13229,6 +13317,25 @@ function leShowError(msg){
   setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
+// Crop-receipt auto-increment helper. The reference data uses
+// zero-padded sequential strings like "01208", "01209", "01210" — so
+// we preserve the original width when incrementing. Pure numeric ("3"
+// → "4") works the same way. A non-digit prefix is preserved
+// verbatim ("CR1234" → "CR1235"). Returns '' when the input wasn't
+// numeric so the next lot starts fresh.
+function _leIncrementCrpt(prev){
+  const s = String(prev == null ? '' : prev).trim();
+  if (!s) return '';
+  const m = s.match(/^(\D*?)(\d+)$/);
+  if (!m) return '';
+  const prefix = m[1] || '';
+  const num    = m[2];
+  const next   = (BigInt(num) + 1n).toString();
+  // Re-pad to the original numeric width (carry past width grows it).
+  const padded = next.length >= num.length ? next : next.padStart(num.length, '0');
+  return prefix + padded;
+}
+
 async function leSaveLot(){
   const aid = document.getElementById('le-auction').value;
   if (!aid) { leShowError('Select a trade first'); return; }
@@ -13254,6 +13361,16 @@ async function leSaveLot(){
     ? String(parseFloat(moistureRaw) || '')
     : '';
 
+  // e-Auction-only fields. Always read the raw input (even when the flag
+  // is off the input still exists, just hidden by CSS) so the value is
+  // not lost if a hidden input still carries a value from a previous
+  // edit. Reserved Price is normalised to a number; Crop Receipt rides
+  // through as a string to preserve any operator-typed leading zeros
+  // ("01208" stays "01208" in the database).
+  const crptRaw = (document.getElementById('le-crpt')?.value || '').trim();
+  const rpRaw   = (document.getElementById('le-reserved-price')?.value || '').trim();
+  const reservedPrice = rpRaw === '' ? 0 : Number(rpRaw) || 0;
+
   const btn = document.getElementById('le-save-btn');
   btn.disabled = true;
   try {
@@ -13275,6 +13392,8 @@ async function leSaveLot(){
       sample_wt: sample,
       gross_wt: gross,
       moisture: moisture,
+      crpt: crptRaw,
+      reserved_price: reservedPrice,
       state: _le.selectedSeller.pstate || getDefaultBusinessState(),
       // Pull seller's denormalised fields onto the lot row so existing
       // listings (Lots tab, exports) work without a join.
@@ -13326,6 +13445,15 @@ async function leSaveLot(){
     document.getElementById('le-sample').value = _le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000';
     const moistureEl = document.getElementById('le-moisture');
     if (moistureEl) moistureEl.value = '';
+    // Crop Receipt auto-increment — only on a fresh save (not edit),
+    // and only when the previous value parses as a digit-tail string
+    // ("01208" → "01209", "CR9" → "CR10"). Anything else clears so
+    // the operator types a fresh starting value next.
+    const crptEl = document.getElementById('le-crpt');
+    if (crptEl && !wasEditing) crptEl.value = _leIncrementCrpt(crptRaw);
+    // Reserved Price clears every save — user types per lot, no chain.
+    const reservedEl = document.getElementById('le-reserved-price');
+    if (reservedEl && !wasEditing) reservedEl.value = '';
     setTimeout(() => document.getElementById('le-lotno').focus(), 50);
     await loadLeRecent();
     // After a successful create (not edit), auto-suggest the next lot
@@ -13351,6 +13479,13 @@ function leResetForm(){
   document.getElementById('le-sample').value = _le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000';
   const moistureEl = document.getElementById('le-moisture');
   if (moistureEl) moistureEl.value = '';
+  // Hard clear — both Crop Receipt + Reserved Price blanked. The
+  // auto-increment chain restarts on the next save when the operator
+  // types a fresh starting value.
+  const crptEl = document.getElementById('le-crpt');
+  if (crptEl) crptEl.value = '';
+  const reservedEl = document.getElementById('le-reserved-price');
+  if (reservedEl) reservedEl.value = '';
   document.getElementById('le-err').style.display = 'none';
   // Drop edit mode if active
   _le.editingLotId = null;
@@ -13397,6 +13532,17 @@ async function leEditLot(lotId){
   document.getElementById('le-sample').value = lot.sample_wt ?? (_le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000');
   const moistureEl = document.getElementById('le-moisture');
   if (moistureEl) moistureEl.value = lot.moisture || '';
+  // Populate Crop Receipt + Reserved Price from the existing lot so
+  // the operator can correct typos mid-edit. Reserved Price of 0/null
+  // is rendered as blank to avoid the placeholder "0" sticking around
+  // and getting saved back on next Save.
+  const crptEl = document.getElementById('le-crpt');
+  if (crptEl) crptEl.value = lot.crpt || '';
+  const reservedEl = document.getElementById('le-reserved-price');
+  if (reservedEl) {
+    const rp = Number(lot.reserved_price);
+    reservedEl.value = (Number.isFinite(rp) && rp !== 0) ? rp : '';
+  }
   leCalcGross();
   // Branch may differ from the toolbar — pre-fill so the user sees what
   // this lot's branch is. Don't overwrite the toolbar branch input

@@ -2332,9 +2332,14 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
 
 app.post('/api/lots', requireLotWrite, (req, res) => {
   const l = req.body;
-  getDb().run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',l.branch||'',l.state||'TAMIL NADU',l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
+  // reserved_price is persisted unconditionally — server doesn't gate
+  // on flag_reserved_price because flipping the flag later mustn't
+  // wipe values that the operator already entered. UI hides the input
+  // when the flag is off so 0 is what flows in by default.
+  const reservedPrice = Number(l.reserved_price);
+  getDb().run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',l.state||'TAMIL NADU',l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
   res.json({ success: true });
 });
 
@@ -6365,9 +6370,19 @@ app.get('/api/reports/summary-pdf/:id', (req, res, next) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'Invalid auction id' });
   try {
-    const pdf = await generateTradeSummaryPDF(getDb(), id, req.query.branch || '');
+    const db = getDb();
+    const pdf = await generateTradeSummaryPDF(db, id, req.query.branch || '');
+    // Filename noun follows business_mode (matches the PDF title +
+    // on-screen card) — read the setting inline rather than exporting
+    // reports.js's private helper.
+    let nounMode = 'e-Auction';
+    try {
+      const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode'`);
+      if (r && r.value) nounMode = String(r.value);
+    } catch (_) {}
+    const noun = (nounMode === 'e-Trade') ? 'Trade' : 'Auction';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="TradeSummary_${id}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="${noun}Summary_${id}.pdf"`);
     res.send(pdf);
   } catch (e) {
     if (e && e.status === 404) return res.status(404).json({ error: e.message });

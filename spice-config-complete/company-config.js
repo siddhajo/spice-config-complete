@@ -143,6 +143,12 @@ const DEFAULTS = [
   { key: 'flag_round',      value: 'true',           category: 'flags',     label: 'Round Invoice Amounts',    type: 'boolean' },
   { key: 'flag_eway',       value: 'false',          category: 'flags',     label: 'ASP eWay Bill / Transport', type: 'boolean' },
   { key: 'flag_export',     value: 'false',          category: 'flags',     label: 'Export Invoices',          type: 'boolean' },
+  // e-Auction-only fields. Both gated by business_mode === 'e-Auction'
+  // on top of the flag, so flipping the mode away from e-Auction
+  // automatically hides them regardless of the flag value. Default OFF
+  // so a fresh install matches the pre-feature behaviour.
+  { key: 'flag_crop_receipt',  value: 'false',       category: 'flags',     label: 'Crop Receipt (e-Auction)',   type: 'boolean' },
+  { key: 'flag_reserved_price',value: 'false',       category: 'flags',     label: 'Reserved Price (e-Auction)', type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
   // Single-mode e-Auction build. Default flipped from 'e-Trade' to 'e-Auction'

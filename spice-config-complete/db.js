@@ -379,6 +379,7 @@ async function initDb() {
     gross_wt REAL DEFAULT 0,
     sample_wt REAL DEFAULT 0,
     moisture TEXT DEFAULT '',
+    reserved_price REAL DEFAULT 0,
     price REAL DEFAULT 0,
     amount REAL DEFAULT 0,
     code TEXT DEFAULT '',
@@ -740,6 +741,13 @@ async function initDb() {
     "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",
     "ALTER TABLE invoices ADD COLUMN addl_name TEXT DEFAULT ''",
     "ALTER TABLE invoices ADD COLUMN lorry_no TEXT",
+    // e-Auction Reserved Price — bid floor per lot, typed by the
+    // operator at entry time. Persisted regardless of the
+    // flag_reserved_price toggle (so flipping the flag later doesn't
+    // lose values), but the UI hides the input when the flag is off.
+    // Feeds the Spices Board e-Auction CSV's reserved-price column on
+    // export. Stored as REAL — value is in rupees per kg.
+    'ALTER TABLE lots ADD COLUMN reserved_price REAL DEFAULT 0',
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }

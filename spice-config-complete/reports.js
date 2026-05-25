@@ -50,6 +50,21 @@ function _isUsernameShown(db) {
   }
 }
 
+// Returns the noun for an "auction event" based on company_settings.
+// e-Trade mode → "Trade(s)"; e-Auction mode (default) → "Auction(s)".
+// Mirrors the client-side termAuction() helper so the PDF speaks the
+// same language as the UI that triggered it.
+function _termAuction(db, plural) {
+  let mode = 'e-Auction';
+  try {
+    const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode'`);
+    if (r && r.value) mode = String(r.value);
+  } catch (_) {}
+  const isTrade = (mode === 'e-Trade');
+  if (isTrade)  return plural ? 'Trades'   : 'Trade';
+  return            plural ? 'Auctions' : 'Auction';
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Trade Summary — per-auction multi-dimensional rollup
 // ─────────────────────────────────────────────────────────────────────
@@ -381,8 +396,11 @@ async function generateTradeSummaryPDF(db, auctionId, branchFilter) {
     const mm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
     return mm ? `${mm[3]}/${mm[2]}/${mm[1]}` : s;
   };
+  // Noun ("Trade" vs "Auction") follows business_mode so the PDF
+  // matches the on-screen card the operator just clicked through.
+  const aucWord = _termAuction(db, false);
   const metaLines = [
-    `Trade #${a.ano}`,
+    `${aucWord} #${a.ano}`,
     `Date: ${fmtDate(a.date)}`,
   ];
   if (a.crop_type) metaLines.push(`Crop: ${a.crop_type}`);
@@ -390,7 +408,7 @@ async function generateTradeSummaryPDF(db, auctionId, branchFilter) {
 
   y = drawCompanyHeader(doc, companyHeader || {}, {
     x: m, y: m, width: usableW,
-    title: 'Trade Summary',
+    title: `${aucWord} Summary`,
     metaLines,
   });
 
