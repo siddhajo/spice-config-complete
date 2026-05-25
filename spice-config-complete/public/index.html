@@ -1505,7 +1505,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 })();
 </script>
 </head>
-<body>
+<body data-feat-bills="1" data-feat-debit-notes="1" data-feat-price-list-mapping="1" data-feat-price-check="1">
 <div id="login">
   <div class="login-box">
     <h1><span class="dot"></span> Spice Config</h1>
@@ -12333,7 +12333,19 @@ function renderLeRecent(){
   // page; the footer below shows Prev / page indicator / Next.
   const sortMode  = leGetSortMode();
   const sortDir   = leGetSortDir();
-  const visible   = leSortRecent(_le.recentLots, sortMode, sortDir);
+  let visible     = leSortRecent(_le.recentLots, sortMode, sortDir);
+  // Ticked rows always float to the top, preserving the user's chosen
+  // sort within each bucket (Array.sort is stable on modern engines).
+  // Driven by selectedForPrint so per-row clicks and bulk "Tick" both
+  // contribute. No-op when nothing is ticked.
+  if (_le.selectedForPrint && _le.selectedForPrint.size) {
+    const ticked = _le.selectedForPrint;
+    visible = visible.slice().sort((a, b) => {
+      const ta = ticked.has(a.id) ? 0 : 1;
+      const tb = ticked.has(b.id) ? 0 : 1;
+      return ta - tb;
+    });
+  }
   // Direction arrow + per-header style helper. Active column shows in
   // the primary theme color so the field user can see at a glance how
   // the list is currently ordered.
@@ -12908,14 +12920,10 @@ function leToggleLotSelected(lotId, on) {
   if (!_le.selectedForPrint) _le.selectedForPrint = new Set();
   if (on) _le.selectedForPrint.add(lotId);
   else    _le.selectedForPrint.delete(lotId);
-  // Sync header master checkbox state without re-rendering everything.
-  const all = document.getElementById('le-recent-select-all');
-  if (all) {
-    const total = _le.recentLots.length;
-    const inWindow = _le.recentLots.filter(l => _le.selectedForPrint.has(l.id)).length;
-    all.checked = inWindow > 0 && inWindow === total;
-    all.indeterminate = inWindow > 0 && inWindow < total;
-  }
+  // Re-render so the row visibly jumps to / from the top via the
+  // ticked-first sort in renderLeRecent. Header master + print toolbar
+  // are reset by the render itself.
+  renderLeRecent();
   leUpdatePrintToolbar();
 }
 
@@ -12936,35 +12944,6 @@ function leClearPrintSelection() {
   const all = document.getElementById('le-recent-select-all');
   if (all) { all.checked = false; all.indeterminate = false; }
   leUpdatePrintToolbar();
-}
-
-// Expand a raw "tick lots" input into individual lot-no tokens.
-// Accepted shapes:
-//   • single numbers     →  "12"
-//   • comma / space /    →  "12, 13 15;17\n19"
-//     semicolon / newline
-//   • numeric ranges     →  "5-10"  →  ["5","6","7","8","9","10"]
-//     (both ends inclusive; reversed ranges like "10-5" also work)
-// Non-numeric tokens (legacy "A12", "B-7", etc.) are preserved
-// verbatim — the range expander only fires when BOTH sides of the
-// hyphen are pure digits, so alphanumeric lot codes aren't mangled.
-// Ranges wider than 10,000 entries are clamped to bound memory.
-function _expandLotNoTokens(raw) {
-  const out = [];
-  const segments = String(raw || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
-  for (const seg of segments) {
-    const m = /^(\d+)-(\d+)$/.exec(seg);
-    if (m) {
-      let a = parseInt(m[1], 10);
-      let b = parseInt(m[2], 10);
-      if (a > b) { const t = a; a = b; b = t; }
-      const span = Math.min(b - a + 1, 10000);
-      for (let i = 0; i < span; i++) out.push(String(a + i));
-    } else {
-      out.push(seg);
-    }
-  }
-  return out;
 }
 
 // Bulk-tick by lot number — parses the input field, resolves each
@@ -13046,20 +13025,10 @@ async function leApplyPickLots() {
 
   for (const id of matched) _le.selectedForPrint.add(id);
 
-  // Re-tick the checkboxes for any matches in the current view.
-  document.querySelectorAll('.le-recent-cb').forEach(cb => {
-    const id = Number(cb.dataset.lotId);
-    if (_le.selectedForPrint.has(id)) cb.checked = true;
-  });
-  // Keep the header master in sync with the visible state.
-  const all = document.getElementById('le-recent-select-all');
-  if (all) {
-    const total = _le.recentLots.length;
-    const inWindow = _le.recentLots.filter(l => _le.selectedForPrint.has(l.id)).length;
-    all.checked = inWindow > 0 && inWindow === total;
-    all.indeterminate = inWindow > 0 && inWindow < total;
-  }
-  leUpdatePrintToolbar();
+  // Re-render so newly-ticked rows visibly jump to the top via the
+  // ticked-first sort in renderLeRecent. The render also re-ticks the
+  // visible row checkboxes and syncs the header master + print toolbar.
+  renderLeRecent();
 
   // Clear the input on success so the next paste starts fresh.
   if (matched.size) input.value = '';
