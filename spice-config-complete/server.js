@@ -4409,12 +4409,26 @@ app.put('/api/bills/:id', requireInvoiceWrite, (req, res) => {
 // DEBIT NOTES (for discounts/adjustments)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/debit-notes', requireView, (req, res) => {
-  const { auction_id, ano, from, to } = req.query;
+  const { auction_id, ano, from, to, search } = req.query;
   const db = getDb();
   let q = 'SELECT * FROM debit_notes WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  // Free-text search across note no, seller name, and trade no (ano).
+  // Cross-trade — the client drops the auction filter when search is
+  // non-empty so dad can find a stray note from another trade by
+  // typing the dealer name.
+  const searchTerm = String(search || '').trim();
+  if (searchTerm) {
+    const wild = `%${searchTerm}%`;
+    q += ` AND (
+            COALESCE(note_no,'') LIKE ?
+            OR COALESCE(name,'')    LIKE ?
+            OR COALESCE(ano,'')     LIKE ?
+          )`;
+    p.push(wild, wild, wild);
+  }
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=debit_notes.auction_id)');
   q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC, note_no DESC LIMIT 500';
@@ -4451,6 +4465,22 @@ app.post('/api/debit-notes/generate', requireInvoiceWrite, (req, res) => {
 app.delete('/api/debit-notes/:id', requireDelete, (req, res) => {
   getDb().run('DELETE FROM debit_notes WHERE id = ?', [req.params.id]);
   res.json({ success: true });
+});
+
+// ── BULK DELETE — selected debit notes ──
+// Body: { ids: [1,2,3] }. Single round-trip replacement for the trade-
+// wide Delete All. Returns the number of rows actually deleted.
+app.post('/api/debit-notes/bulk-delete', requireDelete, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid debit note IDs' });
+  const db = getDb();
+  const placeholders = cleanIds.map(() => '?').join(',');
+  const r = db.run(`DELETE FROM debit_notes WHERE id IN (${placeholders})`, cleanIds);
+  res.json({ ok: true, deleted: r.changes });
 });
 
 // Update debit note (edit)

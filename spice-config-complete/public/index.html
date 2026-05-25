@@ -2574,11 +2574,67 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <div class="tc" id="tc-debit">
       <div class="card">
         <h2>Debit Notes <span style="font-weight:400;font-size:12px;color:var(--text3)">For discounts/adjustments on sales invoices</span></h2>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <button class="btn btn-g" onclick="showModal('gen-debit-modal')">Generate Debit Note</button>
-          <button class="needs-delete-all btn" style="background:#c0392b;color:#fff;margin-left:auto" onclick="deleteAll('debit-notes','Debit Notes')">Delete All</button>
+
+        <!-- KPI strip — hidden until first data load. Wrapped at startup
+             by initSummaryPanels into a collapsible Summary card with a
+             one-line stats summary in the header. -->
+        <div id="dn-kpis" class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;display:none">
+          <div class="kpi cardamom">
+            <div class="kpi-label">Debit Notes</div>
+            <div class="kpi-value" id="dn-kpi-count">0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Taxable Amount</div>
+            <div class="kpi-value" id="dn-kpi-amount" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+          </div>
+          <div class="kpi turmeric">
+            <div class="kpi-label">Total Tax</div>
+            <div class="kpi-value" id="dn-kpi-tax" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+          </div>
+          <div class="kpi chili">
+            <div class="kpi-label">Grand Total</div>
+            <div class="kpi-value" id="dn-kpi-total" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+          </div>
         </div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Note#</th><th>Date</th><th><span data-term-auction="singular">Auction</span></th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debit-list"></tbody></table></div>
+
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+          <!-- Trade filter — restricts the list to notes for the picked
+               trade. Empty = show all trades (default). Filtering is
+               server-side via /api/debit-notes?ano=. -->
+          <select id="dn-auction" onchange="loadDebitNotes()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px" title="Filter by trade">
+            <option value="">All <span data-term-auction="plural">auctions</span></option>
+          </select>
+
+          <!-- Cross-trade search across note no, seller name, trade no.
+               When active, the trade filter is bypassed so cross-trade
+               lookups work. Debounced 200ms. -->
+          <input type="search" id="dn-search" placeholder="Search note no, seller, trade…" oninput="searchDebitNotesDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
+            <button class="needs-invoice-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-debit-modal')">+ Generate Debit Note</button>
+          </div>
+
+          <!-- Bulk actions group — Delete Selected. Hidden until ≥1 row
+               is ticked; visibility driven by _updateDnBulkToolbar()
+               called from syncDnMaster + on each checkbox change. -->
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
+            <button id="dn-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedDebitNotes()" title="Delete all ticked debit notes">🗑 Delete Selected <span id="dn-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Note#</th><th>Date</th><th><span data-term-auction="singular">Auction</span></th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debit-list"></tbody></table></div>
       </div>
     </div>
 
@@ -4114,6 +4170,7 @@ const SUMMARY_PANELS = [
   { kpiId:'pur-kpis',  chartId:null,                  key:'purchases', label:'Summary' },
   { kpiId:'pay-kpis',  chartId:'pay-chart-card',      key:'payments',  label:'Summary' },
   { kpiId:'bill-kpis', chartId:null,                  key:'bills',     label:'Summary' },
+  { kpiId:'dn-kpis',   chartId:null,                  key:'debit',     label:'Summary' },
 ];
 
 function summaryStorageKey(key){ return 'summary:' + key; }
@@ -10575,10 +10632,75 @@ async function viewBillPDF(auctionId,sellerName,billNo){
 async function delBill(id){if(!confirm('Delete bill?'))return;await j(`/api/bills/${id}`,{method:'DELETE'});loadBills()}
 
 // ── Debit Notes ────────────────────────────────────────────
-async function loadDebitNotes(){
-  const d=await j('/api/debit-notes');
-  DataTable.mount('debit-list', d, {
+// Populate the trade filter dropdown for the Debit Notes tab. Pulls
+// from /api/auctions and pre-pends an "All trades" option. Cached
+// across tab opens — we only need to re-fetch when the auction list
+// itself changes (handled by other code paths that reload trades).
+async function _populateDnAuctionFilter(){
+  const sel = document.getElementById('dn-auction');
+  if (!sel) return;
+  // Skip if already populated (idempotent — keeps the user's current selection).
+  if (sel.options.length > 1) return;
+  try {
+    const list = await j('/api/auctions');
+    const allTerm = (typeof termAuction === 'function') ? termAuction(true, true) : 'auctions';
+    sel.innerHTML = `<option value="">All ${esc(allTerm)}</option>` +
+      (list || []).map(a => {
+        const mt = a.mode ? ` [${a.mode}]` : '';
+        return `<option value="${a.ano}">${esc(a.ano)} — ${fmtD(a.date)}${mt}</option>`;
+      }).join('');
+  } catch (e) { /* non-fatal — filter just won't populate */ }
+}
+
+async function loadDebitNotes(opts){
+  // First call populates the trade filter; subsequent calls reuse it.
+  _populateDnAuctionFilter();
+
+  const ano    = (document.getElementById('dn-auction')?.value || '').trim();
+  const search = (document.getElementById('dn-search')?.value || '').trim();
+  // Build URL — when search is active, drop the ano filter so the
+  // search spans every trade. Mode + business-state filters still
+  // apply via the server's modeWhereClause.
+  const qs = [];
+  if (ano && !search) qs.push(`ano=${encodeURIComponent(ano)}`);
+  if (search)         qs.push(`search=${encodeURIComponent(search)}`);
+  const url = qs.length ? `/api/debit-notes?${qs.join('&')}` : '/api/debit-notes';
+
+  const d = await j(url);
+  const arr = Array.isArray(d) ? d : [];
+
+  // ── Update KPI strip ───────────────────────────────────────────
+  // Count + Taxable Amount + Total Tax (CGST+SGST+IGST) + Grand Total.
+  // Hidden when empty; reveals when at least one note is present.
+  const kpiStrip = document.getElementById('dn-kpis');
+  if (kpiStrip) {
+    if (!arr.length) {
+      kpiStrip.style.display = 'none';
+      if (typeof hideSummaryPanel === 'function') hideSummaryPanel('debit');
+    } else {
+      kpiStrip.style.display = 'grid';
+      const totalAmount = arr.reduce((a,n) => a + (Number(n.amount) || 0), 0);
+      const totalTax    = arr.reduce((a,n) => a + (Number(n.cgst) || 0) + (Number(n.sgst) || 0) + (Number(n.igst) || 0), 0);
+      const grandTotal  = arr.reduce((a,n) => a + (Number(n.total) || 0), 0);
+      const $ = (id) => document.getElementById(id);
+      if ($('dn-kpi-count'))  $('dn-kpi-count').textContent  = arr.length;
+      if ($('dn-kpi-amount')) $('dn-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
+      if ($('dn-kpi-tax'))    $('dn-kpi-tax').innerHTML      = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalTax, 0)}`;
+      if ($('dn-kpi-total'))  $('dn-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 0)}`;
+      if (typeof updateSummaryStats === 'function') {
+        updateSummaryStats('debit',
+          `<strong>${arr.length}</strong> debit note${arr.length === 1 ? '' : 's'} · `
+          + `<strong>₹${fmtI(grandTotal, 0)}</strong> total`);
+      }
+    }
+  }
+
+  DataTable.mount('debit-list', arr, {
     columns: [
+      { key:'_select', label:'',
+        labelHTML:'<input type="checkbox" id="dn-select-all" onclick="event.stopPropagation();toggleAllDn(this.checked)" title="Select / clear all visible" style="cursor:pointer;width:16px;height:16px;vertical-align:middle;accent-color:var(--green)">',
+        sortable:false, searchable:false,
+        render:(n)=>`<input type="checkbox" class="dn-select-cb" value="${n.id}" onclick="event.stopPropagation()" style="cursor:pointer">` },
       { key:'note_no', label:'Note#', sort:'text' },
       { key:'date', label:'Date', sort:'date', render:(n)=>fmtD(n.date) },
       { key:'ano', label:'Auction', sort:'text', render:(n)=>n.ano?('#'+esc(n.ano)):'—' },
@@ -10595,6 +10717,7 @@ async function loadDebitNotes(){
           + iconBtn('del','Delete debit note',`delDebitNote(${n.id})`) }
     ]
   });
+  syncDnMaster();
 }
 
 function openDebitEdit(n){
@@ -10635,6 +10758,93 @@ async function generateDebitNote(){
     loadDebitNotes();
   }catch(e){showError(e)}}
 async function delDebitNote(id){if(!confirm('Delete debit note?'))return;await j(`/api/debit-notes/${id}`,{method:'DELETE'});loadDebitNotes()}
+
+// ── Debit note bulk selection + cross-trade search ──────────
+// Master "select all visible" — mirrors the pattern used by Sales
+// Invoices and Purchases. Only ticks rows whose <tr> is currently
+// visible (so an active table search inside DataTable doesn't grab
+// hidden rows).
+function toggleAllDn(state){
+  const body=document.getElementById('debit-list');
+  if(!body)return;
+  body.querySelectorAll('.dn-select-cb').forEach(cb=>{
+    const row=cb.closest('tr');
+    if(row && row.style.display !== 'none') cb.checked=state;
+  });
+  syncDnMaster();
+}
+function syncDnMaster(){
+  const master=document.getElementById('dn-select-all');
+  const body=document.getElementById('debit-list');
+  if(!body){
+    if(master){master.checked=false;master.indeterminate=false}
+    _updateDnBulkToolbar(0);
+    return;
+  }
+  const visible=Array.from(body.querySelectorAll('.dn-select-cb')).filter(cb=>{
+    const row=cb.closest('tr');return row && row.style.display !== 'none';
+  });
+  const ticked=visible.filter(cb=>cb.checked).length;
+  if(master){
+    master.indeterminate = ticked>0 && ticked<visible.length;
+    master.checked       = visible.length>0 && ticked===visible.length;
+  }
+  _updateDnBulkToolbar(ticked);
+}
+// Show/hide the Delete Selected pill based on ticked count. Mirrors
+// the invoices + purchases pattern. `_bulkBtnSetVisible` handles the
+// `.needs-delete` permission CSS that uses !important on display.
+function _updateDnBulkToolbar(ticked){
+  const del = document.getElementById('dn-bulk-del');
+  const counter = document.getElementById('dn-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(del, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
+}
+// Delegate: per-row checkbox changes sync the master + bulk toolbar.
+document.addEventListener('change', (e)=>{
+  if(e.target && e.target.classList && e.target.classList.contains('dn-select-cb')){
+    syncDnMaster();
+  }
+});
+
+// Debit notes search debouncer — 200ms after the last keystroke.
+let _dnSearchTimer = null;
+function searchDebitNotesDebounced(_q){
+  clearTimeout(_dnSearchTimer);
+  _dnSearchTimer = setTimeout(() => loadDebitNotes(), 200);
+}
+
+// Bulk-delete ticked debit notes. Two-click confirm via confirmTwoClick
+// when available, plain confirm() otherwise. Server endpoint frees no
+// dependent rows (unlike sales invoices) since debit notes are pure
+// adjustment records.
+async function deleteSelectedDebitNotes(){
+  const body = document.getElementById('debit-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.dn-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more debit notes first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  const btn = document.getElementById('dn-bulk-del');
+  const proceed = (typeof confirmTwoClick === 'function')
+    ? await confirmTwoClick('dnBulkDelete', btn, {
+        confirmLabel: `⚠ Click again to DELETE ${ids.length} debit note${ids.length === 1 ? '' : 's'}`,
+        fallbackMessage: `Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
+      })
+    : confirm(`Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
+  if (!proceed) return;
+  try {
+    const r = await j('/api/debit-notes/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    const n = r.deleted || 0;
+    toast(`Deleted ${n} debit note${n === 1 ? '' : 's'}`);
+    loadDebitNotes();
+  } catch (e) { showError(e); }
+}
 
 // ── Journals ───────────────────────────────────────────────
 function loadJournalDefault(){
