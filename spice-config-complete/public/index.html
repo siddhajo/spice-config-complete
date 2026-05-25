@@ -2164,9 +2164,25 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </div>
         </div>
 
-        <!-- ── Action toolbar — grouped: Auction selector / Create / Print / Manage ── -->
+        <!-- ── Action toolbar — grouped: Auction / Search / Filter / Create / Print / Bulk / Manage ── -->
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
           <select id="inv-auction" onchange="loadInvoices();loadInvEligibleBuyers()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px"></select>
+
+          <!-- Cross-trade search across pages. Matches invoice no, buyer
+               name, GSTIN, place and lorry no for the selected auction
+               (or every auction when none is picked). Server-side LIKE,
+               debounced 200ms. -->
+          <input type="search" id="inv-search" placeholder="Search invoice no, buyer, GSTIN, lorry…" oninput="searchInvoicesDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <!-- Sale-type filter (L/I/E). Filters visible invoices to
+               local / inter-state / export only. Server-side via
+               `/api/invoices?saleType=`. Empty option = no filter. -->
+          <select id="inv-sale-filter" onchange="loadInvoices()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px" title="Filter by sale type">
+            <option value="">All sale types</option>
+            <option value="L">Local (L)</option>
+            <option value="I">Inter-state (I)</option>
+            <option value="E">Export (E)</option>
+          </select>
 
           <!-- Create group -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
@@ -2182,14 +2198,24 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <button id="btn-print-asp-purchase" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="printSelectedPurchaseFromInvoices()" title="Print purchase-side mirror PDF for all ticked invoices (ASP context only)">🖨 Print Selected Purchase</button>
           </div>
 
-          <!-- Destructive group — pushed right -->
+          <!-- Bulk actions group — Delete Selected + Set Lorry No. Both
+               hidden until ≥1 row is ticked; visibility driven by
+               _updateInvBulkToolbar() called from syncInvoiceMaster +
+               on each individual checkbox change. -->
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
+            <button id="inv-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedInvoices()" title="Delete all ticked invoices">🗑 Delete Selected <span id="inv-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="inv-bulk-lorry" class="needs-invoice-write btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="setLorryNoForSelected()" title="Set the lorry / vehicle number on ticked invoices (used by Tally sales voucher e-way bill)">🚚 Set Lorry No</button>
+          </div>
+
+          <!-- Destructive group — pushed right. Delete All removed in
+               favour of Delete Selected above; Revert All kept as the
+               "nuclear reset" for re-invoicing every row in the trade. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
             <button class="needs-invoice-revert btn" style="height:38px;padding:0 14px;background:var(--spice-turmeric);color:#fff;font-weight:600" onclick="revertAllInvoices()" title="Revert all invoices — deletes them and re-enables lots for re-invoicing">⟲ Revert All</button>
-            <button class="needs-delete-all btn" style="height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteAll('invoices','Invoices')" title="Permanently delete all invoices">🗑 Delete All</button>
           </div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Sale</th><th>Inv#</th><th>ASP Inv#</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="invoices-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Sale</th><th>Inv#</th><th>Lorry</th><th>ASP Inv#</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="invoices-list"></tbody></table></div>
         <div id="invoices-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -9353,7 +9379,18 @@ function gotoInvoicesPage(p){
 async function loadInvoices(opts){
   if (!opts || !opts.keepPage) _invoicesPager.page = 1;
   const aid=document.getElementById('inv-auction')?.value;
-  const url=aid?`/api/invoices?auction_id=${aid}`:'/api/invoices';
+  const search   = (document.getElementById('inv-search')?.value || '').trim();
+  const saleType = (document.getElementById('inv-sale-filter')?.value || '').trim();
+  // Build the URL with auction + search + saleType params. Search bypasses
+  // the auction filter so cross-trade lookups work — the server only
+  // applies auction_id when no search is active OR the user explicitly
+  // ticks "search within this trade" (not implemented yet; for now,
+  // search always overrides auction_id when present).
+  const qs = [];
+  if (aid && !search) qs.push(`auction_id=${encodeURIComponent(aid)}`);
+  if (search)         qs.push(`search=${encodeURIComponent(search)}`);
+  if (saleType)       qs.push(`saleType=${encodeURIComponent(saleType)}`);
+  const url = qs.length ? `/api/invoices?${qs.join('&')}` : '/api/invoices';
   const d=await j(url);
   // Invoice count badge
   const badge=document.getElementById('inv-count-badge');
@@ -9418,6 +9455,14 @@ async function loadInvoices(opts){
       { key:'invo', label:'Inv#', sort:'text',
         // Bold + dark green to make the primary identifier pop in a wide row
         render:(i)=>`<strong style="color:var(--spice-cardamom-dk);font-weight:700">${esc(i.invo)}</strong>` },
+      // Lorry / vehicle no — populated via bulk Set Lorry No. Empty rows
+      // show a muted em-dash so the column doesn't read as a layout bug.
+      // Monospace because plate numbers (TN66H1234) read better in a
+      // mono face when scanning down the column.
+      { key:'lorry_no', label:'Lorry', sort:'text',
+        render:(i)=> i.lorry_no
+          ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.lorry_no)}</span>`
+          : '<span style="color:var(--text3)">—</span>' },
       { key:'asp_invo', label:'ASP Inv#', sort:'text',
         // Empty string for ASP rows (state=Kerala) so the column shows
         // only on ISP rows where the ASP→ISP cross-reference is meaningful.
@@ -9701,15 +9746,39 @@ function toggleAllInvoices(state){
 //  - partial             → indeterminate (dash-style UI)
 function syncInvoiceMaster(){
   const master=document.getElementById('inv-select-all');
-  if(!master)return;
   const body=document.getElementById('invoices-list');
-  if(!body){master.checked=false;master.indeterminate=false;return}
+  if(!body){
+    if(master){master.checked=false;master.indeterminate=false}
+    _updateInvBulkToolbar(0);
+    return;
+  }
   const visible=Array.from(body.querySelectorAll('.inv-select-cb')).filter(cb=>{
     const row=cb.closest('tr');return row && row.style.display !== 'none';
   });
   const ticked=visible.filter(cb=>cb.checked).length;
-  master.indeterminate = ticked>0 && ticked<visible.length;
-  master.checked       = visible.length>0 && ticked===visible.length;
+  if(master){
+    master.indeterminate = ticked>0 && ticked<visible.length;
+    master.checked       = visible.length>0 && ticked===visible.length;
+  }
+  _updateInvBulkToolbar(ticked);
+}
+// Show/hide the Delete Selected + Set Lorry No pills based on ticked
+// row count. Permission CSS uses `!important` on display, so toggling
+// inline `style.display` directly is a no-op — we go through
+// _bulkBtnSetVisible when available (matches the lots-tab pattern).
+function _updateInvBulkToolbar(ticked){
+  const del   = document.getElementById('inv-bulk-del');
+  const lorry = document.getElementById('inv-bulk-lorry');
+  const counter = document.getElementById('inv-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(del,   ticked > 0);
+  show(lorry, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
 }
 // Delegate: any click on a row checkbox updates the master's indeterminate state
 document.addEventListener('change', (e)=>{
@@ -9717,6 +9786,78 @@ document.addEventListener('change', (e)=>{
     syncInvoiceMaster();
   }
 });
+
+// Cross-trade search debouncer. Each keystroke delays a loadInvoices()
+// reload by 200ms; loadInvoices reads the input live and appends
+// search=… to the API URL, which the server uses to LIKE across
+// invoice no / buyer / GSTIN / place / lorry_no.
+let _invSearchTimer = null;
+function searchInvoicesDebounced(_q){
+  clearTimeout(_invSearchTimer);
+  _invSearchTimer = setTimeout(() => loadInvoices(), 200);
+}
+
+// Delete Selected — bulk-delete ticked invoices via the bulk endpoint
+// (frees their lots so they can be re-invoiced). Two-click confirm via
+// confirmTwoClick when available, plain confirm() otherwise so the
+// flow works on builds without the helper.
+async function deleteSelectedInvoices(){
+  const body = document.getElementById('invoices-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.inv-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more invoices first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  const btn = document.getElementById('inv-bulk-del');
+  const proceed = (typeof confirmTwoClick === 'function')
+    ? await confirmTwoClick('invBulkDelete', btn, {
+        confirmLabel: `⚠ Click again to DELETE ${ids.length} invoice${ids.length === 1 ? '' : 's'}`,
+        fallbackMessage: `Delete ${ids.length} invoice${ids.length === 1 ? '' : 's'}? Lots will be freed for re-invoicing. This cannot be undone.`,
+      })
+    : confirm(`Delete ${ids.length} invoice${ids.length === 1 ? '' : 's'}? Lots will be freed for re-invoicing. This cannot be undone.`);
+  if (!proceed) return;
+  try {
+    const r = await j('/api/invoices/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    const n = r.deleted || 0;
+    const freed = r.lotsFreed || 0;
+    toast(`Deleted ${n} invoice${n === 1 ? '' : 's'} · ${freed} lot${freed === 1 ? '' : 's'} freed`);
+    loadInvoices({ keepPage: true });
+    if (typeof loadInvEligibleBuyers === 'function') loadInvEligibleBuyers();
+  } catch (e) { showError(e); }
+}
+
+// Set Lorry No — prompt once for a vehicle number, apply to every
+// ticked invoice. Server normalises to UPPERCASE / no-spaces; empty
+// input clears the field. Used by the Tally sales voucher generator
+// as the e-way bill VehicleNo.
+async function setLorryNoForSelected(){
+  const body = document.getElementById('invoices-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.inv-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more invoices first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  // Suggest the lorry no of the FIRST ticked invoice if it already has
+  // one — common case is the user wants to apply the same plate to a
+  // batch (and only needs to type it once on the first invoice).
+  const first = checked[0]?.closest('tr')?.querySelector('td:nth-child(4)')?.textContent || '';
+  const prefill = first.trim() && first.trim() !== '—' ? first.trim() : '';
+  const v = prompt(
+    `Enter lorry / vehicle number for ${ids.length} invoice${ids.length === 1 ? '' : 's'}.\n\nLeave BLANK to clear.\n\nExamples: TN66H1234, KL07AB1234`,
+    prefill
+  );
+  if (v === null) return; // user cancelled
+  try {
+    const r = await j('/api/invoices/lorry-no', {
+      method: 'PUT',
+      body: JSON.stringify({ ids, lorry_no: v }),
+    });
+    const n = r.updated || 0;
+    const cleared = !r.lorry_no;
+    toast(cleared
+      ? `Cleared lorry no on ${n} invoice${n === 1 ? '' : 's'}`
+      : `Set lorry "${r.lorry_no}" on ${n} invoice${n === 1 ? '' : 's'}`);
+    loadInvoices({ keepPage: true });
+  } catch (e) { showError(e); }
+}
 
 // Print Selected: POST ticked invoice IDs to the bulk endpoint, which returns
 // a single merged PDF with one invoice per page group. Opens in a new tab.

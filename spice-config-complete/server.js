@@ -3023,7 +3023,7 @@ app.get('/api/lots/validate/:auctionId', requireView, (req, res) => {
 // INVOICES — Sales (GSTIN.PRG / KGSTIN.PRG)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/invoices', requireView, (req, res) => {
-  const { ano, auction_id, from, to } = req.query;
+  const { ano, auction_id, from, to, search, saleType } = req.query;
   const db = getDb();
   const cfg = getSettingsFlat(db);
   // Filter list by active business context: when state=KERALA show only
@@ -3035,6 +3035,21 @@ app.get('/api/invoices', requireView, (req, res) => {
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  // Sale-type filter (L/I/E) — set by the toolbar dropdown. Empty means
+  // "All sale types" so we skip the predicate entirely.
+  if (saleType) {
+    q += ' AND UPPER(sale) = ?';
+    p.push(String(saleType).toUpperCase());
+  }
+  // Free-text search across invoice no, buyer name (both display + short),
+  // GSTIN, place, and lorry no. Active filter bypasses the auction_id
+  // narrowing above (so cross-trade search works) but still honours the
+  // business-state / mode filters below.
+  if (search) {
+    const s = `%${String(search).trim()}%`;
+    q += ` AND (invo LIKE ? OR buyer LIKE ? OR buyer1 LIKE ? OR gstin LIKE ? OR place LIKE ? OR lorry_no LIKE ?)`;
+    p.push(s, s, s, s, s, s);
+  }
   // Match the invoice's stamped state to the current business context.
   // We allow both spellings (TAMIL NADU / Tamil Nadu / TN) just in case.
   if (businessState === 'KERALA') {
@@ -3342,6 +3357,78 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
   }
   
   res.json({ success: true, generated: results.length, results, errors });
+});
+
+// ── LORRY / VEHICLE NUMBER — bulk-set on selected invoices ──
+// Stored on invoices.lorry_no (already in db.js). The Tally sales voucher
+// generator reads this column and emits it as the e-way bill VehicleNo.
+// Body: { ids: [1,2,3], lorry_no: 'TN66H1234' }  (lorry_no '' = clear)
+//
+// CRITICAL: declared BEFORE `app.put('/api/invoices/:id')` because Express
+// matches in declaration order — a generic `:id` route declared first
+// would capture 'lorry-no' as the id and 404 the request.
+app.put('/api/invoices/lorry-no', requireInvoiceWrite, (req, res) => {
+  const { ids, lorry_no } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid invoice IDs' });
+  // Normalise: trim, uppercase, strip spaces. Empty → NULL (clear). We
+  // deliberately DON'T validate format — Indian plates have many regional
+  // variants and rejecting valid ones is worse than accepting a typo.
+  let v = null;
+  if (lorry_no != null && String(lorry_no).trim() !== '') {
+    v = String(lorry_no).trim().toUpperCase().replace(/\s+/g, '');
+    if (v.length > 20) return res.status(400).json({ error: 'Lorry no too long (max 20 chars)' });
+  }
+  try {
+    const db = getDb();
+    const placeholders = cleanIds.map(() => '?').join(',');
+    const r = db.run(
+      `UPDATE invoices SET lorry_no = ? WHERE id IN (${placeholders})`,
+      [v, ...cleanIds]
+    );
+    res.json({ ok: true, updated: r.changes, lorry_no: v });
+  } catch (e) {
+    console.error('[lorry-no] bulk update failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── BULK DELETE — selected invoices ──
+// Body: { ids: [1,2,3] }. Frees the lots tied to each deleted invoice so
+// they can be re-invoiced. Single-round-trip replacement for the
+// per-row Delete All flow which nuked every invoice in the trade.
+app.post('/api/invoices/bulk-delete', requireDelete, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid invoice IDs' });
+  const db = getDb();
+  let deleted = 0;
+  let lotsFreed = 0;
+  for (const id of cleanIds) {
+    const inv = db.get('SELECT * FROM invoices WHERE id=?', [id]);
+    if (!inv) continue;
+    // Clear sale/invo from related lots so they become eligible again.
+    if (inv.auction_id) {
+      const before = db.get(
+        'SELECT COUNT(*) as c FROM lots WHERE auction_id=? AND sale=? AND invo=? AND buyer=?',
+        [inv.auction_id, inv.sale, inv.invo, inv.buyer]
+      ).c;
+      db.run(
+        `UPDATE lots SET sale='', invo='' WHERE auction_id=? AND sale=? AND invo=? AND buyer=?`,
+        [inv.auction_id, inv.sale, inv.invo, inv.buyer]
+      );
+      lotsFreed += before;
+    }
+    db.run('DELETE FROM invoices WHERE id=?', [id]);
+    deleted++;
+  }
+  res.json({ ok: true, deleted, lotsFreed });
 });
 
 // Update invoice fields (edit)
