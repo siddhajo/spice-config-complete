@@ -1682,6 +1682,18 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       <h1><span class="dot"><img id="topbar-logo-img" alt="" onerror="this.remove()"></span> Spice Config</h1>
     </div>
     <div style="display:flex;gap:10px;align-items:center">
+      <!-- Global trade/auction picker — single source of truth used by
+           every tab that has its own auction dropdown. Picking here
+           broadcasts the value into every per-tab selector + reloads
+           the active view. The label text flips between "Trade" and
+           "Auction" via the data-term-auction binding so the wording
+           matches the active business mode. -->
+      <div id="global-aid-wrap" style="display:none;align-items:center;gap:6px">
+        <span style="font-size:10.5px;font-weight:700;letter-spacing:.6px;color:var(--text2);text-transform:uppercase" data-term-auction="singular">Trade</span>
+        <select id="global-aid" onchange="onGlobalAidChange()" title="Pick the active trade — this selection flows into every screen" style="height:34px;padding:0 28px 0 12px;border:1.5px solid var(--green);border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:var(--spice-text-main);min-width:230px;max-width:340px;cursor:pointer">
+          <option value="">— none —</option>
+        </select>
+      </div>
       <span id="sync-indicator" class="sync-pill sync-ok" title="Last successful sync"></span>
       <span id="logo-badge" style="font-size:11px;font-weight:700;color:var(--green);background:var(--green-bg);padding:4px 10px;border-radius:12px;border:1px solid var(--green-border);display:none" title="Active company for invoices & calculations"></span>
       <span id="user-lbl" class="topbar-user"></span>
@@ -5130,6 +5142,10 @@ async function login(){
   applyPermissionAttributes();
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
   loadSettings();  // fire-and-forget: populates _sdata so mode-aware UI works across all tabs
+  // Populate the topbar's global trade/auction picker once on login.
+  // Subsequent refreshes happen via loadAuctions (create/delete trade) and
+  // on every tab open via fillAucSelect, but this is the first paint.
+  if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
   // lot_entry users land directly on the Lot Entry tab — every other
   // sidebar item is hidden by role-scoped CSS, so dashboard would
   // give them an empty room.
@@ -5142,6 +5158,10 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   for (const attr of Array.from(document.body.attributes)) {
     if (attr.name.startsWith('data-perm-')) document.body.removeAttribute(attr.name);
   }
+  // Hide the global picker so the next login starts clean. We keep the
+  // localStorage value so re-login on the same browser pre-selects the
+  // last-active trade.
+  const gw = document.getElementById('global-aid-wrap'); if (gw) gw.style.display = 'none';
   document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
 // On page load, restore the auth token from localStorage and verify it
 // against /api/me. Critical: T must be assigned BEFORE the /api/me call
@@ -5156,6 +5176,9 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   document.getElementById('login').style.display='none';
   document.getElementById('app').style.display='block';
   loadSettings();  // fire-and-forget: populates _sdata so mode-aware UI works across all tabs
+  // Same global-aid restore as the explicit login path — runs once on
+  // page reload when the token check succeeds.
+  if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
   go(window._userRole === 'lot_entry' ? 'lotentry' : 'dash');}catch(e){T='';localStorage.removeItem('t')}})();
 
 // ── Navigation ────────────────────────────────────────────
@@ -8574,6 +8597,10 @@ function modeBadge(mode){
 }
 
 async function loadAuctions(){const d=await j('/api/auctions');
+  // Keep the topbar global picker in step with the auctions table. A
+  // create / delete / edit on this screen would otherwise leave the
+  // global picker showing stale options.
+  if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
   const tA = termAuction(), tALower = termAuction(false, true), tAPlLower = termAuction(true, true);
   DataTable.mount('auctions-list', d, {
     emptyState: { icon: 'auctions', title: 'No ' + tAPlLower + ' yet', body: 'Create your first ' + tALower + ' from the Add ' + tA + ' button to start entering lots.' },
@@ -9260,7 +9287,139 @@ async function fillAucSelect(selId){const d=await j('/api/auctions');const sel=d
   sel.innerHTML=d.map(a=>{
     const mt = a.mode ? ` [${a.mode}]` : '';
     return `<option value="${a.id}">${a.ano} — ${fmtD(a.date)} (${a.lot_count} lots)${mt}</option>`;
-  }).join('');return d}
+  }).join('');
+  // After populating, sync the selection with the global picker so
+  // landing on this tab respects whatever the user picked elsewhere.
+  if (typeof _applyGlobalAidToSelect === 'function') _applyGlobalAidToSelect(sel);
+  return d}
+
+// ══════════════════════════════════════════════════════════════
+// Global trade/auction picker
+// ══════════════════════════════════════════════════════════════
+// Single source of truth for the active auction id. Lives in the
+// topbar (#global-aid); broadcasts to every per-tab dropdown
+// (#lot-auction, #inv-auction, #pur-auction, #bill-auction,
+// #pay-auction, #tally-auction, #exp-auction, #lorry-auction,
+// #dn-auction, #le-auction, #pc-auction, #dbf-auction, #sb-auction,
+// #rep-auction). Persisted in localStorage('global_aid') so the
+// choice survives reloads.
+//
+// Label text ("Trade" vs "Auction") flips via data-term-auction so
+// it reads correctly in both business modes. The wrapper hides
+// entirely until the auction list is loaded — pre-login state shows
+// no chrome at all.
+const _GLOBAL_AID_KEY = 'global_aid';
+// Every per-tab auction selector that should shadow the global pick.
+// Adding a new selector? Drop its id here AND make sure the tab's
+// loader reads it via standard `.value` + dispatches a 'change' event
+// when needed (most do already).
+const _GLOBAL_AID_TARGETS = [
+  'lot-auction', 'inv-auction', 'pur-auction', 'bill-auction',
+  'pay-auction', 'tally-auction', 'exp-auction', 'lorry-auction',
+  'dn-auction',  'le-auction',   'pc-auction',  'dbf-auction',
+  'sb-auction',  'rep-auction',
+];
+
+let _globalAidList = [];   // [{id, ano, date, lot_count, mode}]
+let _globalAidSyncing = false; // re-entry guard so change-events don't loop
+
+// Restore from localStorage. Called once on first load + after every
+// fresh /api/auctions fetch.
+function _restoreGlobalAid(){
+  try { return String(localStorage.getItem(_GLOBAL_AID_KEY) || ''); }
+  catch (_) { return ''; }
+}
+function _persistGlobalAid(aid){
+  try { localStorage.setItem(_GLOBAL_AID_KEY, String(aid || '')); }
+  catch (_) { /* private mode / storage disabled — non-fatal */ }
+}
+
+// Populate the global picker. Called from loadAuctions, auction creates/
+// deletes, and on first login. Idempotent — re-running just refreshes
+// the option list without dropping the current selection (if still
+// valid).
+async function refreshGlobalAidList(){
+  const sel = document.getElementById('global-aid');
+  if (!sel) return;
+  try {
+    const list = await j('/api/auctions');
+    _globalAidList = Array.isArray(list) ? list : [];
+  } catch (_) { _globalAidList = []; }
+  const wrap = document.getElementById('global-aid-wrap');
+  if (!_globalAidList.length) {
+    // Hide the chip entirely when there's nothing to pick from.
+    if (wrap) wrap.style.display = 'none';
+    sel.innerHTML = '<option value="">— none —</option>';
+    return;
+  }
+  if (wrap) wrap.style.display = 'inline-flex';
+  sel.innerHTML = _globalAidList.map(a => {
+    const mt = a.mode ? ` [${a.mode}]` : '';
+    return `<option value="${a.id}">#${esc(a.ano)} · ${fmtD(a.date)} · ${a.lot_count} lots${mt}</option>`;
+  }).join('');
+  // Restore the previous pick if still in the list; otherwise default
+  // to the most recent (first row — server returns newest-first).
+  const saved = _restoreGlobalAid();
+  const inList = _globalAidList.some(a => String(a.id) === saved);
+  const next = inList ? saved : String(_globalAidList[0].id);
+  sel.value = next;
+  _persistGlobalAid(next);
+}
+
+// Push the global selection into a target <select> when it has a
+// matching option. Used by fillAucSelect AFTER it builds its options.
+function _applyGlobalAidToSelect(sel){
+  if (!sel) return;
+  const aid = (document.getElementById('global-aid')?.value || '').trim();
+  if (!aid) return;
+  if (Array.from(sel.options).some(o => o.value === aid)) {
+    if (sel.value !== aid) sel.value = aid;
+  }
+}
+
+// Broadcast handler — fires when the user picks in the topbar.
+// Walks every known per-tab selector, copies the value if it's
+// present in that selector's options, dispatches 'change' so the
+// tab's loader runs.
+function onGlobalAidChange(){
+  if (_globalAidSyncing) return;
+  const sel = document.getElementById('global-aid');
+  if (!sel) return;
+  const aid = (sel.value || '').trim();
+  _persistGlobalAid(aid);
+  _globalAidSyncing = true;
+  try {
+    for (const id of _GLOBAL_AID_TARGETS) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (!aid) continue;
+      const hasOpt = Array.from(el.options).some(o => o.value === aid);
+      if (!hasOpt) continue;
+      if (el.value === aid) continue;
+      el.value = aid;
+      // Trigger the tab's onchange so the list re-renders.
+      try { el.dispatchEvent(new Event('change')); } catch (_) {}
+    }
+  } finally { _globalAidSyncing = false; }
+}
+
+// Reverse sync — when a per-tab selector changes (user picks inside
+// the tab), update the topbar so it stays in sync. Guarded by
+// _globalAidSyncing so the broadcast above doesn't re-enter here.
+document.addEventListener('change', (e) => {
+  if (_globalAidSyncing) return;
+  const el = e.target;
+  if (!el || !el.id) return;
+  if (!_GLOBAL_AID_TARGETS.includes(el.id)) return;
+  const sel = document.getElementById('global-aid');
+  if (!sel) return;
+  const aid = (el.value || '').trim();
+  if (!aid) return;
+  if (Array.from(sel.options).some(o => o.value === aid) && sel.value !== aid) {
+    sel.value = aid;
+    _persistGlobalAid(aid);
+  }
+}, true);
 function loadLotAuctions(){fillAucSelect('lot-auction').then(()=>loadLots())}
 function loadInvAuctions(){fillAucSelect('inv-auction').then(()=>{loadInvoices();loadInvEligibleBuyers()})}
 function loadPurAuctions(){fillAucSelect('pur-auction').then(()=>{loadPurchases();loadPurEligibleSellers()})}
