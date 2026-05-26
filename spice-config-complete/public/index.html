@@ -800,26 +800,61 @@ tr:hover td{background:var(--spice-cream)}
 .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .bgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
 
-/* ── Toggle Switch ───────────────────────────────────────── */
+/* ── Toggle Switch (compact) ─────────────────────────────── */
 .flag-row{
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 0;border-bottom:1px solid #F1F5F9;gap:12px
+  padding:5px 0;border-bottom:1px solid #F1F5F9;gap:10px
 }
 .flag-row:last-child{border-bottom:none}
-.flag-row label{font-size:13px;font-weight:600;cursor:pointer;flex:1;color:var(--text)}
-.sw{position:relative;width:32px;height:18px;flex-shrink:0}
+.flag-row label{font-size:12px;font-weight:600;cursor:pointer;flex:1;color:var(--text);line-height:1.3}
+.sw{position:relative;width:26px;height:15px;flex-shrink:0}
 .sw input{opacity:0;width:0;height:0;position:absolute}
 .sl{
-  position:absolute;inset:0;background:#ccc;border-radius:18px;cursor:pointer;
+  position:absolute;inset:0;background:#ccc;border-radius:15px;cursor:pointer;
   transition:background .2s
 }
 .sl::before{
-  content:'';position:absolute;width:14px;height:14px;
+  content:'';position:absolute;width:11px;height:11px;
   left:2px;bottom:2px;background:#fff;border-radius:50%;
-  transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)
+  transition:transform .2s;box-shadow:0 1px 2px rgba(0,0,0,.2)
 }
 .sw input:checked+.sl{background:var(--green)}
-.sw input:checked+.sl::before{transform:translateX(14px)}
+.sw input:checked+.sl::before{transform:translateX(11px)}
+/* Comfort mode bumps the switch back up slightly so it stays tappable */
+body[data-comfort="1"] .sw{width:32px;height:18px}
+body[data-comfort="1"] .sl{border-radius:18px}
+body[data-comfort="1"] .sl::before{width:14px;height:14px}
+body[data-comfort="1"] .sw input:checked+.sl::before{transform:translateX(14px)}
+body[data-comfort="1"] .flag-row label{font-size:13px}
+
+/* ── Settings collapsible group (used by Feature Flags) ───── */
+.set-group{
+  border:1px solid var(--border);border-radius:8px;background:#fff;
+  margin-bottom:10px;overflow:hidden
+}
+.set-group-head{
+  display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;
+  padding:8px 12px;background:var(--bg);border-bottom:1px solid var(--border);
+  font-size:13px;font-weight:700;color:var(--text);
+  transition:background .12s
+}
+.set-group-head:hover{background:#EEF2F6}
+.set-group-chev{
+  display:inline-block;width:14px;text-align:center;
+  font-size:10px;color:var(--text3);transition:transform .15s;flex:0 0 14px
+}
+.set-group-title{flex:1;min-width:0}
+.set-group-count{
+  font-weight:500;font-size:11px;color:var(--text3);
+  background:#fff;border:1px solid var(--border);
+  padding:1px 7px;border-radius:10px;margin-left:auto
+}
+.set-group-body{padding:6px 14px}
+.set-group.is-collapsed .set-group-chev{transform:rotate(-90deg)}
+.set-group.is-collapsed .set-group-body{display:none}
+.set-group.is-collapsed .set-group-head{border-bottom-color:transparent}
+/* Inside a collapsible group, use a tighter 2-col grid for flag rows */
+.set-group-body .bgrid{gap:0 22px}
 
 
 /* ── To Tally settings panel — macro-style grouped form ──── */
@@ -6771,13 +6806,7 @@ function renderSettingsPanel(){
   if(!fields.length){document.getElementById('settings-root').innerHTML='<div class="set-no-match">No matching settings</div>';return}
   let html='';
   if(ck==='flags'){
-    // Flags: two-column toggle list
-    html+='<div class="bgrid" style="gap:2px 18px">';
-    for(const f of fields){
-      const ck2=(f.value==='true')?'checked':'';
-      html+=`<div class="flag-row"><label>${esc(f.label)}${FIELD_HELP[f.key]?helpTip(FIELD_HELP[f.key]):''}</label><label class="sw"><input type="checkbox" data-key="${f.key}" data-type="boolean" ${ck2}><span class="sl"></span></label></div>`;
-    }
-    html+='</div>';
+    html+=renderFlagsGrouped(fields);
   }else if(ck==='branches'){
     html+='<div class="bgrid">';
     const brs=fields.filter(f=>!f.key.includes('_tel')),tels=fields.filter(f=>f.key.includes('_tel'));
@@ -7030,6 +7059,94 @@ async function onBusinessStateChanged(newState){
   toast(`State: ${newState} · Logo: ${newState==='TAMIL NADU'?'ISP':'ASP'}`);
 }
 function renderSettings(){renderSettingsNav();renderSettingsPanel()}
+
+// ── Feature Flags: meaningful, collapsible groups ─────────
+// Each flag is sorted into one logical group. Anything not in the map
+// falls into "Other". Order within a group follows FLAG_GROUPS_ORDER.
+const FLAG_GROUPS = [
+  { id:'biz', title:'Business Setup', icon:'🏢', keys:[
+    'flag_pooling','flag_sister','flag_tnpa','flag_eway','flag_export'
+  ]},
+  { id:'invoice', title:'Invoice Layout & Content', icon:'📄', keys:[
+    'flag_hsn','flag_bank','flag_dispatch','flag_ship','flag_sample',
+    'flag_round','flag_invoice_stripe'
+  ]},
+  { id:'tax', title:'Tax, TDS & Discount', icon:'💸', keys:[
+    'flag_tds_purchase','flag_tds_sales','flag_rtds_inv','flag_wgst',
+    'flag_disc_gst','flag_debit_note'
+  ]},
+  { id:'special', title:'Special / Advanced', icon:'⚠', keys:[
+    'flag_dummy'
+  ]},
+];
+// Default-open groups (others start collapsed). Persists in localStorage.
+const FLAG_GROUPS_DEFAULT_OPEN = ['biz','invoice','tax'];
+
+function _flagGroupCollapseState(){
+  try {
+    const raw = localStorage.getItem('flagGroupsCollapsed');
+    if (raw) return JSON.parse(raw);
+  } catch(e){}
+  // Default: collapse anything not in DEFAULT_OPEN
+  return FLAG_GROUPS.filter(g => !FLAG_GROUPS_DEFAULT_OPEN.includes(g.id)).map(g => g.id);
+}
+function toggleSetGroup(id){
+  const el = document.getElementById('set-group-' + id);
+  if (!el) return;
+  el.classList.toggle('is-collapsed');
+  try {
+    const collapsed = Array.from(document.querySelectorAll('.set-group.is-collapsed'))
+      .map(e => (e.id || '').replace(/^set-group-/, ''))
+      .filter(Boolean);
+    localStorage.setItem('flagGroupsCollapsed', JSON.stringify(collapsed));
+  } catch(e){}
+}
+function renderFlagsGrouped(fields){
+  // Build lookup; track assigned keys so leftovers go to "Other"
+  const byKey = {};
+  for (const f of fields) byKey[f.key] = f;
+  const assigned = new Set();
+  // When the user is actively searching, expand every group so matches
+  // hiding inside a collapsed group still surface.
+  const isSearching = !!(typeof _setFilter === 'string' && _setFilter.trim());
+  const collapsed = isSearching ? new Set() : new Set(_flagGroupCollapseState());
+
+  const flagRow = (f) => {
+    const ck2 = (f.value === 'true') ? 'checked' : '';
+    const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
+    return `<div class="flag-row"><label>${esc(f.label)}${tip}</label>`
+         + `<label class="sw"><input type="checkbox" data-key="${f.key}" data-type="boolean" ${ck2}><span class="sl"></span></label></div>`;
+  };
+
+  const groupHtml = (g, items) => {
+    if (!items.length) return '';
+    const isCol = collapsed.has(g.id) ? ' is-collapsed' : '';
+    let rows = '';
+    for (const f of items) rows += flagRow(f);
+    return `<div class="set-group${isCol}" id="set-group-${g.id}">`
+         + `<div class="set-group-head" onclick="toggleSetGroup('${g.id}')">`
+         + `<span class="set-group-chev">▾</span>`
+         + `<span class="set-group-title">${g.icon||''} ${esc(g.title)}</span>`
+         + `<span class="set-group-count">${items.length}</span>`
+         + `</div>`
+         + `<div class="set-group-body"><div class="bgrid">${rows}</div></div>`
+         + `</div>`;
+  };
+
+  let html = '';
+  for (const g of FLAG_GROUPS) {
+    const items = g.keys.map(k => byKey[k]).filter(Boolean);
+    items.forEach(f => assigned.add(f.key));
+    html += groupHtml(g, items);
+  }
+  // Anything not yet placed → "Other" group
+  const leftovers = fields.filter(f => !assigned.has(f.key));
+  if (leftovers.length) {
+    html += groupHtml({ id:'other', title:'Other', icon:'•', keys:[] }, leftovers);
+  }
+  return html;
+}
+
 // ── Settings field help text ───────────────────────────
 // Shown as a ? tooltip next to the label. Keep concise (1-2 lines).
 const FIELD_HELP = {
