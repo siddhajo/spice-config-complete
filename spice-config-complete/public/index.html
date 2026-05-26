@@ -1661,7 +1661,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 })();
 </script>
 </head>
-<body data-feat-bills="1" data-feat-debit-notes="1" data-feat-price-list-mapping="1" data-feat-price-check="1">
+<body data-feat-price-list-mapping="1" data-feat-price-check="1">
 <div id="login">
   <div class="login-box">
     <h1><span class="dot"></span> Spice Config</h1>
@@ -6588,6 +6588,9 @@ function applyFeatureFlags(){
   };
   setFlag('data-feat-crop-receipt',   isEAuc && lookupFlag('flag_crop_receipt'));
   setFlag('data-feat-reserved-price', isEAuc && lookupFlag('flag_reserved_price'));
+  // Sidebar module toggles — independent of business mode.
+  setFlag('data-feat-bills',          lookupFlag('flag_bills'));
+  setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
 }
 
 // Hide the off-mode widgets in the To Tally tab. When the active company

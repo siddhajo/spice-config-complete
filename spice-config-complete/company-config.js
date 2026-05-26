@@ -124,6 +124,14 @@ const DEFAULTS = [
   { key: 'signature_text',  value: 'Signature of the Authorised Buyer', category: 'invoice', label: 'Signature Label', type: 'text' },
 
   // ── FEATURE FLAGS ──────────────────────────────────────────
+  // Sidebar visibility toggles for optional document types. When OFF,
+  // the sidebar entry, related dashboard tiles, and Backup → Danger Zone
+  // Delete buttons all hide via the body[data-feat-*] / .feat-* CSS
+  // pairing. Server endpoints stay live (data already in those tables
+  // remains accessible if the user re-enables) — only the UI surface
+  // is gated.
+  { key: 'flag_bills',         value: 'true',        category: 'flags',     label: 'Bills of Supply Module',       type: 'boolean' },
+  { key: 'flag_debit_notes',   value: 'true',        category: 'flags',     label: 'Debit Notes Module',           type: 'boolean' },
   { key: 'flag_pooling',    value: 'false',          category: 'flags',     label: 'Pooling (Single State)',    type: 'boolean' },
   { key: 'flag_sister',     value: 'true',           category: 'flags',     label: 'Sister Concern Active',    type: 'boolean' },
   { key: 'flag_tnpa',       value: 'true',           category: 'flags',     label: 'ASP Ship To Address',      type: 'boolean' },
