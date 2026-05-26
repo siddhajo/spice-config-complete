@@ -290,8 +290,9 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   box-shadow:0 0 0 3px rgba(22,101,52,.14);animation:pulseDot 2.4s ease-in-out infinite
 }
 .login-brand h1{
-  font-size:36px;font-weight:800;letter-spacing:-.7px;
-  margin:0 0 12px 0;color:var(--spice-text-main);line-height:1.05
+  font-size:24px;font-weight:800;letter-spacing:-.3px;
+  margin:0 0 12px 0;color:var(--spice-text-main);line-height:1.15;
+  max-width:480px
 }
 @keyframes loginPop{
   0%{opacity:0;transform:scale(.85) translateY(8px)}
@@ -419,7 +420,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 @media (max-width:820px){
   .login-shell{grid-template-columns:1fr;gap:16px;max-width:440px}
   .login-brand{text-align:center;padding:8px 16px 0;align-items:center}
-  .login-brand h1{font-size:28px}
+  .login-brand h1{font-size:20px}
   .login-tagline{margin-left:auto;margin-right:auto}
   .login-feats{display:none}
   .login-card{justify-self:center}
@@ -3688,7 +3689,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <div style="min-width:160px">
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Branch</div>
             <select id="le-branch" onchange="try{localStorage.setItem('le_branch',this.value)}catch(_){};leLoadAllocBar();leAutoSuggestLotNo()" style="width:100%;height:38px;padding:0 10px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:#fff;text-transform:uppercase">
-              <option value="">— select —</option>
+              <option value="">All branches</option>
             </select>
           </div>
           <div style="min-width:140px">
@@ -5448,6 +5449,7 @@ async function login(){
   window._userPerms = new Set(d.permissions || []);
   applyPermissionAttributes();
   document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
+  if (typeof refreshTopbarBrand === 'function') refreshTopbarBrand();
   loadSettings();  // fire-and-forget: populates _sdata so mode-aware UI works across all tabs
   // Populate the topbar's global trade/auction picker once on login.
   // Subsequent refreshes happen via loadAuctions (create/delete trade) and
@@ -5489,6 +5491,21 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   // last-active trade.
   const gw = document.getElementById('global-aid-wrap'); if (gw) gw.style.display = 'none';
   document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
+// Update the in-app topbar with the company short_name from /api/brand.
+// Auth-free endpoint so this also works pre-login. Idempotent — safe
+// to call from anywhere that changes the active preset / mode.
+async function refreshTopbarBrand(){
+  try {
+    const r = await fetch(B + '/api/brand');
+    if (!r.ok) return;
+    const d = await r.json();
+    const nameEl = document.getElementById('topbar-brand-name');
+    if (nameEl && d.name) nameEl.textContent = d.name;
+    const titleEl = document.querySelector('title');
+    if (titleEl && d.name) titleEl.textContent = d.name;
+  } catch (_) { /* leave literal default */ }
+}
+
 // Public brand probe — populates the login card's company name + logo
 // mark with the active preset (ISP vs ASP) from the server. Endpoint
 // is auth-free since this runs BEFORE the user signs in.
@@ -5533,6 +5550,7 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   applyPermissionAttributes();
   document.getElementById('login').style.display='none';
   document.getElementById('app').style.display='block';
+  if (typeof refreshTopbarBrand === 'function') refreshTopbarBrand();
   loadSettings();  // fire-and-forget: populates _sdata so mode-aware UI works across all tabs
   // Same global-aid restore as the explicit login path — runs once on
   // page reload when the token check succeeds.
@@ -6811,22 +6829,11 @@ function applyLogoBadge(){
     else{badge.textContent = code; badge.style.display = 'inline-block'}
   }
 
-  // Topbar H1 — replace the literal "Spice Config" with the active
-  // company's short_name from _sdata (Company tab for ISP, Sister tab
-  // for ASP). Falls back to "Spice Config" only on a fresh install
-  // where no settings have loaded yet.
-  try {
-    const nameEl = document.getElementById('topbar-brand-name');
-    if (nameEl && window._sdata) {
-      const isAsp = String(code || '').toUpperCase() === 'ASP';
-      const find = (cat, key) => ((_sdata[cat] || []).find(f => f.key === key) || {}).value;
-      const name = (isAsp
-        ? (find('sister','s_short_name') || find('sister','s_trade_name'))
-        : (find('company','short_name')  || find('company','trade_name'))
-      ) || '';
-      if (name.trim()) nameEl.textContent = name.trim();
-    }
-  } catch (_) { /* leave the default literal */ }
+  // Topbar H1 — replace the literal "Spice Config" with the company
+  // short_name. Delegated to refreshTopbarBrand() which hits
+  // /api/brand so the resolution matches the login page exactly
+  // (including preset overrides + sister-fallback).
+  if (typeof refreshTopbarBrand === 'function') refreshTopbarBrand();
 
   // Topbar dot image: /logo-ispl.png or /logo-asp.png
   // If the img element was removed (404 fallback on earlier render), recreate it.
@@ -14515,7 +14522,11 @@ async function loadLotEntry(){
     // because lot save requires a branch.
     const branchSel = document.getElementById('le-branch');
     if (branches.length) {
-      branchSel.innerHTML = '<option value="">— select —</option>' +
+      // "All branches" is the unfiltered state — the recent-entries list,
+      // allocation bars and lot-number suggester all tolerate an empty
+      // branch value (it just means "no branch-scoped highlighting /
+      // suggestion"). Saving a new lot still requires a specific branch.
+      branchSel.innerHTML = '<option value="">All branches</option>' +
         branches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
       // Restore last-used branch from localStorage if it's still in the
       // list (admin may have removed it). Otherwise default to the first
@@ -14844,7 +14855,7 @@ async function leSaveLot(){
   if (!aid) { leShowError('Select a trade first'); return; }
   if (!_le.selectedSeller) { leShowError('Search and pick a seller'); return; }
   const branch = (document.getElementById('le-branch').value || '').trim().toUpperCase();
-  if (!branch) { leShowError('Enter a branch code'); return; }
+  if (!branch) { leShowError('Pick a specific branch to save under (“All branches” is for viewing only)'); return; }
   const lotNo = (document.getElementById('le-lotno').value || '').trim();
   if (!lotNo) { leShowError('Enter the lot number'); return; }
   const grade = document.getElementById('le-grade').value || '1';

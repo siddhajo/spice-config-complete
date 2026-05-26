@@ -1453,6 +1453,11 @@ ${rnd < 0 ? TAGS.DEEMYES : TAGS.DEEMNO}
 function generRDPurchaseXML(rows, cfg, opts = {}) {
   const company    = opts.companyName || cfgGet(cfg, 'tally_asp_company_name', cfgGet(cfg, 'tally_company_name', 'Amazing Spice Park Private Limited'));
   const season     = opts.season || cfgGet(cfg, 'tally_season', cfgGet(cfg, 'season_code', '2026-27'));
+  // Short season ("26-27") for the dedicated TDS bill-allocation ref —
+  // separate from the full season above ("2026-27") used in goods/GST
+  // refs so it lines up with the abbreviation already used in invoice
+  // numbering elsewhere in the app.
+  const seasonShort= opts.seasonShort || cfgGet(cfg, 'season_short', '26-27');
   const detailed   = cfgBool(cfg, 'tally_detailed', true);
   const tlyrnd     = cfgBool(cfg, 'tally_round_enabled', true);
   const opt        = cfgBool(cfg, 'tally_optional', false);
@@ -1597,22 +1602,33 @@ ${rates.cess}
 </ALLINVENTORYENTRIES.LIST>`;
     }
 
-    // Bill allocations split into "goods" + "GST" line items so Tally
-    // can age them separately in receivables/payables. Two cases:
+    // Bill allocations split into "goods" + "GST" + "TDS" line items so
+    // Tally can age each separately in receivables/payables. Three cases:
     //   • detailed   → one allocation per lot for goods (billAlloc1)
-    //                  + one GST allocation = sum(taxes) − TDS
+    //                  + one GST allocation = sum(taxes)
+    //                  + one TDS allocation = −tdsamt (when TDS > 0)
     //   • aggregate  → single goods allocation = bilamttot
-    //                  + one GST allocation = sum(taxes) − TDS
-    // The total of all allocations = the party ledger AMOUNT. TDS is
-    // absorbed in the GST allocation (matches the original VBA macro).
+    //                  + one GST allocation = sum(taxes)
+    //                  + one TDS allocation = −tdsamt (when TDS > 0)
+    // The total of all allocations = the party ledger AMOUNT. Until now
+    // TDS was absorbed into the GST line; we now break it out as its own
+    // New Ref ({ano}/TDS/{seasonShort}) so Tally shows the gross GST and
+    // the TDS withholding separately. The TDS bill carries a negative
+    // amount so the sum still equals the party AMOUNT.
     const gstSum     = cgst + sgst + igst;
-    const gstAllocAmt = tlyrnd ? r0(gstSum) - tdsamt : r2(gstSum) - tdsamt;
+    const gstAllocAmt = tlyrnd ? r0(gstSum) : r2(gstSum);
     const gstAlloc   = `
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/GST/${season}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
 <AMOUNT>${r2(gstAllocAmt)}</AMOUNT>
 </BILLALLOCATIONS.LIST>`;
+    const tdsAlloc   = tdsamt > 0 ? `
+<BILLALLOCATIONS.LIST>
+<NAME>${xe(`${row.ano}/TDS/${seasonShort}`)}</NAME>
+<BILLTYPE>New Ref</BILLTYPE>
+<AMOUNT>${tlyrnd ? r0(-tdsamt) : r2(-tdsamt)}</AMOUNT>
+</BILLALLOCATIONS.LIST>` : '';
 
     xml += `\n${startVoucher}
 <ADDRESS.LIST TYPE="String">
@@ -1656,7 +1672,7 @@ ${TAGS.DEEMNO}
 <NAME>${xe(`${row.ano}/${taxNm}/${season}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
 <AMOUNT>${tlyrnd ? r0(bilamttot) : bilamttot}</AMOUNT>
-</BILLALLOCATIONS.LIST>`}${gstAlloc}
+</BILLALLOCATIONS.LIST>`}${gstAlloc}${tdsAlloc}
 </LEDGERENTRIES.LIST>`;
 
     // Tax ledgers
