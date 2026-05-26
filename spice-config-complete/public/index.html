@@ -2765,17 +2765,33 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
           <select id="bill-auction" onchange="loadBills();loadEligibleSellers()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px"></select>
 
+          <!-- Cross-trade search across bill no, seller name, place.
+               Server-side LIKE, debounced 200ms. When active, the URL
+               builder drops auction_id so the search spans every trade. -->
+          <input type="search" id="bill-search" placeholder="Search bill no, seller, place…" oninput="searchBillsDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <!-- Branch filter — populated from Settings → Branches (br1..br9).
+               Server checks bills.br first; falls back to an EXISTS join
+               on lots.branch for legacy bills that didn't get the column
+               stamped. -->
+          <select id="bill-branch-filter" onchange="loadBills()" title="Filter bills by branch" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px">
+            <option value="">All branches</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
-            <button class="btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
-            <button class="needs-invoice-write btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-bill-one" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-bill-all" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="btn" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedBills()" title="Print all ticked bills">🖨 Print Selected</button>
           </div>
 
+          <!-- Bulk actions group — Delete Selected. Hidden until ≥1 row
+               is ticked; visibility driven by _updateBillBulkToolbar()
+               called from syncBillMaster + on each checkbox change. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
-            <button class="needs-delete-all btn" style="height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteAll('bills','Bills of Supply')">🗑 Delete All</button>
+            <button id="bill-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedBills()" title="Delete all ticked bills">🗑 Delete Selected <span id="bill-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
           </div>
         </div>
 
@@ -11248,16 +11264,72 @@ function toggleAllBills(state){
 }
 function syncBillMaster(){
   const master=document.getElementById('bill-select-all');
-  if(!master)return;
   const body=document.getElementById('bills-list');
-  if(!body){master.checked=false;master.indeterminate=false;return}
+  if(!body){
+    if(master){master.checked=false;master.indeterminate=false}
+    _updateBillBulkToolbar(0);
+    return;
+  }
   const visible=Array.from(body.querySelectorAll('.bill-select-cb')).filter(cb=>{
     const row=cb.closest('tr');return row && row.style.display !== 'none';
   });
   const ticked=visible.filter(cb=>cb.checked).length;
-  master.indeterminate = ticked>0 && ticked<visible.length;
-  master.checked       = visible.length>0 && ticked===visible.length;
+  if(master){
+    master.indeterminate = ticked>0 && ticked<visible.length;
+    master.checked       = visible.length>0 && ticked===visible.length;
+  }
+  _updateBillBulkToolbar(ticked);
 }
+// Show/hide the Delete Selected pill based on ticked count. Mirrors
+// the pattern used by Sales Invoices, Purchases, and Debit Notes —
+// goes through _bulkBtnSetVisible so the .needs-delete permission CSS
+// (which uses !important on display) plays nicely with toggle.
+function _updateBillBulkToolbar(ticked){
+  const del = document.getElementById('bill-bulk-del');
+  const counter = document.getElementById('bill-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(del, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
+}
+
+// Cross-trade search debouncer — 200ms after the last keystroke.
+let _billSearchTimer = null;
+function searchBillsDebounced(_q){
+  clearTimeout(_billSearchTimer);
+  _billSearchTimer = setTimeout(() => loadBills(), 200);
+}
+
+// Bulk-delete ticked bills. Two-click confirm via confirmTwoClick when
+// available; plain confirm() otherwise so the flow works on builds
+// without the helper.
+async function deleteSelectedBills(){
+  const body = document.getElementById('bills-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.bill-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more bills first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  const btn = document.getElementById('bill-bulk-del');
+  const proceed = (typeof confirmTwoClick === 'function')
+    ? await confirmTwoClick('billBulkDelete', btn, {
+        confirmLabel: `⚠ Click again to DELETE ${ids.length} bill${ids.length === 1 ? '' : 's'}`,
+        fallbackMessage: `Delete ${ids.length} bill${ids.length === 1 ? '' : 's'} of supply? This cannot be undone.`,
+      })
+    : confirm(`Delete ${ids.length} bill${ids.length === 1 ? '' : 's'} of supply? This cannot be undone.`);
+  if (!proceed) return;
+  try {
+    const r = await j('/api/bills/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    const n = r.deleted || 0;
+    toast(`Deleted ${n} bill${n === 1 ? '' : 's'}`);
+    loadBills();
+    if (typeof loadEligibleSellers === 'function') loadEligibleSellers();
+  } catch (e) { showError(e); }
+}
+
 async function printSelectedBills(){
   const body=document.getElementById('bills-list');
   if(!body){alert('No bills list found');return}
@@ -11691,9 +11763,35 @@ async function loadEligibleSellers(){
       `<option value="${esc(s.name)}">${esc(s.name)} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`).join('');
     document.getElementById('gb-hint').textContent=`${sellers.length} eligible seller(s) available`;
   }catch(e){console.warn(e)}}
+// Populate the branch filter dropdown from Settings → Branches (br1..br9).
+// Idempotent — skips when already populated, so the user's current
+// selection survives across re-renders.
+async function _populateBillBranchFilter(){
+  const sel = document.getElementById('bill-branch-filter');
+  if (!sel || sel.options.length > 1) return;
+  try {
+    const cfg = await j('/api/company-settings/flat');
+    const out = [];
+    for (let i = 1; i <= 9; i++) {
+      const v = String(cfg['br' + i] || '').trim();
+      if (v) out.push(v.toUpperCase());
+    }
+    sel.innerHTML = '<option value="">All branches</option>'
+      + out.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  } catch (_) { /* non-fatal — filter stays at "All branches" */ }
+}
+
 async function loadBills(){
-  const aid=document.getElementById('bill-auction')?.value;
-  const url=aid?`/api/bills?auction_id=${aid}`:'/api/bills';
+  _populateBillBranchFilter();
+  const aid    = document.getElementById('bill-auction')?.value;
+  const search = (document.getElementById('bill-search')?.value || '').trim();
+  const branch = (document.getElementById('bill-branch-filter')?.value || '').trim();
+  // URL builder: search bypasses auction_id so cross-trade lookups work.
+  const qs = [];
+  if (aid && !search) qs.push(`auction_id=${encodeURIComponent(aid)}`);
+  if (search)         qs.push(`search=${encodeURIComponent(search)}`);
+  if (branch)         qs.push(`branch=${encodeURIComponent(branch)}`);
+  const url = qs.length ? `/api/bills?${qs.join('&')}` : '/api/bills';
   const d=await j(url);
   const arr = Array.isArray(d) ? d : [];
 

@@ -4198,12 +4198,42 @@ app.post('/api/purchases/pdf-bulk', requireView, async (req, res) => {
 // BILLS — Agriculturist Bills of Supply (GSTKBILP/GSTBILP)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/bills', requireView, (req, res) => {
-  const { auction_id, ano, from, to } = req.query;
+  const { auction_id, ano, from, to, search, branch } = req.query;
   const db = getDb();
   let q = 'SELECT * FROM bills WHERE 1=1'; const p = [];
   if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
   if (ano) { q += ' AND ano = ?'; p.push(ano); }
   if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  // Free-text search across bill no, seller name and place. Bypasses
+  // the auction filter when active so cross-trade lookups work — the
+  // client drops auction_id when search is non-empty.
+  const searchTerm = String(search || '').trim();
+  if (searchTerm) {
+    const wild = `%${searchTerm}%`;
+    q += ` AND (
+            COALESCE(CAST(bil AS TEXT),'') LIKE ?
+            OR COALESCE(name,'')              LIKE ?
+            OR COALESCE(pla,'')               LIKE ?
+          )`;
+    p.push(wild, wild, wild);
+  }
+  // Branch filter — populated from Settings → Branches (br1..br9). Matches
+  // against bills.br first (when populated by the generator); falls back
+  // to the underlying lot's branch via an EXISTS subquery so older bills
+  // that didn't get the column stamped still surface under the right tab.
+  const branchTerm = String(branch || '').trim();
+  if (branchTerm) {
+    q += ` AND (
+            UPPER(COALESCE(bills.br,'')) = UPPER(?)
+            OR EXISTS (
+              SELECT 1 FROM lots l
+               WHERE l.auction_id = bills.auction_id
+                 AND UPPER(COALESCE(l.name,'')) = UPPER(COALESCE(bills.name,''))
+                 AND UPPER(COALESCE(l.branch,'')) = UPPER(?)
+            )
+          )`;
+    p.push(branchTerm, branchTerm);
+  }
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=bills.auction_id)');
   q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC, bil DESC LIMIT 500';
@@ -4396,6 +4426,22 @@ app.post('/api/bills/pdf-bulk', requireView, async (req, res) => {
 app.delete('/api/bills/:id', requireDelete, (req, res) => {
   getDb().run('DELETE FROM bills WHERE id = ?', [req.params.id]);
   res.json({ success: true });
+});
+
+// ── BULK DELETE — selected bills ──
+// Body: { ids: [1,2,3] }. Single round-trip replacement for the old
+// trade-wide Delete All flow.
+app.post('/api/bills/bulk-delete', requireDelete, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid bill IDs' });
+  const db = getDb();
+  const placeholders = cleanIds.map(() => '?').join(',');
+  const r = db.run(`DELETE FROM bills WHERE id IN (${placeholders})`, cleanIds);
+  res.json({ ok: true, deleted: r.changes });
 });
 
 // Update bill (edit)
