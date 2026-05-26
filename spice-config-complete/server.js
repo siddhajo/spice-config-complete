@@ -6,7 +6,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, DB_PATH } = require('./db');
-const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode } = require('./company-config');
+const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
@@ -58,6 +58,37 @@ app.use('/api', (req, res, next) => {
 // minimal 200 with no auth required.
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ts: Date.now() });
+});
+
+// Public brand probe — used by the pre-auth login page so the welcome
+// card can show the actual company name (ISP vs ASP) instead of a
+// hardcoded "Spice Config". Returns only the active preset's trade
+// name + a short code for the logo tile; no other settings leak.
+app.get('/api/brand', (req, res) => {
+  try {
+    const db = getDb();
+    const active = (typeof getActivePresetCode === 'function')
+      ? getActivePresetCode(db)
+      : 'ISP';
+    const preset = (typeof getPreset === 'function') ? getPreset(db, active) : {};
+    const flat = getSettingsFlat(db);
+    // Preference order: preset's own trade/short name → flat fallback →
+    // sister-company fallback for ASP → final literal default.
+    const pickName = () => {
+      if (preset.trade_name)  return preset.trade_name;
+      if (preset.short_name)  return preset.short_name;
+      if (active === 'ASP') {
+        return flat.s_short_name || 'Amazing Spice Park';
+      }
+      return flat.trade_name || flat.short_name || 'Ideal Spices';
+    };
+    const name = String(pickName()).trim();
+    // Two-letter tile for the logo mark.
+    const mark = active === 'ASP' ? 'AS' : 'IS';
+    res.json({ active, name, code: active, mark });
+  } catch (e) {
+    res.json({ active: 'ISP', name: 'Spice Config', code: 'ISP', mark: 'IS' });
+  }
 });
 
 // File upload setup

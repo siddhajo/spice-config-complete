@@ -248,15 +248,46 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   padding:36px 24px;color:var(--spice-text-main)
 }
 .login-logo{
-  width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+  position:relative;
+  width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-saffron) 100%);
-  color:#fff;font-weight:800;font-size:22px;letter-spacing:.5px;
-  box-shadow:0 12px 28px rgba(22,101,52,.28);margin-bottom:20px
+  color:#fff;font-weight:800;font-size:24px;letter-spacing:.5px;
+  box-shadow:0 14px 32px rgba(22,101,52,.32),0 0 0 6px rgba(22,101,52,.06);
+  margin-bottom:22px;
+  animation:loginPop .6s cubic-bezier(.16,1,.3,1) both
 }
-.login-logo span{display:inline-block}
+.login-logo::after{
+  /* Subtle inner highlight ring for depth */
+  content:'';position:absolute;inset:1px;border-radius:19px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 40%)
+}
+.login-logo span{position:relative;z-index:1;display:inline-block}
+.login-brand-chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);
+  padding:5px 10px;border-radius:999px;margin-bottom:14px;
+  border:1px solid rgba(22,101,52,.18)
+}
+.login-brand-chip .dot{
+  width:6px;height:6px;border-radius:50%;background:var(--spice-cardamom);
+  box-shadow:0 0 0 3px rgba(22,101,52,.14);animation:pulseDot 2.4s ease-in-out infinite
+}
 .login-brand h1{
-  font-size:34px;font-weight:800;letter-spacing:-.6px;
-  margin:0 0 12px 0;color:var(--spice-text-main);line-height:1.1
+  font-size:36px;font-weight:800;letter-spacing:-.7px;
+  margin:0 0 12px 0;color:var(--spice-text-main);line-height:1.05
+}
+@keyframes loginPop{
+  0%{opacity:0;transform:scale(.85) translateY(8px)}
+  100%{opacity:1;transform:scale(1) translateY(0)}
+}
+@keyframes pulseDot{
+  0%,100%{box-shadow:0 0 0 3px rgba(22,101,52,.14)}
+  50%{box-shadow:0 0 0 6px rgba(22,101,52,.05)}
+}
+@keyframes loginFadeUp{
+  0%{opacity:0;transform:translateY(12px)}
+  100%{opacity:1;transform:translateY(0)}
 }
 .login-tagline{
   font-size:15px;color:var(--spice-text-mute);line-height:1.55;
@@ -275,13 +306,33 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 
 /* Form card */
 .login-card{
-  background:#fff;border:1px solid var(--spice-line);border-radius:20px;
-  padding:36px 34px;
-  box-shadow:0 24px 60px -20px rgba(15,23,42,.22), 0 8px 16px -8px rgba(15,23,42,.08);
-  display:flex;flex-direction:column;justify-content:center
+  position:relative;
+  background:#fff;border:1px solid var(--spice-line);border-radius:22px;
+  padding:38px 36px 32px;
+  box-shadow:0 28px 70px -22px rgba(15,23,42,.24), 0 10px 18px -10px rgba(15,23,42,.08);
+  display:flex;flex-direction:column;justify-content:center;
+  animation:loginFadeUp .55s cubic-bezier(.16,1,.3,1) both;
+  animation-delay:.08s
+}
+/* Hairline accent stripe at the top of the card. */
+.login-card::before{
+  content:'';position:absolute;top:0;left:24px;right:24px;height:3px;border-radius:0 0 6px 6px;
+  background:linear-gradient(90deg,var(--spice-cardamom),var(--spice-saffron),var(--spice-cardamom));
+  opacity:.85
+}
+.login-welcome{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--spice-saffron-dk);background:var(--spice-saffron-lt);
+  padding:5px 10px;border-radius:999px;margin-bottom:10px;
+  border:1px solid rgba(245,158,11,.25);align-self:flex-start
+}
+.login-welcome .lw-dot{
+  width:6px;height:6px;border-radius:50%;background:var(--spice-saffron);
+  box-shadow:0 0 0 3px rgba(245,158,11,.18)
 }
 .login-card h2{
-  font-size:24px;font-weight:800;letter-spacing:-.3px;color:var(--spice-text-main);
+  font-size:26px;font-weight:800;letter-spacing:-.4px;color:var(--spice-text-main);
   margin:0 0 6px 0
 }
 .login-sub{font-size:13.5px;color:var(--spice-text-mute);margin:0 0 22px 0}
@@ -315,6 +366,9 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 }
 .login-eye:hover{color:var(--spice-cardamom)}
 .login-eye[data-on="1"]{color:var(--spice-cardamom)}
+.login-eye .login-eye-off{display:none}
+.login-eye[data-on="1"] .login-eye-on{display:none}
+.login-eye[data-on="1"] .login-eye-off{display:block}
 
 .login-submit{
   margin-top:6px;height:50px;border:0;border-radius:12px;cursor:pointer;
@@ -922,24 +976,27 @@ tr:hover td{background:var(--spice-cream)}
 }
 .flag-row:last-child{border-bottom:none}
 .flag-row label{font-size:12px;font-weight:600;cursor:pointer;flex:1;color:var(--text);line-height:1.3}
-.sw{position:relative;width:20px;height:12px;flex-shrink:0}
+/* Pill-shaped toggle. Thumb fills most of the track height with 2px
+   padding all around; when checked the thumb slides flush to the
+   right and the track turns green. Sizes match the screenshot brief —
+   prominent enough to read at a glance without dominating the row. */
+.sw{position:relative;width:34px;height:18px;flex-shrink:0}
 .sw input{opacity:0;width:0;height:0;position:absolute}
 .sl{
-  position:absolute;inset:0;background:#ccc;border-radius:12px;cursor:pointer;
+  position:absolute;inset:0;background:#cbd5e1;border-radius:999px;cursor:pointer;
   transition:background .2s
 }
 .sl::before{
-  content:'';position:absolute;width:8px;height:8px;
-  left:2px;bottom:2px;background:#fff;border-radius:50%;
-  transition:transform .2s;box-shadow:0 1px 2px rgba(0,0,0,.2)
+  content:'';position:absolute;width:14px;height:14px;
+  left:2px;top:2px;background:#fff;border-radius:50%;
+  transition:transform .2s;box-shadow:0 2px 4px rgba(0,0,0,.18)
 }
 .sw input:checked+.sl{background:var(--green)}
-.sw input:checked+.sl::before{transform:translateX(8px)}
-/* Comfort mode bumps the switch back up slightly so it stays tappable */
-body[data-comfort="1"] .sw{width:26px;height:15px}
-body[data-comfort="1"] .sl{border-radius:15px}
-body[data-comfort="1"] .sl::before{width:11px;height:11px}
-body[data-comfort="1"] .sw input:checked+.sl::before{transform:translateX(11px)}
+.sw input:checked+.sl::before{transform:translateX(16px)}
+/* Comfort mode bumps the switch up so it stays easy to tap. */
+body[data-comfort="1"] .sw{width:40px;height:22px}
+body[data-comfort="1"] .sl::before{width:18px;height:18px}
+body[data-comfort="1"] .sw input:checked+.sl::before{transform:translateX(18px)}
 body[data-comfort="1"] .flag-row label{font-size:13px}
 
 /* ── Settings collapsible group (used by Feature Flags) ───── */
@@ -1031,18 +1088,11 @@ body[data-comfort="1"] .flag-row label{font-size:13px}
 .tally-co-asp{background:#FEF3C7;color:#B45309;border:1px solid #F59E0B}
 
 /* ── To Tally settings: grouped flat-list overrides ──────── */
-/* Theme-coloured labels + section heads (matches Spice green). */
+/* Theme-coloured labels + section heads (matches Spice green).
+   Toggle size now inherits the global .sw rules so every flag in
+   the app reads the same. */
 .tally-panel .flag-row label{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)));font-weight:600}
 .tally-panel .set-group-title{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)))}
-/* Smaller toggles in the Tally panel — tighter than the global .sw. */
-.tally-panel .sw{width:18px;height:11px}
-.tally-panel .sl{border-radius:11px}
-.tally-panel .sl::before{width:7px;height:7px}
-.tally-panel .sw input:checked+.sl::before{transform:translateX(7px)}
-body[data-comfort="1"] .tally-panel .sw{width:22px;height:13px}
-body[data-comfort="1"] .tally-panel .sl{border-radius:13px}
-body[data-comfort="1"] .tally-panel .sl::before{width:9px;height:9px}
-body[data-comfort="1"] .tally-panel .sw input:checked+.sl::before{transform:translateX(9px)}
 /* Compact inline input for text/number fields shown alongside labels. */
 .tally-panel .tally-fld{
   flex:0 0 50%;max-width:50%;
@@ -1807,10 +1857,14 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <span class="login-blob blob-3"></span>
   </div>
   <div class="login-shell">
-    <!-- Brand panel (collapses below the form on narrow screens) -->
+    <!-- Brand panel (collapses below the form on narrow screens).
+         #login-brand-name + #login-brand-mark are populated from
+         /api/brand on page load so the active company (ISP vs ASP)
+         shows here instead of a hardcoded literal. -->
     <aside class="login-brand">
-      <div class="login-logo"><span>IS</span></div>
-      <h1>Spice Config</h1>
+      <div class="login-logo"><span id="login-brand-mark">IS</span></div>
+      <span class="login-brand-chip"><span class="dot"></span> <span id="login-brand-chip-text">Spice Config</span></span>
+      <h1 id="login-brand-name">Spice Config</h1>
       <p class="login-tagline">Company configuration, lot management &amp; Tally exports — built for the cardamom trade.</p>
       <ul class="login-feats">
         <li><span class="lf-bullet"></span> Trade-aware invoicing &amp; debit notes</li>
@@ -1821,8 +1875,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     </aside>
     <!-- Form panel -->
     <main class="login-card" role="dialog" aria-labelledby="login-title">
-      <h2 id="login-title">Welcome back</h2>
-      <p class="login-sub">Sign in to continue to your dashboard.</p>
+      <span class="login-welcome"><span class="lw-dot"></span> Welcome</span>
+      <h2 id="login-title">Sign in to your workspace</h2>
+      <p class="login-sub">Pick up where you left off with trades, lots and invoices.</p>
       <form class="login-form" onsubmit="event.preventDefault();login()" autocomplete="on">
         <div class="login-field">
           <label for="inp-u">Username</label>
@@ -1835,9 +1890,13 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <label for="inp-p">Password</label>
           <span class="login-iwrap">
             <svg class="login-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            <input id="inp-p" type="password" autocomplete="current-password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')login()">
-            <button type="button" class="login-eye" onclick="(function(b){var i=document.getElementById('inp-p');i.type=i.type==='password'?'text':'password';b.setAttribute('data-on',i.type==='text'?'1':'0');})(this)" aria-label="Show / hide password" tabindex="-1">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            <!-- data-pw-eye="1" stops the global password-eye decorator
+                 (see setupPasswordEyeToggles) from adding a second eye —
+                 we provide our own inline eye button below. -->
+            <input id="inp-p" type="password" data-pw-eye="1" autocomplete="current-password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')login()">
+            <button type="button" class="login-eye" onclick="(function(b){var i=document.getElementById('inp-p');i.type=i.type==='password'?'text':'password';b.setAttribute('data-on',i.type==='text'?'1':'0');b.setAttribute('aria-label',i.type==='text'?'Hide password':'Show password');})(this)" aria-label="Show password" tabindex="-1">
+              <svg class="login-eye-on" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="login-eye-off" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
           </span>
         </div>
@@ -5401,6 +5460,23 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   // last-active trade.
   const gw = document.getElementById('global-aid-wrap'); if (gw) gw.style.display = 'none';
   document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
+// Public brand probe — populates the login card's company name + logo
+// mark with the active preset (ISP vs ASP) from the server. Endpoint
+// is auth-free since this runs BEFORE the user signs in.
+(async()=>{try{
+  const r = await fetch(B + '/api/brand');
+  if (!r.ok) return;
+  const d = await r.json();
+  const nameEl = document.getElementById('login-brand-name');
+  const markEl = document.getElementById('login-brand-mark');
+  const chipEl = document.getElementById('login-brand-chip-text');
+  const titleEl= document.querySelector('title');
+  if (nameEl && d.name) nameEl.textContent = d.name;
+  if (markEl && d.mark) markEl.textContent = d.mark;
+  if (chipEl && d.code) chipEl.textContent = d.code + ' · Spice Config';
+  if (titleEl && d.name) titleEl.textContent = d.name + ' · Config';
+} catch (_) { /* leave defaults */ }})();
+
 // On page load, restore the auth token from localStorage and verify it
 // against /api/me. Critical: T must be assigned BEFORE the /api/me call
 // — otherwise the request goes out with an empty Bearer header, gets a
