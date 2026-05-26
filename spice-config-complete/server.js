@@ -151,9 +151,11 @@ function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'No token' });
   const db = getDb();
   const session = db.get('SELECT * FROM sessions WHERE token = ?', [token]);
-  if (!session) return res.status(403).json({ error: 'Session expired — please sign in again' });
+  // 401 (not 403) so the client's auto-logout flow triggers silently
+  // instead of surfacing a "Session expired" toast to the user.
+  if (!session) return res.status(401).json({ error: 'Session expired — please sign in again' });
   const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
-  if (!user) return res.status(403).json({ error: 'Unauthorized' });
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
   // Touch last_used_at for cleanup / activity display
   db.run(`UPDATE sessions SET last_used_at = datetime('now','localtime') WHERE token = ?`, [token]);
   req.user = user;
@@ -7082,9 +7084,9 @@ app.get('/api/reports/summary-pdf/:id', (req, res, next) => {
   if (!token) return res.status(401).json({ error: 'No token' });
   const db = getDb();
   const session = db.get('SELECT * FROM sessions WHERE token = ?', [token]);
-  if (!session) return res.status(403).json({ error: 'Session expired — please sign in again' });
+  if (!session) return res.status(401).json({ error: 'Session expired — please sign in again' });
   const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
-  if (!user) return res.status(403).json({ error: 'Unauthorized' });
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
   if (!userHas(user.role, 'view')) {
     return res.status(403).json({ error: 'Your role does not allow viewing reports', role: user.role });
   }

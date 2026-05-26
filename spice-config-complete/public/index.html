@@ -221,19 +221,132 @@ body[data-theme="trust"]{
 .theme-chip[data-t="trust"]{background:linear-gradient(135deg,#003366,#00A3E0)}
 body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 
-/* ── Login ───────────────────────────────────────────────── */
-#login{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:linear-gradient(135deg,var(--spice-cream) 0%,#F1F5F9 100%)}
-.login-box{background:var(--spice-paper);border:1px solid var(--spice-line);border-radius:20px;padding:40px;width:400px;box-shadow:0 10px 40px rgba(31,25,21,.08)}
-.login-box h1{font-size:24px;font-weight:700;color:var(--spice-text-main);text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:12px;letter-spacing:-.3px}
-.login-box h1 .dot{
-  width:44px;height:44px;border-radius:12px;
-  background:linear-gradient(135deg,var(--spice-saffron) 0%,#84CC16 100%);
-  display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:800;
-  box-shadow:0 4px 12px rgba(16,185,129,.28);animation:none
+/* ── Login (redesigned) ──────────────────────────────────── */
+#login{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  min-height:100vh;padding:24px;overflow:hidden;
+  background:radial-gradient(1200px 600px at 80% -10%,rgba(20,83,45,.10),transparent 60%),
+             radial-gradient(900px 500px at -10% 100%,rgba(245,158,11,.10),transparent 55%),
+             linear-gradient(135deg,var(--spice-cream) 0%,#F8FAFC 60%,#F1F5F9 100%)
 }
-.login-box h1 .dot::before{content:'IS'}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.login-box p{font-size:14px;color:var(--spice-text-mute);text-align:center;margin-bottom:28px}
+/* Decorative blobs — pure CSS, no layout impact */
+.login-bg{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.login-blob{position:absolute;display:block;border-radius:50%;filter:blur(60px);opacity:.45}
+.login-blob.blob-1{width:380px;height:380px;background:#86EFAC;top:-110px;left:-90px}
+.login-blob.blob-2{width:300px;height:300px;background:#FDE68A;bottom:-90px;right:-60px}
+.login-blob.blob-3{width:220px;height:220px;background:#BBF7D0;top:55%;left:62%;opacity:.35}
+
+/* Two-column shell (brand left, form right). Collapses to one column
+   on narrow screens via the @media rule near the end of this block. */
+.login-shell{
+  position:relative;z-index:1;
+  display:grid;grid-template-columns:minmax(280px,1fr) minmax(360px,1fr);
+  gap:36px;width:100%;max-width:960px;align-items:stretch;
+}
+.login-brand{
+  display:flex;flex-direction:column;justify-content:center;
+  padding:36px 24px;color:var(--spice-text-main)
+}
+.login-logo{
+  width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-saffron) 100%);
+  color:#fff;font-weight:800;font-size:22px;letter-spacing:.5px;
+  box-shadow:0 12px 28px rgba(22,101,52,.28);margin-bottom:20px
+}
+.login-logo span{display:inline-block}
+.login-brand h1{
+  font-size:34px;font-weight:800;letter-spacing:-.6px;
+  margin:0 0 12px 0;color:var(--spice-text-main);line-height:1.1
+}
+.login-tagline{
+  font-size:15px;color:var(--spice-text-mute);line-height:1.55;
+  margin:0 0 22px 0;max-width:380px
+}
+.login-feats{list-style:none;padding:0;margin:0;display:grid;gap:10px;max-width:380px}
+.login-feats li{
+  font-size:13.5px;color:var(--spice-text-main);display:flex;align-items:center;gap:10px;
+  padding:6px 0
+}
+.lf-bullet{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--spice-cardamom),var(--spice-saffron));
+  box-shadow:0 0 0 4px rgba(22,101,52,.08)
+}
+
+/* Form card */
+.login-card{
+  background:#fff;border:1px solid var(--spice-line);border-radius:20px;
+  padding:36px 34px;
+  box-shadow:0 24px 60px -20px rgba(15,23,42,.22), 0 8px 16px -8px rgba(15,23,42,.08);
+  display:flex;flex-direction:column;justify-content:center
+}
+.login-card h2{
+  font-size:24px;font-weight:800;letter-spacing:-.3px;color:var(--spice-text-main);
+  margin:0 0 6px 0
+}
+.login-sub{font-size:13.5px;color:var(--spice-text-mute);margin:0 0 22px 0}
+.login-form{display:flex;flex-direction:column;gap:16px}
+.login-field label{
+  display:block;font-size:11.5px;font-weight:700;letter-spacing:.5px;
+  color:var(--spice-text-mute);text-transform:uppercase;margin-bottom:6px
+}
+.login-iwrap{
+  position:relative;display:flex;align-items:center;
+  border:1.5px solid var(--spice-line);border-radius:12px;background:#fff;
+  transition:border-color .15s,box-shadow .15s,background .15s
+}
+.login-iwrap:hover{border-color:#CBD5E1}
+.login-iwrap:focus-within{
+  border-color:var(--spice-cardamom);
+  box-shadow:0 0 0 4px rgba(22,101,52,.10);background:#FEFEFE
+}
+.login-icon{color:#94A3B8;margin:0 10px 0 14px;flex-shrink:0}
+.login-iwrap:focus-within .login-icon{color:var(--spice-cardamom)}
+.login-iwrap input{
+  flex:1;height:46px;border:0;background:transparent;outline:none;
+  font-size:14.5px;font-family:inherit;color:var(--spice-text-main);
+  padding:0 8px 0 0;min-width:0
+}
+.login-iwrap input::placeholder{color:#94A3B8;font-weight:400}
+.login-eye{
+  height:46px;width:42px;border:0;background:transparent;cursor:pointer;
+  color:#94A3B8;display:flex;align-items:center;justify-content:center;
+  border-radius:0 10px 10px 0;transition:color .15s
+}
+.login-eye:hover{color:var(--spice-cardamom)}
+.login-eye[data-on="1"]{color:var(--spice-cardamom)}
+
+.login-submit{
+  margin-top:6px;height:50px;border:0;border-radius:12px;cursor:pointer;
+  background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-cardamom-dk) 100%);
+  color:#fff;font-size:15px;font-weight:700;letter-spacing:.2px;
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  box-shadow:0 10px 24px -8px rgba(22,101,52,.45);
+  transition:transform .12s,box-shadow .15s,filter .15s
+}
+.login-submit:hover{transform:translateY(-1px);box-shadow:0 14px 28px -8px rgba(22,101,52,.55);filter:brightness(1.04)}
+.login-submit:active{transform:translateY(0)}
+.login-submit svg{transition:transform .15s}
+.login-submit:hover svg{transform:translateX(2px)}
+
+.login-err{
+  margin-top:4px;font-size:13px;font-weight:600;text-align:center;
+  color:var(--spice-chili-dk,#991B1B);background:var(--spice-chili-lt,#FEE2E2);
+  border:1px solid #FCA5A5;padding:8px 12px;border-radius:10px;display:none
+}
+.login-err:not(:empty){display:block}
+.login-foot{
+  margin:22px 0 0 0;font-size:12px;color:var(--spice-text-mute);text-align:center;line-height:1.5
+}
+.login-foot b{color:var(--spice-text-main);font-weight:700}
+
+@media (max-width:820px){
+  .login-shell{grid-template-columns:1fr;gap:16px;max-width:440px}
+  .login-brand{text-align:center;padding:8px 16px 0;align-items:center}
+  .login-brand h1{font-size:28px}
+  .login-tagline{margin-left:auto;margin-right:auto}
+  .login-feats{display:none}
+}
 .fg{margin-bottom:14px}
 .fg label{display:block;font-size:12px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
 .fg input:not([type="checkbox"]):not([type="radio"]),.fg select,.fg textarea{
@@ -308,11 +421,13 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .topbar-user{
   font-size:13px;background:var(--spice-saffron-lt);color:var(--spice-clove);
   padding:8px 14px;border-radius:10px;font-weight:600;
-  display:inline-flex;align-items:center;gap:6px
+  display:inline-flex;align-items:center;gap:6px;
+  transition:background .2s,color .2s
 }
 .topbar-user:empty{display:none}
 .topbar-user::before{
-  content:'';width:8px;height:8px;border-radius:50%;background:var(--spice-cardamom);
+  content:'';width:8px;height:8px;border-radius:50%;
+  background:var(--user-dot,var(--spice-cardamom));
   display:inline-block;flex-shrink:0
 }
 
@@ -1685,13 +1800,55 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 </head>
 <body data-feat-price-list-mapping="1" data-feat-price-check="1">
 <div id="login">
-  <div class="login-box">
-    <h1><span class="dot"></span> Spice Config</h1>
-    <p>Company Configuration & Reports</p>
-    <div class="fg"><label>Username</label><input id="inp-u" value="admin"></div>
-    <div class="fg"><label>Password</label><input type="password" id="inp-p" onkeydown="if(event.key==='Enter')login()"></div>
-    <button class="btn btn-g btn-full" onclick="login()">Sign In</button>
-    <div class="err" id="login-err"></div>
+  <!-- Decorative background blobs — pure CSS, no layout impact -->
+  <div class="login-bg" aria-hidden="true">
+    <span class="login-blob blob-1"></span>
+    <span class="login-blob blob-2"></span>
+    <span class="login-blob blob-3"></span>
+  </div>
+  <div class="login-shell">
+    <!-- Brand panel (collapses below the form on narrow screens) -->
+    <aside class="login-brand">
+      <div class="login-logo"><span>IS</span></div>
+      <h1>Spice Config</h1>
+      <p class="login-tagline">Company configuration, lot management &amp; Tally exports — built for the cardamom trade.</p>
+      <ul class="login-feats">
+        <li><span class="lf-bullet"></span> Trade-aware invoicing &amp; debit notes</li>
+        <li><span class="lf-bullet"></span> ISP / ASP dual-identity support</li>
+        <li><span class="lf-bullet"></span> One-click Tally voucher export</li>
+        <li><span class="lf-bullet"></span> Role-based access for your team</li>
+      </ul>
+    </aside>
+    <!-- Form panel -->
+    <main class="login-card" role="dialog" aria-labelledby="login-title">
+      <h2 id="login-title">Welcome back</h2>
+      <p class="login-sub">Sign in to continue to your dashboard.</p>
+      <form class="login-form" onsubmit="event.preventDefault();login()" autocomplete="on">
+        <div class="login-field">
+          <label for="inp-u">Username</label>
+          <span class="login-iwrap">
+            <svg class="login-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <input id="inp-u" type="text" autocomplete="username" placeholder="e.g. admin" autofocus>
+          </span>
+        </div>
+        <div class="login-field">
+          <label for="inp-p">Password</label>
+          <span class="login-iwrap">
+            <svg class="login-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <input id="inp-p" type="password" autocomplete="current-password" placeholder="Enter your password" onkeydown="if(event.key==='Enter')login()">
+            <button type="button" class="login-eye" onclick="(function(b){var i=document.getElementById('inp-p');i.type=i.type==='password'?'text':'password';b.setAttribute('data-on',i.type==='text'?'1':'0');})(this)" aria-label="Show / hide password" tabindex="-1">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </span>
+        </div>
+        <button type="submit" class="login-submit">
+          <span>Sign In</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+        <div class="err login-err" id="login-err"></div>
+      </form>
+      <p class="login-foot">Need access? Ask an administrator to create your user in <b>Settings → Users</b>.</p>
+    </main>
   </div>
 </div>
 
@@ -1718,8 +1875,11 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       </div>
       <span id="sync-indicator" class="sync-pill sync-ok" title="Last successful sync"></span>
       <span id="logo-badge" style="font-size:11px;font-weight:700;color:var(--green);background:var(--green-bg);padding:4px 10px;border-radius:12px;border:1px solid var(--green-border);display:none" title="Active company for invoices & calculations"></span>
-      <span id="user-lbl" class="topbar-user"></span>
-      <span id="user-role-badge" style="display:none;font-size:10.5px;font-weight:700;letter-spacing:.4px;padding:3px 8px;border-radius:8px;text-transform:uppercase" title="Your role"></span>
+      <!-- Single user pill: shows the username and gets role-themed
+           colours applied by applyPermissionAttributes(). The previous
+           layout also rendered a separate role badge here, which read
+           as a duplicate when username and role matched (e.g. admin / ADMIN). -->
+      <span id="user-lbl" class="topbar-user" title="Signed in"></span>
       <button class="btn btn-o" id="refresh-btn" onclick="refreshCurrentTab()" title="Refresh this page (reloads data without losing your login)" style="padding:6px 10px;display:flex;align-items:center;gap:6px;font-weight:700">
         <svg id="refresh-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.36L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.36L3 16"/><path d="M3 21v-5h5"/></svg>
         <span>Refresh</span>
@@ -4462,9 +4622,23 @@ async function _jOnce(t, o){
   let body; try{ body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
   if(!r.ok){
     if(r.status === 401){
+      // Stale token: silently log out — no toast / pill error, so the
+      // user just lands on the login form without a confusing "Session
+      // expired" message blinking up.
       console.warn('Got 401 — clearing stale token');
       localStorage.removeItem('t'); T = '';
+      try {
+        const toastEl = document.getElementById('toast');
+        if (toastEl) { toastEl.style.display = 'none'; toastEl.style.background = ''; toastEl.style.color = ''; }
+        if (window._net) { window._net.lastError = null; window._net.lastOkAt = Date.now(); }
+        if (typeof updateSyncIndicator === 'function') updateSyncIndicator();
+      } catch (_) {}
       setTimeout(()=>{ document.getElementById('app').style.display='none'; document.getElementById('login').style.display='flex'; }, 100);
+      // Mark the error as silent so j()'s retry/error path stays out of
+      // the user's hair on auth failures.
+      const e = new Error('auth');
+      e.status = 401; e.body = body; e.silent = true;
+      throw e;
     }
     const msg = body.error || body.message || `HTTP ${r.status} ${r.statusText||''}`.trim();
     const err = new Error(msg);
@@ -4491,8 +4665,13 @@ const j = async (t, o) => {
       // Only retry transient failures (network or 5xx). Do NOT retry 4xx.
       const shouldRetry = (err.isNetwork || (err.status >= 500 && err.status < 600));
       if (!shouldRetry || attempt === maxRetries - 1) {
-        window._net.lastError = err;
-        updateSyncIndicator();
+        // Silent auth failures (handled by _jOnce auto-logout) don't
+        // pollute the sync pill — otherwise "Sync failed" lingers on
+        // the login page after the redirect.
+        if (!err.silent) {
+          window._net.lastError = err;
+          updateSyncIndicator();
+        }
         throw err;
       }
       // Exponential backoff: 300ms, 900ms, 2700ms
@@ -5139,28 +5318,42 @@ function applyPermissionAttributes(){
   // Stamp the user's role so CSS rules can gate admin-only surfaces
   // (the Unlock button on the Lots tab is the current consumer).
   if (window._userRole) body.setAttribute('data-role', window._userRole);
-  // Update the role badge in the topbar with role-themed colors
-  const badge = document.getElementById('user-role-badge');
-  if (badge && window._userRole) {
+  // Apply role-themed colours directly to the username pill — single
+  // source of truth for "who you are + what you can do". The previous
+  // standalone role badge was a visual duplicate when username==role.
+  const userLbl = document.getElementById('user-lbl');
+  if (userLbl && window._userRole) {
     const role = window._userRole;
     const themes = {
-      admin:    { bg:'var(--spice-chili-lt)',    fg:'var(--spice-chili-dk)' },
-      manager:  { bg:'var(--spice-cardamom-lt)', fg:'var(--spice-cardamom-dk)' },
-      operator: { bg:'var(--spice-saffron-lt)',  fg:'var(--spice-saffron-dk)' },
-      viewer:   { bg:'#f1f5f9',                  fg:'#64748b' },
-      user:     { bg:'#f1f5f9',                  fg:'#64748b' }, // legacy
+      admin:    { bg:'var(--spice-chili-lt)',    fg:'var(--spice-chili-dk)',   dot:'var(--spice-chili)' },
+      manager:  { bg:'var(--spice-cardamom-lt)', fg:'var(--spice-cardamom-dk)',dot:'var(--spice-cardamom)' },
+      operator: { bg:'var(--spice-saffron-lt)',  fg:'var(--spice-saffron-dk)', dot:'var(--spice-saffron)' },
+      viewer:   { bg:'#f1f5f9',                  fg:'#64748b',                 dot:'#94a3b8' },
+      user:     { bg:'#f1f5f9',                  fg:'#64748b',                 dot:'#94a3b8' }, // legacy
     };
     const t = themes[role] || themes.viewer;
-    badge.style.background = t.bg;
-    badge.style.color = t.fg;
-    badge.textContent = role === 'user' ? 'viewer' : role;
-    badge.style.display = 'inline-block';
+    userLbl.style.background = t.bg;
+    userLbl.style.color = t.fg;
+    userLbl.style.setProperty('--user-dot', t.dot);
+    userLbl.title = 'Signed in · role: ' + (role === 'user' ? 'viewer' : role);
   }
 }
 
 async function login(){
-  const e=document.getElementById('login-err');e.style.display='none';
-  try{const d=await j('/api/login',{method:'POST',body:JSON.stringify({username:document.getElementById('inp-u').value,password:document.getElementById('inp-p').value})});
+  const e=document.getElementById('login-err');
+  e.textContent='';e.style.display='none';
+  // Clear any lingering "Session expired" toast left over from a prior
+  // auto-logout so the login screen isn't shouting at the user.
+  try {
+    const toastEl=document.getElementById('toast');
+    if (toastEl) { toastEl.style.display='none'; toastEl.style.background=''; toastEl.style.color=''; }
+  } catch (_) {}
+  const u=(document.getElementById('inp-u').value||'').trim();
+  const p=document.getElementById('inp-p').value||'';
+  if (!u || !p) { e.textContent='Enter both username and password.';e.style.display='block';return; }
+  const btn=document.querySelector('.login-submit');
+  if (btn) { btn.disabled=true; btn.dataset.origText=btn.querySelector('span')?.textContent||'Sign In'; const lbl=btn.querySelector('span'); if(lbl) lbl.textContent='Signing in…'; }
+  try{const d=await j('/api/login',{method:'POST',body:JSON.stringify({username:u,password:p})});
   T=d.token;localStorage.setItem('t',T);document.getElementById('user-lbl').textContent=d.username;
   // Cache role + permissions for client-side button visibility
   window._userRole  = d.role || 'viewer';
@@ -5176,11 +5369,30 @@ async function login(){
   // sidebar item is hidden by role-scoped CSS, so dashboard would
   // give them an empty room.
   go(window._userRole === 'lot_entry' ? 'lotentry' : 'dash');}
-  catch(x){e.textContent='Invalid credentials';e.style.display='block'}}
+  catch(x){
+    // 401 from /api/login = invalid credentials (server returns 401 for
+    // bad creds AND for stale-session on other routes). On the login
+    // form specifically, the only 401 path here is bad creds.
+    const msg = (x && x.status === 401) ? 'Invalid username or password.'
+              : (x && x.message)        ? x.message
+              :                            'Sign-in failed. Please try again.';
+    e.textContent = msg; e.style.display='block';
+  }
+  finally {
+    if (btn) { btn.disabled=false; const lbl=btn.querySelector('span'); if(lbl) lbl.textContent=btn.dataset.origText||'Sign In'; }
+  }
+}
 function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem('t');
   window._userRole=null;window._userPerms=new Set();
-  // Hide role badge + clear perm attributes (or stale hides persist on next login)
-  const badge=document.getElementById('user-role-badge');if(badge)badge.style.display='none';
+  // Reset the username pill styling so the next login starts neutral
+  // (and the dot reverts to its default green).
+  const userLbl=document.getElementById('user-lbl');
+  if(userLbl){
+    userLbl.textContent='';
+    userLbl.style.background='';userLbl.style.color='';
+    userLbl.style.removeProperty('--user-dot');
+    userLbl.title='Signed in';
+  }
   for (const attr of Array.from(document.body.attributes)) {
     if (attr.name.startsWith('data-perm-')) document.body.removeAttribute(attr.name);
   }
@@ -5195,6 +5407,10 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
 // 401, and we wipe the (valid) token from storage. That's what caused
 // the "logged out on refresh" bug.
 (async()=>{const t=localStorage.getItem('t');if(!t)return;T=t;try{const d=await j('/api/me');
+  // Race-condition guard: if the user managed to submit the login form
+  // while this auto-restore was in flight, T has already been replaced
+  // by the new token — don't overwrite anything in that case.
+  if (T !== t) return;
   document.getElementById('user-lbl').textContent=d.username;
   window._userRole  = d.role || 'viewer';
   window._userPerms = new Set(d.permissions || []);
@@ -5205,7 +5421,11 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   // Same global-aid restore as the explicit login path — runs once on
   // page reload when the token check succeeds.
   if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
-  go(window._userRole === 'lot_entry' ? 'lotentry' : 'dash');}catch(e){T='';localStorage.removeItem('t')}})();
+  go(window._userRole === 'lot_entry' ? 'lotentry' : 'dash');}catch(e){
+    // Only clear if T is still the stale token we tried to validate; a
+    // parallel successful login may have replaced it already.
+    if (T === t) { T=''; localStorage.removeItem('t'); }
+  }})();
 
 // ── Navigation ────────────────────────────────────────────
 // Track the most recently activated tab so the topbar Refresh button
