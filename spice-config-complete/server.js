@@ -2982,9 +2982,15 @@ app.post('/api/lots/calculate/:auctionId', requireLotWrite, (req, res) => {
   const lots = db.all('SELECT * FROM lots WHERE auction_id = ? AND amount > 0', [req.params.auctionId]);
   let count = 0;
   for (const lot of lots) {
+    // Re-derive amount = qty × price first so calculateLot (which reads
+    // lot.amount as its base) doesn't compound stale data when price has
+    // been edited without a matching amount write.
+    const qty = Number(lot.qty) || 0, price = Number(lot.price) || 0;
+    const newAmount = (qty > 0 && price > 0) ? +(qty * price).toFixed(2) : (Number(lot.amount) || 0);
+    lot.amount = newAmount;
     const calc = calculateLot(lot, cfg);
-    db.run(`UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
-      [calc.pqty,calc.prate,calc.puramt,calc.com,calc.sertax,calc.cgst,calc.sgst,calc.igst,calc.advance,calc.balance,calc.bilamt,calc.refund||0,calc.refud||0,calc.isp_pqty||0,calc.isp_prate||0,calc.isp_puramt||0,calc.asp_pqty||0,calc.asp_prate||0,calc.asp_puramt||0,lot.id]);
+    db.run(`UPDATE lots SET amount=?,pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+      [newAmount,calc.pqty,calc.prate,calc.puramt,calc.com,calc.sertax,calc.cgst,calc.sgst,calc.igst,calc.advance,calc.balance,calc.bilamt,calc.refund||0,calc.refud||0,calc.isp_pqty||0,calc.isp_prate||0,calc.isp_puramt||0,calc.asp_pqty||0,calc.asp_prate||0,calc.asp_puramt||0,lot.id]);
     count++;
   }
   res.json({ success: true, calculated: count });
@@ -3010,9 +3016,15 @@ app.post('/api/lots/calculate-all', requireLotWrite, (req, res) => {
   const lots = db.all(`SELECT * FROM lots WHERE amount > 0 ${mwLots.sql}`, mwLots.params);
   let count = 0;
   for (const lot of lots) {
+    // Re-derive amount = qty × price first so calculateLot (which reads
+    // lot.amount as its base) doesn't compound stale data when price has
+    // been edited without a matching amount write.
+    const qty = Number(lot.qty) || 0, price = Number(lot.price) || 0;
+    const newAmount = (qty > 0 && price > 0) ? +(qty * price).toFixed(2) : (Number(lot.amount) || 0);
+    lot.amount = newAmount;
     const calc = calculateLot(lot, cfg);
-    db.run(`UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
-      [calc.pqty,calc.prate,calc.puramt,calc.com,calc.sertax,calc.cgst,calc.sgst,calc.igst,calc.advance,calc.balance,calc.bilamt,calc.refund||0,calc.refud||0,calc.isp_pqty||0,calc.isp_prate||0,calc.isp_puramt||0,calc.asp_pqty||0,calc.asp_prate||0,calc.asp_puramt||0,lot.id]);
+    db.run(`UPDATE lots SET amount=?,pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+      [newAmount,calc.pqty,calc.prate,calc.puramt,calc.com,calc.sertax,calc.cgst,calc.sgst,calc.igst,calc.advance,calc.balance,calc.bilamt,calc.refund||0,calc.refud||0,calc.isp_pqty||0,calc.isp_prate||0,calc.isp_puramt||0,calc.asp_pqty||0,calc.asp_prate||0,calc.asp_puramt||0,lot.id]);
     count++;
   }
   res.json({ success: true, calculated: count });
