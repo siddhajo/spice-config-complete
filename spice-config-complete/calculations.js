@@ -272,10 +272,14 @@ function calculateTCS(invoiceAmount, priorSales, cfg) {
  * Sale type filter is optional — if lots don't have sale set yet, filter by buyer only
  */
 function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
-  // Get all lots for this buyer in this auction that have amounts
-  // Don't filter by sale — we're ASSIGNING the sale type now
+  // Get all lots for this buyer in this auction that have amounts.
+  // Don't filter by sale — we're ASSIGNING the sale type now.
+  // Skip code='WD' lots: those are withdrawn (no actual buyer
+  // transaction), so they must not appear as line items, contribute
+  // to totals, or get an invo stamped on them.
   const lots = db.all(
-    `SELECT * FROM lots WHERE auction_id = ? AND buyer = ? AND amount > 0 
+    `SELECT * FROM lots WHERE auction_id = ? AND buyer = ? AND amount > 0
+     AND UPPER(COALESCE(code, '')) != 'WD'
      AND (sale IS NULL OR sale = '' OR sale = ?) ORDER BY lot_no`,
     [auctionId, buyerCode, saleType]
   );

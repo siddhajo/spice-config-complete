@@ -2337,9 +2337,12 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // wipe values that the operator already entered. UI hides the input
   // when the flag is off so 0 is what flows in by default.
   const reservedPrice = Number(l.reserved_price);
-  getDb().run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
+  const _db = getDb();
+  _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',l.state||'TAMIL NADU',l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
+  // New lot in this trade → reconciliation is stale.
+  pcClearGate(_db, l.auction_id);
   res.json({ success: true });
 });
 
@@ -2376,7 +2379,11 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     }
   }
   vals.push(req.params.id);
+  // Capture auction_id BEFORE the write so a price/code edit drops
+  // the price-check gate to 'stale' (re-surfacing the lots-tab banner).
+  const _pcRow = db.get('SELECT auction_id FROM lots WHERE id = ?', [req.params.id]);
   db.run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
+  if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
   res.json({ success: true });
 });
 
@@ -2391,7 +2398,9 @@ app.delete('/api/lots/:id', requireDelete, (req, res) => {
       locked: true,
     });
   }
+  const _pcRow = db.get('SELECT auction_id FROM lots WHERE id = ?', [req.params.id]);
   db.run('DELETE FROM lots WHERE id = ?', [req.params.id]);
+  if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
   res.json({ success: true });
 });
 
@@ -2456,6 +2465,9 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
     `UPDATE lots SET buyer=?, buyer1=?, sale=?, invo='' WHERE id IN (${placeholders})`,
     [buyer.buyer, buyer.buyer1 || '', buyer.sale || 'L', ...part.allowedIds]
   );
+  // Stale price-check for every affected trade.
+  const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  for (const r of _aids) pcClearGate(db, r.auction_id);
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -2499,6 +2511,8 @@ app.post('/api/lots/bulk-grade', requireLotWrite, (req, res) => {
     );
     recalced++;
   }
+  const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  for (const r of _aids) pcClearGate(db, r.auction_id);
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -2522,7 +2536,9 @@ app.post('/api/lots/bulk-delete', requireDelete, (req, res) => {
     });
   }
   const placeholders = part.allowedIds.map(() => '?').join(',');
+  const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   db.run(`DELETE FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  for (const r of _aids) pcClearGate(db, r.auction_id);
   res.json({
     success: true,
     deleted: part.allowedIds.length,
@@ -2824,11 +2840,75 @@ function _pcBuildReport(filePath, opts) {
   };
 }
 
+// ── Price-check gate (per-auction tri-state) ──────────────────
+// Each auction carries two timestamps:
+//   • price_check_first_passed_at — stamped on the FIRST successful
+//     verify, never cleared. "This auction has been reconciled at
+//     least once."
+//   • price_checked_at — stamped on every successful verify AND
+//     cleared by any endpoint that mutates lot price/code. "The
+//     current reconciliation is still in sync with the lot data."
+//
+// Derived state:
+//   'off'   — feature flag disabled (treat as clean, gate is a no-op)
+//   'never' — first-passed-at not set → show banner, hard "pending"
+//   'stale' — first-passed-at set but price_checked_at empty → show
+//             banner softly ("lots changed since last Price Check")
+//   'clean' — both set → no banner
+function pcFlagOn(db) {
+  try {
+    const cfg = getSettingsFlat(db || getDb());
+    return String(cfg.flag_price_check || '').toLowerCase() === 'true';
+  } catch (_) { return false; }
+}
+function pcStampGate(db, auctionId) {
+  if (!auctionId || !pcFlagOn(db)) return;
+  db.run(
+    `UPDATE auctions
+        SET price_checked_at = datetime('now','localtime'),
+            price_check_first_passed_at = COALESCE(NULLIF(price_check_first_passed_at, ''), datetime('now','localtime'))
+      WHERE id = ?`,
+    [auctionId]
+  );
+}
+function pcClearGate(db, auctionId) {
+  if (!auctionId || !pcFlagOn(db)) return;
+  // First-pass stamp is permanent; clearing only drops state to 'stale'.
+  db.run(`UPDATE auctions SET price_checked_at = '' WHERE id = ?`, [auctionId]);
+}
+function pcGateState(db, auctionId) {
+  if (!auctionId)    return 'never';
+  if (!pcFlagOn(db)) return 'off';
+  const row = db.get(
+    'SELECT price_checked_at, price_check_first_passed_at FROM auctions WHERE id = ?',
+    [auctionId]
+  );
+  if (!row) return 'never';
+  if (!row.price_check_first_passed_at) return 'never';
+  return row.price_checked_at ? 'clean' : 'stale';
+}
+// Compute "gate-ready" from a verify summary. We use the same lenient
+// rule as the sibling: a verify counts as fully reconciled when no
+// fixable code rows remain (CODE Δ + DB BLANK = 0). File-blank codes
+// are operator-fixable manually and aren't gated on.
+function _pcReportIsGateReady(report) {
+  if (!report) return false;
+  const codeFixesPending = (report.codeMismatched || 0) + (report.codeDbBlank || 0);
+  return codeFixesPending === 0;
+}
+
 // POST /api/price-check/verify — returns JSON reconciliation.
 app.post('/api/price-check/verify', requireView, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
-    const report = _pcBuildReport(req.file.path, { auctionId: req.body.auction_id });
+    const auctionId = req.body.auction_id ? Number(req.body.auction_id) : null;
+    const report = _pcBuildReport(req.file.path, { auctionId });
+    // Stamp the gate when the verify ran against a specific auction
+    // AND all fixable code rows are resolved. Drives the lots-tab
+    // "Lots changed since last Price Check" banner clear-out.
+    if (auctionId && _pcReportIsGateReady(report)) {
+      pcStampGate(getDb(), auctionId);
+    }
     res.json(report);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -2836,6 +2916,28 @@ app.post('/api/price-check/verify', requireView, upload.single('file'), (req, re
     // Best-effort cleanup of the multer temp file.
     try { fs.unlinkSync(req.file.path); } catch (_) {}
   }
+});
+
+// Lightweight status probe — drives the lots-tab banner state.
+// Tri-state response stays small so the client can poll cheaply.
+app.get('/api/auctions/:id/price-check-status', requireView, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid auction id' });
+  const db = getDb();
+  const row = db.get(
+    'SELECT id, ano, date, price_checked_at, price_check_first_passed_at FROM auctions WHERE id = ?', [id]
+  );
+  if (!row) return res.status(404).json({ error: 'auction not found' });
+  const state = pcGateState(db, id);
+  res.json({
+    auctionId: id,
+    ano: row.ano, date: row.date,
+    state,                                     // 'off' | 'never' | 'stale' | 'clean'
+    checked: state === 'clean' || state === 'off',
+    everPassed: !!row.price_check_first_passed_at,
+    checkedAt: row.price_checked_at || null,
+    firstPassedAt: row.price_check_first_passed_at || null,
+  });
 });
 
 // POST /api/price-check/download — same data, returns an XLSX with
@@ -3081,10 +3183,17 @@ function _hasRemainingParties(db, docType, auctionId) {
     const uninvoicedExpr = isASPState
       ? `(l.invo IS NULL OR l.invo = '')`
       : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo))`;
+    // WD = withdrawn lot, no buyer transaction → never gets an invoice.
+    // The price-check Apply-fix flow writes code='WD' but leaves the
+    // buyer column intact (since 'WD' doesn't match a buyers row), so
+    // we have to exclude WD here explicitly or the gate never engages
+    // for a trade that has any withdrawn lots.
     return !!db.get(
       `SELECT 1 FROM lots l
        WHERE l.auction_id = ? AND l.buyer IS NOT NULL AND l.buyer != ''
-         AND l.amount > 0 AND ${uninvoicedExpr}
+         AND l.amount > 0
+         AND UPPER(COALESCE(l.code, '')) != 'WD'
+         AND ${uninvoicedExpr}
        LIMIT 1`,
       [auctionId]
     );
@@ -3398,6 +3507,7 @@ app.get('/api/invoices/eligible-buyers/:auctionId', requireView, (req, res) => {
      LEFT JOIN buyers b ON b.buyer = l.buyer
      WHERE l.auction_id = ?
        AND l.buyer IS NOT NULL AND l.buyer != ''
+       AND UPPER(COALESCE(l.code, '')) != 'WD'
        ${saleClause}
      GROUP BY l.buyer
      HAVING COUNT(CASE WHEN ${eligibleExpr} THEN 1 END) > 0

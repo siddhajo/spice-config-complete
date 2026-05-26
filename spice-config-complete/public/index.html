@@ -3369,7 +3369,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
          the lots they trust, leaving the rest untouched. -->
     <div class="tc" id="tc-pricecheck">
       <div class="card">
-        <h2>Price Check <span style="font-weight:400;font-size:12px;color:var(--text3)">Reconcile an external price sheet against the saved lot ledger</span></h2>
+        <h2>Price Check <span style="font-weight:400;font-size:12px;color:var(--text3)">Reconcile an external price sheet against a <span data-term-auction="singular-lower">trade</span>'s saved lot ledger</span></h2>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
           <div class="fg" style="margin:0;min-width:260px">
             <label data-term-auction="singular">Auction</label>
@@ -3384,7 +3384,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <button class="btn btn-o" onclick="pcClear()">Clear</button>
         </div>
         <div id="pc-hint" style="font-size:12px;color:var(--text3);margin-bottom:8px">
-          Upload the external price sheet, then click <b>Verify Prices</b>. The first sheet is used. Columns
+          Pick a <span data-term-auction="singular-lower">trade</span>, upload the external price sheet, then click <b>Verify Prices</b>. The first sheet is used. Columns
           recognised (case-insensitive): <code>Lot No</code>, <code>Price</code>, optional <code>Buyer Code</code>.
           When the DB price is correct and the file is wrong, use <b>Keep DB</b> to acknowledge the row without overwriting the lot.
         </div>
@@ -10152,7 +10152,13 @@ async function lotApplyPickLots(){
 let _lotsFull = [];
 
 async function loadLots(opts){
-  const aid=document.getElementById('lot-auction').value;if(!aid)return;
+  const aid=document.getElementById('lot-auction').value;
+  // Refresh the lots-tab price-check banner (stale/never → show; clean
+  // → hide). Runs even when aid is empty so a cleared banner stays
+  // cleared on auction-deselect. Becomes a no-op when flag_price_check
+  // is OFF (server returns state:'off').
+  if (typeof pcRefreshGate === 'function') pcRefreshGate(aid, '#tc-lots');
+  if(!aid)return;
   // Pager: fresh loads reset to page 1; only pager-driven navigation
   // sets {keepPage:true} to preserve the user's current page.
   if (!opts || !opts.keepPage) _lotsPager.page = 1;
@@ -13461,6 +13467,92 @@ async function exportJournal(){
   const r=await fetch(B+url,{headers:{'Authorization':'Bearer '+T}});
   const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
 
+// ── Price-check gate (per-auction stale banner) ────────────
+// Tri-state probe of /api/auctions/:id/price-check-status. When the
+// state is 'stale' or 'never', a soft amber banner appears at the top
+// of the Lots tab nudging the operator to (re-)run Price Check. A
+// successful verify (when the auction is pre-picked AND no fixable
+// code rows remain) stamps the gate clean and the banner disappears.
+// When the feature flag flag_price_check is OFF, the endpoint returns
+// state:'off' and the helpers are no-ops.
+const _PC_STATUS_CACHE = new Map();
+async function _pcFetchStatus(auctionId){
+  if (!auctionId) return null;
+  try {
+    const d = await j('/api/auctions/' + encodeURIComponent(auctionId) + '/price-check-status');
+    _PC_STATUS_CACHE.set(String(auctionId), d);
+    return d;
+  } catch (_) { return null; }
+}
+// Renders / clears the lots-tab banner based on tri-state.
+//   'clean' / 'off' → remove any existing banner
+//   'stale'         → amber "Lots changed since the last Price Check"
+//   'never'         → amber "Price check pending — run Reports → Price
+//                     Check against this auction first"
+function _pcRenderStaleBanner(tabScope, state, opts){
+  const scope = tabScope ? document.querySelector(tabScope) : null;
+  if (!scope) return;
+  const host = scope.querySelector('.card') || scope;
+  const existing = host.querySelector(':scope > .pc-stale-banner');
+  if (state === 'clean' || state === 'off') {
+    if (existing) existing.remove();
+    return;
+  }
+  const isNever = (state === 'never');
+  const msg = isNever
+    ? '<b>Price check pending.</b> Run Reports → Price Check against this auction before generating to stay safe.'
+    : '<b>Lots changed since the last Price Check.</b> Review the data, then re-verify before generating to stay safe.';
+  if (existing) { existing.dataset.pcState = state; existing.querySelector('.pc-stale-msg').innerHTML = msg; return; }
+  const banner = document.createElement('div');
+  banner.className = 'pc-stale-banner';
+  banner.dataset.pcState = state;
+  banner.style.cssText = [
+    'display:flex','align-items:center','gap:12px',
+    'margin:0 0 12px 0','padding:10px 14px',
+    'background:#FEF3C7','border:1px solid #F59E0B',
+    'border-radius:8px','color:#7C2D12',
+    'font-size:13px','line-height:1.5',
+  ].join(';');
+  banner.innerHTML =
+    '<span style="font-size:18px;line-height:1">⚠</span>'+
+    '<span class="pc-stale-msg" style="flex:1">'+msg+'</span>'+
+    '<button type="button" class="btn btn-o" '+
+    'style="height:30px;padding:0 12px;font-weight:600;font-size:12.5px" '+
+    'onclick="go(\'pricecheck\')">'+ (isNever ? 'Run Price Check' : 'Re-verify') +'</button>';
+  host.insertBefore(banner, host.firstChild);
+}
+async function pcRefreshGate(auctionId, tabScope){
+  let state = 'never';
+  if (auctionId) {
+    const status = await _pcFetchStatus(auctionId);
+    if (status && status.state) state = status.state;
+    else if (status && status.checked) state = 'clean';
+  }
+  // Feature off → behave as clean (banner removed, no nag).
+  if (state === 'off') state = 'clean';
+  _pcRenderStaleBanner(tabScope, state);
+  return state === 'clean' || state === 'stale';
+}
+// Re-run pcRefreshGate against any gated tab whose auction selector
+// is currently pointing at the auction we just verified. Without this
+// the banner lingers until the operator manually re-loads the tab.
+function _pcRefreshOpenGates(verifiedAuctionId){
+  if (!verifiedAuctionId) return;
+  const target = String(verifiedAuctionId);
+  const gates = [
+    { scope: '#tc-lots', auctionSel: '#lot-auction' },
+  ];
+  for (const g of gates) {
+    const scopeEl = document.querySelector(g.scope);
+    if (!scopeEl) continue;
+    const aucEl = scopeEl.querySelector(g.auctionSel) || document.querySelector(g.auctionSel);
+    const aid = aucEl && aucEl.value ? String(aucEl.value) : '';
+    if (aid !== target) continue;
+    _PC_STATUS_CACHE.delete(target);
+    pcRefreshGate(aid, g.scope);
+  }
+}
+
 // ── Price Check ────────────────────────────────────────────
 // External price-sheet reconciliation. The server endpoints live in
 // server.js (/api/price-check/verify, /download, /apply-fix). The
@@ -13518,6 +13610,14 @@ async function pcVerify(){
     if(!r.ok)throw new Error(d.error||'Verify failed');
     _pcLastReport=d;
     _pcRenderPreview(d);
+    // Clear the lots-tab "Lots changed since last Price Check" banner
+    // immediately if the verify just stamped the gate clean. Server
+    // stamps only when (a) an auction was pre-picked, AND (b) no
+    // fixable code rows remain.
+    if (typeof _pcRefreshOpenGates === 'function') {
+      const verifiedAid = (d && d.forcedAuction && d.forcedAuction.id) || aid;
+      _pcRefreshOpenGates(verifiedAid);
+    }
   }catch(e){
     if(res)res.innerHTML='<div class="alert" style="padding:10px;color:#c00">'+esc(e.message||String(e))+'</div>';
     showError(e);
@@ -13582,7 +13682,7 @@ function _pcRenderPreview(d){
   for(const rr of (d.rows||[])) if(rr.lot_id) reportLotIds.add(rr.lot_id);
   for(const id of [..._pcKept]) if(!reportLotIds.has(id)) _pcKept.delete(id);
 
-  const fa=d.forcedAuction?(' for <b>'+esc(d.forcedAuction.ano)+'</b>'):'';
+  const fa=d.forcedAuction?(' for '+termAuction(false,true)+' <b>'+esc(d.forcedAuction.ano)+'</b>'):'';
   const colN=d.hasServerPriceCol?'<code>SERVER PRICE</code>':'<code>PRICE</code>';
   const tile=(lbl,val,bg)=>('<div style="background:'+(bg||'var(--bg)')+';padding:10px 14px;border-radius:8px;min-width:120px">'+
     '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">'+lbl+'</div>'+
@@ -13778,11 +13878,36 @@ async function pcApplyFix(btn,lotId,price,code){
       if(r.status===423)throw new Error(d.error||'Lot is locked');
       throw new Error(d.error||'Apply failed');
     }
-    if(btn){btn.textContent='✓ Applied';btn.classList.remove('btn-g');btn.classList.add('btn-o');btn.disabled=true}
+    // Reflect the applied fix on the cached report so the toolbar's
+    // "Keep DB price for X" count + the row's status badge stay in
+    // sync with the DB. Without this, the row keeps its original
+    // server_diff/server_empty status in _pcLastReport and the bulk
+    // counter never drops (the bug being fixed here).
+    _pcMarkRowApplied(lotId, body);
+    if(_pcLastReport){ _pcRenderPreview(_pcLastReport); }
+    else if(btn){ btn.textContent='✓ Applied';btn.classList.remove('btn-g');btn.classList.add('btn-o');btn.disabled=true }
     toast('Lot updated');
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent=orig}
     showError(e);
+  }
+}
+// Mutate the cached row in _pcLastReport so the "Apply" outcome is
+// reflected in subsequent re-renders. Price-applied → status becomes
+// 'match', diff zeroed, db_price updated. Code-applied → code_status
+// becomes 'match', db_code updated.
+function _pcMarkRowApplied(lotId, body){
+  if(!_pcLastReport || !lotId) return;
+  const row=(_pcLastReport.rows||[]).find(r=>r.lot_id===lotId);
+  if(!row) return;
+  if(body.price!==undefined && body.price!==null){
+    row.db_price=Number(body.price);
+    row.diff=0;
+    row.status='match';
+  }
+  if(body.code!==undefined && body.code!==null){
+    row.db_code=String(body.code);
+    row.code_status='match';
   }
 }
 
@@ -13819,6 +13944,7 @@ async function pcApplyCodeOnly(btn,lotId,code){
       throw new Error(d.error||'Apply failed');
     }
     _pcKept.add(lotId);
+    _pcMarkRowApplied(lotId, {code});
     toast('Code applied; DB price preserved');
     if(_pcLastReport) _pcRenderPreview(_pcLastReport);
   }catch(e){
@@ -13894,11 +14020,12 @@ async function pcApplyAll(){
       const r=await fetch(B+'/api/price-check/apply-fix',{method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
         body:JSON.stringify(body)});
-      if(r.ok) ok++;
+      if(r.ok){ ok++; _pcMarkRowApplied(item.lot_id, body); }
       else if(r.status===423) { locked++; fail++; }
       else fail++;
     } catch(_){ fail++; }
   }
+  if(_pcLastReport) _pcRenderPreview(_pcLastReport);
   let summary='Applied '+ok+' of '+queue.length;
   if(locked>0) summary+=' ('+locked+' locked)';
   else if(fail>0) summary+=' ('+fail+' failed)';
