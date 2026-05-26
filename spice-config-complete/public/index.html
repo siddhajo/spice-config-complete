@@ -9284,13 +9284,13 @@ async function doPriceImport(){
 }
 
 // ── Auction dropdowns ─────────────────────────────────────
-// <option> text is plain-text only — we suffix with [e-Trade] / [e-Auction]
-// so the operator can see at a glance which mode each trade was tagged
-// with when scanning the picker.
+// <option> text is plain-text only. The current mode (e-Auction / e-Trade)
+// is conveyed by the page label + Business Mode setting, so we don't
+// repeat it per-row — the per-row stored mode is historical and stays
+// stale when the operator flips business mode.
 async function fillAucSelect(selId){const d=await j('/api/auctions');const sel=document.getElementById(selId);
   sel.innerHTML=d.map(a=>{
-    const mt = a.mode ? ` [${a.mode}]` : '';
-    return `<option value="${a.id}">${a.ano} — ${fmtD(a.date)} (${a.lot_count} lots)${mt}</option>`;
+    return `<option value="${a.id}">${a.ano} — ${fmtD(a.date)} (${a.lot_count} lots)</option>`;
   }).join('');
   // After populating, sync the selection with the global picker so
   // landing on this tab respects whatever the user picked elsewhere.
@@ -9358,8 +9358,7 @@ async function refreshGlobalAidList(){
   }
   if (wrap) wrap.style.display = 'inline-flex';
   sel.innerHTML = _globalAidList.map(a => {
-    const mt = a.mode ? ` [${a.mode}]` : '';
-    return `<option value="${a.id}">#${esc(a.ano)} · ${fmtD(a.date)} · ${a.lot_count} lots${mt}</option>`;
+    return `<option value="${a.id}">#${esc(a.ano)} · ${fmtD(a.date)} · ${a.lot_count} lots</option>`;
   }).join('');
   // Restore the previous pick if still in the list; otherwise default
   // to the most recent (first row — server returns newest-first).
@@ -12488,11 +12487,10 @@ async function _populateDnAuctionFilter(){
     const allTerm = (typeof termAuction === 'function') ? termAuction(true, true) : 'auctions';
     sel.innerHTML = `<option value="">All ${esc(allTerm)}</option>` +
       (list || []).map(a => {
-        const mt = a.mode ? ` [${a.mode}]` : '';
         // `data-auction-id` exposes the numeric id alongside the `ano`
         // value so the generation-lock helper can call the auction-id
         // scoped /generation-status endpoint without a second lookup.
-        return `<option value="${a.ano}" data-auction-id="${a.id}">${esc(a.ano)} — ${fmtD(a.date)}${mt}</option>`;
+        return `<option value="${a.ano}" data-auction-id="${a.id}">${esc(a.ano)} — ${fmtD(a.date)}</option>`;
       }).join('');
   } catch (e) { /* non-fatal — filter just won't populate */ }
 }
@@ -13478,8 +13476,7 @@ async function loadPriceCheckAuctions(){
       sel.innerHTML='<option value="">No '+termAuction(true,true)+' available</option>';
     }else{
       sel.innerHTML=d.map(a=>{
-        const mt = a.mode ? ' ['+a.mode+']' : '';
-        return `<option value="${a.id}">${esc(a.ano)} — ${fmtD(a.date)} (${a.lot_count} lots)${mt}</option>`;
+        return `<option value="${a.id}">${esc(a.ano)} — ${fmtD(a.date)} (${a.lot_count} lots)</option>`;
       }).join('');
     }
   }catch(e){showError(e)}
