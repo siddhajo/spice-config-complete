@@ -259,9 +259,18 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .login-logo::after{
   /* Subtle inner highlight ring for depth */
   content:'';position:absolute;inset:1px;border-radius:19px;pointer-events:none;
-  background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 40%)
+  background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 40%);
+  z-index:2
 }
 .login-logo span{position:relative;z-index:1;display:inline-block}
+/* Real company logo (when uploaded) sits inside the rounded tile with
+   a white background so logos with transparent / colored marks read
+   cleanly against the green→saffron gradient frame. */
+.login-logo img{
+  position:absolute;inset:4px;width:calc(100% - 8px);height:calc(100% - 8px);
+  border-radius:16px;background:#fff;object-fit:contain;padding:6px;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.04);z-index:1
+}
 .login-brand-chip{
   display:inline-flex;align-items:center;gap:6px;
   font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
@@ -1858,13 +1867,18 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   </div>
   <div class="login-shell">
     <!-- Brand panel (collapses below the form on narrow screens).
-         #login-brand-name + #login-brand-mark are populated from
+         The logo image, brand name + chip text are all populated from
          /api/brand on page load so the active company (ISP vs ASP)
          shows here instead of a hardcoded literal. -->
     <aside class="login-brand">
-      <div class="login-logo"><span id="login-brand-mark">IS</span></div>
-      <span class="login-brand-chip"><span class="dot"></span> <span id="login-brand-chip-text">Spice Config</span></span>
-      <h1 id="login-brand-name">Spice Config</h1>
+      <div class="login-logo">
+        <!-- Image is hidden until /api/brand returns a real logo path;
+             falls back to the 2-letter text mark when no logo is set. -->
+        <img id="login-brand-logo" alt="" style="display:none" onerror="this.style.display='none';var m=document.getElementById('login-brand-mark');if(m)m.style.display='inline-block'">
+        <span id="login-brand-mark">IS</span>
+      </div>
+      <span class="login-brand-chip" id="login-brand-chip" style="display:none"><span class="dot"></span> <span id="login-brand-chip-text"></span></span>
+      <h1 id="login-brand-name"></h1>
       <p class="login-tagline">Company configuration, lot management &amp; Tally exports — built for the cardamom trade.</p>
       <ul class="login-feats">
         <li><span class="lf-bullet"></span> Trade-aware invoicing &amp; debit notes</li>
@@ -1917,7 +1931,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
         <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
       </button>
-      <h1><span class="dot"><img id="topbar-logo-img" alt="" onerror="this.remove()"></span> Spice Config</h1>
+      <h1><span class="dot"><img id="topbar-logo-img" alt="" onerror="this.remove()"></span> <span id="topbar-brand-name">Spice Config</span></h1>
     </div>
     <div style="display:flex;gap:10px;align-items:center">
       <!-- Global trade/auction picker — single source of truth used by
@@ -5469,12 +5483,31 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   const d = await r.json();
   const nameEl = document.getElementById('login-brand-name');
   const markEl = document.getElementById('login-brand-mark');
+  const logoEl = document.getElementById('login-brand-logo');
   const chipEl = document.getElementById('login-brand-chip-text');
+  const chipBox= document.getElementById('login-brand-chip');
   const titleEl= document.querySelector('title');
-  if (nameEl && d.name) nameEl.textContent = d.name;
+  // Heading + page title use the company short name from /api/brand. No
+  // hardcoded "Spice Config" fallback — if the server returns nothing
+  // we leave the heading empty rather than misbrand the page.
+  if (nameEl) nameEl.textContent = d.name || '';
   if (markEl && d.mark) markEl.textContent = d.mark;
-  if (chipEl && d.code) chipEl.textContent = d.code + ' · Spice Config';
-  if (titleEl && d.name) titleEl.textContent = d.name + ' · Config';
+  // Prefer the real company logo image. If a file exists on the server
+  // (active preset OR the other preset as a fallback), swap the text
+  // mark for the <img>; otherwise leave the initials visible.
+  if (logoEl && d.hasLogo && d.logoUrl) {
+    logoEl.src = d.logoUrl;
+    logoEl.alt = d.name || 'Company logo';
+    logoEl.style.display = 'block';
+    if (markEl) markEl.style.display = 'none';
+  }
+  // Chip is just the preset tag (ISP / ASP). Hidden when the server
+  // didn't return a code so we don't show an empty pill.
+  if (chipBox && chipEl && d.code) {
+    chipEl.textContent = d.code;
+    chipBox.style.display = 'inline-flex';
+  }
+  if (titleEl && d.name) titleEl.textContent = d.name;
 } catch (_) { /* leave defaults */ }})();
 
 // On page load, restore the auth token from localStorage and verify it
@@ -6770,6 +6803,23 @@ function applyLogoBadge(){
     if(!code){badge.style.display='none'}
     else{badge.textContent = code; badge.style.display = 'inline-block'}
   }
+
+  // Topbar H1 — replace the literal "Spice Config" with the active
+  // company's short_name from _sdata (Company tab for ISP, Sister tab
+  // for ASP). Falls back to "Spice Config" only on a fresh install
+  // where no settings have loaded yet.
+  try {
+    const nameEl = document.getElementById('topbar-brand-name');
+    if (nameEl && window._sdata) {
+      const isAsp = String(code || '').toUpperCase() === 'ASP';
+      const find = (cat, key) => ((_sdata[cat] || []).find(f => f.key === key) || {}).value;
+      const name = (isAsp
+        ? (find('sister','s_short_name') || find('sister','s_trade_name'))
+        : (find('company','short_name')  || find('company','trade_name'))
+      ) || '';
+      if (name.trim()) nameEl.textContent = name.trim();
+    }
+  } catch (_) { /* leave the default literal */ }
 
   // Topbar dot image: /logo-ispl.png or /logo-asp.png
   // If the img element was removed (404 fallback on earlier render), recreate it.

@@ -61,9 +61,10 @@ app.get('/api/health', (req, res) => {
 });
 
 // Public brand probe — used by the pre-auth login page so the welcome
-// card can show the actual company name (ISP vs ASP) instead of a
-// hardcoded "Spice Config". Returns only the active preset's trade
-// name + a short code for the logo tile; no other settings leak.
+// card can show the actual company short name + logo image instead of
+// a hardcoded literal. Returns only the active preset's short name,
+// the static logo URL, and a fallback text mark. No other settings
+// leak (auth-free endpoint).
 app.get('/api/brand', (req, res) => {
   try {
     const db = getDb();
@@ -72,22 +73,40 @@ app.get('/api/brand', (req, res) => {
       : 'ISP';
     const preset = (typeof getPreset === 'function') ? getPreset(db, active) : {};
     const flat = getSettingsFlat(db);
-    // Preference order: preset's own trade/short name → flat fallback →
+    // Short-name preference: preset's own short_name → flat fallback →
     // sister-company fallback for ASP → final literal default.
     const pickName = () => {
-      if (preset.trade_name)  return preset.trade_name;
       if (preset.short_name)  return preset.short_name;
+      if (preset.trade_name)  return preset.trade_name;
       if (active === 'ASP') {
         return flat.s_short_name || 'Amazing Spice Park';
       }
-      return flat.trade_name || flat.short_name || 'Ideal Spices';
+      return flat.short_name || flat.trade_name || 'Spice Config';
     };
     const name = String(pickName()).trim();
-    // Two-letter tile for the logo mark.
+    // Logo: prefer the active preset's file, but fall back to the other
+    // preset's logo if the active one hasn't been uploaded yet — that
+    // way a single uploaded logo still brands the login page when the
+    // operator flips presets. Only when BOTH are missing do we hand the
+    // client a null URL so it can show the text-mark fallback.
+    const pickLogo = () => {
+      const order = active === 'ASP' ? ['asp', 'ispl'] : ['ispl', 'asp'];
+      for (const w of order) {
+        const t = LOGO_FILES && LOGO_FILES[w];
+        if (t && fs.existsSync(t)) {
+          return { which: w, url: '/logo-' + w + '.png?v=' + Math.floor(fs.statSync(t).mtimeMs) };
+        }
+      }
+      return null;
+    };
+    const picked = pickLogo();
+    const hasLogo = !!picked;
+    const logoUrl = picked ? picked.url : null;
+    // Two-letter tile (used only when logoUrl is null).
     const mark = active === 'ASP' ? 'AS' : 'IS';
-    res.json({ active, name, code: active, mark });
+    res.json({ active, name, code: active, mark, logoUrl, hasLogo });
   } catch (e) {
-    res.json({ active: 'ISP', name: 'Spice Config', code: 'ISP', mark: 'IS' });
+    res.json({ active: 'ISP', name: '', code: 'ISP', mark: 'IS', logoUrl: null, hasLogo: false });
   }
 });
 
