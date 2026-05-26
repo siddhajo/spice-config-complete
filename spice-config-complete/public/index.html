@@ -2363,8 +2363,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
           <!-- Create group -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
-            <button class="needs-invoice-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenInvModal()">+ Generate Invoice</button>
-            <button class="needs-invoice-write btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('invoices')">⚡ Generate for All Buyers</button>
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-inv-one" data-gen-doctype="invoices" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenInvModal()">+ Generate Invoice</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-inv-all" data-gen-doctype="invoices" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('invoices')">⚡ Generate for All Buyers</button>
+            <button class="needs-admin btn" data-gen-admin-unlock="invoices" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('invoices')" title="Admin: clear the lock so the operator can generate invoices again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
           </div>
 
           <!-- Print group -->
@@ -2463,8 +2464,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </select>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
-            <button class="needs-invoice-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenPurModal()">+ Generate Purchase</button>
-            <button class="needs-invoice-write btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('purchases')">⚡ Generate for All Dealers</button>
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-pur-one" data-gen-doctype="purchases" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenPurModal()">+ Generate Purchase</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-pur-all" data-gen-doctype="purchases" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('purchases')">⚡ Generate for All Dealers</button>
+            <button class="needs-admin btn" data-gen-admin-unlock="purchases" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('purchases')" title="Admin: clear the lock so the operator can generate purchases again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
@@ -2849,8 +2851,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </select>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
-            <button class="needs-invoice-write btn btn-g" id="btn-gen-bill-one" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
-            <button class="needs-invoice-write btn btn-a" id="btn-gen-bill-all" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-bill-one" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-bill-all" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
+            <button class="needs-admin btn" data-gen-admin-unlock="bills" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('bills')" title="Admin: clear the lock so the operator can generate bills again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
@@ -2922,8 +2925,9 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <input type="search" id="dn-search" placeholder="Search note no, seller, trade…" oninput="searchDebitNotesDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
-            <button class="needs-invoice-write btn btn-g" id="btn-gen-dn-one" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitSingleModal()">+ Generate Debit Note</button>
-            <button class="needs-invoice-write btn btn-a" id="btn-gen-dn-all" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitAllModal()">⚡ Generate All</button>
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-dn-one" data-gen-doctype="debit_notes" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitSingleModal()">+ Generate Debit Note</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-dn-all" data-gen-doctype="debit_notes" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitAllModal()">⚡ Generate All</button>
+            <button class="needs-admin btn" data-gen-admin-unlock="debit_notes" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('debit_notes')" title="Admin: clear the lock so the operator can generate debit notes again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
           </div>
 
           <!-- Bulk actions group — Delete Selected. Hidden until ≥1 row
@@ -3382,7 +3386,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div id="pc-hint" style="font-size:12px;color:var(--text3);margin-bottom:8px">
           Upload the external price sheet, then click <b>Verify Prices</b>. The first sheet is used. Columns
           recognised (case-insensitive): <code>Lot No</code>, <code>Price</code>, optional <code>Buyer Code</code>.
-          Existing prices on the server are never overwritten in bulk — apply each fix individually.
+          When the DB price is correct and the file is wrong, use <b>Keep DB</b> to acknowledge the row without overwriting the lot.
         </div>
         <div id="pc-result"></div>
         <div id="pc-preview" style="margin-top:14px"></div>
@@ -10954,6 +10958,101 @@ async function generateInvoice(){
   }catch(e){showError(e)}
 }
 
+// ── Generation lock (per-trade, per-doc-type) ───────────────────
+// Once EVERY eligible party in a trade has its invoice/purchase/bill/DN,
+// the matching Generate buttons are disabled with a tooltip. While
+// any party is still un-documented, generate stays enabled. Admin
+// can click the "🔓 Allow regeneration" button (visible only when
+// locked AND user is admin) to grant a one-shot unlock. The server
+// enforces the same rule; the buttons are a courtesy.
+const _GEN_LOCK_TOOLTIP = {
+  invoices:    'All buyers in this trade have been invoiced. Ask an admin to click 🔓 Allow regeneration to unlock.',
+  purchases:   'All registered dealers in this trade have purchase invoices. Ask an admin to click 🔓 Allow regeneration to unlock.',
+  bills:       'All agriculturist sellers in this trade have bills of supply. Ask an admin to click 🔓 Allow regeneration to unlock.',
+  debit_notes: 'Every purchase in this trade has a debit note. Ask an admin to click 🔓 Allow regeneration to unlock.',
+};
+// Force-toggle visibility on a bulk-action button. Permission CSS
+// (.needs-admin etc.) applies `display: inline-flex !important` to
+// authorized users, so a plain `el.style.display = 'none'` is a no-op
+// for them — we have to set the inline rule with !important to win.
+function _bulkBtnSetVisible(el, visible){
+  if (!el) return;
+  if (visible) el.style.removeProperty('display');
+  else el.style.setProperty('display', 'none', 'important');
+}
+function _genApplyLock(btn, locked, reason) {
+  if (!btn) return;
+  if (!btn.dataset.genOrigTitle && btn.title) btn.dataset.genOrigTitle = btn.title;
+  if (locked) {
+    btn.setAttribute('data-gen-locked', '1');
+    btn.disabled = true;
+    btn.style.opacity = '0.55';
+    btn.style.cursor = 'not-allowed';
+    btn.title = reason || 'Already generated for this trade.';
+  } else {
+    btn.removeAttribute('data-gen-locked');
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    btn.title = btn.dataset.genOrigTitle || '';
+  }
+}
+async function refreshGenerationLocks(auctionId, tabScope, docTypes) {
+  const tabEl = tabScope ? document.querySelector(tabScope) : document;
+  if (!tabEl) return;
+  const types = Array.isArray(docTypes) ? docTypes : [docTypes];
+  let status = null;
+  if (auctionId) {
+    try { status = await j(`/api/auctions/${encodeURIComponent(auctionId)}/generation-status`); }
+    catch (_) { status = null; }
+  }
+  for (const dt of types) {
+    const s = status && status[dt];
+    const locked = !!(s && s.has && !s.override);
+    const reason = _GEN_LOCK_TOOLTIP[dt] || 'Already generated for this trade.';
+    tabEl.querySelectorAll(`[data-gen-doctype="${dt}"]`).forEach(btn => _genApplyLock(btn, locked, reason));
+    const adminBtn = tabEl.querySelector(`[data-gen-admin-unlock="${dt}"]`);
+    if (adminBtn) _bulkBtnSetVisible(adminBtn, locked);
+  }
+}
+async function adminAllowRegeneration(docType) {
+  // Look up the current auction from whichever tab the admin button
+  // lives in. Most tabs use {inv,pur,bill}-auction whose value IS the
+  // auction id. The DN tab uses `dn-auction` whose value is the trade
+  // `ano`; the numeric auction id is mirrored on `data-auction-id`.
+  const adminBtn = document.querySelector(`[data-gen-admin-unlock="${docType}"]:not([style*="display: none"])`);
+  let auctionId = null, tabScope = null;
+  const selectorIdByDocType = {
+    invoices: 'inv-auction', purchases: 'pur-auction',
+    bills: 'bill-auction', debit_notes: 'dn-auction',
+  };
+  const sel = document.getElementById(selectorIdByDocType[docType]);
+  if (sel) {
+    if (docType === 'debit_notes') {
+      auctionId = sel.selectedOptions[0]?.dataset?.auctionId || '';
+    } else if (sel.value) {
+      auctionId = sel.value;
+    }
+  }
+  if (adminBtn) {
+    const tabEl = adminBtn.closest('.tc') || adminBtn.closest('[id^="tc-"]');
+    if (tabEl && tabEl.id) tabScope = '#' + tabEl.id;
+  }
+  if (!auctionId) { toast('Pick a trade first'); return; }
+  const label = ({invoices:'invoices', purchases:'purchase invoices', bills:'bills', debit_notes:'debit notes'})[docType] || docType;
+  if (!confirm(`Allow operator to regenerate ${label} for this trade?\n\nThis is a ONE-SHOT unlock — the gate re-engages automatically after the next successful generate.`)) return;
+  try {
+    await j(`/api/auctions/${encodeURIComponent(auctionId)}/generation-override`, {
+      method: 'POST',
+      body: JSON.stringify({ docType }),
+    });
+    toast(`🔓 ${label.charAt(0).toUpperCase() + label.slice(1)} generation unlocked — one regenerate allowed ✓`);
+    await refreshGenerationLocks(auctionId, tabScope, [docType]);
+  } catch (e) {
+    showError(e);
+  }
+}
+
 // ── Invoices: client-side pagination ────────────────────────────
 const _invoicesPager = { page: 1, pageSize: 50, total: 0, totalPages: 0 };
 function gotoInvoicesPage(p){
@@ -10964,6 +11063,7 @@ function gotoInvoicesPage(p){
 async function loadInvoices(opts){
   if (!opts || !opts.keepPage) _invoicesPager.page = 1;
   const aid=document.getElementById('inv-auction')?.value;
+  if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(aid, '#tc-invoices', ['invoices']);
   const search   = (document.getElementById('inv-search')?.value || '').trim();
   const saleType = (document.getElementById('inv-sale-filter')?.value || '').trim();
   // Build the URL with auction + search + saleType params. Search bypasses
@@ -11741,6 +11841,7 @@ function gotoPurchasesPage(p){
 async function loadPurchases(opts){
   if (!opts || !opts.keepPage) _purchasesPager.page = 1;
   const aid    = document.getElementById('pur-auction')?.value;
+  if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(aid, '#tc-purchases', ['purchases']);
   const search = (document.getElementById('pur-search')?.value || '').trim();
   const sale   = (document.getElementById('pur-sale-filter')?.value || '').trim();
   // Build URL from filters. Search bypasses auction_id so cross-trade
@@ -12270,6 +12371,7 @@ async function _populateBillBranchFilter(){
 async function loadBills(){
   _populateBillBranchFilter();
   const aid    = document.getElementById('bill-auction')?.value;
+  if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(aid, '#tc-bills', ['bills']);
   const search = (document.getElementById('bill-search')?.value || '').trim();
   const branch = (document.getElementById('bill-branch-filter')?.value || '').trim();
   // URL builder: search bypasses auction_id so cross-trade lookups work.
@@ -12387,7 +12489,10 @@ async function _populateDnAuctionFilter(){
     sel.innerHTML = `<option value="">All ${esc(allTerm)}</option>` +
       (list || []).map(a => {
         const mt = a.mode ? ` [${a.mode}]` : '';
-        return `<option value="${a.ano}">${esc(a.ano)} — ${fmtD(a.date)}${mt}</option>`;
+        // `data-auction-id` exposes the numeric id alongside the `ano`
+        // value so the generation-lock helper can call the auction-id
+        // scoped /generation-status endpoint without a second lookup.
+        return `<option value="${a.ano}" data-auction-id="${a.id}">${esc(a.ano)} — ${fmtD(a.date)}${mt}</option>`;
       }).join('');
   } catch (e) { /* non-fatal — filter just won't populate */ }
 }
@@ -12397,6 +12502,11 @@ async function loadDebitNotes(opts){
   _populateDnAuctionFilter();
 
   const ano    = (document.getElementById('dn-auction')?.value || '').trim();
+  // dn-auction stores `ano`; the numeric auction id we need for the
+  // generation-status endpoint is mirrored on the selected option.
+  const _dnSel = document.getElementById('dn-auction');
+  const _dnAid = _dnSel ? (_dnSel.selectedOptions[0]?.dataset?.auctionId || '') : '';
+  if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(_dnAid, '#tc-debit', ['debit_notes']);
   const search = (document.getElementById('dn-search')?.value || '').trim();
   // Build URL — when search is active, drop the ano filter so the
   // search spans every trade. Mode + business-state filters still
@@ -13374,13 +13484,22 @@ async function loadPriceCheckAuctions(){
     }
   }catch(e){showError(e)}
 }
+// Set of lot_ids the operator has marked "Keep DB price" — those rows
+// stay acknowledged across re-verify of the SAME file so the badge
+// survives a refresh, but reset when a new file is picked or Clear is
+// hit (a new upload is a fresh reconciliation).
+const _pcKept = new Set();
 function pcOnFileChange(){
   // Clear stale verify output when the user swaps files; download
-  // still works because it re-uploads.
+  // still works because it re-uploads. New file = fresh kept state.
+  _pcKept.clear();
+  _pcLastReport=null;
   const res=document.getElementById('pc-result');if(res)res.innerHTML='';
   const pv=document.getElementById('pc-preview');if(pv)pv.innerHTML='';
 }
 function pcClear(){
+  _pcKept.clear();
+  _pcLastReport=null;
   const f=document.getElementById('pc-file');if(f)f.value='';
   const res=document.getElementById('pc-result');if(res)res.innerHTML='';
   const pv=document.getElementById('pc-preview');if(pv)pv.innerHTML='';
@@ -13432,20 +13551,71 @@ function _pcCodeBadge(s,fc,dc){
   const [bg,fg,lbl]=map[s]||map.both_blank;
   return '<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+bg+';color:'+fg+';font-size:11px;font-weight:600">'+lbl+'</span>';
 }
+// Compute what's still unresolved from the operator's POV. A row counts
+// as resolved when it matches, or the operator has marked it KEPT (DB
+// price preserved). Anything else — open price diff, blank file price,
+// missing DB lot, no auction — is unresolved and the operator needs to
+// either act on it or accept it. missing_file (DB has lot, file didn't
+// mention it) is intentional in most workflows so we don't count it.
+function _pcResolution(d){
+  let openDiff=0, openEmpty=0;
+  for(const r of (d.rows||[])){
+    if(!r.lot_id) continue;
+    const kept=_pcKept.has(r.lot_id);
+    if(r.status==='server_diff'  && !kept) openDiff++;
+    if(r.status==='server_empty' && !kept) openEmpty++;
+  }
+  const openMissing  = d.missingServer || 0;
+  const openNoAuction= d.noAuction    || 0;
+  return {
+    openDiff, openEmpty, openMissing, openNoAuction,
+    openTotal: openDiff + openEmpty + openMissing + openNoAuction,
+  };
+}
+
 function _pcRenderPreview(d){
   const res=document.getElementById('pc-result');
   const pv=document.getElementById('pc-preview');
   if(!res||!pv)return;
+
+  // Prune kept lot_ids that don't appear in this report (e.g. operator
+  // changed auction). Lot_ids are globally unique, so a match here means
+  // the same physical lot — KEPT survives a re-verify of the same file.
+  const reportLotIds=new Set();
+  for(const rr of (d.rows||[])) if(rr.lot_id) reportLotIds.add(rr.lot_id);
+  for(const id of [..._pcKept]) if(!reportLotIds.has(id)) _pcKept.delete(id);
+
   const fa=d.forcedAuction?(' for <b>'+esc(d.forcedAuction.ano)+'</b>'):'';
   const colN=d.hasServerPriceCol?'<code>SERVER PRICE</code>':'<code>PRICE</code>';
   const tile=(lbl,val,bg)=>('<div style="background:'+(bg||'var(--bg)')+';padding:10px 14px;border-radius:8px;min-width:120px">'+
     '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">'+lbl+'</div>'+
     '<div style="font-size:18px;font-weight:600;margin-top:2px">'+val+'</div></div>');
-  res.innerHTML =
+  const nKept=_pcKept.size;
+
+  // Completion banner — green when everything reconciles, amber when
+  // there's still work to do. Listed buckets tell the operator exactly
+  // what's blocking "complete".
+  const stat=_pcResolution(d);
+  let banner='';
+  if(d.total===0){
+    banner='<div style="background:#f3f4f6;color:#374151;padding:12px 16px;border-radius:8px;margin-bottom:10px;font-weight:600;border-left:4px solid #9ca3af">No rows in this report — nothing to reconcile.</div>';
+  } else if(stat.openTotal===0){
+    banner='<div style="background:#dcfce7;color:#166534;padding:12px 16px;border-radius:8px;margin-bottom:10px;font-weight:600;font-size:14px;border-left:4px solid #16a34a">✓ Price check complete — all '+d.total+' row'+(d.total===1?'':'s')+' reconcile (matched or kept).</div>';
+  } else {
+    const parts=[];
+    if(stat.openDiff>0)      parts.push(stat.openDiff+' open price diff'+(stat.openDiff===1?'':'s'));
+    if(stat.openEmpty>0)     parts.push(stat.openEmpty+' blank file price'+(stat.openEmpty===1?'':'s'));
+    if(stat.openMissing>0)   parts.push(stat.openMissing+' missing in DB');
+    if(stat.openNoAuction>0) parts.push(stat.openNoAuction+' with no '+termAuction(false,true));
+    banner='<div style="background:#fef3c7;color:#92400e;padding:12px 16px;border-radius:8px;margin-bottom:10px;font-weight:600;font-size:14px;border-left:4px solid #f59e0b">⚠ Price check incomplete — '+parts.join(', ')+' still need review.</div>';
+  }
+
+  res.innerHTML = banner +
     '<div style="font-size:13px;color:var(--text3);margin-bottom:8px">Validated column: '+colN+fa+'. Total file rows + DB-only rows: <b>'+d.total+'</b>.</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
       tile('Matched',d.matched,'#dcfce7')+
       tile('Price Δ',d.mismatched,'#fef3c7')+
+      tile('Kept (DB)',nKept,'#e5e7eb')+
       tile('Missing in DB',d.missingServer,'#fee2e2')+
       tile('Missing in File',d.missingFile,'#e0e7ff')+
       tile('File Empty',d.serverEmpty,'#f3f4f6')+
@@ -13458,7 +13628,39 @@ function _pcRenderPreview(d){
   // Sort: differences first, then missing/empty, then matches.
   const order={server_diff:0,missing_server:1,missing_file:2,server_empty:3,no_auction:4,match:5,unmatched:6};
   const rows=d.rows.slice().sort((a,b)=>(order[a.status]??99)-(order[b.status]??99));
-  let html='<div style="overflow-x:auto;max-height:520px;border:1px solid var(--spice-line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
+
+  // Count toolbar actions. Apply All also picks up code fixes on kept
+  // rows so a previously-kept row that still has a pending code diff
+  // gets cleaned up; the bulk action never re-writes DB price for kept.
+  // Bulk Keep DB also covers blank-file-price rows (operator can mass-
+  // acknowledge "the DB price is right, the file just didn't list one").
+  let nApplyAll=0, nKeepableNow=0;
+  for(const r of rows){
+    if(!r.lot_id) continue;
+    const isKept=_pcKept.has(r.lot_id);
+    const hasPriceDiff=(r.status==='server_diff');
+    const hasFileEmpty=(r.status==='server_empty');
+    const hasCodeFix=(r.code_status==='diff'||r.code_status==='db_blank');
+    if(isKept){ if(hasCodeFix) nApplyAll++; }
+    else {
+      if(hasPriceDiff||hasCodeFix) nApplyAll++;
+      if(hasPriceDiff||hasFileEmpty) nKeepableNow++;
+    }
+  }
+  let toolbar='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">';
+  if(nApplyAll>0){
+    toolbar+='<button class="btn btn-g needs-lot-write" onclick="pcApplyAll()" style="padding:6px 14px;font-size:13px;font-weight:600">Apply all fixes ('+nApplyAll+')</button>';
+  }
+  if(nKeepableNow>0){
+    toolbar+='<button class="btn btn-o needs-lot-write" onclick="pcKeepAll()" style="padding:6px 14px;font-size:13px;font-weight:600">Keep DB price for '+nKeepableNow+' row'+(nKeepableNow===1?'':'s')+'</button>';
+  }
+  if(nKept>0){
+    toolbar+='<span style="background:#e5e7eb;color:#374151;padding:5px 12px;border-radius:14px;font-size:12px;font-weight:600">'+nKept+' kept (DB price preserved)</span>';
+    toolbar+='<button class="btn needs-lot-write" onclick="pcUndoAllKept()" style="padding:5px 12px;font-size:12px">Undo all</button>';
+  }
+  toolbar+='</div>';
+
+  let html=toolbar+'<div style="overflow-x:auto;max-height:520px;border:1px solid var(--spice-line);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:13px">'+
     '<thead style="position:sticky;top:0;background:var(--spice-cream);z-index:1"><tr>'+
     '<th style="text-align:left;padding:8px">Row</th>'+
     '<th style="text-align:left;padding:8px">Lot</th>'+
@@ -13473,7 +13675,9 @@ function _pcRenderPreview(d){
     '<th style="text-align:left;padding:8px">Action</th>'+
     '</tr></thead><tbody>';
   for(const r of rows){
-    const tint = r.status==='server_diff'?'background:#fffbeb'
+    const isKept=!!(r.lot_id && _pcKept.has(r.lot_id));
+    const tint = isKept ? 'background:#f3f4f6'
+              : r.status==='server_diff'?'background:#fffbeb'
               : r.status==='missing_server'?'background:#fef2f2'
               : r.status==='missing_file'?'background:#eef2ff'
               : r.status==='no_auction'?'background:#fdf2f8'
@@ -13481,30 +13685,61 @@ function _pcRenderPreview(d){
     const fp=r.file_server_price==null?'':(Number(r.file_server_price)||0).toFixed(2);
     const dp=r.db_price==null?'':(Number(r.db_price)||0).toFixed(2);
     const df=r.diff==null?'':(r.diff>0?'+':'')+r.diff.toFixed(2);
+    const fpStyle  = isKept ? 'color:var(--text3)' : '';
+    const diffStyle= isKept ? 'color:var(--text3);text-decoration:line-through' : '';
+
+    // Status cell: swap PRICE Δ or FILE EMPTY → KEPT (DB) when kept.
+    let statusCell;
+    if(isKept && (r.status==='server_diff' || r.status==='server_empty')){
+      statusCell='<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#9ca3af;color:#fff;font-size:11px;font-weight:600">KEPT (DB)</span>';
+    } else {
+      statusCell=_pcStatusBadge(r.status);
+    }
+
+    // Action cell: kept rows show KEPT chip + Undo. Otherwise pick the
+    // shape based on which diffs exist on the row. server_empty rows
+    // (file has no price for this lot) get Keep DB + a manual price
+    // input — the operator can either acknowledge the DB price or type
+    // a new one to write.
     let actions='';
     if(r.lot_id){
-      const canPrice = (r.status==='server_diff' || r.status==='server_empty' && r.file_server_price!=null);
-      const canCode  = (r.code_status==='diff' || r.code_status==='db_blank');
-      if(canPrice||canCode){
-        const pArg=canPrice?(r.file_server_price):'null';
-        const cArg=canCode?("'"+String(r.file_code).replace(/'/g,"\\'")+"'"):'null';
-        actions='<button class="btn btn-g needs-lot-write" style="padding:3px 10px;font-size:12px" onclick="pcApplyFix(this,'+r.lot_id+','+pArg+','+cArg+')">Apply</button>';
-      }else{
+      const hasPriceDiff=(r.status==='server_diff');
+      const hasFileEmpty=(r.status==='server_empty');
+      const hasCodeFix=(r.code_status==='diff'||r.code_status==='db_blank');
+      if(isKept){
+        actions='<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:#e5e7eb;color:#374151;font-size:11px;font-weight:600;margin-right:6px">KEPT</span>'+
+                '<button class="btn needs-lot-write" onclick="pcUnmarkKept('+r.lot_id+')" style="padding:3px 10px;font-size:12px">Undo</button>';
+      } else if(hasPriceDiff && hasCodeFix){
+        const cEsc=String(r.file_code).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+        actions ='<button class="btn btn-g needs-lot-write" onclick="pcApplyFix(this,'+r.lot_id+','+r.file_server_price+",'"+cEsc+"')\" style=\"padding:3px 10px;font-size:12px;margin-right:4px\">Apply price + code</button>"+
+                 "<button class=\"btn needs-lot-write\" onclick=\"pcApplyCodeOnly(this,"+r.lot_id+",'"+cEsc+"')\" style=\"padding:3px 10px;font-size:12px\">Apply code only</button>";
+      } else if(hasPriceDiff){
+        actions ='<button class="btn btn-g needs-lot-write" onclick="pcApplyFix(this,'+r.lot_id+','+r.file_server_price+',null)" style="padding:3px 10px;font-size:12px;margin-right:4px">Apply price</button>'+
+                 '<button class="btn needs-lot-write" onclick="pcMarkKept('+r.lot_id+')" style="padding:3px 10px;font-size:12px">Keep DB</button>';
+      } else if(hasFileEmpty){
+        const inpId='pc-newprice-'+r.lot_id;
+        actions='<button class="btn needs-lot-write" onclick="pcMarkKept('+r.lot_id+')" style="padding:3px 10px;font-size:12px;margin-right:4px">Keep DB</button>'+
+                '<input type="number" step="0.01" min="0" id="'+inpId+'" placeholder="New price" style="width:90px;padding:3px 6px;font-size:12px;border:1px solid var(--spice-line);border-radius:4px;margin-right:4px" onkeydown="if(event.key===&quot;Enter&quot;){pcApplyManualPrice(this.nextElementSibling,'+r.lot_id+')}">'+
+                '<button class="btn btn-g needs-lot-write" onclick="pcApplyManualPrice(this,'+r.lot_id+')" style="padding:3px 10px;font-size:12px">Apply</button>';
+      } else if(hasCodeFix){
+        const cEsc=String(r.file_code).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+        actions ="<button class=\"btn btn-g needs-lot-write\" onclick=\"pcApplyFix(this,"+r.lot_id+",null,'"+cEsc+"')\" style=\"padding:3px 10px;font-size:12px\">Apply</button>";
+      } else {
         actions='<span style="color:var(--text3);font-size:12px">—</span>';
       }
-    }else{
+    } else {
       actions='<span style="color:var(--text3);font-size:12px">—</span>';
     }
     html+='<tr style="'+tint+';border-top:1px solid var(--spice-line)">'+
       '<td style="padding:6px 8px">'+(r.row||'')+'</td>'+
       '<td style="padding:6px 8px"><b>'+esc(r.lot||'')+'</b></td>'+
       '<td style="padding:6px 8px">'+esc(r.auction_ano||'')+'</td>'+
-      '<td style="padding:6px 8px;text-align:right">'+fp+'</td>'+
+      '<td style="padding:6px 8px;text-align:right;'+fpStyle+'">'+fp+'</td>'+
       '<td style="padding:6px 8px;text-align:right">'+dp+'</td>'+
-      '<td style="padding:6px 8px;text-align:right;font-weight:600">'+df+'</td>'+
+      '<td style="padding:6px 8px;text-align:right;font-weight:600;'+diffStyle+'">'+df+'</td>'+
       '<td style="padding:6px 8px">'+esc(r.file_code||'')+'</td>'+
       '<td style="padding:6px 8px">'+esc(r.db_code||'')+'</td>'+
-      '<td style="padding:6px 8px">'+_pcStatusBadge(r.status)+'</td>'+
+      '<td style="padding:6px 8px">'+statusCell+'</td>'+
       '<td style="padding:6px 8px">'+_pcCodeBadge(r.code_status,r.file_code,r.db_code)+'</td>'+
       '<td style="padding:6px 8px">'+actions+'</td>'+
     '</tr>';
@@ -13552,6 +13787,125 @@ async function pcApplyFix(btn,lotId,price,code){
     if(btn){btn.disabled=false;btn.textContent=orig}
     showError(e);
   }
+}
+
+// Per-row manual price entry on server_empty rows — reads the inline
+// number input, validates, then delegates to pcApplyFix for the actual
+// write + button-state handling.
+async function pcApplyManualPrice(btn,lotId){
+  if(!lotId)return;
+  const inp=document.getElementById('pc-newprice-'+lotId);
+  if(!inp){ showError(new Error('Price input not found for lot '+lotId)); return; }
+  const raw=String(inp.value||'').trim();
+  if(!raw){ alert('Enter a price first.'); inp.focus(); return; }
+  const val=Number(raw);
+  if(!Number.isFinite(val)||val<=0){ alert('Enter a valid price greater than 0.'); inp.focus(); return; }
+  return pcApplyFix(btn,lotId,val,null);
+}
+
+// "Apply code only" on a both-diff row — writes the file's CODE but
+// leaves DB price untouched, and marks the row kept so the price diff
+// stays acknowledged on re-verify. We only flip the kept flag AFTER the
+// POST succeeds so a failed fetch doesn't leave a phantom kept row.
+async function pcApplyCodeOnly(btn,lotId,code){
+  if(!lotId)return;
+  const body={lot_id:lotId, code:code};
+  const orig=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='…'}
+  try{
+    const r=await fetch(B+'/api/price-check/apply-fix',{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+      body:JSON.stringify(body)});
+    const txt=await r.text();let d;try{d=JSON.parse(txt)}catch(_){d={error:txt}}
+    if(!r.ok){
+      if(r.status===423)throw new Error(d.error||'Lot is locked');
+      throw new Error(d.error||'Apply failed');
+    }
+    _pcKept.add(lotId);
+    toast('Code applied; DB price preserved');
+    if(_pcLastReport) _pcRenderPreview(_pcLastReport);
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent=orig}
+    showError(e);
+  }
+}
+
+function pcMarkKept(lotId){
+  if(!lotId)return;
+  _pcKept.add(lotId);
+  if(_pcLastReport) _pcRenderPreview(_pcLastReport);
+}
+function pcUnmarkKept(lotId){
+  if(!lotId)return;
+  _pcKept.delete(lotId);
+  if(_pcLastReport) _pcRenderPreview(_pcLastReport);
+}
+function pcKeepAll(){
+  if(!_pcLastReport)return;
+  let n=0;
+  for(const r of _pcLastReport.rows){
+    if(!r.lot_id) continue;
+    if(_pcKept.has(r.lot_id)) continue;
+    if(r.status==='server_diff' || r.status==='server_empty'){
+      _pcKept.add(r.lot_id); n++;
+    }
+  }
+  if(n===0){ toast('No rows to keep'); return; }
+  _pcRenderPreview(_pcLastReport);
+  toast(n+' row'+(n===1?'':'s')+' marked as Keep DB');
+}
+function pcUndoAllKept(){
+  if(_pcKept.size===0)return;
+  if(!confirm('Clear KEPT flag on '+_pcKept.size+' row'+(_pcKept.size===1?'':'s')+'? Their price diffs will go back to red.')) return;
+  _pcKept.clear();
+  if(_pcLastReport) _pcRenderPreview(_pcLastReport);
+}
+
+// Bulk apply all pending fixes. Kept rows are NEVER price-updated; if a
+// kept row still has a pending code diff (e.g. DB code changed between
+// keep + apply-all), it gets a code-only write. Non-kept rows get
+// whichever combination of price/code is pending on them.
+async function pcApplyAll(){
+  if(!_pcLastReport)return;
+  const queue=[];
+  for(const r of _pcLastReport.rows){
+    if(!r.lot_id) continue;
+    const isKept=_pcKept.has(r.lot_id);
+    const hasPriceDiff=(r.status==='server_diff');
+    const hasCodeFix=(r.code_status==='diff'||r.code_status==='db_blank');
+    if(isKept){
+      if(hasCodeFix) queue.push({lot_id:r.lot_id, code:r.file_code, kept:true});
+    } else {
+      if(hasPriceDiff && hasCodeFix) queue.push({lot_id:r.lot_id, price:r.file_server_price, code:r.file_code});
+      else if(hasPriceDiff)          queue.push({lot_id:r.lot_id, price:r.file_server_price});
+      else if(hasCodeFix)            queue.push({lot_id:r.lot_id, code:r.file_code});
+    }
+  }
+  if(queue.length===0){ toast('No fixes to apply'); return; }
+  const keptInQueue=queue.filter(q=>q.kept).length;
+  let msg='Apply '+queue.length+' fix'+(queue.length===1?'':'es')+'?';
+  if(keptInQueue>0){
+    msg+='\n\nNote: '+keptInQueue+' kept row'+(keptInQueue===1?'':'s')+' will only get code updates — DB price stays as-is.';
+  }
+  if(!confirm(msg))return;
+  let ok=0, fail=0, locked=0;
+  for(const item of queue){
+    const body={lot_id:item.lot_id};
+    if(item.price!==undefined) body.price=item.price;
+    if(item.code !==undefined) body.code =item.code;
+    try{
+      const r=await fetch(B+'/api/price-check/apply-fix',{method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+        body:JSON.stringify(body)});
+      if(r.ok) ok++;
+      else if(r.status===423) { locked++; fail++; }
+      else fail++;
+    } catch(_){ fail++; }
+  }
+  let summary='Applied '+ok+' of '+queue.length;
+  if(locked>0) summary+=' ('+locked+' locked)';
+  else if(fail>0) summary+=' ('+fail+' failed)';
+  toast(summary);
 }
 
 // ══════════════════════════════════════════════════════════════
