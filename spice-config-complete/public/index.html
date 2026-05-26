@@ -2485,6 +2485,22 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
           <select id="pay-auction" onchange="loadPayments()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px"></select>
 
+          <!-- Seller search — filters the payments summary client-side
+               (the table is a per-seller rollup, not raw rows). Matches
+               on `name` substring (case-insensitive). Debounced 150ms. -->
+          <input type="search" id="pay-search" placeholder="Search seller…" oninput="searchPaymentsDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <!-- Payable-status filter. Pure client-side since the data is
+               already per-seller aggregated. Useful for splitting the
+               "still owe" rows from the "fully settled" ones during a
+               payment run. -->
+          <select id="pay-status-filter" onchange="loadPayments({ keepPage: true })" title="Filter by payable status" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px">
+            <option value="">All sellers</option>
+            <option value="payable">Has payable</option>
+            <option value="settled">Settled (₹0)</option>
+            <option value="discount">Has discount</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="loadPayments()">↻ Reload</button>
           </div>
@@ -2492,6 +2508,13 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('bank_payment')" title="Export bulk RTGS/NEFT file for bank portal upload">📤 Export Bank Payment</button>
             <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('payment')" title="Per-lot detailed payment breakdown">📊 Export Payment XLSX</button>
+          </div>
+
+          <!-- Bulk actions group — Export Selected. Hidden until ≥1 row
+               is ticked; visibility driven by _updatePayBulkToolbar()
+               called from syncPayMaster + on each checkbox change. -->
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
+            <button id="pay-bulk-export" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedPayments()" title="Download a CSV of just the ticked sellers">📥 Export Selected <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
           </div>
         </div>
 
@@ -2507,7 +2530,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <div style="height:280px;position:relative"><canvas id="pay-top-sellers-chart"></canvas></div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Purchase</th><th>Discount</th><th>Payable</th></tr></thead><tbody id="payments-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Purchase</th><th>Discount</th><th>Payable</th></tr></thead><tbody id="payments-list"></tbody></table></div>
         <div id="payments-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -11534,16 +11557,47 @@ function gotoPaymentsPage(p){
     } catch (_) { /* localStorage may be blocked — fall back to default */ }
   }
 })();
+// Cached raw payments rows from the last successful /api/payments fetch.
+// loadPayments() can be called with opts.useCache=true to re-render
+// search/filter changes without hitting the server again.
+let _paymentsAll = [];
 async function loadPayments(opts){
   if (!opts || !opts.keepPage) _paymentsPager.page = 1;
   const aid=document.getElementById('pay-auction').value;
   const body=document.getElementById('payments-list');
-  if(!aid){body.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';return}
+  if(!aid){body.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
   try{
-    const d=await j(`/api/payments/${aid}`);
-    const arr = Array.isArray(d) ? d : [];
+    let rows;
+    if (opts && opts.useCache && _paymentsAll.length) {
+      rows = _paymentsAll;
+    } else {
+      const d = await j(`/api/payments/${aid}`);
+      rows = Array.isArray(d) ? d : [];
+      _paymentsAll = rows;
+    }
+    // Apply search + status filter client-side before render. The
+    // KPI tiles + chart still use the unfiltered set so they show
+    // trade-wide totals — only the table visualises the filter.
+    const search   = (document.getElementById('pay-search')?.value || '').trim().toLowerCase();
+    const status   = (document.getElementById('pay-status-filter')?.value || '').trim();
+    const arr = rows.filter(p => {
+      if (search) {
+        const n = String(p.name || '').toLowerCase();
+        if (!n.includes(search)) return false;
+      }
+      const payable = Number(p.total_payable) || 0;
+      const discount = Number(p.total_discount) || 0;
+      if (status === 'payable' && payable <= 0) return false;
+      if (status === 'settled' && payable !== 0) return false;
+      if (status === 'discount' && discount <= 0) return false;
+      return true;
+    });
 
-    // Update KPI strip
+    // Update KPI strip — reflects the FILTERED set so the user sees
+    // "X sellers with payable" when they apply the status filter.
+    // (Chart below still uses the unfiltered `rows` so Top Sellers
+    // stays a stable trade-wide reference even while filters narrow
+    // the table.)
     const kpiStrip = document.getElementById('pay-kpis');
     if (kpiStrip) {
       if (arr.length === 0) {
@@ -11554,24 +11608,35 @@ async function loadPayments(opts){
         const totalQty      = arr.reduce((a,i) => a + (Number(i.total_qty)      || 0), 0);
         const totalDiscount = arr.reduce((a,i) => a + (Number(i.total_discount) || 0), 0);
         const totalPayable  = arr.reduce((a,i) => a + (Number(i.total_payable)  || 0), 0);
+        const filterTail    = (search || status)
+          ? ` <span style="color:var(--text3);font-weight:400;font-size:11px">(of ${rows.length})</span>`
+          : '';
         const $ = (id) => document.getElementById(id);
-        if ($('pay-kpi-sellers'))  $('pay-kpi-sellers').textContent  = arr.length;
+        if ($('pay-kpi-sellers'))  $('pay-kpi-sellers').innerHTML     = arr.length + filterTail;
         if ($('pay-kpi-qty'))      $('pay-kpi-qty').innerHTML        = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
         if ($('pay-kpi-discount')) $('pay-kpi-discount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalDiscount, 0)}`;
         if ($('pay-kpi-payable'))  $('pay-kpi-payable').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalPayable, 0)}`;
         updateSummaryStats('payments',
-          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'} · `
+          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status)?` (of ${rows.length})`:''} · `
           + `<strong>${fmtI(totalQty,0)} kg</strong> · `
           + `<strong>₹${fmtI(totalPayable,0)}</strong> payable`);
       }
     }
 
-    // Paginate the table render. Chart below still uses the full `arr`
-    // so "Top sellers" reflects every seller, not just the current page.
+    // Paginate the table render. Chart below uses the full `rows` set
+    // (unfiltered) so "Top sellers" stays a stable trade-wide reference.
     const _paySlice = applyClientSidePagination(_paymentsPager, 'payments-pager', gotoPaymentsPage, arr);
     DataTable.mount('payments-list', _paySlice, {
       emptyState: { icon: 'payments', title: 'No payments to summarize yet', body: 'Calculate the lots in this ' + termAuction(false, true) + ' to see per-seller payable amounts here.' },
       columns: [
+        // Selection column. Payments has no per-row id from the server
+        // (the rows are per-seller rollups), so we key checkboxes by
+        // seller name. `data-pay-name` lets sync + bulk handlers find
+        // the right row even after pagination switches the visible slice.
+        { key:'_select', label:'',
+          labelHTML:'<input type="checkbox" id="pay-select-all" onclick="event.stopPropagation();toggleAllPay(this.checked)" title="Select / clear all visible" style="cursor:pointer;width:16px;height:16px;vertical-align:middle;accent-color:var(--green)">',
+          sortable:false, searchable:false,
+          render:(p)=>`<input type="checkbox" class="pay-select-cb" data-pay-name="${esc(p.name||'')}" onclick="event.stopPropagation()" style="cursor:pointer">` },
         { key:'name', label:'Seller', sort:'text',
           render:(p)=>`<span style="font-weight:600;color:var(--spice-text-main)">${esc(p.name||'')}</span>` },
         { key:'lot_count', label:'Lots', sort:'number', numeric:true },
@@ -11594,11 +11659,12 @@ async function loadPayments(opts){
       ]
     });
 
-    // Top Sellers chart — horizontal bars, top 10 by payable.
-    // Hidden when fewer than 2 sellers (chart isn't meaningful).
+    // Top Sellers chart — horizontal bars, top 10 by payable. Uses
+    // the unfiltered `rows` so the chart stays stable when the user
+    // narrows the table via search/filter.
     const chartCard = document.getElementById('pay-chart-card');
     if (chartCard) {
-      if (typeof Chart !== 'undefined' && arr.length >= 2) {
+      if (typeof Chart !== 'undefined' && rows.length >= 2) {
         chartCard.style.display = 'block';
         requestAnimationFrame(() => {
           const canvas = document.getElementById('pay-top-sellers-chart');
@@ -11607,7 +11673,7 @@ async function loadPayments(opts){
           // Sort descending by payable, take top 10, then reverse so the
           // highest bar is at the TOP of the chart (Chart.js indexAxis:y
           // draws first label at top).
-          const sorted = [...arr]
+          const sorted = [...rows]
             .sort((a, b) => (Number(b.total_payable)||0) - (Number(a.total_payable)||0))
             .slice(0, 10)
             .reverse();
@@ -11664,8 +11730,117 @@ async function loadPayments(opts){
       }
     }
   }catch(e){
-    body.innerHTML=`<tr><td colspan="7" style="text-align:center;color:var(--red);padding:24px">Failed to load: ${esc(e.message)}</td></tr>`;
+    body.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--red);padding:24px">Failed to load: ${esc(e.message)}</td></tr>`;
   }
+}
+
+// ── Payments search + selection helpers ─────────────────────────
+// Search is client-side because /api/payments returns aggregated
+// per-seller rows; debouncing the input avoids spamming filter +
+// re-render on every keystroke. We hit useCache=true so we don't
+// re-fetch the server data — just re-filter the cached rows.
+let _paySearchTimer = null;
+function searchPaymentsDebounced(_q){
+  clearTimeout(_paySearchTimer);
+  _paySearchTimer = setTimeout(() => loadPayments({ keepPage: true, useCache: true }), 150);
+}
+
+// Master "select all visible" toggles every checkbox whose row isn't
+// hidden by DataTable's internal search. Mirrors the lots/invoices
+// pattern — keyed by seller name, not by row id (no id on payments).
+function toggleAllPay(state){
+  const body = document.getElementById('payments-list');
+  if (!body) return;
+  body.querySelectorAll('.pay-select-cb').forEach(cb => {
+    const row = cb.closest('tr');
+    if (row && row.style.display !== 'none') cb.checked = state;
+  });
+  syncPayMaster();
+}
+function syncPayMaster(){
+  const master = document.getElementById('pay-select-all');
+  const body = document.getElementById('payments-list');
+  if (!body) {
+    if (master) { master.checked = false; master.indeterminate = false; }
+    _updatePayBulkToolbar(0);
+    return;
+  }
+  const visible = Array.from(body.querySelectorAll('.pay-select-cb')).filter(cb => {
+    const row = cb.closest('tr'); return row && row.style.display !== 'none';
+  });
+  const ticked = visible.filter(cb => cb.checked).length;
+  if (master) {
+    master.indeterminate = ticked > 0 && ticked < visible.length;
+    master.checked       = visible.length > 0 && ticked === visible.length;
+  }
+  _updatePayBulkToolbar(ticked);
+}
+// Show/hide Export Selected pill based on ticked count.
+function _updatePayBulkToolbar(ticked){
+  const exp = document.getElementById('pay-bulk-export');
+  const counter = document.getElementById('pay-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(exp, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
+}
+// Delegate: per-row checkbox changes drive the master + bulk toolbar.
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains('pay-select-cb')) {
+    syncPayMaster();
+  }
+});
+
+// Export Selected — client-side CSV of just the ticked sellers.
+// Browser-only (no server round-trip) since the payments view is
+// already a per-seller aggregate and the data lives in _paymentsAll.
+// CSV avoids needing a XLSX library on the client.
+function exportSelectedPayments(){
+  const body = document.getElementById('payments-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.pay-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more sellers first'); return; }
+  const names = new Set(checked.map(cb => String(cb.getAttribute('data-pay-name') || '')));
+  const rows = (_paymentsAll || []).filter(p => names.has(String(p.name || '')));
+  if (!rows.length) { toast('Selected sellers not found in current data — reload and retry'); return; }
+
+  // Build CSV. Same column order as the visible table; numbers
+  // emitted with 3-dp qty / 2-dp money so spreadsheet apps keep
+  // precision.
+  const esc = (s) => {
+    const v = String(s == null ? '' : s);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const header = ['Seller','Lots','Qty (kg)','Amount','Purchase','Discount','Payable'];
+  const lines = [header.join(',')];
+  let totQty = 0, totAmt = 0, totPur = 0, totDisc = 0, totPay = 0;
+  for (const p of rows) {
+    const lc = Number(p.lot_count) || 0;
+    const q  = Number(p.total_qty) || 0;
+    const a  = Number(p.total_amount) || 0;
+    const pu = Number(p.total_puramt) || 0;
+    const di = Number(p.total_discount) || 0;
+    const py = Number(p.total_payable) || 0;
+    totQty += q; totAmt += a; totPur += pu; totDisc += di; totPay += py;
+    lines.push([
+      esc(p.name || ''), lc, q.toFixed(3),
+      a.toFixed(2), pu.toFixed(2), di.toFixed(2), py.toFixed(2),
+    ].join(','));
+  }
+  lines.push(['TOTAL', rows.length, totQty.toFixed(3), totAmt.toFixed(2), totPur.toFixed(2), totDisc.toFixed(2), totPay.toFixed(2)].join(','));
+
+  const aid = document.getElementById('pay-auction')?.value || '';
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `payments_selected_${aid || 'trade'}_${rows.length}.csv`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+  toast(`Exported ${rows.length} seller${rows.length === 1 ? '' : 's'}`);
 }
 
 // ── Exports ───────────────────────────────────────────────
