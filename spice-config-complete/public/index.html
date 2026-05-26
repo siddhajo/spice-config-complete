@@ -2939,8 +2939,8 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
         <div style="margin-top:12px;padding:10px 14px;background:var(--green-bg);border-radius:8px;border:1px solid var(--green);font-size:12px;color:var(--text2);line-height:1.5">
           <strong style="color:var(--green)">Two Tally companies for ledgers:</strong>
-          <strong>Sales Party Ledgers</strong> import into the <span class="tally-co-badge tally-co-isp">ISP</span> Tally company (since buyers are ISP customers).
-          <strong>RD &amp; URD Purchase Party Ledgers</strong> import into the <span class="tally-co-badge tally-co-asp">ASP</span> Tally company (since suppliers are ASP's).
+          <strong>Sales Party Ledgers</strong> import into the <span class="tally-co-badge tally-co-isp" data-logo-code-badge="isp">ISP</span> Tally company (since buyers are ISP customers).
+          <strong>RD &amp; URD Purchase Party Ledgers</strong> import into the <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span> Tally company (since suppliers are ASP's).
           All vouchers currently import into ISP — open the matching company in Tally before importing.
           <br><strong style="color:var(--green)">Workflow:</strong> Import party ledgers first, then matching vouchers — Tally rejects imports if any referenced ledger is missing.
         </div>
@@ -2957,7 +2957,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--green-bg);display:inline-flex;align-items:center;justify-content:center;font-size:18px">🛒</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Party Ledgers <span class="tally-co-badge tally-co-isp">ISP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Party Ledgers <span class="tally-co-badge tally-co-isp" data-logo-code-badge="isp">ISP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Buyers from this auction's invoices (under Local / Inter Dealer-Purchase)</div>
               </div>
             </div>
@@ -2972,7 +2972,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">🏢</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">RD Purchase Party Ledgers <span class="tally-co-badge tally-co-asp">ASP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">RD Purchase Party Ledgers <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Registered dealers (under Local / Inter Dealer)</div>
               </div>
             </div>
@@ -2987,7 +2987,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-cardamom-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">🌾</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">URD Purchase Party Ledgers <span class="tally-co-badge tally-co-asp">ASP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">URD Purchase Party Ledgers <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Agriculturists (under Purchase From Agriculturist)</div>
               </div>
             </div>
@@ -3083,7 +3083,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--green-bg);display:inline-flex;align-items:center;justify-content:center;font-size:18px">💰</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Vouchers — ISP <span class="tally-co-badge tally-co-isp">ISP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Vouchers — ISP <span class="tally-co-badge tally-co-isp" data-logo-code-badge="isp">ISP</span></div>
                 <div style="font-size:11px;color:var(--text3)">ISP → outside customers — full e-way bill, dispatch from ASP, BASICORDERREF</div>
               </div>
             </div>
@@ -3098,7 +3098,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:#FEF3C7;display:inline-flex;align-items:center;justify-content:center;font-size:18px">🔁</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Vouchers — ASP <span class="tally-co-badge tally-co-asp">ASP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">Sales Vouchers — ASP <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
                 <div style="font-size:11px;color:var(--text3)">ASP → ISP internal transfer — uses ASP planter rates (asp_puramt)</div>
               </div>
             </div>
@@ -3113,7 +3113,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--green-bg);display:inline-flex;align-items:center;justify-content:center;font-size:18px">📦</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">ISP Purchase Vouchers <span class="tally-co-badge tally-co-isp">ISP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">ISP Purchase Vouchers <span class="tally-co-badge tally-co-isp" data-logo-code-badge="isp">ISP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Mirror of ASP→ISP transfer — same voucher number (ASP/I-…), supplier=ASP, IGST input</div>
               </div>
             </div>
@@ -3128,7 +3128,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">📥</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">RD Purchase Vouchers <span class="tally-co-badge tally-co-asp">ASP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">RD Purchase Vouchers <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Registered dealers — input GST, TDS 194Q, batch tracking</div>
               </div>
             </div>
@@ -3143,7 +3143,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-cardamom-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">🌾</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">URD Purchase Vouchers <span class="tally-co-badge tally-co-asp">ASP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">URD Purchase Vouchers <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Agriculturist / unregistered — Nil Rated, no GST input</div>
               </div>
             </div>
@@ -3158,7 +3158,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
               <span style="width:32px;height:32px;border-radius:8px;background:#FCEBEB;display:inline-flex;align-items:center;justify-content:center;font-size:18px">📝</span>
               <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Debit Notes <span class="tally-co-badge tally-co-isp">ISP</span></div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">Debit Notes <span class="tally-co-badge tally-co-isp" data-logo-code-badge="isp">ISP</span></div>
                 <div style="font-size:11px;color:var(--text3)">Discount received from suppliers — 18% GST credit</div>
               </div>
             </div>
@@ -6602,7 +6602,32 @@ function applyFeatureFlags(){
 // off-mode options. The widget itself stays visible (so they can flip
 // to "All kinds" if they really need a one-off cross-company action),
 // but the default selection moves to the active mode's primary kind.
+// Refresh every `.tally-co-badge` (and any other marker tagged with
+// data-logo-code-badge) to show the user's configured Logo Code rather
+// than the hardcoded "ISP" / "ASP" literals. Reads:
+//   • company.logo   → primary company's logo code (default 'ISP')
+//   • sister.s_logo  → sister company's logo code  (default 'ASP')
+// Called from applyTallyCompanyVisibility (fires on settings save +
+// state/mode flip), so editing the Logo Code in Settings → Company /
+// Sister Company reflects everywhere immediately.
+function applyTallyLogoBadges(){
+  const findVal = (cat, key, fb) => {
+    const arr = (window._sdata && _sdata[cat]) || [];
+    const f = arr.find(x => x && x.key === key);
+    const v = (f && String(f.value || '').trim()) || '';
+    return v || fb;
+  };
+  const ispCode = findVal('company', 'logo',   'ISP').toUpperCase();
+  const aspCode = findVal('sister',  's_logo', 'ASP').toUpperCase();
+  document.querySelectorAll('[data-logo-code-badge="isp"]').forEach(el => { el.textContent = ispCode; });
+  document.querySelectorAll('[data-logo-code-badge="asp"]').forEach(el => { el.textContent = aspCode; });
+}
+
 function applyTallyCompanyVisibility(){
+  // Paint the configurable logo-code badges before deciding visibility
+  // so the badge text matches the company's configured logo on every
+  // run (including the first paint after a fresh login).
+  applyTallyLogoBadges();
   const co = (typeof getCurrentLogoCode === 'function')
     ? String(getCurrentLogoCode() || 'isp').toLowerCase()
     : 'isp';
@@ -7628,6 +7653,13 @@ async function saveSettings(){
   // Re-apply feat-* body attrs so flag toggles (flag_crop_receipt /
   // flag_reserved_price) take visual effect without a page reload.
   if (typeof applyFeatureFlags === 'function') applyFeatureFlags();
+  // Re-paint the Tally logo-code badges in case the user edited the
+  // Logo Code under Settings → Company / Sister Company. The Company
+  // tab saves through saveActivePreset, but its cfg cache is also
+  // refreshed here so applyTallyCompanyVisibility picks up the new
+  // value on the next render. Call applyLogoBadge to keep the topbar
+  // logo + the Tally badges in lockstep.
+  if (typeof applyLogoBadge === 'function') applyLogoBadge();
   toast('Settings saved');
 }
 async function exportSettings(){const d=await j('/api/company-settings/export');const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
