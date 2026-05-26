@@ -221,27 +221,34 @@ body[data-theme="trust"]{
 .theme-chip[data-t="trust"]{background:linear-gradient(135deg,#003366,#00A3E0)}
 body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 
-/* ── Login (redesigned) ──────────────────────────────────── */
+/* ── Login (vibrant) ─────────────────────────────────────── */
 #login{
   position:relative;display:flex;align-items:center;justify-content:center;
-  min-height:100vh;padding:24px;overflow:hidden;
-  background:radial-gradient(1200px 600px at 80% -10%,rgba(20,83,45,.10),transparent 60%),
-             radial-gradient(900px 500px at -10% 100%,rgba(245,158,11,.10),transparent 55%),
-             linear-gradient(135deg,var(--spice-cream) 0%,#F8FAFC 60%,#F1F5F9 100%)
+  min-height:100vh;padding:32px;overflow:hidden;
+  /* Layered colour wash — cardamom / saffron / chili / teal mesh. */
+  background:
+    radial-gradient(900px 600px at  8% 18%,#86EFAC 0%,transparent 55%),
+    radial-gradient(720px 520px at 92% 12%,#FCD34D 0%,transparent 58%),
+    radial-gradient(800px 600px at 14% 92%,#5EEAD4 0%,transparent 55%),
+    radial-gradient(700px 540px at 88% 88%,#FB923C 0%,transparent 58%),
+    linear-gradient(135deg,#FFFBEB 0%,#ECFDF5 50%,#F0F9FF 100%)
 }
-/* Decorative blobs — pure CSS, no layout impact */
+/* Decorative blobs — bolder, with mix-blend so the mesh stays bright. */
 .login-bg{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-.login-blob{position:absolute;display:block;border-radius:50%;filter:blur(60px);opacity:.45}
-.login-blob.blob-1{width:380px;height:380px;background:#86EFAC;top:-110px;left:-90px}
-.login-blob.blob-2{width:300px;height:300px;background:#FDE68A;bottom:-90px;right:-60px}
-.login-blob.blob-3{width:220px;height:220px;background:#BBF7D0;top:55%;left:62%;opacity:.35}
+.login-blob{position:absolute;display:block;border-radius:50%;filter:blur(70px);opacity:.55;mix-blend-mode:multiply}
+.login-blob.blob-1{width:460px;height:460px;background:#16A34A;top:-130px;left:-120px;opacity:.30}
+.login-blob.blob-2{width:380px;height:380px;background:#F59E0B;top:-80px;right:-110px;opacity:.32}
+.login-blob.blob-3{width:340px;height:340px;background:#06B6D4;bottom:-110px;left:18%;opacity:.28}
+.login-blob.blob-4{width:300px;height:300px;background:#EF4444;bottom:-90px;right:-60px;opacity:.22;mix-blend-mode:screen}
+.login-blob.blob-5{width:220px;height:220px;background:#A78BFA;top:48%;left:38%;opacity:.20}
 
-/* Two-column shell (brand left, form right). Collapses to one column
-   on narrow screens via the @media rule near the end of this block. */
+/* Brand on the left (wider, hero-style), form anchored to the right
+   edge. Collapses to a single column below 820px (see media query). */
 .login-shell{
   position:relative;z-index:1;
-  display:grid;grid-template-columns:minmax(280px,1fr) minmax(360px,1fr);
-  gap:36px;width:100%;max-width:960px;align-items:stretch;
+  display:grid;grid-template-columns:minmax(340px,1.4fr) minmax(380px,440px);
+  gap:48px;width:100%;max-width:1180px;align-items:center;
+  justify-items:stretch;
 }
 .login-brand{
   display:flex;flex-direction:column;justify-content:center;
@@ -315,10 +322,16 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 
 /* Form card */
 .login-card{
-  position:relative;
-  background:#fff;border:1px solid var(--spice-line);border-radius:22px;
+  position:relative;justify-self:end;width:100%;max-width:440px;
+  background:rgba(255,255,255,.92);
+  -webkit-backdrop-filter:blur(14px) saturate(140%);
+          backdrop-filter:blur(14px) saturate(140%);
+  border:1px solid rgba(255,255,255,.65);border-radius:24px;
   padding:38px 36px 32px;
-  box-shadow:0 28px 70px -22px rgba(15,23,42,.24), 0 10px 18px -10px rgba(15,23,42,.08);
+  box-shadow:
+    0 36px 80px -28px rgba(15,23,42,.32),
+    0 14px 28px -14px rgba(15,23,42,.16),
+    inset 0 1px 0 rgba(255,255,255,.6);
   display:flex;flex-direction:column;justify-content:center;
   animation:loginFadeUp .55s cubic-bezier(.16,1,.3,1) both;
   animation-delay:.08s
@@ -409,6 +422,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   .login-brand h1{font-size:28px}
   .login-tagline{margin-left:auto;margin-right:auto}
   .login-feats{display:none}
+  .login-card{justify-self:center}
 }
 .fg{margin-bottom:14px}
 .fg label{display:block;font-size:12px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
@@ -1864,6 +1878,8 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
     <span class="login-blob blob-1"></span>
     <span class="login-blob blob-2"></span>
     <span class="login-blob blob-3"></span>
+    <span class="login-blob blob-4"></span>
+    <span class="login-blob blob-5"></span>
   </div>
   <div class="login-shell">
     <!-- Brand panel (collapses below the form on narrow screens).
@@ -1877,7 +1893,6 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <img id="login-brand-logo" alt="" style="display:none" onerror="this.style.display='none';var m=document.getElementById('login-brand-mark');if(m)m.style.display='inline-block'">
         <span id="login-brand-mark">IS</span>
       </div>
-      <span class="login-brand-chip" id="login-brand-chip" style="display:none"><span class="dot"></span> <span id="login-brand-chip-text"></span></span>
       <h1 id="login-brand-name"></h1>
       <p class="login-tagline">Company configuration, lot management &amp; Tally exports — built for the cardamom trade.</p>
       <ul class="login-feats">
@@ -5484,8 +5499,6 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   const nameEl = document.getElementById('login-brand-name');
   const markEl = document.getElementById('login-brand-mark');
   const logoEl = document.getElementById('login-brand-logo');
-  const chipEl = document.getElementById('login-brand-chip-text');
-  const chipBox= document.getElementById('login-brand-chip');
   const titleEl= document.querySelector('title');
   // Heading + page title use the company short name from /api/brand. No
   // hardcoded "Spice Config" fallback — if the server returns nothing
@@ -5500,12 +5513,6 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
     logoEl.alt = d.name || 'Company logo';
     logoEl.style.display = 'block';
     if (markEl) markEl.style.display = 'none';
-  }
-  // Chip is just the preset tag (ISP / ASP). Hidden when the server
-  // didn't return a code so we don't show an empty pill.
-  if (chipBox && chipEl && d.code) {
-    chipEl.textContent = d.code;
-    chipBox.style.display = 'inline-flex';
   }
   if (titleEl && d.name) titleEl.textContent = d.name;
 } catch (_) { /* leave defaults */ }})();
