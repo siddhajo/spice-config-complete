@@ -4442,31 +4442,369 @@ app.get('/api/debit-notes', requireView, (req, res) => {
   res.json(withFmtDate(db.all(q, p)));
 });
 
+// ── Debit note math helpers ──────────────────────────────────────
+// Local to the DN endpoints since these were imported from the
+// reference build's standalone DN routes. Both are stateless one-liners.
+function _dnRound2(n) { return Math.round(Number(n || 0) * 100) / 100; }
+function _dnAddDays(iso, days) {
+  const d = new Date(String(iso || '').slice(0, 10) + 'T00:00:00');
+  if (isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toISOString().slice(0, 10);
+}
+// Strip a "GSTIN."/"GSTIN" prefix, uppercase, trim. Used for the
+// state-code extraction below.
+function _dnNormGstin(s) {
+  let v = String(s == null ? '' : s).trim().toUpperCase();
+  if (v.startsWith('GSTIN.')) v = v.slice(6);
+  else if (v.startsWith('GSTIN')) v = v.slice(5);
+  return v.trim();
+}
+
+// ── Generate Debit Note (single, trade-scoped) ───────────────────
+// Inputs: purchno (purchase invoice number) + ano (trade) + optional
+// startNoteNo. Discount is auto-derived from settings (discount_pct
+// and discount_days). GST split classified by the DEALER's GSTIN
+// state code vs the company's state code. Numbering is TRADE-WISE —
+// each trade has its own 1..N sequence.
 app.post('/api/debit-notes/generate', requireInvoiceWrite, (req, res) => {
-  const db = getDb(); const cfg = getSettingsFlat(db);
-  const { invoiceNo, saleType, discount, noteNo } = req.body;
-  
-  if (!invoiceNo || !saleType || !discount || !noteNo) {
-    return res.status(400).json({ error: 'invoiceNo, saleType, discount, and noteNo required' });
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+  const purchno = String(req.body.purchno || req.body.invoiceNo || '').trim();
+  const ano     = String(req.body.ano || '').trim();
+
+  if (!purchno) return res.status(400).json({ error: 'purchno (purchase invoice number) is required' });
+  if (!ano)     return res.status(400).json({ error: 'ano (trade number) is required' });
+
+  // Look up the purchase. Multiple rows can share an invo across
+  // trades — pick the one matching the requested trade.
+  const candidates = db.all(
+    `SELECT * FROM purchases WHERE invo = ? ORDER BY date DESC, id DESC`,
+    [purchno]
+  );
+  if (!candidates.length) {
+    // Distinguish "is a sales invoice" from "doesn't exist".
+    const isSalesInv = db.get(`SELECT id FROM invoices WHERE invo = ? LIMIT 1`, [purchno]);
+    if (isSalesInv) {
+      return res.status(400).json({
+        error: `${purchno} is a SALES invoice. Debit notes can only be generated against PURCHASE invoices.`
+      });
+    }
+    return res.status(404).json({ error: `Purchase invoice ${purchno} not found` });
   }
-  
-  const note = buildDebitNote(db, invoiceNo, saleType, parseFloat(discount), cfg);
-  if (!note) return res.status(404).json({ error: `Invoice ${invoiceNo} (${saleType}) not found` });
 
-  // Use the invoice's date (= auction date) as the debit note's date.
-  // This is what every downstream consumer assumes — the PDF generator
-  // and XML builder both join debit_notes back to auctions via this
-  // column. Falls back to today only if the invoice somehow has no
-  // date stored (rare; legacy data).
-  const noteDate = note.invoice.date || new Date().toISOString().slice(0, 10);
+  const purchase = candidates.find(p => String(p.ano) === ano);
+  if (!purchase) {
+    const otherAnos = [...new Set(candidates.map(p => String(p.ano)))].join(', ');
+    return res.status(400).json({
+      error: `Purchase invoice ${purchno} does not belong to trade #${ano}. It belongs to trade #${otherAnos}.`
+    });
+  }
 
-  db.run(`INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [note.invoice.ano, noteDate, note.invoice.state||'',
-     note.invoice.buyer1||note.invoice.buyer, String(noteNo),
-     note.amount, note.cgst, note.sgst, note.igst, note.total]);
-  
-  res.json({ success: true, note });
+  // Idempotency: skip if a DN for (ano, dealer) already exists.
+  const dealerName = purchase.name || '';
+  const dupe = db.get(
+    `SELECT id, note_no FROM debit_notes WHERE ano = ? AND name = ? LIMIT 1`,
+    [ano, dealerName]
+  );
+  if (dupe) {
+    return res.status(409).json({
+      error: `Debit note #${dupe.note_no} already exists for ${dealerName} in trade #${ano}`,
+      existingId: dupe.id,
+      existingNoteNo: dupe.note_no,
+    });
+  }
+
+  // Discount: explicit override > computed from settings.
+  const baseAmt = Number(purchase.amount || 0);
+  if (baseAmt <= 0) {
+    return res.status(400).json({ error: 'Purchase amount is zero — cannot compute discount' });
+  }
+  let discountAmt = req.body.discount != null ? parseFloat(req.body.discount) : NaN;
+  if (!Number.isFinite(discountAmt) || discountAmt <= 0) {
+    const discountPct  = Number(cfg.discount_pct)  || 0;
+    const discountDays = Number(cfg.discount_days) || 0;
+    if (discountPct <= 0) {
+      return res.status(400).json({ error: 'Discount % not configured in settings' });
+    }
+    discountAmt = discountDays > 0
+      ? Math.round((baseAmt / 1000) * discountDays * discountPct)
+      : Math.round(baseAmt * discountPct / 100);
+  }
+  if (discountAmt <= 0) {
+    return res.status(400).json({ error: 'Computed discount is zero — check settings or invoice amount' });
+  }
+
+  // GST split — classify by the DEALER's GSTIN state code vs the
+  // company's state code. Not by purchase.igst (which can be stale).
+  const dealerG = _dnNormGstin(purchase.gstin);
+  const dealerStateCode = /^\d{2}/.test(dealerG) ? dealerG.slice(0, 2) : '';
+  const companyStateCode = String(cfg.tally_state_code
+      || (String(cfg.business_state || '').toUpperCase() === 'KERALA' ? '32' : '33'));
+  const isInter = !!dealerStateCode && dealerStateCode !== companyStateCode;
+
+  const dnGstRate = Number(cfg.gst_service) || 18;
+  // Only emit GST when (a) flag_disc_gst is on AND (b) the source
+  // purchase carried GST (registered dealer). URD/agri purchases
+  // produce exempt DNs regardless.
+  const flagDiscGst = String(cfg.flag_disc_gst || '').toLowerCase() === 'true' || cfg.flag_disc_gst === true;
+  const dealerCarriedGst = Number(purchase.cgst) || Number(purchase.sgst) || Number(purchase.igst);
+  let cgst = 0, sgst = 0, igst = 0;
+  if (flagDiscGst && dealerCarriedGst) {
+    if (isInter) {
+      igst = _dnRound2(discountAmt * dnGstRate / 100);
+    } else {
+      const half = _dnRound2(discountAmt * (dnGstRate / 2) / 100);
+      cgst = half; sgst = half;
+    }
+  }
+  const total = _dnRound2(discountAmt + cgst + sgst + igst);
+
+  // DN date = trade.date + 1.
+  const trade = db.get('SELECT date FROM auctions WHERE ano = ? LIMIT 1', [ano]);
+  const dnDate = trade && trade.date
+    ? _dnAddDays(trade.date, 1)
+    : new Date().toISOString().slice(0, 10);
+
+  // Note number: client-supplied `startNoteNo` (preferred) or fall
+  // back to MAX(note_no)+1 within this trade. Validated as a positive
+  // integer; uniqueness scoped to the selected trade only.
+  const rawStart = req.body.startNoteNo != null ? req.body.startNoteNo : req.body.noteNo;
+  let noteNo;
+  if (rawStart != null && String(rawStart).trim() !== '') {
+    const n = parseInt(String(rawStart).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) {
+      return res.status(400).json({ error: 'Starting Number must be a positive integer' });
+    }
+    noteNo = String(n);
+    const taken = db.get(
+      `SELECT id FROM debit_notes WHERE ano = ? AND CAST(note_no AS INTEGER) = ? LIMIT 1`,
+      [ano, n]
+    );
+    if (taken) {
+      const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes WHERE ano = ?', [ano]);
+      const mx = parseInt(row && row.mx, 10);
+      const safe = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+      return res.status(409).json({
+        error: `Debit note #${n} is already used in trade #${ano}. Choose a different number.`,
+        suggested: safe,
+      });
+    }
+  } else {
+    const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes WHERE ano = ?', [ano]);
+    const mx = parseInt(row && row.mx, 10);
+    noteNo = String(Number.isFinite(mx) && mx > 0 ? mx + 1 : 1);
+  }
+
+  db.run(
+    `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [ano, dnDate, purchase.state || '', dealerName,
+     noteNo, discountAmt, cgst, sgst, igst, total]
+  );
+
+  res.json({
+    success: true, created: 1, note_no: noteNo,
+    purchno, ano, dealer: dealerName,
+    amount: discountAmt, cgst, sgst, igst, total,
+  });
+});
+
+// ── Generate All Debit Notes (trade-scoped bulk) ─────────────────
+// Body: { ano, startNoteNo }. Generates one DN per eligible purchase
+// in the selected trade (i.e. purchases without an existing DN for
+// the same (ano, dealer) pair, amount > 0). DNs get sequential note
+// numbers starting at startNoteNo. Returns { created, skipped,
+// generated[], skippedDetails[] }.
+app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+
+  // Resolve trade number. Two input shapes: { ano } (preferred) or
+  // { purchno } (legacy — derive ano from the single purchase).
+  let ano = String(req.body.ano || '').trim();
+  if (!ano) {
+    const purchno = String(req.body.purchno || '').trim();
+    if (!purchno) return res.status(400).json({ error: 'Trade number (ano) is required' });
+    const p = db.get(
+      `SELECT ano FROM purchases WHERE invo = ? ORDER BY date DESC, id DESC LIMIT 1`,
+      [purchno]
+    );
+    if (!p) return res.status(404).json({ error: `Purchase invoice ${purchno} not found` });
+    ano = String(p.ano || '').trim();
+    if (!ano) return res.status(400).json({ error: 'Purchase row has no trade number' });
+  }
+
+  // Pull every purchase row for this trade.
+  const purchases = db.all(`SELECT * FROM purchases WHERE ano = ? ORDER BY id`, [ano]);
+  if (!purchases.length) {
+    return res.json({
+      success: true, created: 0, skipped: 0, generated: [], skippedDetails: [],
+      note: `No purchase invoices in trade #${ano}`,
+    });
+  }
+
+  // Existing DN keys for this trade (single query — cheap).
+  const existingKeys = new Set(
+    db.all(`SELECT name FROM debit_notes WHERE ano = ?`, [ano]).map(r => r.name || '')
+  );
+
+  // Resolve DN date once per trade.
+  const trade = db.get('SELECT date FROM auctions WHERE ano = ? LIMIT 1', [ano]);
+  const dnDate = trade && trade.date
+    ? _dnAddDays(trade.date, 1)
+    : new Date().toISOString().slice(0, 10);
+
+  // Discount math constants — read once, applied per-purchase.
+  const discountPct  = Number(cfg.discount_pct)  || 0;
+  const discountDays = Number(cfg.discount_days) || 0;
+  const dnGstRate    = Number(cfg.gst_service) || 18;
+  const flagDiscGst  = String(cfg.flag_disc_gst || '').toLowerCase() === 'true' || cfg.flag_disc_gst === true;
+  if (discountPct <= 0) {
+    return res.status(400).json({ error: 'Discount % not configured in settings' });
+  }
+  const companyStateCode = String(cfg.tally_state_code
+      || (String(cfg.business_state || '').toUpperCase() === 'KERALA' ? '32' : '33'));
+
+  // Eligible count for the up-front range check.
+  const eligibleCount = purchases.filter(
+    p => !existingKeys.has(p.name || '') && Number(p.amount || 0) > 0
+  ).length;
+
+  // Resolve next note number. User-supplied `startNoteNo` anchors the
+  // sequence; omitted → MAX+1 within this trade.
+  let nextNoteNo;
+  const rawStart = req.body.startNoteNo != null ? req.body.startNoteNo : req.body.startInvoiceNo;
+  if (rawStart != null && String(rawStart).trim() !== '') {
+    const n = parseInt(String(rawStart).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) {
+      return res.status(400).json({ error: 'Starting Number must be a positive integer' });
+    }
+    nextNoteNo = n;
+    if (eligibleCount > 0) {
+      // Range claim — scoped to THIS TRADE only.
+      const upper = nextNoteNo + eligibleCount - 1;
+      const collisions = db.all(
+        `SELECT CAST(note_no AS INTEGER) AS n
+           FROM debit_notes
+          WHERE ano = ? AND CAST(note_no AS INTEGER) BETWEEN ? AND ?
+          ORDER BY n`,
+        [ano, nextNoteNo, upper]
+      );
+      if (collisions.length) {
+        const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes WHERE ano = ?', [ano]);
+        const mx = parseInt(row && row.mx, 10);
+        const safe = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+        return res.status(409).json({
+          error: `Starting Number ${nextNoteNo} would overlap existing debit note(s) in trade #${ano} `
+               + `(${collisions.slice(0, 5).map(c => '#' + c.n).join(', ')}`
+               + `${collisions.length > 5 ? `, +${collisions.length - 5} more` : ''}). Try ${safe} or higher.`,
+          collisions: collisions.map(c => c.n),
+          suggested: safe,
+        });
+      }
+    }
+  } else {
+    const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes WHERE ano = ?', [ano]);
+    const mx = parseInt(row && row.mx, 10);
+    nextNoteNo = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+  }
+
+  const generated = [];
+  const skipped   = [];
+
+  for (const p of purchases) {
+    const dealerName = p.name || '';
+    if (existingKeys.has(dealerName)) {
+      skipped.push({ invo: p.invo, ano, buyer: dealerName, reason: 'duplicate (DN already exists for this dealer in this trade)' });
+      continue;
+    }
+    const baseAmt = Number(p.amount || 0);
+    if (baseAmt <= 0) {
+      skipped.push({ invo: p.invo, ano, buyer: dealerName, reason: 'zero amount' });
+      continue;
+    }
+    const discountAmt = discountDays > 0
+      ? Math.round((baseAmt / 1000) * discountDays * discountPct)
+      : Math.round(baseAmt * discountPct / 100);
+    if (discountAmt <= 0) {
+      skipped.push({ invo: p.invo, ano, buyer: dealerName, reason: 'computed discount is zero' });
+      continue;
+    }
+
+    // Intra/inter classification by dealer's GSTIN state code.
+    const dealerG = _dnNormGstin(p.gstin);
+    const dealerStateCode = /^\d{2}/.test(dealerG) ? dealerG.slice(0, 2) : '';
+    const isInter = !!dealerStateCode && dealerStateCode !== companyStateCode;
+    const dealerCarriedGst = Number(p.cgst) || Number(p.sgst) || Number(p.igst);
+    let cgst = 0, sgst = 0, igst = 0;
+    if (flagDiscGst && dealerCarriedGst) {
+      if (isInter) {
+        igst = _dnRound2(discountAmt * dnGstRate / 100);
+      } else {
+        const half = _dnRound2(discountAmt * (dnGstRate / 2) / 100);
+        cgst = half; sgst = half;
+      }
+    }
+    const total = _dnRound2(discountAmt + cgst + sgst + igst);
+
+    db.run(
+      `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [ano, dnDate, p.state || '', dealerName,
+       String(nextNoteNo), discountAmt, cgst, sgst, igst, total]
+    );
+    generated.push({ note_no: nextNoteNo, purchno: p.invo, dealer: dealerName, total });
+    existingKeys.add(dealerName);
+    nextNoteNo++;
+  }
+
+  res.json({
+    success: true,
+    created: generated.length,
+    skipped: skipped.length,
+    generated,
+    skippedDetails: skipped,
+    note: generated.length === 0 && skipped.length === 0
+      ? `No eligible purchases in trade #${ano}`
+      : undefined,
+  });
+});
+
+// List purchases in a trade that don't yet have a DN. Drives the
+// preview panel in the Generate All modal so the user sees exactly
+// what will be created before clicking Generate.
+app.get('/api/debit-notes/eligible-purchases/:auctionId', requireView, (req, res) => {
+  const db = getDb();
+  const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [req.params.auctionId]);
+  if (!auction) return res.status(404).json({ error: 'Auction not found' });
+  const ano = auction.ano;
+  const rows = db.all(
+    `SELECT p.id, p.invo, p.name, p.amount, p.cgst, p.sgst, p.igst, p.total, p.date, p.state
+       FROM purchases p
+      WHERE p.ano = ? AND p.amount > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM debit_notes dn WHERE dn.ano = p.ano AND dn.name = p.name
+        )
+      ORDER BY p.id`,
+    [ano]
+  );
+  res.json(rows);
+});
+
+// Next-available DN number for a trade. Trade-wise numbering — each
+// trade has its own 1..N sequence. Used by both Generate modals to
+// pre-fill the Starting Number field.
+app.get('/api/debit-notes/next-note-no', requireView, (req, res) => {
+  const db = getDb();
+  const ano = String(req.query.ano || '').trim();
+  if (!ano) return res.status(400).json({ error: 'ano (trade number) is required' });
+  const row = db.get(
+    'SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes WHERE ano = ?', [ano]
+  );
+  const mx = parseInt(row && row.mx, 10);
+  const next = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+  res.json({ next, ano });
 });
 
 app.delete('/api/debit-notes/:id', requireDelete, (req, res) => {
