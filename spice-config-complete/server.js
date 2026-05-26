@@ -84,24 +84,15 @@ app.get('/api/brand', (req, res) => {
       return flat.short_name || flat.trade_name || 'Spice Config';
     };
     const name = String(pickName()).trim();
-    // Logo: prefer the active preset's file, but fall back to the other
-    // preset's logo if the active one hasn't been uploaded yet — that
-    // way a single uploaded logo still brands the login page when the
-    // operator flips presets. Only when BOTH are missing do we hand the
-    // client a null URL so it can show the text-mark fallback.
-    const pickLogo = () => {
-      const order = active === 'ASP' ? ['asp', 'ispl'] : ['ispl', 'asp'];
-      for (const w of order) {
-        const t = LOGO_FILES && LOGO_FILES[w];
-        if (t && fs.existsSync(t)) {
-          return { which: w, url: '/logo-' + w + '.png?v=' + Math.floor(fs.statSync(t).mtimeMs) };
-        }
-      }
-      return null;
-    };
-    const picked = pickLogo();
-    const hasLogo = !!picked;
-    const logoUrl = picked ? picked.url : null;
+    // Logo: ONLY the active preset's file. We deliberately do not
+    // fall back to the other preset's logo — showing the ISPL bee on
+    // an ASP-active session (or vice versa) is misbranding. When the
+    // active preset's file is missing the client falls through to the
+    // text-mark tile / .dot background.
+    const which = active === 'ASP' ? 'asp' : 'ispl';
+    const target = LOGO_FILES && LOGO_FILES[which];
+    const hasLogo = !!(target && fs.existsSync(target));
+    const logoUrl = hasLogo ? ('/logo-' + which + '.png?v=' + Math.floor(fs.statSync(target).mtimeMs)) : null;
     // Two-letter tile (used only when logoUrl is null).
     const mark = active === 'ASP' ? 'AS' : 'IS';
     res.json({ active, name, code: active, mark, logoUrl, hasLogo });

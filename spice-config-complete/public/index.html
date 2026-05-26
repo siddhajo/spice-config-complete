@@ -5491,19 +5491,40 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   // last-active trade.
   const gw = document.getElementById('global-aid-wrap'); if (gw) gw.style.display = 'none';
   document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
-// Update the in-app topbar with the company short_name from /api/brand.
-// Auth-free endpoint so this also works pre-login. Idempotent — safe
-// to call from anywhere that changes the active preset / mode.
+// Update the in-app topbar with the company short_name + logo image
+// from /api/brand. Auth-free endpoint so this also works pre-login.
+// Idempotent — safe to call from anywhere that changes the active
+// preset / mode. Source-of-truth for the topbar's branding so it stays
+// in sync with the login page (which uses the same endpoint).
 async function refreshTopbarBrand(){
   try {
-    const r = await fetch(B + '/api/brand');
+    const r = await fetch(B + '/api/brand?_=' + Date.now());
     if (!r.ok) return;
     const d = await r.json();
     const nameEl = document.getElementById('topbar-brand-name');
     if (nameEl && d.name) nameEl.textContent = d.name;
     const titleEl = document.querySelector('title');
     if (titleEl && d.name) titleEl.textContent = d.name;
-  } catch (_) { /* leave literal default */ }
+    // Topbar logo: prefer the resolved URL from /api/brand (which knows
+    // the active preset + falls back across presets). If the <img> was
+    // removed earlier by an onerror handler, recreate it inside .dot.
+    const dot = document.querySelector('.topbar .dot');
+    if (!dot) return;
+    let el = document.getElementById('topbar-logo-img');
+    if (d.hasLogo && d.logoUrl) {
+      if (!el) {
+        el = document.createElement('img');
+        el.id = 'topbar-logo-img';
+        el.alt = '';
+        el.onerror = function(){ this.remove(); };
+        dot.appendChild(el);
+      }
+      if (el.getAttribute('src') !== d.logoUrl) el.src = d.logoUrl;
+    } else if (el) {
+      // No logo at all → drop the img so the dot's background shows.
+      el.remove();
+    }
+  } catch (_) { /* leave literal defaults */ }
 }
 
 // Public brand probe — populates the login card's company name + logo
@@ -6829,33 +6850,12 @@ function applyLogoBadge(){
     else{badge.textContent = code; badge.style.display = 'inline-block'}
   }
 
-  // Topbar H1 — replace the literal "Spice Config" with the company
-  // short_name. Delegated to refreshTopbarBrand() which hits
-  // /api/brand so the resolution matches the login page exactly
-  // (including preset overrides + sister-fallback).
+  // Topbar H1 + dot image — delegated to refreshTopbarBrand() which
+  // hits /api/brand so the resolution matches the login page exactly
+  // (active preset + cross-preset logo fallback). Single source of
+  // truth for the topbar's branding.
   if (typeof refreshTopbarBrand === 'function') refreshTopbarBrand();
-
-  // Topbar dot image: /logo-ispl.png or /logo-asp.png
-  // If the img element was removed (404 fallback on earlier render), recreate it.
   if(!code) return;
-  const src = (String(code).toUpperCase() === 'ASP') ? '/logo-asp.png' : '/logo-ispl.png';
-  let el = img;
-  if(!el){
-    // img was removed by its onerror handler (missing file). Re-insert so we
-    // try again on every mode/state change — helps after the user drops the
-    // logo files into public/.
-    const dot = document.querySelector('.topbar .dot');
-    if(dot){
-      el = document.createElement('img');
-      el.id = 'topbar-logo-img';
-      el.alt = '';
-      el.onerror = function(){this.remove()};
-      dot.appendChild(el);
-    }
-  }
-  if(el && el.getAttribute('src') !== src){
-    el.src = src;
-  }
   // Cascade: anything keyed off ASP context (e.g. the "Print Selected
   // Purchase" button on the Sales tab) gets a visibility refresh here so
   // there's a single place that needs to fire on logo/state changes.
