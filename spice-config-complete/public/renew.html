@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>License renewal — Spice e-Trade</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root{--bg:#fff7ed;--ink:#7c2d12;--accent:#14532d;--accent-dk:#0f3d1f;
+          --warn:#b45309;--err:#991b1b;--ok:#15803d;--border:#fde68a}
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+              font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+              min-height:100vh}
+    .wrap{max-width:520px;margin:8vh auto;padding:24px;background:#fff;
+          border:2px solid var(--border);border-radius:14px;
+          box-shadow:0 10px 40px rgba(124,45,18,.12)}
+    h1{margin:0 0 6px;font-size:24px;display:flex;align-items:center;gap:8px}
+    h1 .icon{display:inline-flex;width:36px;height:36px;border-radius:10px;
+             background:#fef3c7;color:#92400e;align-items:center;justify-content:center;
+             font-size:20px}
+    .sub{font-size:13px;color:#92400e;margin:0 0 18px}
+    .status{padding:12px 14px;border-radius:10px;background:#fffbeb;
+            border:1px solid #fde68a;margin-bottom:18px;font-size:13px;line-height:1.55}
+    .status.expired{background:#fee2e2;border-color:#fecaca;color:var(--err)}
+    .status.ok{background:#dcfce7;border-color:#86efac;color:var(--ok)}
+    .row{display:flex;gap:6px;align-items:center;margin:6px 0;font-size:12.5px}
+    .row b{min-width:120px;display:inline-block;color:#78350f}
+    code.id{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+            background:#fef3c7;padding:2px 7px;border-radius:6px;
+            user-select:all;cursor:copy;border:1px solid #fde68a;color:#78350f}
+    label{display:block;font-size:11.5px;font-weight:700;color:#78350f;
+          text-transform:uppercase;letter-spacing:.4px;margin:14px 0 4px}
+    textarea{width:100%;min-height:110px;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;
+             font-size:12.5px;border:1.5px solid #fde68a;border-radius:8px;
+             background:#fffbeb;color:#7c2d12;resize:vertical;line-height:1.4}
+    textarea:focus{outline:none;border-color:#a16207;background:#fff}
+    .actions{display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap}
+    button{height:38px;padding:0 16px;border:none;border-radius:8px;font-weight:600;
+           font-size:13px;cursor:pointer;font-family:inherit;transition:transform .05s,filter .15s}
+    button:active{transform:translateY(1px)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .btn-apply{background:var(--accent);color:#fff}
+    .btn-apply:hover{filter:brightness(1.08)}
+    .btn-secondary{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+    .btn-secondary:hover{background:#f0fdf4}
+    .msg{margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.45;display:none}
+    .msg.err{background:#fee2e2;border:1px solid #fecaca;color:var(--err)}
+    .msg.ok{background:#dcfce7;border:1px solid #86efac;color:var(--ok)}
+    .help{margin-top:18px;padding-top:14px;border-top:1px dashed #fde68a;
+          font-size:12px;color:#92400e;line-height:1.5}
+    .help b{color:#7c2d12}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1><span class="icon">🔑</span> License renewal</h1>
+    <p class="sub">Paste the access token your provider gave you.</p>
+
+    <div id="status" class="status">Loading status…</div>
+
+    <label for="token">License token</label>
+    <textarea id="token" placeholder="eyJpbnN0YWxsX2lkIjoi… (paste the full string here)"
+              autocomplete="off" spellcheck="false"></textarea>
+
+    <div class="actions">
+      <button class="btn-apply"     id="applyBtn"      onclick="applyToken()">✓ Apply token</button>
+      <button class="btn-secondary" id="backBtn" type="button" onclick="goToLogin()">← Back to login</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <div class="help">
+      <b>How this works.</b> Each install has a unique ID (shown above).
+      Send that ID to your provider; they reply with a token. Paste it
+      here and click Apply — you'll be back in the app immediately. Tokens
+      can be re-applied if you reset the install or restore a backup.
+    </div>
+  </div>
+
+  <script>
+    var statusEl = document.getElementById('status');
+    var msgEl    = document.getElementById('msg');
+    var applyBtn = document.getElementById('applyBtn');
+    var tokenEl  = document.getElementById('token');
+
+    function fmtDate(iso){
+      if(!iso) return '—';
+      var p = String(iso).slice(0,10).split('-');
+      if(p.length !== 3) return iso;
+      return p[2] + '/' + p[1] + '/' + p[0];
+    }
+    function showMsg(text, kind){
+      msgEl.className = 'msg ' + (kind === 'err' ? 'err' : 'ok');
+      msgEl.textContent = text;
+      msgEl.style.display = 'block';
+    }
+    function hideMsg(){
+      msgEl.style.display = 'none';
+      msgEl.textContent = '';
+    }
+    function renderStatus(s){
+      var klass = 'status';
+      if (s.expired) klass += ' expired';
+      else if (s.days_remaining <= 7) klass += '';
+      else klass += ' ok';
+      statusEl.className = klass;
+      var headline = s.expired
+        ? '⚠ Access expired ' + Math.abs(s.days_remaining) + ' day' +
+            (Math.abs(s.days_remaining) === 1 ? '' : 's') + ' ago'
+        : (s.days_remaining <= 7
+            ? '⏳ Access expires in ' + s.days_remaining + ' day' +
+                (s.days_remaining === 1 ? '' : 's')
+            : '✓ Access is current');
+      statusEl.innerHTML =
+        '<div style="font-weight:700;font-size:14px;margin-bottom:8px">' + headline + '</div>' +
+        '<div class="row"><b>Install ID</b><code class="id" title="Click to select then copy">' +
+          (s.install_id || '—') + '</code></div>' +
+        '<div class="row"><b>Expires on</b><span>' + fmtDate(s.expires_at) + '</span></div>' +
+        '<div class="row"><b>First seen</b><span>' + fmtDate(s.first_seen_at) + '</span></div>' +
+        '<div class="row"><b>Days left</b><span><strong>' + s.days_remaining + '</strong></span></div>';
+    }
+    async function loadStatus(){
+      try {
+        var r = await fetch('/api/license/status', { cache: 'no-store' });
+        var d = await r.json();
+        renderStatus(d);
+      } catch (e) {
+        statusEl.className = 'status expired';
+        statusEl.textContent = 'Could not load status: ' + (e.message || e);
+      }
+    }
+    async function applyToken(){
+      hideMsg();
+      var token = (tokenEl.value || '').trim();
+      if (!token) { showMsg('Paste the token first.', 'err'); tokenEl.focus(); return; }
+      applyBtn.disabled = true;
+      try {
+        var r = await fetch('/api/license/apply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token }),
+        });
+        var d = await r.json();
+        if (!r.ok || !d.ok) {
+          showMsg(d.error || 'Token rejected (HTTP ' + r.status + ').', 'err');
+          return;
+        }
+        showMsg('✓ Token applied. New expiry: ' + fmtDate(d.status.expires_at) +
+                ' (' + d.status.days_remaining + ' day' +
+                (d.status.days_remaining === 1 ? '' : 's') + ' left).', 'ok');
+        renderStatus(d.status);
+        tokenEl.value = '';
+      } catch (e) {
+        showMsg('Network error: ' + (e.message || e), 'err');
+      } finally {
+        applyBtn.disabled = false;
+      }
+    }
+    function goToLogin(){ window.location.href = '/'; }
+
+    loadStatus();
+  </script>
+</body>
+</html>

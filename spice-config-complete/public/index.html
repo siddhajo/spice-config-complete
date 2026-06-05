@@ -2644,7 +2644,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button class="needs-lot-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('price-import-modal')">📥 Price Import</button>
+            <button class="needs-lot-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openPriceImport()">📥 Price Import</button>
           </div>
         </div>
 
@@ -4641,18 +4641,72 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 <!-- ═══ PRICE IMPORT (post-auction) ═══════════════════════ -->
 <div class="modal-bg" id="price-import-modal"><div class="modal">
   <h2>Price Import — Post-Auction Data</h2>
-  <!-- Pre-Trade Export — download a ready-to-fill price sheet for the
-       trade currently open on the Lots tab. STATE/TNO/DATE/LOT/BAG/QTY
-       come pre-filled; PRICE and CODE are left blank for the auction
-       floor. Fill them in, then re-import in Step 2 below. -->
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--spice-cream);border:1px solid var(--spice-line);border-radius:8px;padding:12px 14px;margin-bottom:14px">
-    <div style="flex:1;min-width:200px">
-      <div style="font-weight:700;font-size:13px;color:var(--spice-cardamom-dk)">Step 1 · Pre-Trade Export</div>
-      <div style="font-size:12px;color:var(--spice-text-mute);margin-top:2px">Download a price sheet for the open trade with PRICE &amp; CODE blank — hand it to the auction floor, then re-import below.</div>
+
+  <!-- "Before trade" snapshot reminder. Importing prices rewrites the
+       lots table with the auctioneer's data; the reports listed here are
+       the only record of the pre-trade state once that happens. The
+       Import button stays disabled until the operator ticks the ack box,
+       so the reminder can't be silently skipped. openPriceImport()
+       re-arms this every time the modal opens. Snapshots use the trade
+       picked in the topbar (#global-aid). -->
+  <div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px;padding:12px 14px;margin-bottom:14px">
+    <div style="font-weight:700;color:#7C2D12;font-size:13px;margin-bottom:4px">⚠ Download "before trade" snapshots first</div>
+    <div style="font-size:12px;color:#7C2D12;margin-bottom:8px;line-height:1.45">
+      Once you import prices the lots table is overwritten with the auctioneer's data. These reports are your record of the pre-trade state.
+      <span style="display:block;margin-top:4px">Snapshots use the trade picked in the topbar.</span>
     </div>
-    <button class="btn btn-a" id="pi-pretrade-btn" onclick="doPreTradeExport()" style="white-space:nowrap">📤 Export Pre-Trade Sheet</button>
+    <!-- Per report: label on the left, XLSX + PDF buttons on the right.
+         Praman stays CSV-only since the export pipeline doesn't render it
+         in either spreadsheet form. -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Slip</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_slip','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_slip','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Buyer</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_buyer','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_buyer','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Name</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_name','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
+          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_name','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Praman</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('praman_csv','csv')" title="Download as CSV" style="padding:3px 8px;font-size:11px;font-weight:600">📄 CSV</button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Price List (Before)</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('price_list_before','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
+          <button class="btn btn-o" type="button" onclick="piQuickExport('price_list_before','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
+        <span style="font-size:12px;font-weight:600;color:#7C2D12">Dealer List</span>
+        <span style="display:flex;gap:4px">
+          <button class="btn btn-o" type="button" onclick="piQuickExport('dealer_list','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
+          <button class="btn btn-o" type="button" onclick="piQuickExport('dealer_list','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
+        </span>
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C2D12;margin-top:10px;cursor:pointer;font-weight:600">
+      <input type="checkbox" id="pi-ack" onchange="piAckChanged()">
+      Snapshots saved — proceed with import
+    </label>
   </div>
-  <div style="font-weight:700;font-size:13px;color:var(--spice-cardamom-dk);margin-bottom:4px">Step 2 · Import filled sheet</div>
+
   <p style="font-size:13px;color:var(--spice-text-mute);margin-bottom:10px">Use this after the auction ends to update prices, buyer codes, and quantities on existing lots.</p>
   <div style="font-size:12px;color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);border:1px solid #C5E3D2;border-radius:8px;padding:10px 12px;margin-bottom:14px">
     <strong>Expected columns:</strong> STATE, TNO (or ANO), DATE, LOT, BAG, QTY, PRICE, CODE<br>
@@ -4667,7 +4721,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
   </div>
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('price-import-modal')">Cancel</button>
-    <button class="btn btn-g" id="pi-submit" onclick="doPriceImport()">Import Prices</button>
+    <button class="btn btn-g" id="pi-submit" onclick="doPriceImport()" disabled>Import Prices</button>
   </div>
 </div></div>
 
@@ -10409,34 +10463,39 @@ async function importAuction(){
     if(d.skipped===0)setTimeout(()=>status.style.display='none',5000);
   }catch(err){status.style.background='var(--red-bg)';status.style.color='var(--red)';status.textContent='Error: '+err.message}}
 
-// ── Pre-Trade Export ───────────────────────────────────────
-// Step 1 of the Price Import workflow: download a ready-to-fill price
-// sheet for the trade currently open on the Lots tab (#lot-auction).
-// The server emits the exact columns import reads back (STATE/TNO/DATE/
-// LOT/BAG/QTY/PRICE/CODE) with PRICE + CODE blank, so the floor fills
-// them in and re-imports via doPriceImport() below.
-async function doPreTradeExport(){
-  const sel=document.getElementById('lot-auction');
-  const aid=sel?sel.value:'';
-  if(!aid){alert('Select a '+termAuction(false,true)+' on the Lots tab first');return}
-  const btn=document.getElementById('pi-pretrade-btn');
-  const orig=btn?btn.textContent:'';
-  if(btn){btn.disabled=true;btn.textContent='Exporting…';}
-  try{
-    const r=await fetch(B+`/api/exports/pre_trade/${encodeURIComponent(aid)}?format=xlsx`,{headers:{'Authorization':'Bearer '+T}});
-    if(!r.ok){
-      const e=await r.json().catch(()=>({}));
-      throw new Error(e.error||('HTTP '+r.status));
-    }
-    const blob=await r.blob();
-    // Name the file after the selected trade label for easy recognition.
-    const label=((sel.options[sel.selectedIndex]&&sel.options[sel.selectedIndex].text)||aid).replace(/[^\w.-]+/g,'_');
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`PreTrade_${label}.xlsx`;a.click();
-  }catch(err){
-    alert('Pre-trade export failed: '+err.message);
-  }finally{
-    if(btn){btn.disabled=false;btn.textContent=orig;}
+// ── Price Import "before trade" snapshots ──────────────────
+// Open the Price Import modal with a fresh reminder state — the ack
+// checkbox starts unchecked and the Import button starts disabled every
+// time, so the operator can't muscle-memory through the warning by
+// clicking submit before downloading the pre-trade snapshots.
+function openPriceImport(){
+  const ack=document.getElementById('pi-ack');
+  if(ack) ack.checked=false;
+  const submit=document.getElementById('pi-submit');
+  if(submit) submit.disabled=true;
+  showModal('price-import-modal');
+}
+function piAckChanged(){
+  const ack=document.getElementById('pi-ack');
+  const submit=document.getElementById('pi-submit');
+  if(submit) submit.disabled=!(ack && ack.checked);
+}
+// Quick-download for the "before trade" snapshot reports surfaced inside
+// the Price Import reminder banner. Uses the topbar's shared trade pick
+// (#global-aid) so the operator doesn't have to open the Reports tab
+// first. Each report offers XLSX + PDF (Praman is CSV-only). `format`
+// defaults to PDF, or CSV for Praman.
+async function piQuickExport(type, format){
+  const aid=(document.getElementById('global-aid')?.value
+           || document.getElementById('lot-auction')?.value
+           || '').trim();
+  if(!aid){
+    alert('Pick a '+termAuction(false,true)+' in the topbar first — the snapshots need to know which '+termAuction(false,true)+' to export.');
+    return;
   }
+  let fmt=(format||'').toLowerCase();
+  if(!fmt) fmt=(type==='praman_csv') ? 'csv' : 'pdf';
+  await exportType(type, fmt, aid);
 }
 
 async function doPriceImport(){
@@ -14139,8 +14198,11 @@ function renderExportBtns(){document.getElementById('export-btns').innerHTML=Obj
     </div>
   </div>`;
 }).join('')}
-async function exportType(type,format){format=format||'xlsx';
-  const aid=document.getElementById('exp-auction')?.value||document.getElementById('pay-auction')?.value;
+async function exportType(type,format,aidArg){format=format||'xlsx';
+  // aidArg lets callers (e.g. the Price Import snapshot banner via
+  // piQuickExport) pass an explicit trade id; otherwise fall back to the
+  // Export Center / Payments tab selectors.
+  const aid=aidArg||document.getElementById('exp-auction')?.value||document.getElementById('pay-auction')?.value;
   if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
   const label = (EXP_LABELS[type]||type);
   await withOverlay(`Exporting ${label} (${format.toUpperCase()})…`, async () => {

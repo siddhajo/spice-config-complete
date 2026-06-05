@@ -460,6 +460,22 @@ const COLS = {
     { header: 'AMOUNT', key: 'amount', width: 14 },
     { header: 'CODE', key: 'code', width: 8 },
   ],
+  lot_buyer: [
+    { header: 'LOT',   key: 'lot',   width: 8  },
+    { header: 'BUYER', key: 'buyer', width: 24 },
+    { header: 'BR',    key: 'br',    width: 6  },
+    { header: 'BAG',   key: 'bag',   width: 6  },
+    { header: 'QTY',   key: 'qty',   width: 12 },
+  ],
+  lot_name: [
+    { header: 'LOT',     key: 'lot',     width: 8  },
+    { header: 'NAME',    key: 'name',    width: 30 },
+    { header: 'BR',      key: 'br',      width: 6  },
+    { header: 'BAG',     key: 'bag',     width: 6  },
+    { header: 'QTY',     key: 'qty',     width: 12 },
+    { header: 'PRICE',   key: 'price',   width: 10 },
+    { header: 'CONTROL', key: 'control', width: 12 },
+  ],
   price_list: [
     { header: 'LOT', key: 'lot', width: 8 },
     { header: 'BAG', key: 'bag', width: 6 },
@@ -467,6 +483,15 @@ const COLS = {
     { header: 'PRICE', key: 'price', width: 10 },
     { header: 'CODE', key: 'code', width: 8 },
     { header: 'BIDDER', key: 'bidder', width: 20 },
+  ],
+  price_list_before: [
+    { header: 'TNO',   key: 'trade_no', width: 10 },
+    { header: 'DATE',  key: 'date',     width: 12 },
+    { header: 'LOT',   key: 'lot',      width: 10 },
+    { header: 'BAG',   key: 'bag',      width: 8  },
+    { header: 'QTY',   key: 'qty',      width: 14 },
+    { header: 'PRICE', key: 'price',    width: 10 },
+    { header: 'CODE',  key: 'code',     width: 10 },
   ],
   bank_payment: [
     // PDF-only display columns — restructured for portrait so all data fits
@@ -584,7 +609,10 @@ const COLS = {
 const TOTAL_KEYS = {
   lot_slip:        ['bag', 'qty'],
   lot_slip_after:  ['bag', 'qty', 'amount'],
+  lot_buyer:       ['bag', 'qty'],
+  lot_name:        ['bag', 'qty'],
   price_list:      ['bag', 'qty'],
+  price_list_before: ['bag', 'qty'],
   bank_payment:    ['amount'],
   pooler_register: ['qty', 'amount', 'pqty', 'puramt'],
   full_file:       ['bags', 'qty', 'amount', 'pqty', 'puramt', 'cgst', 'sgst', 'igst', 'advance', 'balance'],
@@ -599,7 +627,10 @@ const TOTAL_KEYS = {
 const TITLES = {
   lot_slip:        'Lot Slip',
   lot_slip_after:  'Lot Slip (After Trade)',
+  lot_buyer:       'Lot Buyer',
+  lot_name:        'Lot Name',
   price_list:      'Price List',
+  price_list_before: 'Price List (Before)',
   bank_payment:    'Bank Payment (RTGS/NEFT)',
   pooler_register: 'Pooler Register',
   full_file:       'Full File',
@@ -667,10 +698,46 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
          FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''}
          ORDER BY lot_no`, extra.state ? [auctionId, extra.state] : [auctionId]);
 
+    case 'lot_buyer':
+      return db.all(
+        `SELECT lot_no as lot, COALESCE(buyer,'') as buyer,
+                CASE UPPER(COALESCE(state,''))
+                  WHEN 'KERALA' THEN 'KL'
+                  WHEN 'TAMIL NADU' THEN 'TN'
+                  ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
+                END AS br,
+                bags as bag, qty
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+
+    case 'lot_name':
+      return db.all(
+        `SELECT lot_no as lot, COALESCE(name,'') as name,
+                CASE UPPER(COALESCE(state,''))
+                  WHEN 'KERALA' THEN 'KL'
+                  WHEN 'TAMIL NADU' THEN 'TN'
+                  ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
+                END AS br,
+                bags as bag, qty, price, '' as control
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+
     case 'price_list':
       return db.all(
         `SELECT lot_no as lot, bags as bag, qty, price, code, buyer as bidder
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+
+    case 'price_list_before': {
+      const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+      const tradeNo = a.ano || '';
+      const tradeDate = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
+      // PRICE blanked when 0 so the column reads empty instead of "0.00",
+      // matching CODE's blank-when-unset behaviour.
+      return db.all(
+        `SELECT lot_no as lot, bags as bag, qty,
+                CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
+                COALESCE(code,'') AS code
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+      ).map(r => ({ trade_no: tradeNo, date: tradeDate, ...r }));
+    }
 
     case 'bank_payment': {
       const { getBankPaymentData } = require('./calculations');

@@ -135,45 +135,89 @@ async function exportLotSlipAfter(db, auctionId, state) {
   });
 }
 
-// ── Pre-Trade Export: blank-priced sheet for the auction floor ──
-// The complement to the "Price Import" modal. Emits exactly the columns
-// that import reads back (STATE, TNO, DATE, LOT, BAG, QTY, PRICE, CODE)
-// so the sheet round-trips: export before the auction, fill in PRICE +
-// CODE on the floor, then re-import via "Price Import". STATE/TNO/DATE/
-// LOT/BAG/QTY come pre-filled; PRICE and CODE are blank when the lot is
-// still unpriced (price 0 / no code) so the floor sees empty cells to
-// fill. NAME is included for readability and is ignored on import.
-async function exportPreTrade(db, auctionId) {
-  const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+// ── "Before trade" snapshot exports ───────────────────────────
+// Surfaced from the Price Import modal: importing prices overwrites the
+// lots table with the auctioneer's data, so these reports are the
+// operator's record of the pre-trade state. Ported from the eTrade
+// build. State → BR is folded inline (KERALA→KL, TAMIL NADU→TN, else
+// first two letters) so each function stays self-contained.
+
+// Lot ↔ Buyer crosswalk: which buyer bought each lot, with branch code.
+async function exportLotBuyer(db, auctionId) {
   const rows = db.all(
-    `SELECT state, lot_no as lot, name, bags as bag, qty, price, code
-       FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
-  ).map(r => ({
-    state: r.state || '',
-    tno:   auc.ano  || '',
-    date:  auc.date || '',
-    lot:   r.lot,
-    name:  r.name || '',
-    bag:   r.bag,
-    qty:   r.qty,
-    // Blank (not 0) when unpriced so the floor gets an empty cell to fill;
-    // a re-export of an already-priced lot still carries its value through.
-    price: r.price || '',
-    code:  r.code  || '',
-  }));
+    `SELECT lot_no AS lot, COALESCE(buyer,'') AS buyer,
+            CASE UPPER(COALESCE(state,''))
+              WHEN 'KERALA' THEN 'KL'
+              WHEN 'TAMIL NADU' THEN 'TN'
+              ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
+            END AS br,
+            bags AS bag, qty
+     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+  );
   const cols = [
-    { header: 'STATE', key: 'state', width: 12 },
-    { header: 'TNO',   key: 'tno',   width: 8 },
-    { header: 'DATE',  key: 'date',  width: 12 },
-    { header: 'LOT',   key: 'lot',   width: 8 },
-    { header: 'NAME',  key: 'name',  width: 30 },
-    { header: 'BAG',   key: 'bag',   width: 6 },
+    { header: 'LOT',   key: 'lot',   width: 8  },
+    { header: 'BUYER', key: 'buyer', width: 24 },
+    { header: 'BR',    key: 'br',    width: 6  },
+    { header: 'BAG',   key: 'bag',   width: 6  },
     { header: 'QTY',   key: 'qty',   width: 12 },
-    { header: 'PRICE', key: 'price', width: 10 },
-    { header: 'CODE',  key: 'code',  width: 8 },
   ];
-  return createExcelBuffer('PreTrade', cols, rows, {
-    db, title: 'Pre-Trade Price Sheet', metaLines: auctionMeta(db, auctionId),
+  return createExcelBuffer('LotBuyer', cols, rows, {
+    db, title: 'Lot Buyer', metaLines: auctionMeta(db, auctionId),
+  });
+}
+
+// Lot ↔ Seller name crosswalk, with a blank CONTROL column for hand notes.
+async function exportLotName(db, auctionId) {
+  const rows = db.all(
+    `SELECT lot_no AS lot, COALESCE(name,'') AS name,
+            CASE UPPER(COALESCE(state,''))
+              WHEN 'KERALA' THEN 'KL'
+              WHEN 'TAMIL NADU' THEN 'TN'
+              ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
+            END AS br,
+            bags AS bag, qty, price, '' AS control
+     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+  );
+  const cols = [
+    { header: 'LOT',     key: 'lot',     width: 8  },
+    { header: 'NAME',    key: 'name',    width: 30 },
+    { header: 'BR',      key: 'br',      width: 6  },
+    { header: 'BAG',     key: 'bag',     width: 6  },
+    { header: 'QTY',     key: 'qty',     width: 12 },
+    { header: 'PRICE',   key: 'price',   width: 10 },
+    { header: 'CONTROL', key: 'control', width: 12 },
+  ];
+  return createExcelBuffer('LotName', cols, rows, {
+    db, title: 'Lot Name', metaLines: auctionMeta(db, auctionId),
+  });
+}
+
+// Price List (Before): same shape as Price List minus the trade-result
+// columns — typically printed empty so buyers can hand-fill PRICE / CODE
+// during the auction. PRICE is blanked when 0 (lot not yet priced) so the
+// column reads empty rather than "0.00".
+async function exportPriceListBefore(db, auctionId) {
+  const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+  const tradeNo = a.ano || '';
+  const tradeDate = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
+  const rawRows = db.all(
+    `SELECT lot_no as lot, bags as bag, qty,
+            CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
+            COALESCE(code,'') AS code
+     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+  );
+  const rows = rawRows.map(r => ({ trade_no: tradeNo, date: tradeDate, ...r }));
+  const cols = [
+    { header: 'TNO',   key: 'trade_no', width: 10 },
+    { header: 'DATE',  key: 'date',     width: 12 },
+    { header: 'LOT',   key: 'lot',      width: 10 },
+    { header: 'BAG',   key: 'bag',      width: 8  },
+    { header: 'QTY',   key: 'qty',      width: 14 },
+    { header: 'PRICE', key: 'price',    width: 10 },
+    { header: 'CODE',  key: 'code',     width: 10 },
+  ];
+  return createExcelBuffer('PriceListBefore', cols, rows, {
+    db, title: 'Price List (Before)', metaLines: auctionMeta(db, auctionId),
   });
 }
 
@@ -579,9 +623,12 @@ async function exportTradeReport(db, auctionId) {
 const EXPORT_TYPES = {
   lot_slip:       { fn: exportLotSlip,       name: 'LotSlip' },
   lot_slip_after: { fn: exportLotSlipAfter,  name: 'LotSlipAfter' },
-  // Served only from the Price Import modal (not listed in the Export
-  // Center, which is driven by the frontend EXP_LABELS map).
-  pre_trade:      { fn: exportPreTrade,      name: 'PreTradePriceSheet' },
+  // "Before trade" snapshots surfaced from the Price Import modal (not
+  // listed in the Export Center, which is driven by the frontend
+  // EXP_LABELS map).
+  lot_buyer:         { fn: exportLotBuyer,        name: 'LotBuyer' },
+  lot_name:          { fn: exportLotName,         name: 'LotName' },
+  price_list_before: { fn: exportPriceListBefore, name: 'PriceListBefore' },
   praman_csv:     { fn: exportPramanCSV,     name: 'eTrade_Praman', ext: 'csv', mime: 'text/csv', needsCfg: true },
   price_list:     { fn: exportPriceList,     name: 'PriceList' },
   bank_payment:   { fn: exportBankPayment,   name: 'BankPayment', needsCfg: true },
@@ -597,7 +644,8 @@ const EXPORT_TYPES = {
 
 module.exports = {
   EXPORT_TYPES,
-  exportLotSlip, exportLotSlipAfter, exportPreTrade, exportPramanCSV, exportPriceList, exportBankPayment,
+  exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportPriceListBefore,
+  exportPramanCSV, exportPriceList, exportBankPayment,
   exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList,
   exportSalesTaxes, exportPaymentSummary, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
