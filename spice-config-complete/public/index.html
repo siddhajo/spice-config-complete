@@ -780,6 +780,33 @@ tr:hover td{background:var(--spice-cream)}
 #lot-kpis .kpi-value{font-size:22px}
 #lot-kpis .kpi-icon{width:28px;height:28px;right:10px;top:10px;border-radius:8px}
 #lot-kpis .kpi-icon svg{width:14px;height:14px}
+
+/* Dashboard "Headline metrics" tiles — same .kpi shell as the top KPI
+   row so colors, borders, and hover affordances match. Seven tiles
+   (Trades / Lots / Sold / Withdrawn / Value / Payable / Outstanding);
+   Lots/Sold/Withdrawn carry a bags/qty/amount breakdown and Value carries
+   min/max/avg price (see .kpi-meta below). The emoji icon sits in the
+   .kpi-icon corner; we override font-size since emojis read tiny at SVG
+   size. */
+#dash-headline-grid .kpi{padding:14px 16px;border-radius:12px}
+/* margin-bottom pushes the value's line down past the icon so the value
+   can use the FULL tile width on its own line without running underneath
+   the corner icon. */
+#dash-headline-grid .kpi-label{font-size:10.5px;letter-spacing:.6px;margin-bottom:18px;padding-right:36px}
+/* Values stay on ONE line with decimals intact; fitDashHeadlineValues()
+   shrinks the whole strip's font uniformly just enough that the longest
+   value fits its tile. overflow:hidden is a last-resort guard. */
+#dash-headline-grid .kpi-value{font-size:20px;white-space:nowrap;overflow:hidden}
+#dash-headline-grid .kpi-icon{width:32px;height:32px;right:12px;top:12px;border-radius:9px;font-size:17px;line-height:1}
+/* Breakdown table under the headline number (bags / qty / amount, or
+   min / max / avg in the Value tile). Mirrors #lot-kpis .kpi-meta. */
+#dash-headline-grid .kpi-meta{
+  margin-top:10px;padding-top:8px;border-top:1px solid var(--spice-line);
+  display:grid;grid-template-columns:auto 1fr;gap:3px 10px;
+  font-size:11px;line-height:1.4
+}
+#dash-headline-grid .kpi-meta .lbl{color:var(--spice-text-mute);font-weight:500;letter-spacing:.1px}
+#dash-headline-grid .kpi-meta .val{text-align:right;font-weight:600;color:var(--spice-text-main);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 #lot-kpis .kpi-meta{
   /* Mini-table layout — label on the left (muted, small), value on
      the right (tabular numerals). Thin divider above separates the
