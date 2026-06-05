@@ -217,6 +217,23 @@ async function initDb() {
   process.on('SIGTERM', onExit);
   process.on('beforeExit', onExit);
 
+  // ── LICENSE STATE ──────────────────────────────────────────
+  // Single-row table (CHECK id = 1) holding the per-install license
+  // state. On first boot, ./license.js inserts a row with a fresh
+  // install_id and a 30-day trial expiry. The dev's signed tokens
+  // bump expires_at when applied via /api/license/apply.
+  //
+  // active_token stores the most recently applied token verbatim so
+  // an operator can copy it back out if they need to re-apply on a
+  // restored backup, and so the dev can audit who has what.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS license_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    install_id TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    active_token TEXT
+  )`);
+
   // ── SESSIONS ───────────────────────────────────────────────
   // expires_at caps the lifetime of a leaked Authorization header even
   // if the holder keeps it warm via the sliding last_used_at sweep.

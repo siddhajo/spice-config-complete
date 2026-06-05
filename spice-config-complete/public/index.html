@@ -2017,6 +2017,10 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         </select>
       </div>
       <span id="sync-indicator" class="sync-pill sync-ok" title="Last successful sync"></span>
+      <!-- Licence countdown pill — hidden by default; shown by
+           _refreshLicenseBadge when ≤ 7 days remain (or already expired).
+           Clicking opens /renew.html. -->
+      <a id="license-badge" href="/renew.html" title="License renewal" style="display:none;font-size:11.5px;font-weight:700;letter-spacing:.2px;padding:4px 10px;border-radius:14px;text-decoration:none;border:1.5px solid transparent"></a>
       <span id="logo-badge" style="font-size:11px;font-weight:700;color:var(--green);background:var(--green-bg);padding:4px 10px;border-radius:12px;border:1px solid var(--green-border);display:none" title="Active company for invoices & calculations"></span>
       <!-- Single user pill: shows the username and gets role-themed
            colours applied by applyPermissionAttributes(). The previous
@@ -5567,11 +5571,25 @@ async function login(){
   // Subsequent refreshes happen via loadAuctions (create/delete trade) and
   // on every tab open via fillAucSelect, but this is the first paint.
   if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
+  // Refresh the topbar licence countdown badge once we're past the
+  // login screen (the badge is hidden until the user authenticates).
+  try { _refreshLicenseBadge(); } catch(_) {}
   // lot_entry users land directly on the Lot Entry tab — every other
   // sidebar item is hidden by role-scoped CSS, so dashboard would
   // give them an empty room.
   go(window._userRole === 'lot_entry' ? 'lotentry' : 'dash');}
   catch(x){
+    // The server returns 451 (RFC 7725 — Unavailable For Legal Reasons,
+    // the closest standard code for "this thing is gated") when the
+    // licence window has lapsed. Redirect to the standalone renewal
+    // page with the install_id pre-filled so the operator can paste a
+    // new token from the dev without having to copy the ID by hand.
+    if (x && x.status === 451 && x.body && x.body.error === 'license_expired') {
+      const iid = encodeURIComponent(x.body.install_id || '');
+      const exp = encodeURIComponent(x.body.expires_at || '');
+      window.location.href = '/renew.html?install_id=' + iid + '&expired=' + exp;
+      return;
+    }
     // 401 from /api/login = invalid credentials (server returns 401 for
     // bad creds AND for stale-session on other routes). On the login
     // form specifically, the only 401 path here is bad creds.
@@ -5603,6 +5621,50 @@ function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem(
   // last-active trade.
   const gw = document.getElementById('global-aid-wrap'); if (gw) gw.style.display = 'none';
   document.getElementById('app').style.display='none';document.getElementById('login').style.display='flex'}
+
+// Topbar licence countdown pill. Hidden when the licence is healthy
+// (> 7 days left); turns amber at ≤ 7 days, red at ≤ 3 days, and a
+// hard "expired — renew" once the window has lapsed. Clicking it opens
+// the standalone /renew.html page. Auth-free probe, so it works even
+// when the rest of the app is gated.
+async function _refreshLicenseBadge(){
+  const badge = document.getElementById('license-badge');
+  if (!badge) return;
+  try {
+    const r = await fetch('/api/license/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const s = await r.json();
+    const days = Number(s.days_remaining);
+    if (s.expired) {
+      badge.style.display = 'inline-block';
+      badge.style.background = '#fef2f2';
+      badge.style.color = '#991b1b';
+      badge.style.borderColor = '#fecaca';
+      badge.textContent = `⚠ License expired — renew`;
+    } else if (days <= 3) {
+      badge.style.display = 'inline-block';
+      badge.style.background = '#fef2f2';
+      badge.style.color = '#991b1b';
+      badge.style.borderColor = '#fecaca';
+      badge.textContent = `⚠ ${days} day${days === 1 ? '' : 's'} left`;
+    } else if (days <= 7) {
+      badge.style.display = 'inline-block';
+      badge.style.background = '#fffbeb';
+      badge.style.color = '#92400e';
+      badge.style.borderColor = '#fde68a';
+      badge.textContent = `⏳ ${days} days left`;
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch (_) {
+    // Status probe failed (network blip / boot race) — leave badge as-is.
+  }
+}
+// Poll every 30 minutes. Cheap (one tiny GET) and survives the day
+// rollover so a session that started yesterday at "8 days left" sees
+// "7 days left" today without a manual refresh.
+setInterval(_refreshLicenseBadge, 30 * 60 * 1000);
+
 // Update the in-app topbar with the company short_name + logo image
 // from /api/brand. Auth-free endpoint so this also works pre-login.
 // Idempotent — safe to call from anywhere that changes the active

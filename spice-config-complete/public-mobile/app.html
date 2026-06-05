@@ -468,7 +468,11 @@ select:focus{border-color:var(--green)}
       </div>
     </div>
     <div class="lb">GRADE</div><input type="text" id="ed-grade">
-    <div class="fr" style="margin-top:12px"><div><div class="lb">BAGS</div><input type="text" id="ed-bags" inputmode="numeric" oninput="sanitizeInt(this)"></div><div><div class="lb">LITRE</div><input type="text" id="ed-litre" inputmode="numeric" oninput="sanitizeInt(this)"></div></div>
+    <div class="fr" style="margin-top:12px"><div><div class="lb">BAGS</div><input type="text" id="ed-bags" inputmode="numeric" oninput="sanitizeInt(this);onEditBagsInput()"></div><div><div class="lb">LITRE</div><input type="text" id="ed-litre" inputmode="numeric" oninput="sanitizeInt(this)"></div></div>
+    <!-- Weight w/ Gunny + total Gunny Wt — shown only when the
+         "Show Extra Lot Fields" setting is on. Quantity below derives as
+         W/Gunny − (default gunny weight × bags); Gunny Wt is read-only. -->
+    <div id="ed-gunny-wrap" class="fr" style="display:none;margin-top:8px"><div><div class="lb">W/ GUNNY</div><input type="text" id="ed-wwg" inputmode="decimal" placeholder="0.000" oninput="sanitizeDec(this);calcEditNetFromGunny()"></div><div><div class="lb">GUNNY WT</div><input type="text" id="ed-gunny-wt" readonly style="background:var(--bg);color:var(--text3);font-weight:600" title="Total gunny weight = default gunny weight × bags"></div></div>
     <div class="lb">QUANTITY (KG)</div><input type="text" id="ed-qty" inputmode="decimal" class="qi" oninput="sanitizeDec(this);calcEditGross()">
     <div class="fr" style="margin-top:8px"><div><div class="lb">SAMPLE WT</div><input type="text" id="ed-sample" inputmode="decimal" oninput="sanitizeDec(this);calcEditGross()" readonly style="background:var(--bg);color:var(--text3)"></div><div><div class="lb">GROSS WT</div><input type="text" id="ed-gross" readonly style="background:var(--bg);color:var(--green);font-weight:700"></div></div>
     <!-- e-Auction extras (mirror of entry form). Visibility synced
@@ -574,8 +578,9 @@ function applyEAuctionVisibility(){
   if(e1) e1.style.display=showCrop?'block':'none';
   if(e2) e2.style.display=showRsrv?'block':'none';
   if(erow) erow.style.display=(showCrop||showRsrv)?'block':'none';
-  // Gunny pair + Net-Wt read-only state (entry form only — the edit
-  // modal keeps Net Wt operator-typed for corrections).
+  // Gunny pair + Net-Wt read-only state — driven by cfgShowExtraFields
+  // on BOTH the entry form and the edit modal so a partial edit can
+  // recompute the gross-of-gunny value the same way as a fresh entry.
   var gwrap=document.getElementById('le-gunny-wrap');
   if(gwrap) gwrap.style.display=cfgShowExtraFields?'grid':'none';
   var qtyEl=document.getElementById('le-qty');
@@ -591,7 +596,42 @@ function applyEAuctionVisibility(){
       qtyEl.readOnly=false;qtyEl.style.background='';
     }
   }
+  // Edit modal mirror — the .fr wrapper reverts to its flex layout when
+  // display is cleared ('' not 'grid').
+  var egwrap=document.getElementById('ed-gunny-wrap');
+  if(egwrap) egwrap.style.display=cfgShowExtraFields?'':'none';
+  var edQtyEl=document.getElementById('ed-qty');
+  if(edQtyEl){
+    if(cfgShowExtraFields){
+      var eb=parseInt(document.getElementById('ed-bags').value,10)||0;
+      var egwEl=document.getElementById('ed-gunny-wt');
+      if(egwEl){var et=(Number(cfgGunnyWeight)||0)*eb;egwEl.value=et>0?et.toFixed(3):'0.000';}
+      edQtyEl.readOnly=true;edQtyEl.style.background='var(--bg)';
+    }else{
+      edQtyEl.readOnly=false;edQtyEl.style.background='';
+    }
+  }
 }
+
+// Edit-modal twins of leSeedGunnyWt / calcNetFromGunny. Same derive-only
+// rule: Net = W/Gunny − (gunny × bags), guarded on wwg>0 so a blank
+// W/Gunny never wipes the stored Net loaded into the modal.
+function edSeedGunnyWt(){
+  var bags=parseInt(document.getElementById('ed-bags').value,10)||0;
+  var tare=(Number(cfgGunnyWeight)||0)*bags;
+  var gw=document.getElementById('ed-gunny-wt');
+  if(gw) gw.value=tare>0?tare.toFixed(3):'0.000';
+  return tare;
+}
+function calcEditNetFromGunny(){
+  var wwg=parseFloat(document.getElementById('ed-wwg').value)||0;
+  var tare=edSeedGunnyWt();
+  if(wwg>0){
+    document.getElementById('ed-qty').value=Math.max(0,wwg-tare).toFixed(3);
+    calcEditGross();
+  }
+}
+function onEditBagsInput(){ if(cfgShowExtraFields) calcEditNetFromGunny(); }
 
 // Auto-derive Net = Weight-w/-Gunny − (default gunny weight × bags).
 // Re-runs whenever W/Gunny changes and whenever Bags changes (via
@@ -1256,7 +1296,7 @@ function printLot(id){printAndClose(B+'/api/lots/'+id+'/receipt?branch='+encodeU
 
 var editBanks=[],editTraderId=null;
 var editLotBankId=null;
-function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';/* Reset e-Auction extras + refresh visibility (flag may have flipped since last open) */ var _ed_crpt=document.getElementById('ed-crpt');if(_ed_crpt)_ed_crpt.value='';var _ed_rp=document.getElementById('ed-reserved-price');if(_ed_rp)_ed_rp.value='';applyEAuctionVisibility();document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';/* Populate crpt + reserved_price from the loaded lot. Number coerce w/ blank-as-zero so a 0/null reserved_price renders empty (no stuck "0" placeholder). */if(_ed_crpt)_ed_crpt.value=d.lot.crpt||'';if(_ed_rp){var rp=Number(d.lot.reserved_price);_ed_rp.value=(Number.isFinite(rp)&&rp!==0)?rp:''}calcEditGross()}}).catch(()=>{calcEditGross()})}
+function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';/* Reset e-Auction extras + refresh visibility (flag may have flipped since last open) */ var _ed_crpt=document.getElementById('ed-crpt');if(_ed_crpt)_ed_crpt.value='';var _ed_rp=document.getElementById('ed-reserved-price');if(_ed_rp)_ed_rp.value='';/* W/Gunny isn't stored (Net is derive-only) — clear any stale value; applyEAuctionVisibility reseeds the read-only Gunny Wt from this lot's bags */var _ed_wwg=document.getElementById('ed-wwg');if(_ed_wwg)_ed_wwg.value='';applyEAuctionVisibility();document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';/* Populate crpt + reserved_price from the loaded lot. Number coerce w/ blank-as-zero so a 0/null reserved_price renders empty (no stuck "0" placeholder). */if(_ed_crpt)_ed_crpt.value=d.lot.crpt||'';if(_ed_rp){var rp=Number(d.lot.reserved_price);_ed_rp.value=(Number.isFinite(rp)&&rp!==0)?rp:''}calcEditGross()}}).catch(()=>{calcEditGross()})}
 function closeEdit(){document.getElementById('edit-modal').classList.remove('show');editId=null;editTraderId=null}
 function editSellerMode(){document.getElementById('ed-seller-card').style.display='none';document.getElementById('ed-seller-search').style.display='block';document.getElementById('ed-seller-input').value='';document.getElementById('ed-seller-input').focus()}
 let edStm;

@@ -16,6 +16,10 @@ const { DBF_EXPORTS } = require('./dbf-exports');
 const { REPORTS: LORRY_REPORTS } = require('./lorry-reports');
 const { REPORTS: SPICE_BOARD_REPORTS, getReportFilters: getSpiceBoardFilters } = require('./spice-board-reports');
 const { getTradeSummary, getBranchComparison, generateTradeSummaryPDF } = require('./reports');
+// Per-install time-bombed licensing — see license.js for the model.
+// Token signing/verification + the license_state row helpers live there;
+// db.js owns the schema migration.
+const license = require('./license');
 const {
   generSalesXML, generSalesIspXML, generSalesAspXML, generIspPurchaseXML,
   generRDPurchaseXML, generURDPurchaseXML, generDebitNoteXML, generLedgerXML,
@@ -354,6 +358,21 @@ const requireExport        = requirePermission('export');
 // AUTH
 // ══════════════════════════════════════════════════════════════
 app.post('/api/login', async (req, res) => {
+  // Hard licence gate before the credential check — when the install
+  // is expired we don't even pretend to authenticate. The frontend
+  // login script catches the 451 and redirects to /renew.html with
+  // the install ID pre-filled.
+  try {
+    const lstatus = license.getStatus(getDb());
+    if (lstatus.expired) {
+      return res.status(451).json({
+        error: 'license_expired',
+        message: `Your access window ended on ${lstatus.expires_at}. Send the install ID below to your provider to receive a renewal token.`,
+        install_id: lstatus.install_id,
+        expires_at: lstatus.expires_at,
+      });
+    }
+  } catch (_) { /* license check failed → let login through; fail-open is friendlier than a brick */ }
   const { username, password, device_label } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
   const db = getDb();
@@ -387,6 +406,109 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/me', requireView, (req, res) => {
   const permissions = Array.from(ROLE_PERMISSIONS[req.user.role] || ROLE_PERMISSIONS.viewer);
   res.json({ username: req.user.username, role: req.user.role, permissions });
+});
+
+// ══════════════════════════════════════════════════════════════
+// LICENSING — install ID, expiry probe, token apply
+// ══════════════════════════════════════════════════════════════
+//
+// Both endpoints are deliberately auth-free: the renewal page lives
+// outside the normal authenticated flow (the operator is locked out
+// of /api/login while expired, so they need a way to apply a new
+// token from a logged-out state). status is also used by the topbar
+// countdown pill on the main UI.
+app.get('/api/license/status', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const status = license.getStatus(getDb());
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post('/api/license/apply', (req, res) => {
+  const token = (req.body && (req.body.token || req.body.license_token) || '').trim();
+  if (!token) return res.status(400).json({ error: 'token required' });
+  const result = license.applyToken(getDb(), token);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+// ─────────────────────────────────────────────────────────────
+// Admin endpoint — back-channel for ops without shell access.
+//
+// Authenticated by the same LICENSE_SECRET used to sign tokens
+// (only the developer knows it). When LICENSE_SECRET is unset on
+// the server, this endpoint refuses ALL requests so the fallback
+// development secret in license.js can never double as a remote
+// admin backdoor on a misconfigured production deploy.
+//
+// Usage from anywhere (no shell required):
+//
+//   curl -X POST https://<app>/api/license/admin/set-expiry \
+//     -H "content-type: application/json" \
+//     -H "X-License-Secret: $LICENSE_SECRET" \
+//     -d '{"expires_at":"2020-01-01"}'      # force expired (test)
+//
+//   curl -X POST https://<app>/api/license/admin/set-expiry \
+//     -H "content-type: application/json" \
+//     -H "X-License-Secret: $LICENSE_SECRET" \
+//     -d '{"expires_at":"2026-07-02"}'      # restore
+//
+// Sets the row's active_token to NULL so the audit trail doesn't
+// falsely attribute the new expiry to a previously-applied token.
+// For token-driven history use POST /api/license/apply.
+// ─────────────────────────────────────────────────────────────
+function _requireLicenseAdmin(req) {
+  const envSecret = String(process.env.LICENSE_SECRET || '').trim();
+  if (!envSecret) {
+    return { status: 403, error: 'admin disabled: LICENSE_SECRET env var is not set on this server' };
+  }
+  const provided = String(req.headers['x-license-secret'] || '').trim();
+  if (!provided) {
+    return { status: 403, error: 'X-License-Secret header required' };
+  }
+  // Constant-time compare on equal-length buffers. Bail before the
+  // compare when lengths differ so we don't leak the secret length
+  // (and so timingSafeEqual doesn't throw on a length mismatch).
+  const a = Buffer.from(envSecret, 'utf8');
+  const b = Buffer.from(provided, 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return { status: 403, error: 'invalid X-License-Secret' };
+  }
+  return null;
+}
+
+app.post('/api/license/admin/set-expiry', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const denied = _requireLicenseAdmin(req);
+  if (denied) return res.status(denied.status).json({ error: denied.error });
+
+  const body = req.body || {};
+  const expires_at = String(body.expires_at || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expires_at)) {
+    return res.status(400).json({ error: 'expires_at must be YYYY-MM-DD (e.g. 2026-07-31)' });
+  }
+  // Sanity bound — anything outside 2020-2099 is almost certainly a typo.
+  // Tokens already issued past 2099 would also be unusable.
+  const yr = Number(expires_at.slice(0, 4));
+  if (yr < 2020 || yr > 2099) {
+    return res.status(400).json({ error: 'expires_at year out of range (2020-2099)' });
+  }
+
+  try {
+    const db = getDb();
+    // Make sure the row exists — on a fresh install this endpoint may
+    // be hit before any normal traffic has triggered the bootstrap.
+    license.ensureState(db);
+    db.run(
+      'UPDATE license_state SET expires_at = ?, active_token = NULL WHERE id = 1',
+      [expires_at]
+    );
+    res.json({ ok: true, status: license.getStatus(db) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -7845,6 +7967,18 @@ const PORT = process.env.PORT || 3001;
   const db = await initDb();
   initCompanySettings(db);
   repairBadDates(db);
+  // Bootstrap the per-install license row on first boot. This generates
+  // the install_id, starts the trial window, and logs the current
+  // status so the operator can spot expiry-soon at deploy time.
+  try {
+    const lstatus = license.getStatus(db);
+    const tag = lstatus.expired
+      ? `EXPIRED (was ${lstatus.expires_at})`
+      : `${lstatus.days_remaining} day${lstatus.days_remaining === 1 ? '' : 's'} remaining (expires ${lstatus.expires_at})`;
+    console.log(`  License: install ${lstatus.install_id} — ${tag}`);
+  } catch (e) {
+    console.warn('  License bootstrap failed:', e.message);
+  }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n  Spice Config running at http://localhost:${PORT}\n`);
   });
