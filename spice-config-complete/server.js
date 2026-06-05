@@ -7559,6 +7559,11 @@ app.post('/api/import-old-data/preview', requireAdmin, upload.single('file'), (r
       fields:  def.fields,
       keyCols: def.keyCols,
       autoFillAuctionId: !!def.autoFillAuctionId,
+      // Fields the server fills from a default when the source omits them
+      // (e.g. `state` ← current business state). The UI renders these as
+      // auto-filled rather than "missing", and excludes them from the
+      // "rows missing required values" tally.
+      autoDefaults: (() => { try { return def.defaults ? (def.defaults(getDb()) || {}) : {}; } catch (_) { return {}; } })(),
       detectedMapping: mapping,
       // Flag key columns the user still needs to map — but EXCLUDE any
       // that a module default fills (e.g. `state` ← current business
@@ -7782,6 +7787,7 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
       fields: def.fields,
       keyCols: def.keyCols,
       autoFillAuctionId: !!def.autoFillAuctionId,
+      autoDefaults: (() => { try { return def.defaults ? (def.defaults(getDb()) || {}) : {}; } catch (_) { return {}; } })(),
       sampleLimit: PER_BUCKET_LIMIT,
       targetTable: def.table,
       targetRowCount,

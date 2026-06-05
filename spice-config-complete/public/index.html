@@ -18990,6 +18990,9 @@ let _impLastFields  = [];
 let _impLastKeyCols = [];
 let _impLastRows    = [];
 let _impLastAutoFillAuctionId = false;
+// Fields the server fills from a default when the source omits them
+// (e.g. `state` ← current business state). Keyed field→value.
+let _impLastAutoDefaults = {};
 let _impLastVerify = null;
 
 // Reset the Import Old Data screen back to its first-load state.
@@ -19002,6 +19005,7 @@ function impClear(){
   _impLastKeyCols = [];
   _impLastRows    = [];
   _impLastAutoFillAuctionId = false;
+  _impLastAutoDefaults = {};
   _impLastVerify = null;
   const result  = document.getElementById('imp-result');
   const preview = document.getElementById('imp-preview');
@@ -19049,6 +19053,7 @@ async function impPreview(){
     _impLastFields  = Array.isArray(data.fields) ? data.fields : [];
     _impLastKeyCols = Array.isArray(data.keyCols) ? data.keyCols : [];
     _impLastAutoFillAuctionId = !!data.autoFillAuctionId;
+    _impLastAutoDefaults = (data.autoDefaults && typeof data.autoDefaults === 'object') ? data.autoDefaults : {};
     const missing  = data.missingFields || [];
     const allFields = _impLastFields.length
       ? _impLastFields
@@ -19130,12 +19135,19 @@ function _impRenderProjected(){
     html += '<tr style="background:'+(rowIdx % 2 ? '#fafafa' : '#fff')+'">';
     _impLastFields.forEach(f => {
       const src = _impLastMapping[f];
+      const srcRaw = src ? row[src] : '';
+      const srcBlank = (srcRaw == null || String(srcRaw).trim() === '');
       let val, cellStyle = '';
       if (f === 'auction_id' && _impLastAutoFillAuctionId) {
         const anoSrc = _impLastMapping['ano'];
         const ano = anoSrc ? row[anoSrc] : '';
         val = ano ? '↳ from ano="'+String(ano).trim()+'"' : '↳ from ano (missing!)';
         cellStyle = ano ? 'color:#0369a1;font-style:italic' : 'color:#c00;font-style:italic';
+      } else if (srcBlank && (f in _impLastAutoDefaults)) {
+        // Server fills this field from a default when the source is blank
+        // (e.g. state ← current business state). Show the default value.
+        val = '↳ default: ' + String(_impLastAutoDefaults[f] == null ? '' : _impLastAutoDefaults[f]);
+        cellStyle = 'color:#0369a1;font-style:italic';
       } else if (!src) {
         val = '— skipped —';
         cellStyle = 'color:#9ca3af;font-style:italic';
@@ -19158,6 +19170,7 @@ function _impRenderProjected(){
   let badRows = 0;
   for (const row of _impLastRows) {
     for (const f of _impLastKeyCols) {
+      if (f in _impLastAutoDefaults) continue;   // server fills these from a default
       const src = _impLastMapping[f];
       const v   = src ? row[src] : null;
       if (v == null || String(v).trim() === '') { badRows++; break; }
