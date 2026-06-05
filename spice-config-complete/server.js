@@ -7440,6 +7440,16 @@ const IMPORT_MODULES = {
     defaults: (db) => ({
       state: String(getSettingsFlat(db).business_state || 'TAMIL NADU'),
     }),
+    // Per-row override: rows whose PLACE is prefixed "ASP" belong to the
+    // Amazing Spice Park (ASP) company, which is in KERALA — so their
+    // business state is KERALA, not the flat default above. Only fills a
+    // blank `state`; a state value mapped from the source always wins.
+    // Returns {} for non-ASP rows so they fall back to the flat default.
+    rowDefaults: (row, mapping) => {
+      const placeSrc = mapping.place;
+      const place = placeSrc ? String(row[placeSrc] || '').trim().toUpperCase() : '';
+      return place.startsWith('ASP') ? { state: 'KERALA' } : {};
+    },
   },
   purchase: {
     label: 'Purchase Invoices',
@@ -7658,23 +7668,26 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
     const sampleDupChanges = [];
     const sampleDupIdentical = [];
 
+    // Snapshot flat module defaults once (a DB read); per-row rowDefaults
+    // (no DB) are recomputed inside the loop and override the flat ones.
+    const _flatDefaults = (typeof def.defaults === 'function')
+      ? (() => { try { return def.defaults(db) || {}; } catch (_) { return {}; } })()
+      : {};
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const values = {};
       for (const [f, src] of fieldSources) {
         values[f] = src ? r[src] : '';
       }
-      // Apply server-computed defaults for fields whose mapped value
-      // came back blank. Lets the auctions module stamp `mode` from
-      // current business settings without forcing the user to map it.
-      if (def.defaults) {
-        try {
-          const defaults = def.defaults(db) || {};
-          for (const k of Object.keys(defaults)) {
-            const cur = values[k];
-            if (cur == null || String(cur).trim() === '') values[k] = defaults[k];
-          }
-        } catch (_) { /* non-fatal — module defaults are advisory */ }
+      // Fill blank fields from module defaults. Per-row rowDefaults (e.g.
+      // state ← KERALA when PLACE is ASP-prefixed) override the flat
+      // defaults; a non-blank source value always wins over both.
+      const _eff = Object.assign({}, _flatDefaults,
+        (typeof def.rowDefaults === 'function' ? (() => { try { return def.rowDefaults(r, mapping, db) || {}; } catch (_) { return {}; } })() : {}));
+      for (const k of Object.keys(_eff)) {
+        const cur = values[k];
+        if (cur == null || String(cur).trim() === '') values[k] = _eff[k];
       }
 
       const reasons = [];
@@ -7887,14 +7900,20 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       try {
+        // Effective per-row defaults: flat module defaults overlaid with
+        // per-row rowDefaults (e.g. state ← KERALA when PLACE is ASP-
+        // prefixed). Used for both dedup key resolution and the positional
+        // value fill so the stored row and the dup query agree.
+        const rowEff = Object.assign({}, moduleDefaults,
+          (typeof def.rowDefaults === 'function' ? (() => { try { return def.rowDefaults(r, mapping, db) || {}; } catch (_) { return {}; } })() : {}));
         // Duplicate detection — resolve each key column to its effective
-        // value: the mapped source cell, falling back to a module default
-        // (e.g. `state` ← current business state) when the source is blank.
-        // Dedup only fires when EVERY key column resolves to a non-blank
-        // value, and is keyed identically to /verify so counts agree.
+        // value: the mapped source cell, falling back to the per-row
+        // default when the source is blank. Dedup only fires when EVERY
+        // key column resolves to a non-blank value, keyed identically to
+        // /verify so counts agree.
         const keyVals = def.keyCols.map(k => {
           let v = mapping[k] ? r[mapping[k]] : '';
-          if ((v == null || String(v).trim() === '') && (k in moduleDefaults)) v = moduleDefaults[k];
+          if ((v == null || String(v).trim() === '') && (k in rowEff)) v = rowEff[k];
           return v;
         });
         if (keyVals.every(v => v != null && String(v).trim() !== '')) {
@@ -7913,15 +7932,15 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
           return v;
         });
 
-        // Apply module defaults to any positional slot whose value
-        // came back blank. e.g. auctions.mode gets the current
-        // business mode when the source file omits it.
+        // Apply effective per-row defaults to any positional slot whose
+        // value came back blank. e.g. state ← KERALA for ASP-prefixed
+        // places, or the flat business-state / auctions.mode default.
         for (let s = 0; s < def.fields.length; s++) {
           const fname = def.fields[s];
-          if (!(fname in moduleDefaults)) continue;
+          if (!(fname in rowEff)) continue;
           const cur = values[s];
           if (cur == null || String(cur).trim() === '') {
-            values[s] = moduleDefaults[fname];
+            values[s] = rowEff[fname];
           }
         }
 

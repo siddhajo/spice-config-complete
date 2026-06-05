@@ -19111,6 +19111,19 @@ async function impPreview(){
 }
 
 // Render the "this is how it will land in the DB" table. Reads the
+// Effective per-row default for a field, mirroring the server's
+// rowDefaults so the projected preview shows what will actually be
+// stored. Currently: `state` → KERALA when the mapped PLACE is prefixed
+// "ASP" (Amazing Spice Park is the Kerala company); otherwise the flat
+// default the server sent in autoDefaults (the current business state).
+function _impEffectiveDefault(f, row){
+  if (f === 'state') {
+    const placeSrc = _impLastMapping && _impLastMapping['place'];
+    const place = placeSrc ? String(row[placeSrc] == null ? '' : row[placeSrc]).trim().toUpperCase() : '';
+    if (place.startsWith('ASP')) return 'KERALA';
+  }
+  return _impLastAutoDefaults[f];
+}
 // raw rows already returned by /preview and projects them through the
 // CURRENT _impLastMapping. Re-rendered after every mapping change.
 function _impRenderProjected(){
@@ -19144,9 +19157,11 @@ function _impRenderProjected(){
         val = ano ? '↳ from ano="'+String(ano).trim()+'"' : '↳ from ano (missing!)';
         cellStyle = ano ? 'color:#0369a1;font-style:italic' : 'color:#c00;font-style:italic';
       } else if (srcBlank && (f in _impLastAutoDefaults)) {
-        // Server fills this field from a default when the source is blank
-        // (e.g. state ← current business state). Show the default value.
-        val = '↳ default: ' + String(_impLastAutoDefaults[f] == null ? '' : _impLastAutoDefaults[f]);
+        // Server fills this field from a default when the source is blank.
+        // Mirror its per-row rule so the preview matches what gets stored
+        // (e.g. state ← KERALA for ASP-prefixed places, else business state).
+        const dv = _impEffectiveDefault(f, row);
+        val = '↳ default: ' + String(dv == null ? '' : dv);
         cellStyle = 'color:#0369a1;font-style:italic';
       } else if (!src) {
         val = '— skipped —';
