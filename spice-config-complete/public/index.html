@@ -3042,6 +3042,20 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
       </div>
 
       <div class="card">
+        <div class="tally-section" id="exp-sec-pretrade" style="margin:0">
+          <h3 class="tally-section-head" onclick="toggleTallySection('exp-sec-pretrade')">
+            <span class="tally-section-chev">▼</span>
+            <span>Pre-Trade Exports</span>
+            <span style="font-weight:400;font-size:12px;color:var(--text3);margin-left:8px">"Before trade" snapshots — your record of the pre-trade state</span>
+          </h3>
+          <div class="tally-section-body">
+            <p style="font-size:12px;color:var(--text2);margin:12px 0">Download these before importing prices. Once prices are imported the lots table is overwritten with the auctioneer's data, so these are the only record of the pre-trade state. Uses the <span data-term-auction="singular">auction</span> selected in the Export Center above.</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:12px" id="pretrade-export-btns"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="tally-section" id="exp-sec-dbf" style="margin:0">
           <h3 class="tally-section-head" onclick="toggleTallySection('exp-sec-dbf')">
             <span class="tally-section-chev">▼</span>
@@ -14173,7 +14187,16 @@ const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',praman_c
 const EXP_CSV_ONLY = new Set(['praman_csv']);
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 const EXP_XLSX_ONLY = new Set(['full_file']);
-function renderExportBtns(){document.getElementById('export-btns').innerHTML=Object.entries(EXP_LABELS).map(([k,v])=>{
+// "Before trade" snapshot reports — the same set surfaced in the Price
+// Import modal, grouped here as a Pre-Trade Exports section so operators
+// can grab them from the Exports screen too. Shares the Export Center's
+// auction selector (#exp-auction) via exportType's fallback.
+const PRETRADE_EXP_LABELS={lot_slip:'Lot Slip',lot_buyer:'Lot Buyer',lot_name:'Lot Name',
+  praman_csv:'e-Trade CSV (Praman)',price_list_before:'Price List (Before)',dealer_list:'Dealer List'};
+// Render a single export card (label + format buttons). Shared by the
+// Export Center and the Pre-Trade Exports section so both honour the
+// CSV-only / XLSX-only format rules identically.
+function _exportBtnCard(k, v){
   if (EXP_CSV_ONLY.has(k)) {
     return `<div style="display:flex;flex-direction:column;gap:4px;padding:8px;border:1px solid var(--border);border-radius:6px;background:#fff">
       <div style="font-weight:600;font-size:13px;color:var(--text)">${v}</div>
@@ -14197,7 +14220,12 @@ function renderExportBtns(){document.getElementById('export-btns').innerHTML=Obj
       <button class="btn btn-orange" onclick="exportType('${k}','pdf')" style="flex:1;padding:6px 8px;font-size:12px">PDF</button>
     </div>
   </div>`;
-}).join('')}
+}
+function renderExportBtns(){
+  document.getElementById('export-btns').innerHTML=Object.entries(EXP_LABELS).map(([k,v])=>_exportBtnCard(k,v)).join('');
+  const pt=document.getElementById('pretrade-export-btns');
+  if(pt) pt.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>_exportBtnCard(k,v)).join('');
+}
 async function exportType(type,format,aidArg){format=format||'xlsx';
   // aidArg lets callers (e.g. the Price Import snapshot banner via
   // piQuickExport) pass an explicit trade id; otherwise fall back to the
