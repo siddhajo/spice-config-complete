@@ -309,8 +309,18 @@ select:focus{border-color:var(--green)}
         <!-- Grade + Bags + Litre -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
           <div><div class="elb" id="elb-grade">GRADE</div><input type="text" id="le-grade" value="1" autocomplete="off" class="ein"></div>
-          <div><div class="elb" id="elb-bags">BAGS</div><input type="text" id="le-bags" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"></div>
+          <div><div class="elb" id="elb-bags">BAGS</div><input type="text" id="le-bags" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this);onBagsInput()"></div>
           <div><div class="elb" id="elb-litre">LITRE WT</div><input type="text" id="le-litre" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"></div>
+        </div>
+
+        <!-- Weight w/ Gunny + total Gunny Weight — sits ABOVE Net Wt so the
+             operator types the gross-of-gunny weight first and watches Net
+             Wt populate. Visible only when show_extra_lot_fields is on.
+             Gunny Wt is the read-only total tare (= default gunny weight ×
+             bags); Net Wt below auto-derives as W/Gunny − Gunny Wt. -->
+        <div id="le-gunny-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+          <div><div class="elb">W/ GUNNY</div><input type="text" id="le-wwg" placeholder="0.000" inputmode="decimal" class="ein" oninput="sanitizeDec(this);calcNetFromGunny()"></div>
+          <div><div class="elb">GUNNY WT</div><input type="text" id="le-gunny-wt" readonly class="ein" style="background:var(--bg);color:var(--text3);font-weight:600" title="Total gunny weight = default gunny weight × bags"></div>
         </div>
 
         <!-- Net + Sample + Gross -->
@@ -536,24 +546,72 @@ let cfgDefaultLitre='';
 // AND'ed with business_mode === 'e-Auction', so the client only needs
 // to mirror the boolean into the DOM via applyEAuctionVisibility().
 let cfgShowCropReceipt=false, cfgShowReservedPrice=false;
+// Gunny tare default + the unified "extra lot fields" toggle. When
+// cfgShowExtraFields is on, the Weight-w/-Gunny + Gunny Wt pair shows
+// and Net Wt becomes read-only (auto-derived from W/Gunny − tare), AND
+// the Crop Receipt + Reserved Price cells reveal too (OR'd with their
+// per-field flags above). cfgGunnyWeight is the per-bag tare.
+let cfgGunnyWeight=0, cfgShowExtraFields=false;
 
 // Toggle the entry-form + edit-modal e-Auction rows + their two cells.
 // Each cell wraps its own .display so the outer row can stay flex when
-// only one is on; the row hides entirely when both are off.
+// only one is on; the row hides entirely when both are off. The crop
+// receipt / reserved price cells also reveal when cfgShowExtraFields is
+// on (the unified toggle). The gunny pair + read-only Net Wt are driven
+// purely by cfgShowExtraFields.
 function applyEAuctionVisibility(){
+  var showCrop = cfgShowCropReceipt   || cfgShowExtraFields;
+  var showRsrv = cfgShowReservedPrice || cfgShowExtraFields;
   var row=document.getElementById('le-eauction-row');
   var c1=document.getElementById('le-crpt-wrap');
   var c2=document.getElementById('le-reserved-wrap');
-  if(c1) c1.style.display=cfgShowCropReceipt?'block':'none';
-  if(c2) c2.style.display=cfgShowReservedPrice?'block':'none';
-  if(row) row.style.display=(cfgShowCropReceipt||cfgShowReservedPrice)?'grid':'none';
+  if(c1) c1.style.display=showCrop?'block':'none';
+  if(c2) c2.style.display=showRsrv?'block':'none';
+  if(row) row.style.display=(showCrop||showRsrv)?'grid':'none';
   var erow=document.getElementById('ed-eauction-row');
   var e1=document.getElementById('ed-crpt-wrap');
   var e2=document.getElementById('ed-reserved-wrap');
-  if(e1) e1.style.display=cfgShowCropReceipt?'block':'none';
-  if(e2) e2.style.display=cfgShowReservedPrice?'block':'none';
-  if(erow) erow.style.display=(cfgShowCropReceipt||cfgShowReservedPrice)?'block':'none';
+  if(e1) e1.style.display=showCrop?'block':'none';
+  if(e2) e2.style.display=showRsrv?'block':'none';
+  if(erow) erow.style.display=(showCrop||showRsrv)?'block':'none';
+  // Gunny pair + Net-Wt read-only state (entry form only — the edit
+  // modal keeps Net Wt operator-typed for corrections).
+  var gwrap=document.getElementById('le-gunny-wrap');
+  if(gwrap) gwrap.style.display=cfgShowExtraFields?'grid':'none';
+  var qtyEl=document.getElementById('le-qty');
+  if(qtyEl){
+    if(cfgShowExtraFields){
+      // Seed the read-only Gunny Wt with the current tare so it's never
+      // stale when the row first appears.
+      var bags=parseInt(document.getElementById('le-bags').value,10)||0;
+      var gwEl=document.getElementById('le-gunny-wt');
+      if(gwEl){var tare=(Number(cfgGunnyWeight)||0)*bags;gwEl.value=tare>0?tare.toFixed(3):'0.000';}
+      qtyEl.readOnly=true;qtyEl.style.background='var(--bg)';
+    }else{
+      qtyEl.readOnly=false;qtyEl.style.background='';
+    }
+  }
 }
+
+// Auto-derive Net = Weight-w/-Gunny − (default gunny weight × bags).
+// Re-runs whenever W/Gunny changes and whenever Bags changes (via
+// onBagsInput) because the tare depends on bags. Guarded on wwg>0 so a
+// blank W/Gunny never wipes an already-typed Net Wt.
+function calcNetFromGunny(){
+  var wwg=parseFloat(document.getElementById('le-wwg').value)||0;
+  var bags=parseInt(document.getElementById('le-bags').value,10)||0;
+  var tare=bags*(Number(cfgGunnyWeight)||0);
+  var gwEl=document.getElementById('le-gunny-wt');
+  if(gwEl) gwEl.value=tare>0?tare.toFixed(3):'0.000';
+  if(wwg>0){
+    var net=Math.max(0,wwg-tare);
+    document.getElementById('le-qty').value=net.toFixed(3);
+    calcGrossWeight();
+  }
+}
+// Bags changed → re-derive Net only when extra fields are active, so the
+// legacy operator-typed Net flow is untouched when the toggle is off.
+function onBagsInput(){ if(cfgShowExtraFields) calcNetFromGunny(); }
 
 // Crop-receipt auto-increment helper. Preserves the input's
 // zero-padding width: "01208" → "01209". Any non-digit prefix is
@@ -603,6 +661,8 @@ async function refreshConfig(){
     if(d.defaultLitre!=cfgDefaultLitre){cfgDefaultLitre=d.defaultLitre||'';changed=true}
     if(d.showCropReceipt!=cfgShowCropReceipt){cfgShowCropReceipt=!!d.showCropReceipt;changed=true}
     if(d.showReservedPrice!=cfgShowReservedPrice){cfgShowReservedPrice=!!d.showReservedPrice;changed=true}
+    if(d.gunnyWeight!=cfgGunnyWeight){cfgGunnyWeight=d.gunnyWeight||0;changed=true}
+    if(d.showExtraLotFields!=cfgShowExtraFields){cfgShowExtraFields=!!d.showExtraLotFields;changed=true}
     if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
     if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
     if(d.labels&&JSON.stringify(d.labels)!==JSON.stringify(cfgLabels)){
@@ -633,9 +693,9 @@ function applyLabels(){
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -696,7 +756,7 @@ async function loadAvailableTrades(){
 
 async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select a trade</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
 // Reload config for sample weight + moisture + e-Auction extras
-try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
+try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgShowExtraFields=!!cd.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
 await loadStats();goLots()}
 
 var allocStats=null;
@@ -1160,6 +1220,10 @@ function resetFormKeepSeller(){
   document.getElementById('le-gross').value='';
   document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
   if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  // Clear Weight-w/-Gunny + reset the read-only Gunny Wt (bags just
+  // cleared → tare is 0) so the next entry starts fresh.
+  var wwgEl=document.getElementById('le-wwg');if(wwgEl)wwgEl.value='';
+  var gwEl=document.getElementById('le-gunny-wt');if(gwEl)gwEl.value='0.000';
   // Crop Receipt auto-increments per save (preserves zero-padding
   // width). Reserved Price clears so the operator types per lot.
   var crptEl=document.getElementById('le-crpt');
@@ -1171,7 +1235,7 @@ function resetFormKeepSeller(){
 }
 
 // Full reset (Clear button)
-function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';/* hard clear of e-Auction extras — auto-increment chain restarts on the next save */ var _le_crpt=document.getElementById('le-crpt');if(_le_crpt)_le_crpt.value='';var _le_rp=document.getElementById('le-reserved-price');if(_le_rp)_le_rp.value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
+function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getElementById('le-recent').innerHTML='';document.getElementById('le-name').value='';document.getElementById('le-grade').value='1';document.getElementById('le-bags').value='';document.getElementById('le-litre').value=cfgDefaultLitre||'';document.getElementById('le-qty').value='';document.getElementById('le-gross').value='';document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';var _le_wwg=document.getElementById('le-wwg');if(_le_wwg)_le_wwg.value='';var _le_gw=document.getElementById('le-gunny-wt');if(_le_gw)_le_gw.value='0.000';/* hard clear of e-Auction extras — auto-increment chain restarts on the next save */ var _le_crpt=document.getElementById('le-crpt');if(_le_crpt)_le_crpt.value='';var _le_rp=document.getElementById('le-reserved-price');if(_le_rp)_le_rp.value='';document.getElementById('le-lot-err').style.display='none';document.getElementById('le-res').style.display='none';document.getElementById('le-tc').style.display='none';document.getElementById('le-bank').style.display='none';document.getElementById('le-bank-form').style.display='none';document.getElementById('le-sw').style.display='block';hideSellerBookings();showLotGrid();renderLotGrid();selectNextAvailableLot();document.getElementById('le-scroll').scrollTop=0}
 
 // ── MY LOTS (by branch) ──
 async function loadMyLots(){if(!aid)return;try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();allMyLots=d.lots||[];const stats=d.stats||{};document.getElementById('ml-cnt').textContent=stats.lotCount||0;document.getElementById('ml-bags').textContent=stats.totalBags||0;document.getElementById('ml-qty').textContent=(stats.totalQty||0).toFixed(3);document.getElementById('ml-search').value='';renderMyLots(allMyLots)}catch(e){}}
@@ -1310,6 +1374,8 @@ function clearEntryForm(){
   document.getElementById('le-gross').value='';
   document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
   if(document.getElementById('le-moisture'))document.getElementById('le-moisture').value='';
+  var _ce_wwg=document.getElementById('le-wwg');if(_ce_wwg)_ce_wwg.value='';
+  var _ce_gw=document.getElementById('le-gunny-wt');if(_ce_gw)_ce_gw.value='0.000';
   // Hard clear of e-Auction extras — Clear button restarts the
   // crpt chain (next save starts whatever the operator types).
   var _ce_crpt=document.getElementById('le-crpt');if(_ce_crpt)_ce_crpt.value='';

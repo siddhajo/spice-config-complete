@@ -313,6 +313,15 @@ const DEFAULTS = [
   { key: 'sample_weight',     value: '0.000',  category: 'lot_entry', label: 'Default Sample Weight (kg)',            type: 'number' },
   { key: 'show_moisture',     value: 'false',  category: 'lot_entry', label: 'Show Moisture Column',                  type: 'boolean' },
   { key: 'default_litre',     value: '',       category: 'lot_entry', label: 'Default Litre Weight',                  type: 'text' },
+  // Gunny tare default + the unified "extra lot fields" toggle. Gunny
+  // Weight is the per-bag tare: on the entry form the operator types
+  // Weight-w/-Gunny and Net Wt auto-derives as WwG − (gunny_weight ×
+  // bags). show_extra_lot_fields is a single switch that reveals the
+  // Weight-w/-Gunny + Gunny Wt pair AND the Crop Receipt + Reserved
+  // Price inputs together (OR'ed with the per-field e-Auction flags so
+  // an install already using those flags keeps working).
+  { key: 'gunny_weight',          value: '0.000', category: 'lot_entry', label: 'Default Gunny Weight (kg)',                          type: 'number' },
+  { key: 'show_extra_lot_fields', value: 'false', category: 'lot_entry', label: 'Show Extra Lot Fields (Crop Receipt, Reserved Price)', type: 'boolean' },
   { key: 'default_crop_type', value: '',       category: 'lot_entry', label: 'Default Crop Type',                     type: 'text' },
   { key: 'edit_enabled',      value: 'true',   category: 'lot_entry', label: 'Allow Lot Edits (non-admin)',           type: 'boolean' },
   { key: 'edit_timeout_sec',  value: '0',      category: 'lot_entry', label: 'Edit Timeout (sec; 0 = no limit)',      type: 'number' },
@@ -346,7 +355,7 @@ const CATEGORIES = {
   season:     { order: 9, title: 'Season / Financial Year', icon: '📅' },
   invoice:    { order: 10, title: 'Invoice Settings',     icon: '📄' },
   flags:      { order: 11, title: 'Feature Flags',        icon: '🔧' },
-  lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, default crop, moisture visibility, edit window, and receipt format.' },
+  lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, and receipt format.' },
   integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },
   spice_board:{ order: 14, title: 'Spice Board Reports',   icon: '🌶', description: 'Statutory cardamom-auction reports. Place values entered below populate the Place of Auction dropdown on the FORM-D report.' },

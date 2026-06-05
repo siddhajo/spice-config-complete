@@ -596,6 +596,12 @@ function mountMobile(app, deps) {
       defaultLitre:    get('default_litre', ''),
       showCropReceipt,
       showReservedPrice,
+      // Gunny tare default + unified extra-fields toggle. The mobile UI
+      // uses gunnyWeight to derive Net Wt (= Weight-w/-Gunny − gunny ×
+      // bags) and showExtraLotFields to reveal the Weight-w/-Gunny +
+      // Gunny Wt pair AND the Crop Receipt / Reserved Price inputs.
+      gunnyWeight:        getNum('gunny_weight', 0),
+      showExtraLotFields: getBool('show_extra_lot_fields', false),
       // PWA defaults — surfaced here for completeness; not currently
       // backed by spice-config settings, so static-ish values are fine.
       pageLimit:       20,

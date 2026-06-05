@@ -639,8 +639,12 @@ body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
    attribute to "1" only when the matching flag is ON in Settings AND
    business_mode === 'e-Auction'. Flipping the mode to anything else
    collapses the inputs regardless of the flag value. */
-body:not([data-feat-crop-receipt="1"]) .feat-crop-receipt{display:none !important}
-body:not([data-feat-reserved-price="1"]) .feat-reserved-price{display:none !important}
+/* OR with data-feat-extra-lot (the unified "Show Extra Lot Fields"
+   lot-entry setting): a field shows when its own e-Auction flag is set
+   OR the extra-fields toggle is on, so installs using either control
+   keep working. */
+body:not([data-feat-crop-receipt="1"]):not([data-feat-extra-lot="1"]) .feat-crop-receipt{display:none !important}
+body:not([data-feat-reserved-price="1"]):not([data-feat-extra-lot="1"]) .feat-reserved-price{display:none !important}
 /* Spice Board reports — sidebar entry + tab content carry
    .mode-eauction-only and are visible only when the saved business
    mode is "e-Auction" (set by applyModeLabels() at boot + on mode
@@ -1158,6 +1162,15 @@ body[data-comfort="1"] .flag-row label{font-size:13px}
    the app reads the same. */
 .tally-panel .flag-row label{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)));font-weight:600}
 .tally-panel .set-group-title{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)))}
+/* Match every settings surface to the To Tally label colour: field
+   labels (.fg), Feature Flag toggle labels (.flag-row) and group
+   titles all use the dark cardamom green. Scoped to #settings-root so
+   forms elsewhere in the app keep their own label styling. */
+#settings-root .fg label,
+#settings-root .flag-row label,
+#settings-root .set-group-title{
+  color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)))
+}
 /* Compact inline input for text/number fields shown alongside labels. */
 .tally-panel .tally-fld{
   flex:0 0 50%;max-width:50%;
@@ -3889,11 +3902,27 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Bags</div>
-            <input type="number" id="le-bags" min="0" placeholder="0" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+            <input type="number" id="le-bags" min="0" placeholder="0" oninput="leOnBagsInput()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Litre Wt</div>
             <input type="number" id="le-litre" min="0" placeholder="0" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+          </div>
+        </div>
+
+        <!-- Weight w/ Gunny + total Gunny Wt — shown only when the
+             "Show Extra Lot Fields" setting is on. Operator types the
+             gross-of-gunny weight here; Net Wt below auto-derives as
+             W/Gunny − (default gunny weight × bags). Gunny Wt is the
+             read-only total tare. -->
+        <div id="le-gunny-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div>
+            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Weight w/ Gunny</div>
+            <input type="number" id="le-wwg" step="0.001" min="0" placeholder="0.000" oninput="leCalcNetFromGunny()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+          </div>
+          <div>
+            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Gunny Wt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— default × bags</span></div>
+            <input type="number" id="le-gunny-wt" readonly placeholder="0.000" title="Total gunny weight = default gunny weight × bags" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text3);font-weight:600">
           </div>
         </div>
 
@@ -15779,6 +15808,8 @@ const _le = {
   sampleWeight: 0,         // from settings (sample_weight key, defaults to 0)
   defaultLitre: '',        // from settings — pre-fills litre input on each new lot
   showMoisture: false,     // from settings — toggles the moisture column/input
+  gunnyWeight: 0,          // from settings (gunny_weight key) — per-bag tare
+  showExtraFields: false,  // from settings (show_extra_lot_fields key) — reveals gunny pair + crop receipt + reserved price; net wt derives from W/Gunny when on
   editEnabled: true,       // from settings — when false, only admins can edit lots
   editTimeoutSec: 0,       // from settings — seconds after creation a non-admin can still edit (0 = no limit)
   editingLotId: null,      // when non-null, Save updates instead of inserts
@@ -15926,6 +15957,8 @@ async function loadLotEntry(){
       _le.sampleWeight = Number(cfg.sample_weight ?? cfg.sample_wt ?? cfg.sampleWeight ?? 0) || 0;
       _le.defaultLitre  = String(cfg.default_litre || '').trim();
       _le.showMoisture  = String(cfg.show_moisture || 'false') === 'true';
+      _le.gunnyWeight   = Number(cfg.gunny_weight ?? 0) || 0;
+      _le.showExtraFields = String(cfg.show_extra_lot_fields || 'false') === 'true';
       _le.editEnabled   = String(cfg.edit_enabled  || 'true')  === 'true';
       _le.editTimeoutSec = parseInt(cfg.edit_timeout_sec, 10) || 0;
       // Receipt format pre-selection. Defaults to "detailed" if the
@@ -15940,6 +15973,8 @@ async function loadLotEntry(){
       _le.sampleWeight = 0;
       _le.defaultLitre = '';
       _le.showMoisture = false;
+      _le.gunnyWeight = 0;
+      _le.showExtraFields = false;
       _le.editEnabled  = true;
       _le.editTimeoutSec = 0;
       _le.receiptFormat = 'detailed';
@@ -15949,6 +15984,11 @@ async function loadLotEntry(){
     // workflow doesn't need moisture.
     const moistureWrap = document.getElementById('le-moisture-wrap');
     if (moistureWrap) moistureWrap.style.display = _le.showMoisture ? '' : 'none';
+    // Apply extra-lot-fields visibility — reveals the Weight w/ Gunny +
+    // Gunny Wt pair (and flips Net Wt to read-only/derived) plus the
+    // Crop Receipt + Reserved Price inputs via the data-feat-extra-lot
+    // body attribute (OR'd with the per-field e-Auction flags in CSS).
+    leApplyExtraFields();
     // Render branch dropdown. Show a helpful empty state if no branches
     // are configured yet — the field user can't proceed without one
     // because lot save requires a branch.
@@ -16256,6 +16296,67 @@ function leCalcGross(){
   document.getElementById('le-gross').value = gross > 0 ? gross.toFixed(3) : '';
 }
 
+// Apply the "Show Extra Lot Fields" setting to the Lot Entry form:
+// reveal the Weight w/ Gunny + Gunny Wt pair, flip Net Wt to
+// read-only/derived, and set the data-feat-extra-lot body attribute so
+// the CSS reveals Crop Receipt + Reserved Price (OR'd with the existing
+// per-field e-Auction flags). Idempotent — safe to call on every load.
+function leApplyExtraFields(){
+  const on = !!_le.showExtraFields;
+  const wrap = document.getElementById('le-gunny-wrap');
+  if (wrap) wrap.style.display = on ? 'grid' : 'none';
+  if (on) document.body.setAttribute('data-feat-extra-lot', '1');
+  else    document.body.removeAttribute('data-feat-extra-lot');
+  const qty = document.getElementById('le-qty');
+  if (qty) {
+    if (on) {
+      // Net Wt is derived from Weight w/ Gunny — lock it and de-emphasise.
+      qty.readOnly = true;
+      qty.style.background = 'var(--bg)';
+      qty.style.color = 'var(--text3)';
+      qty.style.borderColor = 'var(--border)';
+      // Seed the read-only Gunny Wt so it isn't stale when first shown.
+      leSeedGunnyWt();
+    } else {
+      qty.readOnly = false;
+      qty.style.background = '';
+      qty.style.color = 'var(--green)';
+      qty.style.borderColor = 'var(--green)';
+    }
+  }
+}
+
+// Recompute and write the read-only Gunny Wt = default gunny weight ×
+// bags. Pulled out so both leApplyExtraFields and the derivation can
+// refresh it without duplicating the formula.
+function leSeedGunnyWt(){
+  const bags = parseInt(document.getElementById('le-bags').value, 10) || 0;
+  const tare = (Number(_le.gunnyWeight) || 0) * bags;
+  const gw = document.getElementById('le-gunny-wt');
+  if (gw) gw.value = tare > 0 ? tare.toFixed(3) : '0.000';
+  return tare;
+}
+
+// Auto-derive Net = Weight w/ Gunny − (default gunny weight × bags).
+// Runs when Weight w/ Gunny changes. Guarded on wwg > 0 so a blank
+// W/Gunny never wipes a Net Wt already loaded into the form (e.g. when
+// editing an existing lot).
+function leCalcNetFromGunny(){
+  const wwg = parseFloat(document.getElementById('le-wwg').value) || 0;
+  const tare = leSeedGunnyWt();
+  if (wwg > 0) {
+    const net = Math.max(0, wwg - tare);
+    document.getElementById('le-qty').value = net.toFixed(3);
+    leCalcGross();
+  }
+}
+
+// Bags changed → re-derive Net only when the extra-fields toggle is on,
+// so the default operator-typed Net flow is untouched when it's off.
+function leOnBagsInput(){
+  if (_le.showExtraFields) leCalcNetFromGunny();
+}
+
 function leShowError(msg){
   const el = document.getElementById('le-err');
   el.textContent = msg;
@@ -16389,6 +16490,12 @@ async function leSaveLot(){
     document.getElementById('le-qty').value = '';
     document.getElementById('le-gross').value = '';
     document.getElementById('le-sample').value = _le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000';
+    // Clear Weight w/ Gunny + reset the read-only Gunny Wt (bags just
+    // cleared → tare is 0) so the next entry starts fresh.
+    const wwgEl = document.getElementById('le-wwg');
+    if (wwgEl) wwgEl.value = '';
+    const gunnyWtEl = document.getElementById('le-gunny-wt');
+    if (gunnyWtEl) gunnyWtEl.value = '0.000';
     const moistureEl = document.getElementById('le-moisture');
     if (moistureEl) moistureEl.value = '';
     // Crop Receipt auto-increment — only on a fresh save (not edit),
@@ -16423,6 +16530,10 @@ function leResetForm(){
   document.getElementById('le-gross').value = '';
   document.getElementById('le-grade').value = '1';
   document.getElementById('le-sample').value = _le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000';
+  const wwgEl = document.getElementById('le-wwg');
+  if (wwgEl) wwgEl.value = '';
+  const gunnyWtEl = document.getElementById('le-gunny-wt');
+  if (gunnyWtEl) gunnyWtEl.value = '0.000';
   const moistureEl = document.getElementById('le-moisture');
   if (moistureEl) moistureEl.value = '';
   // Hard clear — both Crop Receipt + Reserved Price blanked. The
@@ -16476,6 +16587,13 @@ async function leEditLot(lotId){
   document.getElementById('le-litre').value  = lot.litre ?? '';
   document.getElementById('le-qty').value    = lot.qty ?? '';
   document.getElementById('le-sample').value = lot.sample_wt ?? (_le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000');
+  // Weight w/ Gunny isn't stored (Net Wt is derive-only), so clear any
+  // stale value from a prior entry and refresh the read-only Gunny Wt
+  // for this lot's bag count. Net Wt keeps the stored value — leave it
+  // untouched (don't re-derive from a blank W/Gunny).
+  const wwgEl = document.getElementById('le-wwg');
+  if (wwgEl) wwgEl.value = '';
+  leSeedGunnyWt();
   const moistureEl = document.getElementById('le-moisture');
   if (moistureEl) moistureEl.value = lot.moisture || '';
   // Populate Crop Receipt + Reserved Price from the existing lot so
