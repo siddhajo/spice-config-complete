@@ -4076,6 +4076,27 @@ app.get('/api/invoices', requireView, (req, res) => {
   res.json(rows);
 });
 
+// Remove any prior sales-invoice rows this generation would duplicate, so a
+// (re)generation REPLACES instead of APPENDS. Without this, granting "Allow
+// regeneration" and generating again leaves the old rows in place — the
+// root cause of the "two rows per buyer" duplicates. Context-aware:
+//   • Kerala / ASP   → ASP bills exactly one inter-state invoice per buyer
+//                      per auction, so drop every prior KERALA row for the
+//                      buyer (any sale type — also clears stale pre-change
+//                      CGST/SGST rows).
+//   • Tamil Nadu/ISP → preserve a buyer's distinct L / I / E invoices; drop
+//                      only the matching (buyer, sale type) row.
+function clearPriorSalesInvoice(db, auctionId, buyer, invoiceState, saleType) {
+  const isKerala = String(invoiceState || '').toUpperCase() === 'KERALA';
+  if (isKerala) {
+    db.run("DELETE FROM invoices WHERE auction_id=? AND buyer=? AND UPPER(state)='KERALA'",
+      [auctionId, buyer]);
+  } else {
+    db.run("DELETE FROM invoices WHERE auction_id=? AND buyer=? AND UPPER(COALESCE(sale,''))=? AND UPPER(state) IN ('TAMIL NADU','TAMILNADU','TN')",
+      [auctionId, buyer, String(saleType || '').toUpperCase()]);
+  }
+}
+
 app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) => {
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
@@ -4105,6 +4126,8 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   // from ISP invoices in the same auction, which matters for the sales
   // list cross-reference (ASP Inv# column).
   const invoiceState = cfg.business_state || auction.state || '';
+  // Idempotent (re)generation — clear any prior matching row(s) first.
+  clearPriorSalesInvoice(db, req.params.auctionId, buyerCode, invoiceState, invoice.saleType);
   db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,String(invoiceNo),buyerCode,invoice.buyer.buyer1||'',
@@ -4325,6 +4348,8 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
       const invoNo = String(nextNo);
       // Store BUSINESS context state — see single-invoice handler for rationale
       const invoiceState = cfg.business_state || auction.state || '';
+      // Idempotent (re)generation — clear any prior matching row(s) first.
+      clearPriorSalesInvoice(db, req.params.auctionId, row.buyer, invoiceState, invoice.saleType);
       db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,invoNo,row.buyer,invoice.buyer.buyer1||'',
@@ -7373,7 +7398,19 @@ const IMPORT_MODULES = {
   sales_invoice: {
     label: 'Sales Invoices',
     table: 'invoices',
-    keyCols: ['invo', 'sale'],
+    // Natural key = trade no (ano) + sale type + invoice no + business
+    // state. Rationale:
+    //   • ano   — the same invoice number legitimately recurs across
+    //             different trades, so it MUST scope the key (the old
+    //             ['invo','sale'] key wrongly collided cross-trade).
+    //   • sale  — L/I/E share number ranges; keep them distinct.
+    //   • invo  — the invoice number itself.
+    //   • state — separates the TN (ISP) and KL (ASP) books, matching
+    //             how generated invoices stamp cfg.business_state into
+    //             invoices.state. When the source omits a state column
+    //             it defaults to the current business state (see
+    //             `defaults` below) so the key still resolves.
+    keyCols: ['ano', 'sale', 'invo', 'state'],
     // auction_id is derived from `ano` at import time so the imported
     // rows show up under the matching trade in the Sales tab (the list
     // filters by auction_id, not ano).
@@ -7383,6 +7420,9 @@ const IMPORT_MODULES = {
     aliases: {
       ano: ['ano','auction_no','trade'],
       date: ['date','invoice_date','inv_date'],
+      // `state` is a key column — accept the common header spellings so it
+      // auto-maps; falls back to the business-state default when absent.
+      state: ['state','business_state','company_state','bstate','b_state'],
       sale: ['sale','sale_type','type'],
       invo: ['invo','invoice','invoice_no','invno'],
       buyer: ['buyer','buyer_code','code'],
@@ -7394,6 +7434,12 @@ const IMPORT_MODULES = {
       amount: ['amount','cardamom','value'],
       tot: ['tot','total','grand_total','invoice_amount'],
     },
+    // Default `state` to the current business state so the key resolves
+    // even when the source sheet has no state column — mirrors invoice
+    // generation, which stores cfg.business_state in invoices.state.
+    defaults: (db) => ({
+      state: String(getSettingsFlat(db).business_state || 'TAMIL NADU'),
+    }),
   },
   purchase: {
     label: 'Purchase Invoices',
@@ -7514,7 +7560,14 @@ app.post('/api/import-old-data/preview', requireAdmin, upload.single('file'), (r
       keyCols: def.keyCols,
       autoFillAuctionId: !!def.autoFillAuctionId,
       detectedMapping: mapping,
-      missingFields: def.fields.filter(f => !mapping[f] && def.keyCols.includes(f)),
+      // Flag key columns the user still needs to map — but EXCLUDE any
+      // that a module default fills (e.g. `state` ← current business
+      // state), since those resolve without a source column.
+      missingFields: (() => {
+        let dk = [];
+        try { dk = def.defaults ? Object.keys(def.defaults(getDb()) || {}) : []; } catch (_) {}
+        return def.fields.filter(f => !mapping[f] && def.keyCols.includes(f) && !dk.includes(f));
+      })(),
       preview: rows.slice(0, 50),
     });
   } catch (e) {
@@ -7637,10 +7690,12 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
       // Required-field check uses the same keyCols /run uses for dup
       // detection. A row missing any of them can't be inserted (and
       // can't be checked for duplicates).
+      // Use the post-default `values` (defaults already applied above) so
+      // a key column satisfied by a module default — e.g. `state` from the
+      // current business state — counts as present rather than missing.
       const missingKeys = [];
       for (const k of def.keyCols) {
-        const src = mapping[k];
-        const v = src ? r[src] : null;
+        const v = values[k];
         if (v == null || String(v).trim() === '') missingKeys.push(k);
       }
       const requiredMissing = missingKeys.length > 0;
@@ -7650,11 +7705,11 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
 
       // Duplicate detection — only meaningful when every keyCol resolves
       // to a non-blank value. Mirrors /run's gate so verify counts are
-      // accurate.
+      // accurate. Keyed on the post-default values for the same reason.
       let existing = null;
       let diff = null;
       if (!requiredMissing) {
-        const keyVals = def.keyCols.map(k => r[mapping[k]]);
+        const keyVals = def.keyCols.map(k => values[k]);
         const whereSql = def.keyCols.map(k => `${k} = ?`).join(' AND ');
         existing = db.get(`SELECT * FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyVals);
         if (existing) {
@@ -7826,12 +7881,19 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       try {
-        // Duplicate detection — skip if every keyCol resolves AND a
-        // matching row already exists.
-        const keyChecks = def.keyCols.map(k => mapping[k] ? r[mapping[k]] : null).filter(v => v != null && v !== '');
-        if (keyChecks.length === def.keyCols.length) {
+        // Duplicate detection — resolve each key column to its effective
+        // value: the mapped source cell, falling back to a module default
+        // (e.g. `state` ← current business state) when the source is blank.
+        // Dedup only fires when EVERY key column resolves to a non-blank
+        // value, and is keyed identically to /verify so counts agree.
+        const keyVals = def.keyCols.map(k => {
+          let v = mapping[k] ? r[mapping[k]] : '';
+          if ((v == null || String(v).trim() === '') && (k in moduleDefaults)) v = moduleDefaults[k];
+          return v;
+        });
+        if (keyVals.every(v => v != null && String(v).trim() !== '')) {
           const whereSql = def.keyCols.map(k => `${k} = ?`).join(' AND ');
-          const dup = db.get(`SELECT 1 FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyChecks);
+          const dup = db.get(`SELECT 1 FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyVals);
           if (dup) { skipped++; continue; }
         }
 
