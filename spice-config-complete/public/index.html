@@ -1996,6 +1996,10 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           Dashboard
         </button>
+        <button class="side-item" data-tab="insights" onclick="go('insights')">
+          <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Insights
+        </button>
         <button class="side-item needs-settings-write" data-tab="settings" onclick="go('settings')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings
@@ -2132,6 +2136,15 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
     <!-- DASHBOARD -->
     <div class="tc active" id="tc-dash"><div class="stats" id="stats"></div></div>
+
+    <!-- INSIGHTS — detailed per-trade × per-branch analytics. Driven
+         entirely by loadInsights() which renders into #insights-host
+         from a single /api/insights fetch. -->
+    <div class="tc" id="tc-insights">
+      <div id="insights-host">
+        <div style="padding:32px;text-align:center;color:var(--text3)">Loading insights…</div>
+      </div>
+    </div>
 
     <!-- SETTINGS -->
     <div class="tc" id="tc-settings">
@@ -2293,39 +2306,56 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
     <!-- USERS -->
     <div class="tc" id="tc-users">
-      <div class="card">
-        <h2 style="margin-bottom:4px">Users &amp; Access</h2>
-        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Create separate logins for each person. Each user can stay signed in on their own phone/computer without logging the others out.</p>
-        <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
-          <button class="btn btn-g" onclick="openAddUserModal()">+ Add User</button>
+      <div class="card le-collapsible" data-section="users-access" style="padding:0;margin-bottom:16px">
+        <div class="le-collapse-head" onclick="leToggleSection('users-access')" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:14px 24px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <span class="le-collapse-chev" style="display:inline-block;width:14px;font-weight:700;color:var(--green)">▾</span>
+          <span style="font-weight:700;font-size:15px">Users &amp; Access</span>
         </div>
-        <div style="overflow-x:auto">
-          <table>
-            <thead><tr><th>Username</th><th>Role</th><th>Active Sessions</th><th>Last Active</th><th>Created</th><th>Actions</th></tr></thead>
-            <tbody id="users-list"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 style="margin-bottom:4px">My Active Sessions</h2>
-        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Every place you're signed in as <strong id="my-uname-label"></strong>. Revoke any old/unused session to secure your account.</p>
-        <div style="overflow-x:auto">
-          <table>
-            <thead><tr><th>Device</th><th>Signed In</th><th>Last Used</th><th>Token Tail</th><th>Actions</th></tr></thead>
-            <tbody id="sessions-list"></tbody>
-          </table>
+        <div class="le-collapse-body" style="padding:18px 24px">
+          <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Create separate logins for each person. Each user can stay signed in on their own phone/computer without logging the others out.</p>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+            <button class="btn btn-g" onclick="openAddUserModal()">+ Add User</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table>
+              <thead><tr><th>Username</th><th>Role</th><th>Active Sessions</th><th>Last Active</th><th>Created</th><th>Actions</th></tr></thead>
+              <tbody id="users-list"></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <div class="card">
-        <h2 style="margin-bottom:4px">Change My Password</h2>
-        <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Changing your password signs you out from all other devices (this one stays signed in).</p>
-        <div style="max-width:420px">
-          <div class="fg"><label>Current password</label><input type="password" id="pw-cur"></div>
-          <div class="fg"><label>New password</label><input type="password" id="pw-new" placeholder="At least 4 characters"></div>
-          <div class="fg"><label>Confirm new password</label><input type="password" id="pw-conf"></div>
-          <button class="btn btn-g" onclick="changeMyPassword()">Update Password</button>
+      <div class="card le-collapsible" data-section="users-sessions" style="padding:0;margin-bottom:16px">
+        <div class="le-collapse-head" onclick="leToggleSection('users-sessions')" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:14px 24px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <span class="le-collapse-chev" style="display:inline-block;width:14px;font-weight:700;color:var(--green)">▾</span>
+          <span style="font-weight:700;font-size:15px">My Active Sessions</span>
+        </div>
+        <div class="le-collapse-body" style="padding:18px 24px">
+          <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Every place you're signed in as <strong id="my-uname-label"></strong>. Revoke any old/unused session to secure your account.</p>
+          <!-- max-height keeps long session lists from pushing the page down;
+               the table scrolls vertically with a sticky header. -->
+          <div style="overflow:auto;max-height:340px;border:1px solid var(--border);border-radius:8px">
+            <table style="margin:0">
+              <thead style="position:sticky;top:0;background:var(--spice-cream,#FAF7F2);z-index:1"><tr><th>Device</th><th>Signed In</th><th>Last Used</th><th>Token Tail</th><th>Actions</th></tr></thead>
+              <tbody id="sessions-list"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card le-collapsible" data-section="users-password" style="padding:0">
+        <div class="le-collapse-head" onclick="leToggleSection('users-password')" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:14px 24px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <span class="le-collapse-chev" style="display:inline-block;width:14px;font-weight:700;color:var(--green)">▾</span>
+          <span style="font-weight:700;font-size:15px">Change My Password</span>
+        </div>
+        <div class="le-collapse-body" style="padding:18px 24px">
+          <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">Changing your password signs you out from all other devices (this one stays signed in).</p>
+          <div style="max-width:420px">
+            <div class="fg"><label>Current password</label><input type="password" id="pw-cur"></div>
+            <div class="fg"><label>New password</label><input type="password" id="pw-new" placeholder="At least 4 characters"></div>
+            <div class="fg"><label>Confirm new password</label><input type="password" id="pw-conf"></div>
+            <button class="btn btn-g" onclick="changeMyPassword()">Update Password</button>
+          </div>
         </div>
       </div>
     </div>
@@ -5591,7 +5621,7 @@ function go(tab){
   document.querySelectorAll('.side-item').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el=document.getElementById('tc-'+tab);if(el)el.classList.add('active');
-  const loaders={dash:loadStats,settings:loadSettings,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
+  const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
     bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,tally:loadTallyAuctions,
@@ -5726,12 +5756,29 @@ async function refreshCurrentTab(){
 //   null  => "All Trades" (cumulative view, default)
 //   <id>  => drilled into that specific auction
 let _dashSelectedAuctionId = null;
+
+// Branch panel collapse state — persists across loadStats() re-renders
+// so the user's open/closed preference sticks during a session.
+let _dashBranchOpen = false;
+function toggleBranchTotals() {
+  _dashBranchOpen = !_dashBranchOpen;
+  const body = document.getElementById('dash-branch-body');
+  const toggle = document.getElementById('dash-branch-toggle');
+  if (body) body.style.display = _dashBranchOpen ? '' : 'none';
+  if (toggle) toggle.textContent = _dashBranchOpen ? '▾ Hide' : '▸ Show';
+}
 async function loadStats(auctionId){
   // Allow explicit override; otherwise use the remembered selection
   if (auctionId !== undefined) _dashSelectedAuctionId = auctionId || null;
+  // Cache-bust on every load. Branch tiles read configured branches
+  // from settings (br1..br9) which can change between dashboard
+  // visits — without the busted URL, the browser serves a stale
+  // /api/stats response and the user sees old branches even after
+  // saving Settings → Branches & Contacts.
+  const _cb = `_=${Date.now()}`;
   const url = _dashSelectedAuctionId
-    ? `/api/stats?auction_id=${_dashSelectedAuctionId}`
-    : '/api/stats?auction_id=all';
+    ? `/api/stats?auction_id=${_dashSelectedAuctionId}&${_cb}`
+    : `/api/stats?auction_id=all&${_cb}`;
   const d=await j(url);
   const K=d.kpi||{}, A=d.currentAuction, S=d.topSellers||[], I=d.recentInvoices||[], C=d.counts||{}, AA=d.allAuctions||[];
   const CUM=d.cumulative||{qty:0,amount:0,lots:0,auctions:0};
@@ -5792,10 +5839,10 @@ async function loadStats(auctionId){
   ` : (A ? `
     <div class="auction-hero" style="background:var(--spice-cardamom-lt);color:var(--spice-text-main)">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px">
-        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">Current ${termAuction()}</div>
+        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">Current Trade</div>
         ${picker}
       </div>
-      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">${termAuction()} #${esc(A.ano)}</div>
+      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">Trade #${esc(A.ano)}</div>
       <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">${fmtD(A.date)} · ${esc(A.crop_type||'')}</div>
       <div class="auction-hero-stats">
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.totalLots||0}</strong>Total Lots</div>
@@ -5803,28 +5850,53 @@ async function loadStats(auctionId){
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.invoiced||0}</strong>Invoiced</div>
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${inrL(A.totalAmt)}</strong>Volume</div>
       </div>
-      <div style="height:10px;background:#ffffff;border:1px solid rgba(22,101,52,.18);border-radius:999px;overflow:hidden;margin-bottom:8px">
-        <div style="height:100%;background:var(--spice-cardamom);width:${A.totalLots?Math.round(A.invoiced/A.totalLots*100):0}%;border-radius:999px;transition:width .6s ease-out"></div>
-      </div>
-      <div class="progress-label" style="color:var(--spice-text-mute);opacity:1">
-        <span>Invoicing progress</span>
-        <span><strong style="color:var(--spice-cardamom-dk)">${A.totalLots?Math.round(A.invoiced/A.totalLots*100):0}%</strong> complete</span>
-      </div>
+      ${(() => {
+        // Compact 2×2 grid of mini progress bars — one per document
+        // workflow for this trade. Kept thin (6px) with the label and
+        // percentage on a single line so all four fit without crowding
+        // the hero. Denominators differ per workflow (see /api/stats):
+        // invoicing/payments are lot-level, purchases/bills are
+        // per-seller. A 0-denominator workflow (e.g. no URD sellers)
+        // shows "n/a" rather than a misleading 0%.
+        const bar = (label, done, total, color) => {
+          const has = total > 0;
+          const pct = has ? Math.round(done / total * 100) : 0;
+          return `
+            <div>
+              <div class="progress-label" style="color:var(--spice-text-mute);opacity:1;font-size:11.5px;margin-bottom:3px">
+                <span>${label}</span>
+                <span>${has ? `<strong style="color:var(--spice-cardamom-dk)">${pct}%</strong>` : '<span style="color:var(--spice-text-hint)">n/a</span>'}</span>
+              </div>
+              <div style="height:6px;background:#ffffff;border:1px solid rgba(22,101,52,.18);border-radius:999px;overflow:hidden" title="${done} of ${total}">
+                <div style="height:100%;background:${color};width:${pct}%;border-radius:999px;transition:width .6s ease-out"></div>
+              </div>
+            </div>`;
+        };
+        return `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;margin-top:2px">
+            ${bar('Invoicing', A.invoiced || 0, A.totalLots || 0, 'var(--spice-cardamom)')}
+            ${bar('Payments', A.paymentsDone || 0, A.paymentsTotal || 0, 'var(--spice-saffron)')}
+            ${bar('Purchases', A.purchasesDone || 0, A.purchasesTotal || 0, 'var(--spice-turmeric)')}
+            ${bar('Bills of Supply', A.billsDone || 0, A.billsTotal || 0, 'var(--spice-clove)')}
+          </div>`;
+      })()}
     </div>
   ` : `
     <div class="auction-hero" style="background:var(--tab-bg);color:var(--spice-text-main)">
-      <div class="auction-hero-label" style="color:var(--spice-text-mute)">No active ${termAuction(false, true)}</div>
-      <div class="auction-hero-number" style="color:var(--spice-text-main);font-size:22px">Create your first ${termAuction(false, true)}</div>
-      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Head to the ${termAuction(true)} tab to get started.</div>
-      <button class="btn btn-a" onclick="go('auctions')" style="margin-top:8px">+ New ${termAuction()}</button>
+      <div class="auction-hero-label" style="color:var(--spice-text-mute)">No active trade</div>
+      <div class="auction-hero-number" style="color:var(--spice-text-main);font-size:22px">Create your first auction</div>
+      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Head to the Auctions tab to get started.</div>
+      <button class="btn btn-a" onclick="go('auctions')" style="margin-top:8px">+ New Trade</button>
     </div>
   `);
 
-  // Per-trade breakdown table (shown only in All-Trades mode, below the hero row)
+  // Per-trade breakdown table (rendered in BOTH cumulative and drilled-in
+  // modes — clicking a row selects that trade for the hero+KPIs above
+  // without losing the cross-trade context this section provides).
   // Companion: a bar chart of revenue per trade rendered above the table
   // (chart container is empty here; real Chart.js drawing happens in a
   // requestAnimationFrame after innerHTML lands so the canvas exists).
-  const chartHTML = isAllMode && PT.length ? `
+  const chartHTML = PT.length ? `
     <div class="card" style="padding:0;margin-bottom:20px">
       <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
         <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Revenue by Trade</h2>
@@ -5836,11 +5908,93 @@ async function loadStats(auctionId){
     </div>
   ` : '';
 
-  const ptHTML = isAllMode && PT.length ? `
+  // ── Branch-wise breakdown ──
+  // Aggregates lots by `lots.branch` for either ALL trades or just the
+  // currently-selected trade. Toggle (collapsed by default) lets the user
+  // open the panel only when they need it — keeps the dashboard compact
+  // for the 90% case where the headline KPIs are sufficient.
+  const BR = Array.isArray(d.branchTotals) ? d.branchTotals : [];
+  const brTotals = BR.reduce(
+    (acc, b) => ({
+      lots:   acc.lots   + (Number(b.lots)   || 0),
+      qty:    acc.qty    + (Number(b.qty)    || 0),
+      amount: acc.amount + (Number(b.amount) || 0),
+    }),
+    { lots:0, qty:0, amount:0 }
+  );
+  const branchScopeLabel = isAllMode
+    ? 'across all trades'
+    : (A ? `in Trade #${esc(A.ano)}` : 'in selected trade');
+  const branchHTML = BR.length ? `
+    <div class="card" id="dash-branch-card" style="padding:0;margin-bottom:20px">
+      <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleBranchTotals()">
+        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Branch-wise Total <span style="font-weight:400;font-size:13px;color:var(--spice-text-hint)">— ${branchScopeLabel}</span></h2>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:12px;color:var(--spice-text-hint)">${BR.length} branch${BR.length===1?'':'es'}</span>
+          <span id="dash-branch-toggle" style="font-size:14px;color:var(--spice-cardamom-dk);font-weight:700;user-select:none">▸ Show</span>
+        </div>
+      </div>
+      <div id="dash-branch-body" style="padding:18px 22px;display:none">
+        <!-- Tile grid — auto-fits to viewport. Each tile shows the
+             branch name, lot count, qty, and amount with a thin share
+             bar at the bottom so the user can compare branches at a
+             glance. Configured branches always render; unrecognized
+             "(unspecified)" or strays are shown muted/italic so the
+             user can spot data they need to clean up. -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px">
+          ${BR.map(b => {
+            const lots = Number(b.lots) || 0;
+            const qty = Number(b.qty) || 0;
+            const amount = Number(b.amount) || 0;
+            const sharePct = brTotals.amount > 0 ? Math.round(amount / brTotals.amount * 100) : 0;
+            const isEmpty = lots === 0;
+            // Empty configured branches get a muted background so
+            // active branches stand out. Strays are filtered out
+            // server-side — every tile here corresponds to a row in
+            // Settings → Branches & Contacts.
+            const tileBg = isEmpty
+              ? 'background:#F9FAFB;border:1px solid var(--spice-line)'
+              : 'background:#fff;border:1px solid var(--spice-line)';
+            return `
+              <div style="${tileBg};border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+                <div style="font-weight:700;font-size:13px;color:var(--spice-text-main);line-height:1.25;word-break:break-word">${esc(b.branch)}</div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
+                  <div style="font-size:22px;font-weight:800;color:var(--spice-cardamom-dk);font-feature-settings:'tnum'">${inrL(amount)}</div>
+                  <div style="font-size:11px;color:var(--spice-text-hint);font-weight:600">${sharePct}%</div>
+                </div>
+                <div style="font-size:11px;color:var(--spice-text-hint);display:flex;justify-content:space-between;gap:8px">
+                  <span><strong style="color:var(--spice-text-main);font-weight:700">${lots}</strong> lot${lots===1?'':'s'}</span>
+                  <span><strong style="color:var(--spice-text-main);font-weight:700">${kg(qty)}</strong></span>
+                </div>
+                <div style="height:4px;background:var(--spice-line);border-radius:999px;overflow:hidden;margin-top:2px">
+                  <div style="height:100%;background:var(--spice-cardamom);width:${sharePct}%;transition:width .4s ease-out"></div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <!-- Footer reconciles to the dashboard headline so the user can
+             verify branch numbers add up to the cumulative total. -->
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--spice-text-hint)">
+          <span><strong style="color:var(--spice-text-main)">Total:</strong> ${brTotals.lots} lot${brTotals.lots===1?'':'s'} · ${kg(brTotals.qty)} · ${inrL(brTotals.amount)}</span>
+          <span>${BR.filter(b => Number(b.lots) > 0).length} active · ${BR.filter(b => Number(b.lots) === 0).length} idle</span>
+        </div>
+      </div>
+    </div>
+  ` : '';
+
+  // Per-kg price formatter — full Indian-grouping, integer rupees (no
+  // ".00" trailing zeros at this density), em-dash for "no sold lot
+  // yet" rows so the column doesn't print misleading ₹0.
+  const inrPrice = n => (Number(n) || 0) > 0
+    ? '₹' + Math.round(Number(n)).toLocaleString('en-IN')
+    : '<span style="color:var(--spice-text-hint)">—</span>';
+
+  const ptHTML = PT.length ? `
     <div class="card" style="padding:0;margin-bottom:20px">
       <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Per-Trade Breakdown</h2>
-        <span style="font-size:12px;color:var(--spice-text-hint)">${PT.length} trade${PT.length===1?'':'s'} · click a row to drill in</span>
+        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Per-trade breakdown</h2>
+        <span style="font-size:12px;color:var(--spice-text-hint)">${PT.length} trade${PT.length===1?'':'s'}${isAllMode ? ' · click a row to drill in' : ' · click the selected row to clear'}</span>
       </div>
       <div style="padding:0 4px;overflow-x:auto">
         <table style="width:100%">
@@ -5851,20 +6005,39 @@ async function loadStats(auctionId){
               <th>Crop</th>
               <th class="num">Lots</th>
               <th class="num">Qty</th>
+              <th class="num" title="Lots with a buyer code (excludes WD)">Sold Qty</th>
+              <th class="num" title="Lots with code = WD">Withdrawn Qty</th>
               <th class="num">Amount</th>
+              <th class="num" title="Lowest sold price per kg">Min</th>
+              <th class="num" title="Highest sold price per kg">Max</th>
+              <th class="num" title="Σ amount ÷ Σ sold qty">Avg</th>
               <th class="num">Invoiced</th>
             </tr>
           </thead>
           <tbody>
             ${PT.map(t=>{
               const pct = t.lots ? Math.round((t.invoiced||0)/t.lots*100) : 0;
-              return `<tr style="cursor:pointer" onclick="loadStats(${t.id})">
+              // Highlight the currently-selected trade so the operator
+              // can see what the hero/KPIs above are scoped to. Clicking
+              // the highlighted row again clears the selection (back to
+              // All Trades) — mirrors the picker dropdown's "all" option.
+              const sel = !isAllMode && t.id === _dashSelectedAuctionId;
+              const rowStyle = sel
+                ? 'cursor:pointer;background:var(--spice-cardamom-lt);box-shadow:inset 3px 0 0 var(--spice-cardamom-dk)'
+                : 'cursor:pointer';
+              const target = sel ? 'null' : String(t.id);
+              return `<tr style="${rowStyle}" onclick="loadStats(${target})">
                 <td><strong>#${esc(t.ano)}</strong></td>
                 <td style="color:var(--spice-text-mute)">${fmtD(t.date)}</td>
                 <td>${esc(t.crop_type||'—')}</td>
                 <td class="num">${t.lots||0}</td>
                 <td class="num">${kg(t.qty)}</td>
+                <td class="num" style="color:var(--spice-cardamom-dk)">${kg(t.sold_qty)}</td>
+                <td class="num" style="color:${(t.wd_qty||0)>0?'#991B1B':'var(--spice-text-hint)'}">${kg(t.wd_qty)}</td>
                 <td class="num"><strong>${inrL(t.amount)}</strong></td>
+                <td class="num">${inrPrice(t.min_price)}</td>
+                <td class="num">${inrPrice(t.max_price)}</td>
+                <td class="num"><strong>${inrPrice(t.avg_price)}</strong></td>
                 <td class="num">
                   <span style="display:inline-flex;align-items:center;gap:6px">
                     <span style="width:40px;height:6px;background:var(--spice-line);border-radius:999px;overflow:hidden;display:inline-block">
@@ -5881,7 +6054,12 @@ async function loadStats(auctionId){
               <td colspan="3" style="padding:12px 22px">Totals</td>
               <td class="num">${CUM.lots||0}</td>
               <td class="num">${kg(CUM.qty)}</td>
+              <td class="num">${kg(CUM.sold_qty)}</td>
+              <td class="num">${kg(CUM.wd_qty)}</td>
               <td class="num">${inrL(CUM.amount)}</td>
+              <td class="num">${inrPrice(CUM.min_price)}</td>
+              <td class="num">${inrPrice(CUM.max_price)}</td>
+              <td class="num">${inrPrice(CUM.avg_price)}</td>
               <td></td>
             </tr>
           </tfoot>
@@ -5936,18 +6114,18 @@ async function loadStats(auctionId){
     <div class="greeting">
       <div>
         <h1>${greet}, ${esc(uname)} <span class="wave">👋</span></h1>
-        <p>Here's what's happening at Ideal Spices today, ${today}</p>
+        <p>Here's what's happening today, ${today}</p>
       </div>
       <div style="display:flex;gap:10px">
-        <button class="btn btn-o" onclick="go('lots')">Import Data</button>
-        <button class="btn btn-a" onclick="go('auctions')">+ New Auction</button>
+        <button class="btn btn-o" onclick="go('lots')">Import data</button>
+        <button class="btn btn-a" onclick="go('auctions')">+ New trade</button>
       </div>
     </div>
 
     <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M8 13v5M13 9v9M18 6v12"/></svg></div>
-        <div class="kpi-label">${isAllMode ? 'Total Volume' : 'Trade Volume'}</div>
+        <div class="kpi-label">${isAllMode ? 'Total volume' : 'Trade volume'}</div>
         <div class="kpi-value">${isAllMode
           ? inrL(CUM.amount).replace('₹','').replace('L','')
           : inrL(A ? A.totalAmt : 0).replace('₹','').replace('L','')}<span class="kpi-unit">${isAllMode
@@ -5959,7 +6137,7 @@ async function loadStats(auctionId){
       </div>
       <div class="kpi cardamom">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></div>
-        <div class="kpi-label">${isAllMode ? 'Total Lots' : 'Active Lots'}</div>
+        <div class="kpi-label">${isAllMode ? 'Total lots' : 'Active lots'}</div>
         <div class="kpi-value">${isAllMode ? (CUM.lots||0) : (K.activeLots||0)}</div>
         <span class="kpi-delta neutral">${isAllMode
           ? `across all trades`
@@ -5967,7 +6145,7 @@ async function loadStats(auctionId){
       </div>
       <div class="kpi turmeric">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
-        <div class="kpi-label">Pending Invoices</div>
+        <div class="kpi-label">Pending invoices</div>
         <div class="kpi-value">${K.pendingInvoices||0}</div>
         <span class="kpi-delta ${K.pendingInvoices>0?'down':'neutral'}">${K.pendingInvoices>0
           ? (isAllMode ? 'Across all trades' : 'Buyers awaiting')
@@ -5975,9 +6153,24 @@ async function loadStats(auctionId){
       </div>
       <div class="kpi chili">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg></div>
-        <div class="kpi-label">Revenue This Month</div>
+        <div class="kpi-label">Revenue this month</div>
         <div class="kpi-value">${inrL(K.monthRevenue).replace('₹','').replace('L','')}<span class="kpi-unit">${(K.monthRevenue||0)>=100000?'L':''}</span></div>
         ${revPill}
+      </div>
+    </div>
+
+    <div class="card" id="dash-headline-card" style="padding:0;margin-bottom:20px">
+      <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <h2 style="font-size:17px;font-weight:700;margin:0 0 2px;color:var(--spice-text-main)">🎯 Headline metrics</h2>
+          <p style="margin:0;font-size:12.5px;color:var(--spice-text-mute)" id="dash-headline-sub">${isAllMode ? 'At-a-glance totals across every trade.' : 'At-a-glance totals for the selected trade.'}</p>
+        </div>
+        <div style="font-size:12px;color:var(--spice-text-hint)" id="dash-headline-range">${isAllMode ? 'All trades' : (A ? `Trade #${esc(A.ano)} · ${fmtD(A.date)}` : '')}</div>
+      </div>
+      <div style="padding:14px 22px 18px" id="dash-headline-body">
+        <div class="kpi-grid" id="dash-headline-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:0">
+          <div style="grid-column:1/-1;padding:18px 8px;text-align:center;color:var(--spice-text-hint);font-size:13px">Loading…</div>
+        </div>
       </div>
     </div>
 
@@ -5985,23 +6178,23 @@ async function loadStats(auctionId){
       ${aHTML}
       <div class="card" style="padding:0">
         <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Quick Actions</h2>
+          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Quick actions</h2>
         </div>
         <div style="padding:16px 22px 22px">
           <div class="qa-grid">
             <button class="qa" onclick="go('invoices')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
-              <div class="qa-label">Generate Invoices</div>
+              <div class="qa-label">Generate invoices</div>
               <div class="qa-sub">For all buyers</div>
             </button>
             <button class="qa" onclick="go('exports')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
-              <div class="qa-label">Export Data</div>
+              <div class="qa-label">Export data</div>
               <div class="qa-sub">XLSX or PDF</div>
             </button>
             <button class="qa" onclick="go('auctions')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
-              <div class="qa-label">New Auction</div>
+              <div class="qa-label">New trade</div>
               <div class="qa-sub">Start today's trade</div>
             </button>
             <button class="qa" onclick="go('payments')">
@@ -6016,19 +6209,21 @@ async function loadStats(auctionId){
 
     ${chartHTML}
 
+    ${branchHTML}
+
     ${ptHTML}
 
     <div class="dash-row-eq">
       <div class="card" style="padding:0">
         <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Recent Invoices</h2>
+          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Recent invoices</h2>
           <a href="#" onclick="go('invoices');return false" style="font-size:13px;color:var(--spice-saffron);font-weight:600;text-decoration:none">View all →</a>
         </div>
         <div style="padding:0 4px">${invoicesHTML}</div>
       </div>
       <div class="card" style="padding:0">
         <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Top Sellers</h2>
+          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Top sellers</h2>
           <span style="font-size:12px;color:var(--spice-text-hint)">Last 7 days</span>
         </div>
         <div style="padding:4px 22px 18px">${sellersHTML}</div>
@@ -6036,10 +6231,20 @@ async function loadStats(auctionId){
     </div>
   `;
 
+  // Restore branch panel open state after re-render — without this the
+  // panel snaps shut every time loadStats() is called (e.g. picking a
+  // different trade in the dropdown), losing the user's expand choice.
+  if (_dashBranchOpen) {
+    const body = document.getElementById('dash-branch-body');
+    const toggle = document.getElementById('dash-branch-toggle');
+    if (body) body.style.display = '';
+    if (toggle) toggle.textContent = '▾ Hide';
+  }
+
   // Render the dashboard revenue chart AFTER the HTML is in the DOM so
   // the canvas element exists for Chart.js to grab. requestAnimationFrame
   // ensures layout has settled before we measure the canvas size.
-  if (typeof Chart !== 'undefined' && isAllMode && PT.length) {
+  if (typeof Chart !== 'undefined' && PT.length) {
     requestAnimationFrame(() => {
       const canvas = document.getElementById('dash-revenue-chart');
       if (!canvas) return;
@@ -6101,6 +6306,242 @@ async function loadStats(auctionId){
         }
       });
     });
+  }
+
+  // Headline metric tiles. Mirrors the Insights "Headline metrics"
+  // strip but always for the dashboard-selected trade (or current
+  // calendar month when "All Trades" is picked). The tile grid renders
+  // synchronously above with a "Loading…" placeholder; this call fills
+  // it in asynchronously so the dashboard paint is never blocked.
+  renderDashHeadlineTiles(_dashSelectedAuctionId);
+}
+
+// Keep every headline value on ONE line with decimals visible. Money
+// totals like "₹11,65,74,670.30" can exceed the tile width at the base
+// 20px font; rather than wrap (which slid under the corner icon), we
+// shrink the WHOLE strip's font uniformly — one size for all nine tiles
+// so they stay visually consistent — until the widest value fits. Pure
+// CSS can't size-to-fit a variable-width grid track, so we measure here.
+function fitDashHeadlineValues(grid){
+  if (!grid) return;
+  const vals = Array.from(grid.querySelectorAll('.kpi-value'));
+  if (!vals.length) return;
+  const BASE = 20, MIN = 11;
+  let fs = BASE;
+  vals.forEach(v => { v.style.fontSize = fs + 'px'; });
+  // scrollWidth > clientWidth means the (nowrap) text overflows its tile.
+  // +1 tolerates sub-pixel rounding so we don't shrink a value that fits.
+  while (fs > MIN && vals.some(v => v.scrollWidth > v.clientWidth + 1)) {
+    fs -= 1;
+    vals.forEach(v => { v.style.fontSize = fs + 'px'; });
+  }
+}
+// Re-fit when the window resizes (tile widths change with the grid).
+let _dashFitRaf;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(_dashFitRaf);
+  _dashFitRaf = requestAnimationFrame(() => {
+    const g = document.getElementById('dash-headline-grid');
+    if (g && g.offsetParent) fitDashHeadlineValues(g);
+  });
+});
+
+// Fills #dash-headline-grid by querying /api/insights. When auctionId
+// is set we ask for that single trade; otherwise the endpoint defaults
+// to the current calendar month — the same default Insights uses.
+async function renderDashHeadlineTiles(auctionId){
+  const grid = document.getElementById('dash-headline-grid');
+  if (!grid) return;
+  const fmtI = (n, dp) => {
+    const v = Number(n) || 0;
+    return v.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  };
+  // Use the dashboard's existing .kpi shell so these tiles match the
+  // top KPI row (Total volume / Pending invoices / etc.) exactly.
+  // Colors cycle the four .kpi accent variants — saffron (default),
+  // cardamom, turmeric, chili — so the strip stays visually consistent
+  // with the rest of the dashboard while still reading at a glance.
+  // `meta` (optional) is an array of [label, value] pairs rendered as a
+  // small breakdown table under the headline number (e.g. bags/qty/amount).
+  const tile = (icon, label, value, accent, meta) => `<div class="kpi${accent ? ' ' + accent : ''}">
+    <div class="kpi-icon">${icon}</div>
+    <div class="kpi-label">${esc(label)}</div>
+    <div class="kpi-value">${value}</div>
+    ${meta && meta.length ? `<div class="kpi-meta">${meta.map(([l, v]) => `<span class="lbl">${esc(l)}</span><span class="val">${v}</span>`).join('')}</div>` : ''}
+  </div>`;
+  const price = n => (n != null && Number(n) > 0) ? fmtI(n, 0) : '—';
+  try {
+    const url = auctionId
+      ? `/api/insights?auction_id=${auctionId}&_=${Date.now()}`
+      : `/api/insights?_=${Date.now()}`;
+    const d = await j(url);
+    const t = (d && d.totals) || {};
+    grid.innerHTML =
+      tile('📊', 'Trades',      fmtI(t.trades, 0),    'cardamom') +
+      tile('🌾', 'Lots',        fmtI(t.lots, 0),      '', [
+        ['Bags',     fmtI(t.bags, 0)],
+        ['Qty (kg)', fmtI(t.qty, 2)],
+        ['Amount',   '₹' + fmtI(t.value, 2)],
+      ]) +
+      tile('✅', 'Sold',        fmtI(t.sold, 0),      'cardamom', [
+        ['Bags',     fmtI(t.sold_bags, 0)],
+        ['Qty (kg)', fmtI(t.sold_qty, 2)],
+        ['Amount',   '₹' + fmtI(t.sold_value, 2)],
+      ]) +
+      tile('↩️', 'Withdrawn',   fmtI(t.withdrawn, 0), 'turmeric', [
+        ['Bags',     fmtI(t.wd_bags, 0)],
+        ['Qty (kg)', fmtI(t.wd_qty, 2)],
+        ['Amount',   '₹' + fmtI(t.wd_value, 2)],
+      ]) +
+      tile('💰', 'Value',       '₹' + fmtI(t.value, 2), 'cardamom', [
+        ['Min ₹', price(t.min_price)],
+        ['Max ₹', price(t.max_price)],
+        ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
+      ]) +
+      tile('💸', 'Payable',     '₹' + fmtI(t.payable_to_sellers, 2),    'chili') +
+      tile('⏳', 'Outstanding', '₹' + fmtI(t.outstanding_by_buyers, 2), 'chili');
+    // Shrink-to-fit once layout is committed so scrollWidth/clientWidth
+    // reflect the real tile widths.
+    requestAnimationFrame(() => fitDashHeadlineValues(grid));
+  } catch (e) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:14px 8px;text-align:center;color:var(--spice-text-hint);font-size:13px">Could not load headline metrics.</div>`;
+  }
+}
+
+// Range tracker for the revenue-trend chart. Default 7 days; changed by
+// the 7/14/30 buttons on the card header.
+let _dashRevTrendDays = 7;
+function setRevenueTrendRange(days){
+  _dashRevTrendDays = Math.max(1, Math.min(90, parseInt(days, 10) || 7));
+  // Reflect the active button visually
+  const wrap = document.getElementById('dash-rev-range');
+  if (wrap) {
+    wrap.querySelectorAll('button[data-days]').forEach(b => {
+      b.classList.toggle('btn-a', Number(b.dataset.days) === _dashRevTrendDays);
+      b.classList.toggle('btn-o', Number(b.dataset.days) !== _dashRevTrendDays);
+    });
+  }
+  renderRevenueTrendChart();
+}
+async function renderRevenueTrendChart(){
+  // Defer until DOM updates from the loadStats render are committed so
+  // the canvas element exists and has a measured size.
+  if (typeof Chart === 'undefined') return;
+  try {
+    const d = await j(`/api/stats/revenue-trend?days=${_dashRevTrendDays}`);
+    const series = (d && d.series) || [];
+    const canvas = document.getElementById('dash-rev-chart');
+    const empty  = document.getElementById('dash-rev-empty');
+    const wrap   = document.getElementById('dash-rev-canvas-wrap');
+    if (!canvas) return;
+    const totalRevenue = series.reduce((a, p) => a + (Number(p.total) || 0), 0);
+    if (totalRevenue === 0) {
+      // Show the empty state and hide the canvas — Chart.js complains
+      // about all-zero data on a logarithmic axis but a line chart at
+      // y=0 across a week just looks broken either way.
+      if (empty) empty.style.display = 'block';
+      if (wrap)  wrap.style.display  = 'none';
+      if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
+      // Reflect active range button on first render (so the default
+      // 7-day button looks active without the user clicking it).
+      const rangeWrap = document.getElementById('dash-rev-range');
+      if (rangeWrap) {
+        rangeWrap.querySelectorAll('button[data-days]').forEach(b => {
+          b.classList.toggle('btn-a', Number(b.dataset.days) === _dashRevTrendDays);
+          b.classList.toggle('btn-o', Number(b.dataset.days) !== _dashRevTrendDays);
+        });
+      }
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    if (wrap)  wrap.style.display  = '';
+
+    // Format labels — for ≤14 days show "Mon 15", for 30 days show
+    // "15 Nov" to avoid X-axis crowding.
+    const fmtLabel = (iso) => {
+      const dt = new Date(iso);
+      if (_dashRevTrendDays <= 14) {
+        return dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' });
+      }
+      return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    };
+    const labels = series.map(p => fmtLabel(p.date));
+    const data   = series.map(p => Number(p.total) || 0);
+
+    if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
+    const ctx = canvas.getContext('2d');
+    // Soft gradient fill under the line
+    const grad = ctx.createLinearGradient(0, 0, 0, 200);
+    grad.addColorStop(0, 'rgba(22, 101, 52, 0.18)');
+    grad.addColorStop(1, 'rgba(22, 101, 52, 0.02)');
+    canvas._chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Revenue',
+          data,
+          borderColor: '#166534',
+          backgroundColor: grad,
+          borderWidth: 2.5,
+          pointBackgroundColor: '#166534',
+          pointRadius: _dashRevTrendDays <= 14 ? 4 : 0,
+          pointHoverRadius: 6,
+          fill: true,
+          tension: 0.35,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#0F172A',
+            padding: 10,
+            titleFont: { weight: '600' },
+            callbacks: {
+              title: (items) => {
+                const p = series[items[0].dataIndex];
+                if (!p) return items[0].label;
+                const dt = new Date(p.date);
+                return dt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+              },
+              label: (ctx) => {
+                const v = ctx.parsed.y;
+                const p = series[ctx.dataIndex];
+                const cnt = p ? p.count : 0;
+                const formatted = v >= 100000 ? `₹${(v/100000).toFixed(2)}L` : `₹${Math.round(v).toLocaleString('en-IN')}`;
+                return `${formatted}  ·  ${cnt} invoice${cnt===1?'':'s'}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94A3B8', maxRotation: 0 } },
+          y: {
+            beginAtZero: true,
+            grid: { color: '#E2E8F0', drawBorder: false },
+            ticks: {
+              font: { size: 11 }, color: '#94A3B8',
+              callback: (v) => v >= 100000 ? `₹${(v/100000).toFixed(1)}L` : `₹${(v/1000).toFixed(0)}k`,
+            },
+          },
+        },
+      },
+    });
+
+    // Reflect active button on first render
+    const rangeWrap = document.getElementById('dash-rev-range');
+    if (rangeWrap) {
+      rangeWrap.querySelectorAll('button[data-days]').forEach(b => {
+        b.classList.toggle('btn-a', Number(b.dataset.days) === _dashRevTrendDays);
+        b.classList.toggle('btn-o', Number(b.dataset.days) !== _dashRevTrendDays);
+      });
+    }
+  } catch (e) {
+    // Silent fail — chart is non-essential. Surface in console for debugging.
+    console.warn('Revenue trend chart failed:', e);
   }
 }
 
@@ -6568,10 +7009,14 @@ function bcRenderCharts(){
 async function loadUsers(){
   const uname = document.getElementById('user-lbl')?.textContent || '';
   const lbl = document.getElementById('my-uname-label'); if(lbl) lbl.textContent = uname;
+  // Restore the collapsed/expanded state of the Users sub-section cards
+  // (they reuse the Lot-Entry collapsible machinery via data-section).
+  try { leRestoreCollapseState(); } catch(_) {}
   // Load users list
   try{
     const users = await j('/api/users');
     DataTable.mount('users-list', users, {
+      emptyState: { icon: 'traders', title: "No users yet", body: "Create logins so each person on your team can use their own credentials." },
       columns: [
         { key:'username', label:'Username', sort:'text', render:(u)=>{
             const isMe = u.username === uname;
@@ -7213,6 +7658,220 @@ function captureCurrentPanel(){
     if(f)f.value=val;
   });
 }
+// Render the Settings → Integrations status card. Self-contained so
+// it can be called from selectCat() and from gstLookup() (which fires
+// it when the operator is currently looking at the integrations panel
+// — keeps the card live without a manual refresh).
+async function _renderGstApiStatus(){
+  const host = document.getElementById('gst-api-status-host');
+  if (!host) return;
+  host.innerHTML =
+    '<div style="padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:#f9fafb;font-size:12.5px;color:var(--text2)">Loading GST lookup status…</div>';
+  let s;
+  try {
+    const r = await fetch('/api/gst-lookup/status', {
+      headers: T ? { 'Authorization': 'Bearer ' + T } : {},
+      cache: 'no-store',
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    s = await r.json();
+  } catch (e) {
+    host.innerHTML =
+      `<div style="padding:14px 16px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;font-size:12.5px">Could not load GST lookup status: ${esc(e.message || String(e))}</div>`;
+    return;
+  }
+  // Pick a tone (background + border + headline colour) per level.
+  const tones = {
+    exhausted: { bg:'#fef2f2', bd:'#fecaca', fg:'#991b1b', icon:'🚫', head:'GST credits exhausted — recharge before the next lookup' },
+    critical:  { bg:'#fef2f2', bd:'#fecaca', fg:'#991b1b', icon:'⚠',  head:'Very low — recharge soon' },
+    warning:   { bg:'#fffbeb', bd:'#fde68a', fg:'#92400e', icon:'⏳', head:'Running low — consider recharging' },
+    ok:        { bg:'#ecfdf5', bd:'#a7f3d0', fg:'#065f46', icon:'✓',  head:'GST lookup API is healthy' },
+    unknown:   { bg:'#f9fafb', bd:'#e5e7eb', fg:'#374151', icon:'ℹ',  head:'GST lookup status unknown' },
+  };
+  const tone = tones[s.level] || tones.unknown;
+  const rows = [];
+  if (s.has_api_key) {
+    rows.push(['API key', '<span style="color:#065f46;font-weight:600">✓ configured</span>']);
+  } else {
+    rows.push(['API key', '<span style="color:#991b1b;font-weight:600">not set</span> — paste your key into the field below to enable live lookups']);
+  }
+  if (s.credits_remaining != null) {
+    const total = s.credits_total != null ? ` of ${fmtI(s.credits_total, 0)}` : '';
+    rows.push(['Credits remaining',
+      `<strong style="font-size:14px;color:${tone.fg}">${fmtI(s.credits_remaining, 0)}</strong>${total}`]);
+  } else if (s.has_api_key && s.last_envelope) {
+    // Lookup ran but the probe didn't recognise any credit field
+    // name. Help the operator (and the dev reading the screen over
+    // their shoulder) figure out what to add to the probe by showing
+    // exactly which fields came back.
+    rows.push(['Credits remaining',
+      '<span style="color:#991b1b;font-weight:600">unknown</span> — the API did not include a recognised credit field. See the raw response below.']);
+  } else if (s.has_api_key) {
+    rows.push(['Credits remaining', '<span style="color:var(--text3)">unknown — run one GST lookup to refresh</span>']);
+  }
+  if (s.plan_expires_at) {
+    rows.push(['Plan expires', `<code style="font-family:ui-monospace,Menlo,Consolas,monospace">${esc(s.plan_expires_at)}</code>`]);
+  }
+  if (s.last_checked_at) {
+    const t = new Date(s.last_checked_at);
+    const when = isNaN(t.getTime()) ? esc(s.last_checked_at) : t.toLocaleString();
+    rows.push(['Last refreshed', `<span style="color:var(--text3)">${esc(when)}</span>`]);
+  }
+  // Warning thresholds — surfaced so the operator knows when the badge
+  // will start nudging them.
+  rows.push(['Warn at', `<code>≤ ${s.warn_below}</code> credits · critical at <code>≤ ${s.critical_below}</code>`]);
+
+  const rechargeHref = s.recharge_url || 'https://gstincheck.co.in/';
+  // Raw-envelope viewer — collapsed by default but auto-expanded when
+  // the probe failed (level==='unknown' yet a response was captured).
+  // The pre block is the GROUND TRUTH of what gstincheck.co.in shipped
+  // back the last time we hit them; if a credit field is in there
+  // under a name our probe doesn't know, the operator can paste the
+  // shape to the dev (or the dev to ChatGPT) and we add the alias.
+  let envelopeHtml = '';
+  if (s.last_envelope) {
+    const probeMissed = (s.level === 'unknown') && s.has_api_key;
+    const pretty = JSON.stringify(s.last_envelope, null, 2);
+    envelopeHtml = `
+      <details ${probeMissed ? 'open' : ''} style="margin-top:12px;border-top:1px dashed ${tone.bd};padding-top:10px">
+        <summary style="cursor:pointer;font-size:11.5px;font-weight:600;color:${tone.fg};user-select:none">
+          ${probeMissed ? '⚠ Raw response from gstincheck.co.in (probe found no credit field — see what came back)' : 'Show raw response from gstincheck.co.in'}
+        </summary>
+        <pre style="margin:8px 0 0;padding:10px 12px;background:#0b1220;color:#e2e8f0;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.45;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word">${esc(pretty)}</pre>
+        ${probeMissed ? `<div style="margin-top:8px;font-size:11.5px;color:${tone.fg};line-height:1.5">
+          If you can see a credit count above (e.g. a number under a key like <code>availableSearch</code> or <code>x-credits-remaining</code>), send this JSON to your dev — they'll add that field name to the credit probe and the count will start showing in the card and the topbar pill.
+        </div>` : ''}
+      </details>`;
+  }
+  host.innerHTML = `
+    <div style="padding:14px 16px;border:1px solid ${tone.bd};border-radius:10px;background:${tone.bg};color:${tone.fg}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:18px;line-height:1">${tone.icon}</span>
+        <strong style="font-size:13.5px">${esc(tone.head)}</strong>
+        <span style="flex:1"></span>
+        <a href="${rechargeHref}" target="_blank" rel="noopener"
+           style="font-size:11.5px;font-weight:700;background:${tone.fg};color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none">↗ Recharge at gstincheck.co.in</a>
+      </div>
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:4px 12px;font-size:12.5px">
+        ${rows.map(([k, v]) => `<div style="color:var(--text2);font-weight:600">${esc(k)}</div><div>${v}</div>`).join('')}
+      </div>
+      <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.5">
+        Credits refresh automatically every time someone runs a real GST lookup (from the Sellers or Buyers form).
+        ${s.has_api_key ? '' : 'Paste your key from the gstincheck.co.in dashboard into the field below to start tracking.'}
+      </div>
+      ${envelopeHtml}
+    </div>`;
+}
+
+// ── WhatsApp Business config card (Settings → Integrations) ────────
+// Secrets live server-side in the whatsapp_config table and are NEVER
+// returned to the browser; /api/whatsapp/status hands back only booleans
+// (hasToken etc.) + non-secret identifiers + live health from Meta. The
+// inputs carry explicit borders/backgrounds so the focused-but-invisible
+// caret bug on Windows Electron can't bite these fields.
+async function _renderWhatsappCard(){
+  const host = document.getElementById('whatsapp-config-host');
+  if (!host) return;
+  host.innerHTML = '<div style="padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:#f9fafb;font-size:12.5px;color:var(--text2)">Loading WhatsApp status…</div>';
+  let s;
+  try {
+    const r = await fetch(B + '/api/whatsapp/status', { headers: T ? { 'Authorization':'Bearer '+T } : {}, cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    s = await r.json();
+  } catch (e) {
+    host.innerHTML = `<div style="padding:14px 16px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;font-size:12.5px">Could not load WhatsApp status: ${esc(e.message||String(e))}</div>`;
+    return;
+  }
+  const webhookUrl = `${location.origin}/api/whatsapp/webhook`;
+  const tone = s.configured
+    ? (s.live
+        ? {bd:'#a7f3d0',fg:'#065f46',icon:'✓',head:`Connected${s.displayPhone?(' · '+esc(s.displayPhone)):''}${s.qualityRating?(' · quality '+esc(s.qualityRating)):''}`}
+        : {bd:'#fde68a',fg:'#92400e',icon:'⚠',head:`Saved, but Meta check failed: ${esc(s.liveError||'unknown')}`})
+    : {bd:'#e5e7eb',fg:'#374151',icon:'ℹ',head:'Not configured — paste your Meta credentials below'};
+  const inStyle = 'width:100%;padding:7px 9px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font-size:12.5px;box-sizing:border-box';
+  const lblStyle = 'display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:3px;text-transform:uppercase;letter-spacing:.3px';
+  const field = (id,label,val,ph,type) => `<div><label style="${lblStyle}">${esc(label)}</label><input id="${id}" type="${type||'text'}" value="${esc(val||'')}" placeholder="${esc(ph||'')}" autocomplete="off" spellcheck="false" style="${inStyle}"></div>`;
+  const secretPh = (has) => has ? '•••••••• configured — leave blank to keep' : 'not set';
+  host.innerHTML = `
+    <div style="border:1px solid ${tone.bd};border-radius:10px;background:#fff;overflow:hidden">
+      <div style="padding:13px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid ${tone.bd};background:#f9fafb">
+        <span style="font-size:18px;line-height:1">📱</span>
+        <strong style="font-size:13.5px;color:${tone.fg}">WhatsApp Business (Cloud API)</strong>
+        <span style="flex:1"></span>
+        <span style="font-size:11.5px;font-weight:700;color:${tone.fg}">${tone.icon} ${tone.head}</span>
+      </div>
+      <div style="padding:14px 16px">
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.55;margin-bottom:13px">
+          Every send goes through an approved <strong>template</strong>, so invoices reach anyone — even contacts who never messaged you. Create two templates in Meta (a <strong>Document</strong> template + a <strong>Text</strong> template, both with body <code>Dear {{1}}, {{2}} Regards, {{3}}.</code>), get them approved, then paste their names below.${s.source==='env'?'<br><strong>Heads up:</strong> some values come from environment variables and override what you save here.':''}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          ${field('wa-token','Access token','',secretPh(s.hasToken),'password')}
+          ${field('wa-phone-id','Phone number ID',s.phoneId,'e.g. 123456789012345')}
+          ${field('wa-waba-id','WhatsApp Business Account ID',s.wabaId,'optional')}
+          ${field('wa-app-secret','App secret','',secretPh(s.hasAppSecret),'password')}
+          ${field('wa-verify-token','Webhook verify token','',secretPh(s.hasVerifyToken),'password')}
+          ${field('wa-display-number','Display number (label)',s.displayNumber,'optional')}
+          ${field('wa-tpl-document','Document template name',s.tplDocument,'e.g. invoice_document')}
+          ${field('wa-tpl-document-lang','Document template language',s.tplDocumentLang||'en','en')}
+          ${field('wa-tpl-text','Text template name',s.tplText,'e.g. payment_notice')}
+          ${field('wa-tpl-text-lang','Text template language',s.tplTextLang||'en','en')}
+        </div>
+        <div style="margin-top:13px">
+          <label style="${lblStyle}">Webhook callback URL — paste into Meta → WhatsApp → Configuration</label>
+          <div style="display:flex;gap:6px">
+            <input id="wa-webhook-url" type="text" readonly value="${esc(webhookUrl)}" style="${inStyle};background:#f1f5f9;color:#475569">
+            <button type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(webhookUrl)}').then(()=>toast('Webhook URL copied'))" style="white-space:nowrap;padding:7px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Copy</button>
+          </div>
+          <div style="font-size:11px;color:${s.webhookReady?'#065f46':'var(--text3)'};margin-top:4px">${s.webhookReady?'✓ Webhook ready (verify token + app secret set) — subscribe to the “messages” field in Meta to receive delivery receipts.':'Set the app secret + verify token to enable delivery tracking.'}</div>
+        </div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" id="wa-save-btn" onclick="_saveWhatsappConfig()" style="padding:8px 16px;border:none;border-radius:6px;background:#25D366;color:#fff;font-weight:700;font-size:12.5px;cursor:pointer">Save</button>
+          <button type="button" id="wa-test-btn" onclick="_testWhatsapp()" ${s.configured?'':'disabled'} style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font-weight:600;font-size:12.5px;cursor:${s.configured?'pointer':'not-allowed'};opacity:${s.configured?'1':'.5'}">Send test message</button>
+          <span id="wa-card-msg" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+      </div>
+    </div>`;
+}
+async function _saveWhatsappConfig(){
+  const v = (id) => { const el=document.getElementById(id); return el?el.value:undefined; };
+  const body = {
+    token: v('wa-token'), phoneId: v('wa-phone-id'), wabaId: v('wa-waba-id'),
+    appSecret: v('wa-app-secret'), verifyToken: v('wa-verify-token'), displayNumber: v('wa-display-number'),
+    tplDocument: v('wa-tpl-document'), tplDocumentLang: v('wa-tpl-document-lang'),
+    tplText: v('wa-tpl-text'), tplTextLang: v('wa-tpl-text-lang'),
+  };
+  const msgEl = document.getElementById('wa-card-msg');
+  const btn = document.getElementById('wa-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(B + '/api/whatsapp/config', { method:'PUT', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Save failed');
+    _waApiCheck = null; // invalidate cached capability probe so sends re-check
+    if (msgEl){ msgEl.textContent='Saved ✓'; msgEl.style.color='#065f46'; }
+    _renderWhatsappCard(); // re-hydrate: refresh masks + live status
+  } catch (e) {
+    if (msgEl){ msgEl.textContent = e.message; msgEl.style.color='#991b1b'; }
+    if (btn) btn.disabled = false;
+  }
+}
+async function _testWhatsapp(){
+  const phone = prompt('Send a test WhatsApp message to which number?\n(10-digit Indian number, or full international e.g. 919876543210)');
+  if (!phone) return;
+  const msgEl = document.getElementById('wa-card-msg');
+  const btn = document.getElementById('wa-test-btn');
+  if (btn) btn.disabled = true;
+  if (msgEl){ msgEl.textContent='Sending test…'; msgEl.style.color='var(--text3)'; }
+  try {
+    const r = await fetch(B + '/api/whatsapp/test', { method:'POST', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify({ phone }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Test failed');
+    if (msgEl){ msgEl.textContent='Test sent ✓ — check the recipient phone'; msgEl.style.color='#065f46'; }
+  } catch (e) {
+    if (msgEl){ msgEl.textContent = 'Test failed: '+e.message; msgEl.style.color='#991b1b'; }
+  } finally { if (btn) btn.disabled = false; }
+}
+
 function renderSettingsPanel(){
   const ck=_activeCat;
   if(!ck||!_cats[ck]){document.getElementById('settings-root').innerHTML='<div class="set-no-match">Select a category</div>';return}
@@ -7286,11 +7945,30 @@ function renderSettingsPanel(){
     } else if (ck === 'sister') {
       html += logoUploadWidget('asp', 'Sister Company Logo (ASP)');
     }
+    // Integrations tab gets a live status card for the GST lookup API:
+    // credits left, plan expiry, last-checked timestamp, recharge link.
+    // The placeholder is populated by _renderGstApiStatus once the panel
+    // mounts; rendering it here keeps it above the API-key input.
+    if (ck === 'integrations') {
+      html += '<div id="gst-api-status-host" style="margin-bottom:14px"></div>';
+    }
     html+='<div class="sgrid">';
     for(const f of fields)html+=fld(f);
     html+='</div>';
+    // WhatsApp Business config lives in a dedicated server-side table
+    // (secrets never reach the browser), so it renders as its own card
+    // below the standard integration fields rather than via fld().
+    if (ck === 'integrations') {
+      html += '<div id="whatsapp-config-host" style="margin-top:18px"></div>';
+    }
   }
   document.getElementById('settings-root').innerHTML=html;
+  // Hydrate the integrations cards from their status endpoints after the
+  // panel HTML has landed in the DOM.
+  if (ck === 'integrations') {
+    if (typeof _renderGstApiStatus === 'function') { try { _renderGstApiStatus(); } catch(_){} }
+    if (typeof _renderWhatsappCard === 'function') { try { _renderWhatsappCard(); } catch(_){} }
+  }
   // Reset dirty flag on panel render so stale dirty state doesn't trigger
   // a false "unsaved changes" warning when switching presets.
   if (ck === 'company') {
@@ -12512,6 +13190,652 @@ function exportSelectedPayments(){
   setTimeout(() => URL.revokeObjectURL(link.href), 5000);
   toast(`Exported ${rows.length} seller${rows.length === 1 ? '' : 's'}`);
 }
+
+// ══════════════════════════════════════════════════════════════
+// INSIGHTS — detailed per-trade × per-branch analytics
+// ══════════════════════════════════════════════════════════════
+//
+// Renders into #insights-host from a single /api/insights fetch.
+// Sections:
+//   • Date-range filter (with quick presets)
+//   • KPI strip
+//   • Branch-contribution stacked bar chart (Chart.js)
+//   • Per-branch summary cards
+//   • Per-trade detail table (expandable to show branch breakdown)
+//   • Outstanding-by-buyer table
+//   • Top-buyer activity leaderboard
+//
+// Chart instance is tracked so re-renders can dispose the previous
+// canvas — Chart.js will otherwise leave the old chart attached and
+// the new one renders on top of it.
+let _insightsBarChart = null;
+let _insightsRange    = null;
+
+async function loadInsights(){
+  if (!_insightsRange) {
+    const today = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const from = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
+    const to   = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+    _insightsRange = { from, to };
+  }
+  await _renderInsights();
+}
+
+function _insightsApplyDateInputs(){
+  const fromEl = document.getElementById('ins-from');
+  const toEl   = document.getElementById('ins-to');
+  const from = fromEl && fromEl.value ? fromEl.value : _insightsRange.from;
+  const to   = toEl   && toEl.value   ? toEl.value   : _insightsRange.to;
+  if (from > to) { alert('“From” date must not be after “To”.'); return; }
+  _insightsRange = { from, to };
+  _renderInsights();
+}
+
+// Toggle one Insights section open/closed. State persists in
+// localStorage so the user's expand/collapse choices survive reload.
+// Called from the section header (delegated via inline onclick).
+function toggleInsightsSection(id, headEl){
+  const section = headEl && headEl.closest('.ins-section');
+  if (!section) return;
+  const collapsed = section.getAttribute('data-collapsed') === '1';
+  if (collapsed) section.removeAttribute('data-collapsed');
+  else section.setAttribute('data-collapsed', '1');
+  // Persist the diff.
+  let set;
+  try { set = new Set(JSON.parse(localStorage.getItem('ins_collapsed') || '[]')); }
+  catch(_) { set = new Set(); }
+  if (collapsed) set.delete(id); else set.add(id);
+  try { localStorage.setItem('ins_collapsed', JSON.stringify([...set])); } catch(_) {}
+  // Chart.js doesn't redraw automatically when its hidden canvas
+  // becomes visible again — force a resize so the bar chart fits
+  // the freshly-revealed container width. `collapsed` is the
+  // pre-toggle state, so resizing here means we just expanded.
+  if (id === 'chart' && collapsed && _insightsBarChart) {
+    try { _insightsBarChart.resize(); } catch(_) {}
+  }
+}
+
+function _insightsQuickRange(kind){
+  const today = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  let from, to = iso(today);
+  if (kind === 'today') {
+    from = iso(today);
+  } else if (kind === 'week') {
+    const d = new Date(today); d.setDate(d.getDate() - 6); from = iso(d);
+  } else if (kind === 'month') {
+    from = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
+  } else if (kind === 'last_month') {
+    const lm = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    from = `${lm.getFullYear()}-${pad(lm.getMonth() + 1)}-01`;
+    const lme = new Date(today.getFullYear(), today.getMonth(), 0);
+    to = `${lme.getFullYear()}-${pad(lme.getMonth() + 1)}-${pad(lme.getDate())}`;
+  } else if (kind === 'quarter') {
+    const q = Math.floor(today.getMonth() / 3);
+    from = `${today.getFullYear()}-${pad(q * 3 + 1)}-01`;
+  } else if (kind === 'year') {
+    from = `${today.getFullYear()}-01-01`;
+  } else {
+    return;
+  }
+  _insightsRange = { from, to };
+  _renderInsights();
+}
+
+// Branch chart palette — vibrant, distinguishable at thumbnail size.
+// Cycles when there are more branches than colors so two branches at
+// the far ends of the alphabet don't collide visually.
+const _INS_PALETTE = ['#10B981','#F97316','#6366F1','#EC4899','#14B8A6','#A855F7','#F59E0B','#0EA5E9','#EF4444','#84CC16'];
+
+// Themed gradient palette — keyed by `theme` string. Each entry pairs a
+// "from" and "to" stop plus a complementary shadow tint so KPI tiles +
+// section accents stay coherent across the page.
+const _INS_THEMES = {
+  emerald: { from:'#10B981', to:'#047857', glow:'rgba(16,185,129,.28)' },
+  rose:    { from:'#F43F5E', to:'#9F1239', glow:'rgba(244,63,94,.28)' },
+  amber:   { from:'#F59E0B', to:'#B45309', glow:'rgba(245,158,11,.28)' },
+  indigo:  { from:'#6366F1', to:'#3730A3', glow:'rgba(99,102,241,.28)' },
+  violet:  { from:'#A855F7', to:'#6B21A8', glow:'rgba(168,85,247,.28)' },
+  teal:    { from:'#14B8A6', to:'#0F766E', glow:'rgba(20,184,166,.28)' },
+  sky:     { from:'#0EA5E9', to:'#0369A1', glow:'rgba(14,165,233,.28)' },
+  orange:  { from:'#FB923C', to:'#C2410C', glow:'rgba(251,146,60,.28)' },
+  pink:    { from:'#EC4899', to:'#9D174D', glow:'rgba(236,72,153,.28)' },
+};
+function _insGrad(name){ const t = _INS_THEMES[name] || _INS_THEMES.emerald; return `linear-gradient(135deg, ${t.from} 0%, ${t.to} 100%)`; }
+
+async function _renderInsights(){
+  const host = document.getElementById('insights-host');
+  if (!host) return;
+  host.innerHTML = '<div style="padding:60px;text-align:center;color:var(--text3);font-size:14px"><div style="font-size:32px;margin-bottom:8px;animation:ins-spin 1s linear infinite;display:inline-block">◐</div><div>Loading insights…</div></div><style>@keyframes ins-spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>';
+  let data;
+  try {
+    const { from, to } = _insightsRange;
+    data = await j(`/api/insights?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  } catch (e) {
+    host.innerHTML = `<div style="padding:24px;color:var(--red)">Failed to load insights: ${esc(e.message || String(e))}</div>`;
+    return;
+  }
+
+  // Scoped styles for the Insights surface. Re-injected on every render
+  // (cheap — <style> dedupes within a single host). Keeps the visuals
+  // self-contained without bleeding into other tabs.
+  const insightsStyles = `
+  <style>
+    @keyframes ins-fade-in { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+    #insights-host { animation:ins-fade-in .25s ease-out }
+    .ins-section { position:relative; padding:18px 20px; margin-bottom:16px; border-radius:16px; background:#fff; border:1px solid var(--border); box-shadow:0 1px 2px rgba(15,23,42,.04) }
+    .ins-section-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; cursor:pointer; user-select:none; border-radius:10px; padding:4px; margin:-4px -4px 10px; transition:background .12s ease }
+    .ins-section-head:hover { background:rgba(15,23,42,.03) }
+    .ins-section-icon { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; color:#fff; flex-shrink:0; box-shadow:0 4px 12px var(--ins-glow,rgba(16,185,129,.28)) }
+    .ins-section-title { flex:1 }
+    .ins-section-title h3 { margin:0; font-size:15px; font-weight:800; letter-spacing:-.2px; color:var(--text) }
+    .ins-section-title .sub { font-size:11.5px; color:var(--text3); margin-top:1px }
+    .ins-chev { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--text2); background:rgba(15,23,42,.04); transition:transform .2s ease, background .12s ease; font-weight:800; flex-shrink:0 }
+    .ins-section-head:hover .ins-chev { background:rgba(15,23,42,.08) }
+    .ins-section[data-collapsed="1"] .ins-section-body { display:none }
+    .ins-section[data-collapsed="1"] .ins-section-head { margin-bottom:0 }
+    .ins-section[data-collapsed="1"] .ins-chev { transform:rotate(-90deg) }
+
+    /* Custom scrollbars — chunky enough to grab, themed to match the
+       page accent so they don't feel like the OS default appearing
+       randomly inside a colorful card. */
+    .ins-scroll { scrollbar-width:thin; scrollbar-color:#94A3B8 #F1F5F9 }
+    .ins-scroll::-webkit-scrollbar { width:10px; height:10px }
+    .ins-scroll::-webkit-scrollbar-track { background:#F1F5F9; border-radius:5px }
+    .ins-scroll::-webkit-scrollbar-thumb { background:linear-gradient(180deg, #94A3B8, #64748B); border-radius:5px; border:2px solid #F1F5F9 }
+    .ins-scroll::-webkit-scrollbar-thumb:hover { background:linear-gradient(180deg, #64748B, #475569) }
+    .ins-scroll::-webkit-scrollbar-corner { background:#F1F5F9 }
+    .ins-list-scroll { max-height:380px; overflow:auto; border:1px solid var(--border); border-radius:10px; background:#fff }
+    .ins-branch-scroll { max-height:560px; overflow:auto; padding:2px; margin:-2px }
+
+    /* ── KPI tiles ───────────────────────────────────────── */
+    .ins-kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; margin-bottom:18px }
+    .ins-kpi { position:relative; padding:16px 16px 16px 18px; border-radius:14px; display:flex; gap:12px; align-items:center; color:#fff; box-shadow:0 6px 16px var(--ins-glow,rgba(16,185,129,.28)); overflow:hidden; transition:transform .15s ease, box-shadow .15s ease; min-width:0 }
+    .ins-kpi:hover { transform:translateY(-2px); box-shadow:0 10px 24px var(--ins-glow,rgba(16,185,129,.32)) }
+    .ins-kpi::before { content:''; position:absolute; inset:0; background:radial-gradient(circle at 110% -10%, rgba(255,255,255,.22), transparent 55%); pointer-events:none }
+    .ins-kpi::after  { content:''; position:absolute; right:-30px; bottom:-30px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.08); pointer-events:none }
+    .ins-kpi-icon { width:44px; height:44px; border-radius:12px; background:rgba(255,255,255,.22); display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0; backdrop-filter:blur(6px); position:relative; z-index:1 }
+    /* min-width:0 lets the body shrink inside the flex parent;
+       without it the value text refuses to wrap and gets clipped by
+       the parent's overflow:hidden, hiding the right end of large
+       numbers like "₹6,944,006.10". */
+    .ins-kpi-body { position:relative; z-index:1; flex:1; min-width:0 }
+    .ins-kpi-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; opacity:.92; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    /* Use clamp() so the value shrinks gracefully on narrow tiles
+       (small laptops, dashboards) without going below readable size.
+       overflow-wrap:anywhere is a safety net for very long currency
+       strings that have no natural break points. */
+    /* Single line — large ₹ totals (e.g. "₹12,27,43,819.00") must not wrap.
+       fitInsKpiValues() shrinks the whole strip's font uniformly until the
+       widest value fits its tile; overflow:hidden guards extreme cases. */
+    .ins-kpi-value { font-size:22px; font-weight:800; letter-spacing:-.5px; margin-top:2px; line-height:1.15; white-space:nowrap; overflow:hidden }
+    /* Tiles with a breakdown are taller — top-align the icon so it doesn't
+       float in the vertical centre next to a multi-row body. */
+    .ins-kpi-tall { align-items:flex-start }
+    /* Breakdown table under the value (bags / qty / amount, or min/max/avg
+       in the Value tile). Translucent divider + white-on-gradient text. */
+    .ins-kpi-meta { margin-top:9px; padding-top:8px; border-top:1px solid rgba(255,255,255,.28); display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:11px; line-height:1.35 }
+    .ins-kpi-meta .lbl { opacity:.85; font-weight:600 }
+    .ins-kpi-meta .val { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; overflow-wrap:anywhere }
+
+    /* ── Filter strip ────────────────────────────────────── */
+    .ins-filter { padding:14px 18px; margin-bottom:16px; border-radius:14px; background:linear-gradient(135deg, #ECFDF5 0%, #F0F9FF 100%); border:1px solid #BBF7D0 }
+    .ins-filter-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap }
+    .ins-filter-row label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); display:block; margin-bottom:4px }
+    .ins-filter-row input[type=date] { height:36px; padding:0 10px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; background:#fff; color:var(--text) }
+    .ins-pill { padding:7px 13px; font-size:11.5px; font-weight:700; border-radius:999px; border:1.5px solid var(--green-border); background:#fff; color:var(--green-dk); cursor:pointer; transition:all .15s ease; font-family:inherit }
+    .ins-pill:hover { background:var(--green-bg); transform:translateY(-1px) }
+    .ins-pill-primary { background:linear-gradient(135deg, #10B981 0%, #047857 100%); color:#fff; border-color:transparent; box-shadow:0 4px 10px rgba(16,185,129,.3); padding:8px 18px; font-size:12px }
+    .ins-pill-primary:hover { background:linear-gradient(135deg, #059669 0%, #065F46 100%); box-shadow:0 6px 14px rgba(16,185,129,.4) }
+
+    /* ── Branch cards ────────────────────────────────────── */
+    .ins-branch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px }
+    .ins-branch { position:relative; padding:16px 16px 14px; border-radius:14px; background:linear-gradient(180deg, var(--ins-branch-lt,#ECFDF5) 0%, #fff 60%); border:1px solid var(--ins-branch-md,#BBF7D0); overflow:hidden; transition:transform .15s ease, box-shadow .15s ease }
+    .ins-branch:hover { transform:translateY(-2px); box-shadow:0 8px 20px rgba(15,23,42,.08) }
+    .ins-branch::before { content:''; position:absolute; top:0; left:0; right:0; height:4px; background:linear-gradient(90deg, var(--ins-branch-from,#10B981), var(--ins-branch-to,#047857)) }
+    .ins-branch-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px }
+    .ins-branch-name { font-weight:800; font-size:15px; color:var(--ins-branch-to,#047857); letter-spacing:-.2px }
+    .ins-branch-badge { padding:3px 10px; font-size:10.5px; font-weight:700; border-radius:999px; background:rgba(255,255,255,.7); color:var(--ins-branch-to,#047857); border:1px solid var(--ins-branch-md,#BBF7D0) }
+    .ins-branch-stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-bottom:10px }
+    .ins-branch-stat { padding:8px 6px; border-radius:8px; background:rgba(255,255,255,.55); text-align:center; border:1px solid rgba(255,255,255,.6) }
+    .ins-branch-stat-val { font-size:16px; font-weight:800; line-height:1 }
+    .ins-branch-stat-lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--text3); font-weight:700; margin-top:3px }
+    .ins-branch-row { display:flex; justify-content:space-between; align-items:baseline; padding:5px 0; font-size:12px; color:var(--text2) }
+    .ins-branch-row b { color:var(--text); font-weight:700 }
+    .ins-branch-row + .ins-branch-row { border-top:1px dashed rgba(0,0,0,.06) }
+
+    /* ── Table ───────────────────────────────────────────── */
+    .ins-table-wrap { overflow:auto; max-height:520px; border:1px solid var(--border); border-radius:10px; background:#fff }
+    .ins-table { width:100%; border-collapse:collapse; font-size:12.5px }
+    .ins-table thead th { padding:11px 10px; text-align:left; background:linear-gradient(180deg, #F1F5F9 0%, #E2E8F0 100%); position:sticky; top:0; z-index:1; font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); border-bottom:2px solid #CBD5E1; white-space:nowrap }
+    .ins-table tbody tr { transition:background .12s ease }
+    .ins-table tbody tr:nth-child(odd)  { background:#fff }
+    .ins-table tbody tr:nth-child(even) { background:#FAFCFE }
+    .ins-table tbody tr:hover           { background:#ECFDF5 }
+    .ins-table td { padding:9px 10px; border-bottom:1px solid var(--border); font-size:12.5px; color:var(--text) }
+    .ins-num { font-family:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-align:right; font-variant-numeric:tabular-nums }
+    .ins-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; font-variant-numeric:tabular-nums }
+    .ins-badge-green  { background:#DCFCE7; color:#166534 }
+    .ins-badge-amber  { background:#FEF3C7; color:#92400E }
+    .ins-badge-rose   { background:#FFE4E6; color:#9F1239 }
+    .ins-branch-pill { display:inline-flex; align-items:center; padding:2px 9px; border-radius:999px; background:linear-gradient(135deg,#ECFDF5,#D1FAE5); color:#065F46; font-size:10.5px; margin-right:4px; margin-bottom:2px; font-weight:700; border:1px solid #A7F3D0 }
+
+    /* ── Outstanding table ───────────────────────────────── */
+    .ins-out-table { width:100%; border-collapse:collapse; font-size:12.5px }
+    .ins-out-table thead th { padding:11px 10px; text-align:left; background:linear-gradient(135deg,#FEF3C7 0%, #FDE68A 100%); position:sticky; top:0; font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:#92400E; border-bottom:2px solid #F59E0B }
+    .ins-out-table tbody tr:nth-child(odd)  { background:#FFFBEB }
+    .ins-out-table tbody tr:nth-child(even) { background:#FFFEF7 }
+    .ins-out-table tbody tr:hover           { background:#FEF3C7 }
+    .ins-out-table td { padding:9px 10px; border-bottom:1px solid #FDE68A }
+    .ins-out-total { background:linear-gradient(90deg, #F59E0B, #B45309) !important; color:#fff !important }
+    .ins-out-total td { color:#fff !important; font-weight:800; font-size:13px; border:none }
+
+    /* ── Buyer leaderboard ───────────────────────────────── */
+    .ins-rank { width:32px; height:32px; border-radius:50%; color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0; box-shadow:0 2px 6px rgba(0,0,0,.15); position:relative }
+    .ins-rank-1 { background:linear-gradient(135deg, #FCD34D 0%, #B45309 100%); width:36px; height:36px; font-size:14px; box-shadow:0 4px 12px rgba(245,158,11,.4) }
+    .ins-rank-1::before { content:'👑'; position:absolute; top:-12px; left:50%; transform:translateX(-50%); font-size:14px }
+    .ins-rank-2 { background:linear-gradient(135deg, #E5E7EB 0%, #6B7280 100%); width:34px; height:34px }
+    .ins-rank-3 { background:linear-gradient(135deg, #FCA5A5 0%, #92400E 100%); width:34px; height:34px }
+    .ins-lb-row { display:flex; align-items:center; gap:12px; padding:10px 4px; border-bottom:1px solid var(--border); transition:background .12s ease, transform .12s ease }
+    .ins-lb-row:hover { background:#F8FAFC; transform:translateX(2px) }
+    .ins-lb-row:last-child { border-bottom:none }
+    .ins-lb-bar { height:5px; background:#E5E7EB; border-radius:3px; margin-top:5px; overflow:hidden; position:relative }
+    .ins-lb-bar > div { height:100%; border-radius:3px; transition:width .4s ease }
+
+    /* ── Empty state ─────────────────────────────────────── */
+    .ins-empty { padding:40px 20px; text-align:center; color:var(--text3); font-size:13px; background:linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%); border-radius:12px; border:1px dashed var(--border2) }
+    .ins-empty-icon { font-size:36px; margin-bottom:8px; opacity:.5 }
+  </style>`;
+
+  // ── KPI tile builder — gradient background + icon + value.
+  // Strip HTML entities for the title attribute so the hover tooltip
+  // shows the human-readable value even on tiles where the rendered
+  // text was wrapped or shrunk by clamp().
+  // `meta` (optional) is an array of [label, value] pairs rendered as a
+  // small breakdown table under the value (e.g. bags/qty/amount).
+  const kpi = (icon, label, value, theme, meta) => {
+    const t = _INS_THEMES[theme] || _INS_THEMES.emerald;
+    const plain = String(value).replace(/<[^>]+>/g, '');
+    const metaHtml = meta && meta.length
+      ? `<div class="ins-kpi-meta">${meta.map(([l, v]) => `<span class="lbl">${esc(l)}</span><span class="val">${v}</span>`).join('')}</div>`
+      : '';
+    return `
+      <div class="ins-kpi${meta && meta.length ? ' ins-kpi-tall' : ''}" style="background:${_insGrad(theme)}; --ins-glow:${t.glow}" title="${esc(label)}: ${esc(plain)}">
+        <div class="ins-kpi-icon">${icon}</div>
+        <div class="ins-kpi-body">
+          <div class="ins-kpi-label">${esc(label)}</div>
+          <div class="ins-kpi-value">${value}</div>
+          ${metaHtml}
+        </div>
+      </div>`;
+  };
+
+  // ── Per-branch card. The KPI strip up top shows OVERALL numbers;
+  // these cards drill into one branch at a time.
+  const branchCard = (b, idx) => {
+    const themeName = ['emerald','orange','indigo','pink','teal','violet','amber','sky','rose'][idx % 9];
+    const tm = _INS_THEMES[themeName];
+    const lightTint = {emerald:'#ECFDF5',orange:'#FFF7ED',indigo:'#EEF2FF',pink:'#FDF2F8',teal:'#F0FDFA',violet:'#FAF5FF',amber:'#FFFBEB',sky:'#F0F9FF',rose:'#FFF1F2'}[themeName] || '#ECFDF5';
+    const midTint   = {emerald:'#A7F3D0',orange:'#FED7AA',indigo:'#C7D2FE',pink:'#FBCFE8',teal:'#99F6E4',violet:'#E9D5FF',amber:'#FDE68A',sky:'#BAE6FD',rose:'#FECDD3'}[themeName] || '#A7F3D0';
+    const sellPct = b.lots > 0 ? Math.round((b.sold / b.lots) * 100) : 0;
+    return `
+      <div class="ins-branch" style="--ins-branch-from:${tm.from};--ins-branch-to:${tm.to};--ins-branch-lt:${lightTint};--ins-branch-md:${midTint}">
+        <div class="ins-branch-head">
+          <div class="ins-branch-name">${esc(b.branch)}</div>
+          <div class="ins-branch-badge">${sellPct}% sold</div>
+        </div>
+        <div class="ins-branch-stats">
+          <div class="ins-branch-stat"><div class="ins-branch-stat-val" style="color:${tm.to}">${fmtI(b.lots, 0)}</div><div class="ins-branch-stat-lbl">Lots</div></div>
+          <div class="ins-branch-stat"><div class="ins-branch-stat-val" style="color:#15803d">${fmtI(b.sold, 0)}</div><div class="ins-branch-stat-lbl">Sold</div></div>
+          <div class="ins-branch-stat"><div class="ins-branch-stat-val" style="color:#B45309">${fmtI(b.withdrawn, 0)}</div><div class="ins-branch-stat-lbl">WD</div></div>
+          <div class="ins-branch-stat"><div class="ins-branch-stat-val" style="color:#64748B">${fmtI(b.unsold, 0)}</div><div class="ins-branch-stat-lbl">Unsold</div></div>
+        </div>
+        <div class="ins-branch-row"><span>Qty</span><b>${fmtI(b.qty, 2)} kg</b></div>
+        <div class="ins-branch-row"><span>Price (min · max · avg)</span><b>${b.min_price != null ? '₹' + fmtI(b.min_price, 0) : '—'} · ${b.max_price != null ? '₹' + fmtI(b.max_price, 0) : '—'} · ${b.avg_price > 0 ? '₹' + fmtI(b.avg_price, 2) : '—'}</b></div>
+        <div class="ins-branch-row"><span>Value</span><b style="color:#15803d">₹${fmtI(b.value, 2)}</b></div>
+        <div class="ins-branch-row"><span>Payable to sellers</span><b style="color:#C2410C">₹${fmtI(b.payable_to_sellers, 2)}</b></div>
+      </div>`;
+  };
+
+  // ── Per-trade table row. Branches column renders as small pills
+  // showing each branch's share so the user can see contribution
+  // composition without expanding a sub-row.
+  const tradeRow = (t) => {
+    const branchPills = (t.branches || []).slice(0, 4).map(b => {
+      const pct = t.value > 0 ? Math.round((b.value / t.value) * 100) : 0;
+      return `<span class="ins-branch-pill" title="${esc(b.branch)} — ${pct}% of trade value (₹${fmtI(b.value, 2)})">${esc(b.branch)} ${pct}%</span>`;
+    }).join('');
+    const dateStr = (t.date || '').slice(0, 10).split('-').reverse().join('/');
+    return `
+      <tr>
+        <td style="font-weight:800;font-family:ui-monospace,Menlo,monospace;color:var(--green-dk)">#${esc(t.ano)}</td>
+        <td style="font-family:ui-monospace,Menlo,monospace;color:var(--text2)">${esc(dateStr)}</td>
+        <td style="font-size:11.5px;color:var(--text2)">${esc(t.state || '—')}</td>
+        <td class="ins-num">${fmtI(t.lots, 0)}</td>
+        <td class="ins-num"><span class="ins-badge ins-badge-green">${fmtI(t.sold, 0)}</span></td>
+        <td class="ins-num"><span class="ins-badge ins-badge-amber">${fmtI(t.withdrawn, 0)}</span></td>
+        <td class="ins-num">${fmtI(t.qty, 2)}</td>
+        <td class="ins-num">${t.min_price != null ? fmtI(t.min_price, 0) : '—'}</td>
+        <td class="ins-num">${t.max_price != null ? fmtI(t.max_price, 0) : '—'}</td>
+        <td class="ins-num" style="font-weight:800">${t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'}</td>
+        <td class="ins-num" style="font-weight:800;color:#15803d">${fmtI(t.value, 2)}</td>
+        <td>${branchPills || '<span style="color:var(--text3)">—</span>'}</td>
+      </tr>`;
+  };
+
+  // ── Outstanding-by-buyer table. Without a payment-tracking field
+  // every invoice is treated as outstanding; the section header
+  // explains the assumption.
+  const outstandingTable = (rows) => {
+    if (!rows.length) return '<div class="ins-empty"><div class="ins-empty-icon">📭</div>No invoices in this range.</div>';
+    const total = rows.reduce((s, r) => s + r.value, 0);
+    return `
+      <table class="ins-out-table">
+        <thead><tr>
+          <th>Buyer</th>
+          <th style="text-align:right">Invoices</th>
+          <th style="text-align:right">Outstanding</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td><div style="font-weight:700;font-size:12.5px;color:var(--text)">${esc(r.buyer_name)}</div><div style="font-size:10.5px;color:var(--text3);font-family:ui-monospace,Menlo,monospace">${esc(r.buyer_code || '')}</div></td>
+              <td class="ins-num">${fmtI(r.invoices, 0)}</td>
+              <td class="ins-num" style="font-weight:800;color:#C2410C">₹${fmtI(r.value, 2)}</td>
+            </tr>`).join('')}
+          <tr class="ins-out-total">
+            <td>Total</td>
+            <td class="ins-num">${fmtI(rows.reduce((s, r) => s + r.invoices, 0), 0)}</td>
+            <td class="ins-num">₹${fmtI(total, 2)}</td>
+          </tr>
+        </tbody>
+      </table>`;
+  };
+
+  // ── Buyer-activity leaderboard — top buyers by value across the
+  // window. Bar widths are normalised against the leader so the
+  // visual ranking is obvious at a glance. Top 3 wear podium colors
+  // (gold / silver / bronze) and the leader gets a crown.
+  const buyerLeaderboard = (rows) => {
+    if (!rows.length) return '<div class="ins-empty"><div class="ins-empty-icon">🏆</div>No buyer activity in this range.</div>';
+    const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+    return rows.map((r, i) => {
+      const pct = Math.max(2, Math.round((r.value / max) * 100));
+      const palette = _INS_PALETTE[i % _INS_PALETTE.length];
+      let rankClass = 'ins-rank';
+      if (i === 0) rankClass += ' ins-rank-1';
+      else if (i === 1) rankClass += ' ins-rank-2';
+      else if (i === 2) rankClass += ' ins-rank-3';
+      const rankStyle = i < 3 ? '' : `style="background:${palette}"`;
+      const barColor = i < 3
+        ? (i === 0 ? 'linear-gradient(90deg,#FCD34D,#B45309)' : i === 1 ? 'linear-gradient(90deg,#E5E7EB,#6B7280)' : 'linear-gradient(90deg,#FCA5A5,#92400E)')
+        : palette;
+      return `
+        <div class="ins-lb-row">
+          <div class="${rankClass}" ${rankStyle}>${i + 1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.buyer_name)}</div>
+            <div class="ins-lb-bar"><div style="width:${pct}%;background:${barColor}"></div></div>
+            <div style="font-size:10.5px;color:var(--text3);margin-top:3px">${fmtI(r.lots, 0)} lots · ${fmtI(r.qty, 2)} kg</div>
+          </div>
+          <div style="font-weight:800;font-size:14px;font-family:ui-monospace,Menlo,monospace;color:#15803d;flex-shrink:0">₹${fmtI(r.value, 2)}</div>
+        </div>`;
+    }).join('');
+  };
+
+  // Read persisted collapsed-section state. Stored as a JSON array of
+  // section IDs so we can restore the same expand/collapse pattern on
+  // every render without losing it across reloads. Failures are silent
+  // — the only consequence is sections start expanded.
+  let collapsedSet;
+  try { collapsedSet = new Set(JSON.parse(localStorage.getItem('ins_collapsed') || '[]')); }
+  catch(_) { collapsedSet = new Set(); }
+  const sectionAttrs = (id) => `data-ins-section="${id}"${collapsedSet.has(id) ? ' data-collapsed="1"' : ''}`;
+
+  // ── Section header builder — colored icon + title + subtitle + chevron.
+  // Click anywhere on the head toggles the section open/closed. Each
+  // section opts in via `id` so callers can group related sections
+  // (KPI vs Chart vs Branches…) and keep their state independently.
+  const sectionHead = (icon, title, sub, theme, id) => {
+    const t = _INS_THEMES[theme] || _INS_THEMES.emerald;
+    return `
+      <div class="ins-section-head" onclick="toggleInsightsSection('${id}', this)" title="Click to collapse / expand">
+        <div class="ins-section-icon" style="background:${_insGrad(theme)};--ins-glow:${t.glow}">${icon}</div>
+        <div class="ins-section-title"><h3>${esc(title)}</h3><div class="sub">${esc(sub)}</div></div>
+        <div class="ins-chev" aria-hidden="true">▾</div>
+      </div>`;
+  };
+
+  // ── Assemble.
+  const t = data.totals;
+  host.innerHTML = insightsStyles + `
+    <!-- Filter strip -->
+    <div class="ins-filter">
+      <div class="ins-filter-row">
+        <div><label>From</label><input type="date" id="ins-from" value="${esc(data.range.from)}"></div>
+        <div><label>To</label><input type="date" id="ins-to" value="${esc(data.range.to)}"></div>
+        <button class="ins-pill ins-pill-primary" onclick="_insightsApplyDateInputs()">Apply</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-left:6px">
+          <span style="font-size:10.5px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:700">Quick:</span>
+          <button onclick="_insightsQuickRange('week')"       class="ins-pill">7 Days</button>
+          <button onclick="_insightsQuickRange('month')"      class="ins-pill">This Month</button>
+          <button onclick="_insightsQuickRange('last_month')" class="ins-pill">Last Month</button>
+          <button onclick="_insightsQuickRange('quarter')"    class="ins-pill">Quarter</button>
+          <button onclick="_insightsQuickRange('year')"       class="ins-pill">Year</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (in their own collapsible section) -->
+    <div class="ins-section" ${sectionAttrs('kpis')}>
+      ${sectionHead('🎯', 'Headline metrics', 'At-a-glance totals for the selected range.', 'emerald', 'kpis')}
+      <div class="ins-section-body">
+        <div class="ins-kpi-grid" style="margin-bottom:0">
+          ${kpi('📊', 'Trades',      fmtI(t.trades, 0),    'emerald')}
+          ${kpi('🌾', 'Lots',        fmtI(t.lots, 0),      'indigo', [
+            ['Bags',     fmtI(t.bags, 0)],
+            ['Qty (kg)', fmtI(t.qty, 2)],
+            ['Amount',   '₹' + fmtI(t.value, 2)],
+          ])}
+          ${kpi('✅', 'Sold',        fmtI(t.sold, 0),      'teal', [
+            ['Bags',     fmtI(t.sold_bags, 0)],
+            ['Qty (kg)', fmtI(t.sold_qty, 2)],
+            ['Amount',   '₹' + fmtI(t.sold_value, 2)],
+          ])}
+          ${kpi('↩️', 'Withdrawn',   fmtI(t.withdrawn, 0), 'amber', [
+            ['Bags',     fmtI(t.wd_bags, 0)],
+            ['Qty (kg)', fmtI(t.wd_qty, 2)],
+            ['Amount',   '₹' + fmtI(t.wd_value, 2)],
+          ])}
+          ${kpi('💰', 'Value',       '₹' + fmtI(t.value, 2), 'emerald', [
+            ['Min ₹', t.min_price != null && t.min_price > 0 ? fmtI(t.min_price, 0) : '—'],
+            ['Max ₹', t.max_price != null && t.max_price > 0 ? fmtI(t.max_price, 0) : '—'],
+            ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
+          ])}
+          ${kpi('💸', 'Payable',     '₹' + fmtI(t.payable_to_sellers, 2),    'orange')}
+          ${kpi('⏳', 'Outstanding', '₹' + fmtI(t.outstanding_by_buyers, 2), 'rose')}
+        </div>
+      </div>
+    </div>
+
+    <!-- Revenue trend (moved from dashboard). IDs match what
+         renderRevenueTrendChart() / setRevenueTrendRange() target. -->
+    <div class="ins-section" ${sectionAttrs('revtrend')}>
+      ${sectionHead('💹', 'Revenue · last 7 days', 'Total invoiced per day (incl. GST &amp; round-off).', 'pink', 'revtrend')}
+      <div class="ins-section-body">
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px" id="dash-rev-range">
+          <button type="button" class="btn btn-o" data-days="7"  onclick="setRevenueTrendRange(7)"  style="height:28px;padding:0 12px;font-size:11.5px;font-weight:600">7 days</button>
+          <button type="button" class="btn btn-o" data-days="14" onclick="setRevenueTrendRange(14)" style="height:28px;padding:0 12px;font-size:11.5px;font-weight:600">14 days</button>
+          <button type="button" class="btn btn-o" data-days="30" onclick="setRevenueTrendRange(30)" style="height:28px;padding:0 12px;font-size:11.5px;font-weight:600">30 days</button>
+        </div>
+        <div id="dash-rev-empty" style="display:none;padding:30px 10px;text-align:center;color:var(--text3);font-size:13px">
+          No invoices yet in this range.
+        </div>
+        <div style="position:relative;height:240px" id="dash-rev-canvas-wrap">
+          <canvas id="dash-rev-chart" role="img" aria-label="Line chart of daily invoiced revenue over the selected period"></canvas>
+        </div>
+      </div>
+    </div>
+
+    ${data.perTrade.length ? '' : '<div class="ins-section"><div class="ins-empty"><div class="ins-empty-icon">📭</div>No trades fall in this date range. Pick a wider window above.</div></div>'}
+
+    <!-- Stacked bar chart -->
+    ${data.perTrade.length ? `
+    <div class="ins-section" ${sectionAttrs('chart')}>
+      ${sectionHead('📊', 'Branch contribution per trade', 'Each segment is a branch\'s value contribution. Top 20 trades by date.', 'indigo', 'chart')}
+      <div class="ins-section-body">
+        <div style="height:320px;position:relative"><canvas id="ins-stacked-canvas"></canvas></div>
+      </div>
+    </div>` : ''}
+
+    <!-- Per-branch cards -->
+    ${data.perBranch.length ? `
+    <div class="ins-section" ${sectionAttrs('branches')}>
+      ${sectionHead('🏪', 'Per-branch summary', 'Rolled up across every trade in the date range.', 'teal', 'branches')}
+      <div class="ins-section-body">
+        <div class="ins-branch-scroll ins-scroll">
+          <div class="ins-branch-grid">
+            ${data.perBranch.map(branchCard).join('')}
+          </div>
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- Per-trade table -->
+    ${data.perTrade.length ? `
+    <div class="ins-section" ${sectionAttrs('trades')}>
+      ${sectionHead('📋', 'Per-trade details', 'Each row is one trade with branch composition (top 4 by value).', 'violet', 'trades')}
+      <div class="ins-section-body">
+        <div class="ins-table-wrap ins-scroll">
+          <table class="ins-table">
+            <thead><tr>
+              <th>Trade</th>
+              <th>Date</th>
+              <th>State</th>
+              <th style="text-align:right">Lots</th>
+              <th style="text-align:right">Sold</th>
+              <th style="text-align:right">WD</th>
+              <th style="text-align:right">Qty (kg)</th>
+              <th style="text-align:right">Min ₹</th>
+              <th style="text-align:right">Max ₹</th>
+              <th style="text-align:right">Avg ₹</th>
+              <th style="text-align:right">Value (₹)</th>
+              <th>Branches</th>
+            </tr></thead>
+            <tbody>${data.perTrade.map(tradeRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- Two-column row: outstanding by buyer + buyer leaderboard -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px">
+      <div class="ins-section" style="margin-bottom:0" ${sectionAttrs('outstanding')}>
+        ${sectionHead('💳', 'Outstanding by buyer', 'Sales invoices in this range — treated as outstanding (no per-invoice payment tracking yet).', 'amber', 'outstanding')}
+        <div class="ins-section-body">
+          <div class="ins-list-scroll ins-scroll">${outstandingTable(data.outstandingByBuyer)}</div>
+        </div>
+      </div>
+      <div class="ins-section" style="margin-bottom:0" ${sectionAttrs('leaderboard')}>
+        ${sectionHead('🏆', 'Top buyer activity', 'Ranked by value across all trades in range.', 'pink', 'leaderboard')}
+        <div class="ins-section-body">
+          <div class="ins-list-scroll ins-scroll" style="padding:0 12px">${buyerLeaderboard(data.buyerActivity)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // ── Draw the stacked bar chart. Dispose any prior instance — leaving
+  // it attached layers the new render on top and breaks pointer events.
+  if (_insightsBarChart) {
+    try { _insightsBarChart.destroy(); } catch(_) {}
+    _insightsBarChart = null;
+  }
+  const canvas = document.getElementById('ins-stacked-canvas');
+  if (canvas && data.branchStacked && data.branchStacked.labels.length) {
+    const ctx = canvas.getContext('2d');
+    // Gradient fills for each branch dataset — softer than flat fills
+    // and they shift with theme palette so 10 branches stay distinct.
+    const datasets = data.branchStacked.datasets.map((ds, i) => {
+      const base = _INS_PALETTE[i % _INS_PALETTE.length];
+      const grad = ctx.createLinearGradient(0, 0, 0, 320);
+      grad.addColorStop(0, base);
+      grad.addColorStop(1, base + 'AA');
+      return {
+        label: ds.label,
+        data: ds.data,
+        backgroundColor: grad,
+        borderColor: '#fff',
+        borderWidth: 1,
+        borderRadius: 4,
+      };
+    });
+    _insightsBarChart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: data.branchStacked.labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, ticks: { font: { size: 10, weight: '600' }, color: '#64748B' }, grid: { display: false } },
+          y: { stacked: true, ticks: { callback: v => '₹' + (v >= 100000 ? (v/100000).toFixed(1) + 'L' : (v/1000).toFixed(0) + 'k'), font: { size: 10, weight: '600' }, color: '#64748B' }, grid: { color: 'rgba(148,163,184,.15)' } },
+        },
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11, weight: '600' }, boxWidth: 12, boxHeight: 12, padding: 12, color: '#475569' } },
+          tooltip: {
+            backgroundColor: 'rgba(15,23,42,.95)',
+            titleFont: { size: 12, weight: '700' },
+            bodyFont: { size: 12 },
+            padding: 10,
+            cornerRadius: 8,
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ₹${fmtI(ctx.parsed.y, 0)}`,
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Trigger the Revenue trend chart now that its canvas exists. Reuses
+  // the dashboard renderer so range buttons & empty-state behaviour
+  // remain a single code path.
+  if (typeof renderRevenueTrendChart === 'function') {
+    requestAnimationFrame(() => { try { renderRevenueTrendChart(); } catch(_) {} });
+  }
+  // Shrink the headline values to fit one line once layout is committed.
+  requestAnimationFrame(fitInsKpiValues);
+}
+
+// Keep every Insights headline value on ONE line. Large ₹ totals overflow
+// the tile at the base 22px font; rather than wrap, shrink the WHOLE strip's
+// font uniformly (one size for all tiles, so they stay consistent) until the
+// widest value fits. Mirrors the dashboard's fitDashHeadlineValues().
+function fitInsKpiValues(){
+  // Only size visible tiles — when the KPI section is collapsed clientWidth
+  // is 0, which would otherwise shrink every value to MIN for no reason.
+  const vals = Array.from(document.querySelectorAll('#insights-host .ins-kpi-value'))
+    .filter(v => v.clientWidth > 0);
+  if (!vals.length) return;
+  const BASE = 22, MIN = 12;
+  let fs = BASE;
+  vals.forEach(v => { v.style.fontSize = fs + 'px'; });
+  while (fs > MIN && vals.some(v => v.scrollWidth > v.clientWidth + 1)) {
+    fs -= 1;
+    vals.forEach(v => { v.style.fontSize = fs + 'px'; });
+  }
+}
+// Re-fit on resize (tile widths change with the grid).
+let _insFitRaf;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(_insFitRaf);
+  _insFitRaf = requestAnimationFrame(() => {
+    const host = document.getElementById('insights-host');
+    if (host && host.offsetParent) fitInsKpiValues();
+  });
+});
 
 // ── Exports ───────────────────────────────────────────────
 const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment:'Bank Payment (RTGS/NEFT)',

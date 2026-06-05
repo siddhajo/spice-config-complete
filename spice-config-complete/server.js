@@ -900,6 +900,345 @@ const STATE_CODES = {
 };
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
+// Lazily ensure the single-row GST API credit-state table exists.
+function _ensureGstApiState(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS gst_api_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    credits_remaining INTEGER,
+    credits_total INTEGER,
+    plan_expires_at TEXT,
+    last_checked_at TEXT,
+    last_envelope TEXT
+  )`);
+}
+
+// Probe a gstincheck response envelope for a remaining-credit count and
+// persist it. Returns a small {credits_remaining,...} summary (or nulls).
+// The provider's field name varies, so we try a list of likely keys; if
+// none match we still store the raw body so the operator can paste it to
+// a dev who can add the alias.
+function _gstCaptureCredits(db, body) {
+  _ensureGstApiState(db);
+  const out = { credits_remaining: null, credits_total: null, plan_expires_at: null };
+  try {
+    const probe = (obj, keys) => {
+      if (!obj || typeof obj !== 'object') return null;
+      for (const k of Object.keys(obj)) {
+        const lk = k.toLowerCase().replace(/[^a-z]/g, '');
+        if (keys.includes(lk)) {
+          const n = Number(obj[k]);
+          if (Number.isFinite(n)) return n;
+        }
+      }
+      return null;
+    };
+    const REM = ['creditsremaining', 'remainingcredits', 'creditleft', 'creditsleft', 'availablesearch', 'availablesearches', 'searchleft', 'searchesleft', 'balance', 'credit', 'credits'];
+    const TOT = ['creditstotal', 'totalcredits', 'totalsearch', 'totalsearches', 'plancredits'];
+    out.credits_remaining = probe(body, REM);
+    if (out.credits_remaining == null && body) out.credits_remaining = probe(body.data, REM);
+    out.credits_total = probe(body, TOT);
+    if (out.credits_total == null && body) out.credits_total = probe(body.data, TOT);
+    const exp = body && (body.expiry || body.plan_expiry || body.expires_at || body.validtill);
+    if (exp) out.plan_expires_at = String(exp);
+  } catch (_) {}
+  const nowIso = (db.get(`SELECT datetime('now','localtime') AS t`) || {}).t || null;
+  try {
+    db.run(
+      `INSERT INTO gst_api_state (id, credits_remaining, credits_total, plan_expires_at, last_checked_at, last_envelope)
+       VALUES (1, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         credits_remaining = COALESCE(excluded.credits_remaining, gst_api_state.credits_remaining),
+         credits_total     = COALESCE(excluded.credits_total, gst_api_state.credits_total),
+         plan_expires_at   = COALESCE(excluded.plan_expires_at, gst_api_state.plan_expires_at),
+         last_checked_at   = excluded.last_checked_at,
+         last_envelope     = excluded.last_envelope`,
+      [out.credits_remaining, out.credits_total, out.plan_expires_at, nowIso, JSON.stringify(body || null)]
+    );
+  } catch (_) {}
+  out.last_checked_at = nowIso;
+  return out;
+}
+
+// GST lookup API status — credits remaining, plan expiry, last-checked
+// timestamp + raw envelope. Drives the Settings → Integrations card and
+// the topbar credit pill. Read-only; never triggers a live lookup.
+app.get('/api/gst-lookup/status', requireView, (req, res) => {
+  const db = getDb();
+  _ensureGstApiState(db);
+  const cfg = getSettingsFlat(db);
+  const hasKey = !!(cfg.gst_api_key && String(cfg.gst_api_key).trim());
+  const st = db.get('SELECT * FROM gst_api_state WHERE id = 1') || {};
+  const warn_below = parseInt(cfg.gst_warn_below, 10) || 50;
+  const critical_below = parseInt(cfg.gst_critical_below, 10) || 10;
+  const left = st.credits_remaining == null ? null : Number(st.credits_remaining);
+  let level;
+  if (!hasKey || left == null) level = 'unknown';
+  else if (left <= 0) level = 'exhausted';
+  else if (left <= critical_below) level = 'critical';
+  else if (left <= warn_below) level = 'warning';
+  else level = 'ok';
+  let envelope = null;
+  try { envelope = st.last_envelope ? JSON.parse(st.last_envelope) : null; } catch (_) {}
+  res.json({
+    has_api_key: hasKey,
+    level,
+    credits_remaining: left,
+    credits_total: st.credits_total != null ? Number(st.credits_total) : null,
+    plan_expires_at: st.plan_expires_at || null,
+    last_checked_at: st.last_checked_at || null,
+    last_envelope: envelope,
+    warn_below, critical_below,
+    recharge_url: 'https://gstincheck.co.in/',
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// WHATSAPP BUSINESS (Cloud API) — config storage + status + send.
+// Secrets live in the single-row whatsapp_config table and are NEVER
+// returned to the browser (status hands back only booleans + non-secret
+// identifiers). Environment variables override DB values so a managed
+// deployment can inject credentials without touching the UI.
+// Sends call Meta's Graph API when fully configured; otherwise they
+// return 501 so the frontend falls back to the wa.me / Web-Share flow.
+// ══════════════════════════════════════════════════════════════
+const WA_GRAPH = 'https://graph.facebook.com/v21.0';
+function _ensureWaConfig(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS whatsapp_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    token TEXT, phone_id TEXT, waba_id TEXT, app_secret TEXT, verify_token TEXT,
+    display_number TEXT, tpl_document TEXT, tpl_document_lang TEXT,
+    tpl_text TEXT, tpl_text_lang TEXT
+  )`);
+}
+// Merge DB row with env overrides. `source` is 'env' when any secret
+// comes from the environment, else 'db'.
+function _waConfig(db) {
+  _ensureWaConfig(db);
+  const row = db.get('SELECT * FROM whatsapp_config WHERE id = 1') || {};
+  const E = process.env;
+  let source = 'db';
+  const pick = (envKey, dbVal) => {
+    if (E[envKey]) { source = 'env'; return E[envKey]; }
+    return dbVal || '';
+  };
+  return {
+    token:           pick('WHATSAPP_TOKEN', row.token),
+    phoneId:         pick('WHATSAPP_PHONE_ID', row.phone_id),
+    wabaId:          pick('WHATSAPP_WABA_ID', row.waba_id),
+    appSecret:       pick('WHATSAPP_APP_SECRET', row.app_secret),
+    verifyToken:     pick('WHATSAPP_VERIFY_TOKEN', row.verify_token),
+    displayNumber:   row.display_number || '',
+    tplDocument:     row.tpl_document || '',
+    tplDocumentLang: row.tpl_document_lang || 'en',
+    tplText:         row.tpl_text || '',
+    tplTextLang:     row.tpl_text_lang || 'en',
+    source,
+  };
+}
+function _waNormPhone(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (!d) return '';
+  return d.length === 10 ? '91' + d : d;
+}
+
+app.get('/api/whatsapp/status', requireView, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  const configured = !!(c.token && c.phoneId);
+  const out = {
+    configured,
+    hasToken: !!c.token,
+    hasAppSecret: !!c.appSecret,
+    hasVerifyToken: !!c.verifyToken,
+    phoneId: c.phoneId,
+    wabaId: c.wabaId,
+    displayNumber: c.displayNumber,
+    tplDocument: c.tplDocument,
+    tplDocumentLang: c.tplDocumentLang,
+    tplText: c.tplText,
+    tplTextLang: c.tplTextLang,
+    webhookReady: !!(c.verifyToken && c.appSecret),
+    source: c.source,
+    live: false,
+    liveError: null,
+    displayPhone: '',
+    qualityRating: '',
+  };
+  if (configured) {
+    try {
+      const r = await fetch(
+        `${WA_GRAPH}/${encodeURIComponent(c.phoneId)}?fields=display_phone_number,verified_name,quality_rating`,
+        { headers: { Authorization: 'Bearer ' + c.token }, signal: AbortSignal.timeout(5000) }
+      );
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d.error && d.error.message) || ('HTTP ' + r.status));
+      out.live = true;
+      out.displayPhone = d.display_phone_number || c.displayNumber || '';
+      out.qualityRating = d.quality_rating || '';
+    } catch (e) {
+      out.liveError = (e && e.message) || 'check failed';
+    }
+  }
+  res.json(out);
+});
+
+app.put('/api/whatsapp/config', requireSettingsWrite, (req, res) => {
+  const db = getDb();
+  _ensureWaConfig(db);
+  const b = req.body || {};
+  const cur = db.get('SELECT * FROM whatsapp_config WHERE id = 1') || {};
+  // Blank secret inputs mean "keep existing" — the UI sends '' to leave a
+  // configured token untouched. Non-secret fields always overwrite.
+  const keepIfBlank = (incoming, existing) =>
+    (incoming === undefined || incoming === null || incoming === '') ? (existing || '') : String(incoming);
+  const setAlways = (incoming, existing) =>
+    (incoming === undefined || incoming === null) ? (existing || '') : String(incoming);
+  const next = {
+    token:        keepIfBlank(b.token, cur.token),
+    phone_id:     setAlways(b.phoneId, cur.phone_id),
+    waba_id:      setAlways(b.wabaId, cur.waba_id),
+    app_secret:   keepIfBlank(b.appSecret, cur.app_secret),
+    verify_token: keepIfBlank(b.verifyToken, cur.verify_token),
+    display_number:    setAlways(b.displayNumber, cur.display_number),
+    tpl_document:      setAlways(b.tplDocument, cur.tpl_document),
+    tpl_document_lang: setAlways(b.tplDocumentLang, cur.tpl_document_lang) || 'en',
+    tpl_text:          setAlways(b.tplText, cur.tpl_text),
+    tpl_text_lang:     setAlways(b.tplTextLang, cur.tpl_text_lang) || 'en',
+  };
+  db.run(
+    `INSERT INTO whatsapp_config
+       (id, token, phone_id, waba_id, app_secret, verify_token, display_number,
+        tpl_document, tpl_document_lang, tpl_text, tpl_text_lang)
+     VALUES (1,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET
+       token=excluded.token, phone_id=excluded.phone_id, waba_id=excluded.waba_id,
+       app_secret=excluded.app_secret, verify_token=excluded.verify_token,
+       display_number=excluded.display_number, tpl_document=excluded.tpl_document,
+       tpl_document_lang=excluded.tpl_document_lang, tpl_text=excluded.tpl_text,
+       tpl_text_lang=excluded.tpl_text_lang`,
+    [next.token, next.phone_id, next.waba_id, next.app_secret, next.verify_token,
+     next.display_number, next.tpl_document, next.tpl_document_lang, next.tpl_text, next.tpl_text_lang]
+  );
+  res.json({ ok: true });
+});
+
+// Low-level Graph template send. Returns { ok, error }.
+async function _waSendTemplate(c, { phone, templateName, langCode, bodyParams, headerDocument }) {
+  const components = [];
+  if (headerDocument) {
+    components.push({ type: 'header', parameters: [{ type: 'document', document: headerDocument }] });
+  }
+  if (bodyParams && bodyParams.length) {
+    components.push({ type: 'body', parameters: bodyParams.map(t => ({ type: 'text', text: String(t == null ? '' : t) })) });
+  }
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: _waNormPhone(phone),
+    type: 'template',
+    template: { name: templateName, language: { code: langCode || 'en' }, components },
+  };
+  const r = await fetch(`${WA_GRAPH}/${encodeURIComponent(c.phoneId)}/messages`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + c.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) return { ok: false, error: (d.error && d.error.message) || ('HTTP ' + r.status) };
+  return { ok: true, id: (d.messages && d.messages[0] && d.messages[0].id) || null };
+}
+
+app.post('/api/whatsapp/test', requireSettingsWrite, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
+  if (!c.tplText) return res.status(400).json({ error: 'Set a Text template name first', fallback: true });
+  const phone = _waNormPhone((req.body || {}).phone);
+  if (!phone) return res.status(400).json({ error: 'Phone required' });
+  const company = (getSettingsFlat(db).trade_name || 'Test').toUpperCase();
+  const r = await _waSendTemplate(c, {
+    phone, templateName: c.tplText, langCode: c.tplTextLang,
+    bodyParams: ['there', 'this is a test message from your admin console.', company],
+  });
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, id: r.id });
+});
+
+app.post('/api/whatsapp/send-template-text', requireView, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
+  if (!c.tplText) return res.status(400).json({ error: 'No text template configured', fallback: true });
+  const b = req.body || {};
+  const phone = _waNormPhone(b.phone);
+  if (!phone) return res.status(400).json({ error: 'Phone required' });
+  const params = Array.isArray(b.params) ? b.params.map(x => String(x == null ? '' : x).replace(/\s+/g, ' ').trim()) : [];
+  const r = await _waSendTemplate(c, { phone, templateName: c.tplText, langCode: c.tplTextLang, bodyParams: params });
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, id: r.id });
+});
+
+app.post('/api/whatsapp/send-template-document', requireView, upload.single('file'), async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  const cleanup = () => { try { if (req.file) fs.unlinkSync(req.file.path); } catch (_) {} };
+  if (!c.token || !c.phoneId) { cleanup(); return res.status(501).json({ error: 'WhatsApp not configured' }); }
+  if (!c.tplDocument) { cleanup(); return res.status(400).json({ error: 'No document template configured', fallback: true }); }
+  const phone = _waNormPhone((req.body || {}).phone);
+  if (!phone) { cleanup(); return res.status(400).json({ error: 'Phone required' }); }
+  if (!req.file) { cleanup(); return res.status(400).json({ error: 'File required' }); }
+  let params = [];
+  try { params = JSON.parse((req.body || {}).params || '[]'); } catch (_) {}
+  const filename = (req.body || {}).filename || req.file.originalname || 'document.pdf';
+  try {
+    // Upload the PDF to Meta's media store first, then reference it in
+    // the template header.
+    const buf = fs.readFileSync(req.file.path);
+    const fd = new FormData();
+    fd.append('messaging_product', 'whatsapp');
+    fd.append('type', 'application/pdf');
+    fd.append('file', new Blob([buf], { type: 'application/pdf' }), filename);
+    const up = await fetch(`${WA_GRAPH}/${encodeURIComponent(c.phoneId)}/media`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + c.token },
+      body: fd,
+      signal: AbortSignal.timeout(20000),
+    });
+    const upd = await up.json().catch(() => ({}));
+    if (!up.ok || !upd.id) throw new Error((upd.error && upd.error.message) || 'media upload failed');
+    const r = await _waSendTemplate(c, {
+      phone, templateName: c.tplDocument, langCode: c.tplDocumentLang,
+      bodyParams: Array.isArray(params) ? params.map(x => String(x == null ? '' : x).replace(/\s+/g, ' ').trim()) : [],
+      headerDocument: { id: upd.id, filename },
+    });
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ ok: true, id: r.id });
+  } catch (e) {
+    res.status(502).json({ error: (e && e.message) || 'send failed' });
+  } finally {
+    cleanup();
+  }
+});
+
+// Webhook verification handshake (Meta GET) + delivery receipts (POST).
+// No auth: Meta calls these directly. Verification compares the token
+// against the configured verify_token.
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && c.verifyToken && token === c.verifyToken) {
+    return res.status(200).send(String(challenge || ''));
+  }
+  res.sendStatus(403);
+});
+app.post('/api/whatsapp/webhook', (req, res) => {
+  // Delivery receipts are acknowledged but not persisted in this build.
+  res.sendStatus(200);
+});
+
 app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
   const gstin = String(req.params.gstin || '').toUpperCase().trim();
   if (!GSTIN_RE.test(gstin)) {
@@ -927,6 +1266,11 @@ app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
     const r = await fetch(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const body = await r.json();
+    // Persist whatever credit envelope the provider returned so the
+    // Settings → Integrations card + topbar pill can show how many
+    // searches remain. gstincheck doesn't document a single field name,
+    // so probe common aliases and stash the raw body either way.
+    const api = _gstCaptureCredits(db, body);
     if (body && body.flag && body.data) {
       const d = body.data;
       const addr = (d.pradr && d.pradr.addr) || {};
@@ -940,7 +1284,8 @@ app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
         state:    addr.stcd || state,
         status:   d.sts || '',
         regDate:  d.rgdt || '',
-        source:   'live'
+        source:   'live',
+        api,
       });
     }
     return res.json({
@@ -6231,12 +6576,22 @@ app.get('/api/stats', requireView, (req, res) => {
     mwA.params
   );
 
+  // Lot classification fragments shared by cumulative / per-trade /
+  // branch aggregates (sold = code present & != WD; wd = code == WD).
+  const _SOLD = `(code IS NOT NULL AND TRIM(code)<>'' AND UPPER(TRIM(code))<>'WD')`;
+  const _WD   = `(UPPER(TRIM(COALESCE(code,'')))='WD')`;
+
   // ── Cumulative totals across ALL trades (lifetime) ──
   // Aggregates over every lot in every (mode-matching) auction.
   const cumRow = db.get(
     `SELECT COALESCE(SUM(qty),0) as qty,
             COALESCE(SUM(amount),0) as amount,
-            COUNT(*) as lots
+            COUNT(*) as lots,
+            COALESCE(SUM(CASE WHEN ${_SOLD} THEN qty ELSE 0 END),0) as sold_qty,
+            COALESCE(SUM(CASE WHEN ${_WD}   THEN qty ELSE 0 END),0) as wd_qty,
+            COALESCE(SUM(CASE WHEN ${_SOLD} THEN amount ELSE 0 END),0) as sold_value,
+            MIN(CASE WHEN ${_SOLD} AND price>0 AND amount>0 THEN price END) as min_price,
+            MAX(CASE WHEN ${_SOLD} AND price>0 AND amount>0 THEN price END) as max_price
      FROM lots ${_w(mwLots)}`,
     mwLots.params
   ) || {};
@@ -6245,7 +6600,41 @@ app.get('/api/stats', requireView, (req, res) => {
     amount: cumRow.amount || 0,
     lots:   cumRow.lots   || 0,
     auctions: counts.auctions,
+    sold_qty: cumRow.sold_qty || 0,
+    wd_qty:   cumRow.wd_qty   || 0,
+    min_price: cumRow.min_price,
+    max_price: cumRow.max_price,
+    avg_price: (cumRow.sold_qty || 0) > 0 ? (cumRow.sold_value / cumRow.sold_qty) : 0,
   };
+
+  // ── Branch-wise totals (dashboard branch tiles) ──
+  // Scoped to the drilled-in auction when one is picked, else all lots
+  // (mode-filtered). Groups by branch; blanks roll into "(unspecified)".
+  let branchTotals;
+  {
+    const _raw = req.query.auction_id;
+    const _isAll = (_raw === 'all' || _raw === '' || _raw === undefined);
+    const drillId = _isAll ? null : (parseInt(_raw, 10) || null);
+    if (drillId) {
+      branchTotals = db.all(
+        `SELECT COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') as branch,
+                COUNT(*) as lots, COALESCE(SUM(qty),0) as qty, COALESCE(SUM(amount),0) as amount
+         FROM lots WHERE auction_id = ?
+         GROUP BY COALESCE(NULLIF(TRIM(branch),''),'(unspecified)')
+         ORDER BY amount DESC`,
+        [drillId]
+      );
+    } else {
+      branchTotals = db.all(
+        `SELECT COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') as branch,
+                COUNT(*) as lots, COALESCE(SUM(qty),0) as qty, COALESCE(SUM(amount),0) as amount
+         FROM lots ${_w(mwLots)}
+         GROUP BY COALESCE(NULLIF(TRIM(branch),''),'(unspecified)')
+         ORDER BY amount DESC`,
+        mwLots.params
+      );
+    }
+  }
 
   // ── Per-trade breakdown (one row per auction, newest first) ──
   // One query with a LEFT JOIN so auctions with zero lots still appear.
@@ -6257,7 +6646,12 @@ app.get('/api/stats', requireView, (req, res) => {
             COALESCE(SUM(l.qty),0) as qty,
             COALESCE(SUM(l.amount),0) as amount,
             COALESCE(SUM(CASE WHEN l.amount > 0 THEN 1 ELSE 0 END),0) as priced,
-            COALESCE(SUM(CASE WHEN l.invo IS NOT NULL AND l.invo != '' THEN 1 ELSE 0 END),0) as invoiced
+            COALESCE(SUM(CASE WHEN l.invo IS NOT NULL AND l.invo != '' THEN 1 ELSE 0 END),0) as invoiced,
+            COALESCE(SUM(CASE WHEN ${_SOLD.replace(/code/g,'l.code')} THEN l.qty ELSE 0 END),0) as sold_qty,
+            COALESCE(SUM(CASE WHEN ${_WD.replace(/code/g,'l.code')}   THEN l.qty ELSE 0 END),0) as wd_qty,
+            COALESCE(SUM(CASE WHEN ${_SOLD.replace(/code/g,'l.code')} THEN l.amount ELSE 0 END),0) as sold_value,
+            MIN(CASE WHEN ${_SOLD.replace(/code/g,'l.code')} AND l.price>0 AND l.amount>0 THEN l.price END) as min_price,
+            MAX(CASE WHEN ${_SOLD.replace(/code/g,'l.code')} AND l.price>0 AND l.amount>0 THEN l.price END) as max_price
      FROM auctions a
      LEFT JOIN lots l ON l.auction_id = a.id
      ${mwAa.sql ? 'WHERE 1=1' + mwAa.sql : ''}
@@ -6266,6 +6660,10 @@ app.get('/api/stats', requireView, (req, res) => {
      LIMIT 50`,
     mwAa.params
   );
+  // Weighted avg sold price per trade (Σ sold value / Σ sold qty).
+  for (const t of perTradeBreakdown) {
+    t.avg_price = (t.sold_qty || 0) > 0 ? (t.sold_value / t.sold_qty) : 0;
+  }
 
   // Pick: ?auction_id=N if provided
   //   - "all" (or no param) => dashboard shows cumulative view, no individual auction highlighted
@@ -6360,6 +6758,7 @@ app.get('/api/stats', requireView, (req, res) => {
     counts,
     cumulative,
     perTradeBreakdown,
+    branchTotals,
     currentAuction: auctionStats,
     allAuctions,
     topSellers,
@@ -6371,6 +6770,255 @@ app.get('/api/stats', requireView, (req, res) => {
       monthRevenue: monthTot,
       lastMonthRevenue: lastMonthTot,
     }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// REVENUE TREND — daily invoiced revenue for the Insights chart.
+// ?days=7|14|30 (clamped 1..90). Returns a continuous series (zero
+// days filled) so the line chart has an unbroken x-axis. Mode-filtered
+// via the parent auction, matching /api/stats.
+// ══════════════════════════════════════════════════════════════
+app.get('/api/stats/revenue-trend', requireView, (req, res) => {
+  const db = getDb();
+  let days = parseInt(req.query.days, 10) || 7;
+  days = Math.max(1, Math.min(90, days));
+  const mwInv = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=invoices.auction_id)');
+  const rows = db.all(
+    `SELECT date(date) AS d, COALESCE(SUM(tot),0) AS total, COUNT(*) AS count
+     FROM invoices
+     WHERE date(date) >= date('now','localtime', ?) ${mwInv.sql}
+     GROUP BY date(date)`,
+    ['-' + (days - 1) + ' days', ...mwInv.params]
+  );
+  const map = {};
+  for (const r of rows) map[r.d] = r;
+  // Fill every day so the chart x-axis is continuous. Today comes from
+  // SQLite localtime so it matches the GROUP BY date() bucketing above.
+  const todayStr = (db.get(`SELECT date('now','localtime') AS d`) || {}).d;
+  const base = new Date(todayStr + 'T00:00:00');
+  const pad = n => String(n).padStart(2, '0');
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(base);
+    dt.setDate(base.getDate() - i);
+    const d = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+    const hit = map[d];
+    series.push({ date: d, total: hit ? Number(hit.total) : 0, count: hit ? Number(hit.count) : 0 });
+  }
+  res.json({ days, series });
+});
+
+// ══════════════════════════════════════════════════════════════
+// INSIGHTS — per-trade × per-branch analytics. Drives the Dashboard
+// "headline metrics" tiles AND the Insights tab. Scope is either a
+// single trade (?auction_id=N) or a date range (?from=&to=, defaulting
+// to the current calendar month). Mode-filtered like /api/stats.
+//
+// Lot classification (matches the Lots-tab dashboard logic):
+//   sold      = code present and != 'WD'
+//   withdrawn = code == 'WD'
+//   unsold    = no code
+// Price min/max/avg are over SOLD lots only (price>0, amount>0); avg is
+// the weighted Σamount/Σqty. payable_to_sellers = Σ lots.balance.
+// ══════════════════════════════════════════════════════════════
+app.get('/api/insights', requireView, (req, res) => {
+  const db = getDb();
+  const mwAa = modeWhereClause(db, 'a.mode');
+
+  // ── Resolve scope → the auctions in play + the date range label. ──
+  let auctions, range;
+  const rawAid = req.query.auction_id;
+  if (rawAid && String(rawAid).trim() !== '' && String(rawAid) !== 'all') {
+    const aid = parseInt(rawAid, 10);
+    auctions = db.all(`SELECT id, ano, date, crop_type, state FROM auctions a WHERE a.id = ?`, [aid]);
+    const a0 = auctions[0];
+    range = { from: (a0 && a0.date) || '', to: (a0 && a0.date) || '' };
+  } else {
+    let from = String(req.query.from || '').trim();
+    let to   = String(req.query.to   || '').trim();
+    if (!from || !to) {
+      const m = db.get(`SELECT date('now','localtime','start of month') AS f, date('now','localtime') AS t`) || {};
+      from = from || m.f; to = to || m.t;
+    }
+    range = { from, to };
+    auctions = db.all(
+      `SELECT id, ano, date, crop_type, state FROM auctions a
+       WHERE date(a.date) BETWEEN date(?) AND date(?) ${mwAa.sql}
+       ORDER BY date(a.date) ASC, a.id ASC`,
+      [from, to, ...mwAa.params]
+    );
+  }
+
+  const aids = auctions.map(a => a.id);
+  const blankTotals = {
+    trades: auctions.length, lots: 0, bags: 0, qty: 0, value: 0,
+    sold: 0, sold_bags: 0, sold_qty: 0, sold_value: 0,
+    withdrawn: 0, wd_bags: 0, wd_qty: 0, wd_value: 0,
+    min_price: null, max_price: null, avg_price: 0,
+    payable_to_sellers: 0, outstanding_by_buyers: 0,
+  };
+  if (!aids.length) {
+    return res.json({
+      range, totals: blankTotals, perTrade: [], perBranch: [],
+      branchStacked: { labels: [], datasets: [] },
+      outstandingByBuyer: [], buyerActivity: [],
+    });
+  }
+  const ph = aids.map(() => '?').join(',');
+
+  // Reusable code-classification SQL fragments.
+  const SOLD = `(code IS NOT NULL AND TRIM(code)<>'' AND UPPER(TRIM(code))<>'WD')`;
+  const WD   = `(UPPER(TRIM(COALESCE(code,'')))='WD')`;
+
+  // ── Per (auction, branch) lot aggregation in one pass. ──
+  const grid = db.all(
+    `SELECT auction_id,
+            COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') AS branch,
+            COUNT(*) AS lots,
+            COALESCE(SUM(bags),0) AS bags,
+            COALESCE(SUM(qty),0)  AS qty,
+            COALESCE(SUM(amount),0) AS value,
+            SUM(CASE WHEN ${SOLD} THEN 1 ELSE 0 END) AS sold,
+            SUM(CASE WHEN ${WD}   THEN 1 ELSE 0 END) AS withdrawn,
+            SUM(CASE WHEN COALESCE(TRIM(code),'')='' THEN 1 ELSE 0 END) AS unsold,
+            COALESCE(SUM(CASE WHEN ${SOLD} THEN bags   ELSE 0 END),0) AS sold_bags,
+            COALESCE(SUM(CASE WHEN ${SOLD} THEN qty    ELSE 0 END),0) AS sold_qty,
+            COALESCE(SUM(CASE WHEN ${SOLD} THEN amount ELSE 0 END),0) AS sold_value,
+            COALESCE(SUM(CASE WHEN ${WD}   THEN bags   ELSE 0 END),0) AS wd_bags,
+            COALESCE(SUM(CASE WHEN ${WD}   THEN qty    ELSE 0 END),0) AS wd_qty,
+            COALESCE(SUM(CASE WHEN ${WD}   THEN amount ELSE 0 END),0) AS wd_value,
+            MIN(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS min_price,
+            MAX(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS max_price,
+            COALESCE(SUM(balance),0) AS payable
+     FROM lots
+     WHERE auction_id IN (${ph})
+     GROUP BY auction_id, COALESCE(NULLIF(TRIM(branch),''),'(unspecified)')`,
+    aids
+  );
+
+  // ── Roll the grid up into perTrade, perBranch, totals. ──
+  const num = v => Number(v) || 0;
+  const byTrade  = new Map();   // auction_id → trade agg
+  const byBranch = new Map();   // branch     → branch agg
+  const totals = { ...blankTotals };
+  let priceMin = null, priceMax = null;
+
+  const newTradeAgg = (a) => ({
+    id: a.id, ano: a.ano, date: a.date, state: a.state || '', crop_type: a.crop_type || '',
+    lots: 0, sold: 0, withdrawn: 0, qty: 0, value: 0,
+    sold_qty: 0, sold_value: 0,
+    _minP: null, _maxP: null,
+    branches: [],   // [{branch, value, qty, lots}]
+  });
+  for (const a of auctions) byTrade.set(a.id, newTradeAgg(a));
+
+  const newBranchAgg = (name) => ({
+    branch: name, lots: 0, sold: 0, withdrawn: 0, unsold: 0,
+    bags: 0, qty: 0, value: 0, sold_qty: 0, sold_value: 0,
+    _minP: null, _maxP: null, payable_to_sellers: 0,
+  });
+
+  for (const g of grid) {
+    const t = byTrade.get(g.auction_id);
+    if (t) {
+      t.lots += num(g.lots); t.sold += num(g.sold); t.withdrawn += num(g.withdrawn);
+      t.qty += num(g.qty); t.value += num(g.value);
+      t.sold_qty += num(g.sold_qty); t.sold_value += num(g.sold_value);
+      if (g.min_price != null) t._minP = (t._minP == null) ? num(g.min_price) : Math.min(t._minP, num(g.min_price));
+      if (g.max_price != null) t._maxP = (t._maxP == null) ? num(g.max_price) : Math.max(t._maxP, num(g.max_price));
+      t.branches.push({ branch: g.branch, value: num(g.value), qty: num(g.qty), lots: num(g.lots) });
+    }
+    let b = byBranch.get(g.branch);
+    if (!b) { b = newBranchAgg(g.branch); byBranch.set(g.branch, b); }
+    b.lots += num(g.lots); b.sold += num(g.sold); b.withdrawn += num(g.withdrawn); b.unsold += num(g.unsold);
+    b.bags += num(g.bags); b.qty += num(g.qty); b.value += num(g.value);
+    b.sold_qty += num(g.sold_qty); b.sold_value += num(g.sold_value);
+    b.payable_to_sellers += num(g.payable);
+    if (g.min_price != null) b._minP = (b._minP == null) ? num(g.min_price) : Math.min(b._minP, num(g.min_price));
+    if (g.max_price != null) b._maxP = (b._maxP == null) ? num(g.max_price) : Math.max(b._maxP, num(g.max_price));
+
+    totals.lots += num(g.lots); totals.bags += num(g.bags); totals.qty += num(g.qty); totals.value += num(g.value);
+    totals.sold += num(g.sold); totals.sold_bags += num(g.sold_bags); totals.sold_qty += num(g.sold_qty); totals.sold_value += num(g.sold_value);
+    totals.withdrawn += num(g.withdrawn); totals.wd_bags += num(g.wd_bags); totals.wd_qty += num(g.wd_qty); totals.wd_value += num(g.wd_value);
+    totals.payable_to_sellers += num(g.payable);
+    if (g.min_price != null) priceMin = (priceMin == null) ? num(g.min_price) : Math.min(priceMin, num(g.min_price));
+    if (g.max_price != null) priceMax = (priceMax == null) ? num(g.max_price) : Math.max(priceMax, num(g.max_price));
+  }
+  totals.min_price = priceMin;
+  totals.max_price = priceMax;
+  totals.avg_price = totals.sold_qty > 0 ? (totals.sold_value / totals.sold_qty) : 0;
+
+  // ── Invoices in scope: outstanding-by-buyer + grand outstanding. ──
+  const invByBuyer = db.all(
+    `SELECT COALESCE(NULLIF(TRIM(buyer1),''), buyer) AS buyer_name,
+            buyer AS buyer_code,
+            COUNT(*) AS invoices,
+            COALESCE(SUM(tot),0) AS value
+     FROM invoices
+     WHERE auction_id IN (${ph})
+     GROUP BY COALESCE(NULLIF(TRIM(buyer1),''), buyer), buyer
+     ORDER BY value DESC
+     LIMIT 100`,
+    aids
+  ).map(r => ({ buyer_name: r.buyer_name || '(unknown)', buyer_code: r.buyer_code || '', invoices: num(r.invoices), value: num(r.value) }));
+  totals.outstanding_by_buyers = invByBuyer.reduce((s, r) => s + r.value, 0);
+
+  // ── Buyer activity leaderboard (by purchased lot value). ──
+  const buyerActivity = db.all(
+    `SELECT COALESCE(NULLIF(TRIM(buyer1),''), buyer) AS buyer_name,
+            COUNT(*) AS lots,
+            COALESCE(SUM(qty),0) AS qty,
+            COALESCE(SUM(amount),0) AS value
+     FROM lots
+     WHERE auction_id IN (${ph}) AND ${SOLD} AND buyer IS NOT NULL AND TRIM(buyer)<>''
+     GROUP BY COALESCE(NULLIF(TRIM(buyer1),''), buyer)
+     ORDER BY value DESC
+     LIMIT 15`,
+    aids
+  ).map(r => ({ buyer_name: r.buyer_name || '(unknown)', lots: num(r.lots), qty: num(r.qty), value: num(r.value) }));
+
+  // ── Finalize perTrade + perBranch (resolve weighted avg, prune helpers). ──
+  const perTrade = auctions.map(a => {
+    const t = byTrade.get(a.id);
+    const avg = t.sold_qty > 0 ? (t.sold_value / t.sold_qty) : 0;
+    // Trade's branch list, biggest contribution first (frontend shows top 4).
+    const branches = t.branches.slice().sort((x, y) => y.value - x.value);
+    return {
+      id: t.id, ano: t.ano, date: t.date, state: t.state, crop_type: t.crop_type,
+      lots: t.lots, sold: t.sold, withdrawn: t.withdrawn, qty: t.qty, value: t.value,
+      min_price: t._minP, max_price: t._maxP, avg_price: avg, branches,
+    };
+  });
+
+  const perBranch = Array.from(byBranch.values())
+    .map(b => ({
+      branch: b.branch, lots: b.lots, sold: b.sold, withdrawn: b.withdrawn, unsold: b.unsold,
+      qty: b.qty, value: b.value, min_price: b._minP, max_price: b._maxP,
+      avg_price: b.sold_qty > 0 ? (b.sold_value / b.sold_qty) : 0,
+      payable_to_sellers: b.payable_to_sellers,
+    }))
+    .sort((x, y) => y.value - x.value);
+
+  // ── Stacked bar: one stack per trade (newest-window last 20), one
+  //    dataset per branch with that branch's value in each trade. ──
+  const stackTrades = perTrade.slice(-20);
+  const branchNames = perBranch.map(b => b.branch);
+  const branchStacked = {
+    labels: stackTrades.map(t => '#' + (t.ano != null ? t.ano : '')),
+    datasets: branchNames.map(bn => ({
+      label: bn,
+      data: stackTrades.map(t => {
+        const hit = (byTrade.get(t.id).branches || []).find(x => x.branch === bn);
+        return hit ? hit.value : 0;
+      }),
+    })),
+  };
+
+  res.json({
+    range, totals, perTrade, perBranch, branchStacked,
+    outstandingByBuyer: invByBuyer.slice(0, 50),
+    buyerActivity,
   });
 });
 
