@@ -8214,7 +8214,7 @@ async function deleteLogo(which) {
 }
 
 // Triggered when the Business Mode dropdown changes
-function onBusinessModeChanged(newMode){
+async function onBusinessModeChanged(newMode){
   // Persist the change into _sdata immediately (so helpers read the new value)
   const f = (_sdata.mode||[]).find(x => x.key === 'business_mode');
   if (f) f.value = newMode;
@@ -8228,6 +8228,26 @@ function onBusinessModeChanged(newMode){
   // e-Auction-only fields show/hide live so the Lot Entry tab reflects
   // the new mode without a tab switch
   applyFeatureFlags();
+  // Persist the mode to the server LIVE — mirrors onBusinessStateChanged.
+  // Mode-scoped endpoints (/api/auctions and every per-tab loader) filter
+  // rows by the server's stored business_mode, so without this the global
+  // trade picker keeps showing the previous mode's data even though the
+  // label already flipped (Auction ↔ Trade). This is the bug being fixed.
+  try {
+    await j('/api/company-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: { business_mode: newMode } })
+    });
+  } catch (e) {
+    console.error('Failed to persist business mode change:', e);
+  }
+  // Now that the server knows the new mode, reload the global trade/auction
+  // picker so it lists THIS mode's rows, then broadcast the (possibly new)
+  // selection into every per-tab selector and re-run their loaders.
+  if (typeof refreshGlobalAidList === 'function') {
+    await refreshGlobalAidList();
+    if (typeof onGlobalAidChange === 'function') onGlobalAidChange();
+  }
   toast(`Mode: ${newMode}`);
 }
 
@@ -8767,6 +8787,13 @@ async function saveSettings(){
   // value on the next render. Call applyLogoBadge to keep the topbar
   // logo + the Tally badges in lockstep.
   if (typeof applyLogoBadge === 'function') applyLogoBadge();
+  // Saving persists business_mode too, so refresh the global trade picker
+  // in case the mode changed — keeps the topbar list mode-correct without
+  // a reload (the per-tab selectors re-sync via onGlobalAidChange).
+  if (typeof refreshGlobalAidList === 'function') {
+    await refreshGlobalAidList();
+    if (typeof onGlobalAidChange === 'function') onGlobalAidChange();
+  }
   toast('Settings saved');
 }
 async function exportSettings(){const d=await j('/api/company-settings/export');const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
