@@ -7413,6 +7413,9 @@ const IMPORT_MODULES = {
     //             state, so `state` is intentionally absent from the
     //             aliases (it can't be mapped to a source column).
     keyCols: ['ano', 'sale', 'invo', 'state'],
+    // `state` is computed, never read from the source (even if the sheet
+    // has a STATE column) — see rowDefaults.
+    derivedFields: ['state'],
     // auction_id is derived from `ano` at import time so the imported
     // rows show up under the matching trade in the Sales tab (the list
     // filters by auction_id, not ano).
@@ -7458,6 +7461,8 @@ const IMPORT_MODULES = {
     label: 'Purchase Invoices',
     table: 'purchases',
     keyCols: ['invo'],
+    // `state` is computed from BR, never read from the source — see rowDefaults.
+    derivedFields: ['state'],
     autoFillAuctionId: true,
     fields: ['auction_id','ano','date','state','br','name','add_line','place','gstin','invo',
              'qty','amount','cgst','sgst','igst','rund','total','tds'],
@@ -7553,6 +7558,13 @@ function _importMapHeaders(headers, moduleDef) {
     for (const h of headers) {
       if (aliases.includes(norm(h))) { out[field] = h; break; }
     }
+  }
+  // Derived fields are ALWAYS computed server-side (e.g. `state` from the
+  // PLACE/BR prefix), never read from the source — even if the sheet has a
+  // matching column. Strip them so the auto-mapper's `[field]` fallback
+  // can't silently bind a source column that would override the rule.
+  if (Array.isArray(moduleDef.derivedFields)) {
+    for (const f of moduleDef.derivedFields) delete out[f];
   }
   return out;
 }
@@ -7660,6 +7672,9 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
       const v = userMapping[k];
       if (v === '' || v === null) delete mapping[k];
     }
+    // Derived fields are always computed server-side — drop any mapping
+    // (auto or manual) so it can never override the rule.
+    if (Array.isArray(def.derivedFields)) for (const f of def.derivedFields) delete mapping[f];
     const fieldSources = def.fields.map(f => [f, mapping[f] || null]);
     const auctionIdSlot = def.fields.indexOf('auction_id');
 
@@ -7888,6 +7903,9 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
       const v = userMapping[k];
       if (v === '' || v === null) delete mapping[k];
     }
+    // Derived fields are always computed server-side — drop any mapping
+    // (auto or manual) so it can never override the rule.
+    if (Array.isArray(def.derivedFields)) for (const f of def.derivedFields) delete mapping[f];
 
     const fieldSources = def.fields.map(f => [f, mapping[f] || null]);
     const valuePlaceholders = def.fields.map(() => '?').join(',');
