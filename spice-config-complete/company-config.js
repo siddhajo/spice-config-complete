@@ -11,6 +11,12 @@ const DEFAULTS = [
   { key: 'short_name',      value: 'IDEAL SPICES PRIVATE LIMITED', category: 'company', label: 'Short Name', type: 'text' },
   { key: 'pan',             value: 'AAICI5415L',    category: 'company',   label: 'PAN',                      type: 'text' },
   { key: 'cin',             value: 'U47211TN2025PTC186657', category: 'company', label: 'CIN',                type: 'text' },
+  // Partnership Firm toggle: when ON, the invoice letterhead's "CIN" line
+  // is replaced by "Partnership: <partnership_name>" (a partnership firm
+  // has no CIN). In Settings → Company the two fields are mutually
+  // exclusive — turning this ON greys out CIN and vice-versa.
+  { key: 'is_partnership',  value: 'false',          category: 'company',   label: 'Partnership Firm',        type: 'boolean' },
+  { key: 'partnership_name', value: '',              category: 'company',   label: 'Partnership Name / No.',  type: 'text' },
   { key: 'fssai',           value: '',               category: 'company',   label: 'FSSAI No.',               type: 'text' },
   { key: 'sbl',             value: '',               category: 'company',   label: 'SBL No.',                 type: 'text' },
 
@@ -41,6 +47,11 @@ const DEFAULTS = [
   { key: 's_email',         value: 'amazingspicepark@gmail.com', category: 'sister', label: 'Email',           type: 'text' },
   { key: 's_gstin',         value: '32ABDCA2636B1ZE', category: 'sister',   label: 'GSTIN',                    type: 'text' },
   { key: 's_cin',           value: 'U46305KL2025PTC095544', category: 'sister', label: 'CIN',                  type: 'text' },
+  // Partnership Firm toggle for the sister (ASP) company — mirrors the
+  // company-level pair so an ASP-active install can show "Partnership:
+  // <name>" on its letterhead instead of a CIN.
+  { key: 's_is_partnership',  value: 'false',        category: 'sister',    label: 'Partnership Firm',        type: 'boolean' },
+  { key: 's_partnership_name', value: '',            category: 'sister',    label: 'Partnership Name / No.',  type: 'text' },
   { key: 's_pan',           value: 'ABDCA2636B',    category: 'sister',    label: 'PAN',                      type: 'text' },
   { key: 's_fssai',         value: '',               category: 'sister',    label: 'FSSAI No.',                type: 'text' },
   { key: 's_sbl',           value: 'CS/55884/950/2026-27', category: 'sister', label: 'SBL No.',               type: 'text' },

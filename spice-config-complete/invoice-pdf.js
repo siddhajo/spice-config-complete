@@ -63,13 +63,23 @@ function effectiveCompany(cfg) {
   const mode  = (cfg.business_mode  || '').toLowerCase();
   const useASP = (mode === 'e-trade' && state === 'KERALA');
 
+  // Partnership Firm toggle → the letterhead identity line shows
+  // "Partnership: <name>" instead of "CIN: <cin>". cinLabel/cinValue
+  // carry the resolved label + value so the renderer doesn't repeat
+  // this branch; `cin` stays the raw CIN for any other consumer.
+  const _bool = (v) => v === true || String(v || '').toLowerCase() === 'true';
   if (useASP) {
+    const isPartner = _bool(cfg.s_is_partnership);
     return {
       logo:    cfg.s_logo     || 'ASP',
       name:    cfg.s_company  || cfg.s_short_name || '',
       short:   cfg.s_short_name || cfg.s_company  || '',
       pan:     cfg.s_pan      || '',
       cin:     cfg.s_cin      || '',
+      isPartnership: isPartner,
+      partnershipName: cfg.s_partnership_name || '',
+      cinLabel: isPartner ? 'Partnership' : 'CIN',
+      cinValue: isPartner ? (cfg.s_partnership_name || '') : (cfg.s_cin || ''),
       fssai:   cfg.s_fssai    || '',
       sbl:     cfg.s_sbl      || '',
       address1: cfg.s_address1 || '',
@@ -85,12 +95,17 @@ function effectiveCompany(cfg) {
   }
   // ISP: company.* + address matching state (TN uses address_tn, KL uses address_kl)
   const isStateKL = (state === 'KERALA');
+  const ispPartner = _bool(cfg.is_partnership);
   return {
     logo:    cfg.logo        || 'ISP',
     name:    cfg.short_name  || cfg.trade_name || '',
     short:   cfg.short_name  || cfg.trade_name || '',
     pan:     cfg.pan         || '',
     cin:     cfg.cin         || '',
+    isPartnership: ispPartner,
+    partnershipName: cfg.partnership_name || '',
+    cinLabel: ispPartner ? 'Partnership' : 'CIN',
+    cinValue: ispPartner ? (cfg.partnership_name || '') : (cfg.cin || ''),
     fssai:   cfg.fssai       || '',
     sbl:     cfg.sbl         || '',
     address1: isStateKL ? (cfg.kl_address1 || cfg.tn_address1 || '') : (cfg.tn_address1 || ''),
@@ -803,7 +818,12 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   ty += doc.heightOfString(addrLine, { width: textW });
   if (co.gstin) { doc.text(`GSTIN/UIN: ${co.gstin}`, textX, ty, { width: textW }); ty += 10; }
   if (co.stateName) { doc.text(`State Name : ${co.stateName}, Code : ${co.stateCode}`, textX, ty, { width: textW }); ty += 10; }
-  if (co.cin) { doc.text(`CIN: ${co.cin}`, textX, ty, { width: textW }); ty += 10; }
+  // Identity line: "Partnership: <name>" when the partnership toggle is
+  // on for the active company, else "CIN: <cin>". Falls back to the raw
+  // CIN if cinLabel/cinValue aren't resolved (older cfg shapes).
+  const _idLabel = co.cinLabel || 'CIN';
+  const _idValue = (co.cinValue !== undefined ? co.cinValue : co.cin) || '';
+  if (_idValue) { doc.text(`${_idLabel}: ${_idValue}`, textX, ty, { width: textW }); ty += 10; }
   if (co.fssai) { doc.text(`FSSAI No.: ${co.fssai}`, textX, ty, { width: textW }); ty += 10; }
   if (co.sbl)   { doc.text(`SBL No.: ${co.sbl}`,     textX, ty, { width: textW }); ty += 10; }
 
