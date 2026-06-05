@@ -19118,9 +19118,19 @@ async function impPreview(){
 // default the server sent in autoDefaults (the current business state).
 function _impEffectiveDefault(f, row){
   if (f === 'state') {
-    const placeSrc = _impLastMapping && _impLastMapping['place'];
-    const place = placeSrc ? String(row[placeSrc] == null ? '' : row[placeSrc]).trim().toUpperCase() : '';
-    if (place.startsWith('ASP')) return 'KERALA';
+    // Firm rule: the driving column prefixed "ASP" → KERALA, else TAMIL
+    // NADU. Mirrors the server's rowDefaults exactly. The driving column
+    // differs by module: PLACE for sales invoices, BR (branch) for
+    // purchases. Other modules have no such rule → fall back to autoDefaults.
+    const moduleKey = (document.getElementById('imp-module') || {}).value || '';
+    const srcField = moduleKey === 'purchase' ? 'br'
+                   : moduleKey === 'sales_invoice' ? 'place'
+                   : null;
+    if (srcField) {
+      const src = _impLastMapping && _impLastMapping[srcField];
+      const v = src ? String(row[src] == null ? '' : row[src]).trim().toUpperCase() : '';
+      return v.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU';
+    }
   }
   return _impLastAutoDefaults[f];
 }

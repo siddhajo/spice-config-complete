@@ -7405,11 +7405,13 @@ const IMPORT_MODULES = {
     //             ['invo','sale'] key wrongly collided cross-trade).
     //   • sale  — L/I/E share number ranges; keep them distinct.
     //   • invo  — the invoice number itself.
-    //   • state — separates the TN (ISP) and KL (ASP) books, matching
-    //             how generated invoices stamp cfg.business_state into
-    //             invoices.state. When the source omits a state column
-    //             it defaults to the current business state (see
-    //             `defaults` below) so the key still resolves.
+    //   • state — separates the TN (ISP) and KL (ASP) books. It is NOT
+    //             read from the source file: it is ALWAYS derived from
+    //             the PLACE — prefix "ASP" → KERALA, everything else →
+    //             TAMIL NADU (see rowDefaults below). This is a firm
+    //             business rule, independent of the current business
+    //             state, so `state` is intentionally absent from the
+    //             aliases (it can't be mapped to a source column).
     keyCols: ['ano', 'sale', 'invo', 'state'],
     // auction_id is derived from `ano` at import time so the imported
     // rows show up under the matching trade in the Sales tab (the list
@@ -7420,9 +7422,10 @@ const IMPORT_MODULES = {
     aliases: {
       ano: ['ano','auction_no','trade'],
       date: ['date','invoice_date','inv_date'],
-      // `state` is a key column — accept the common header spellings so it
-      // auto-maps; falls back to the business-state default when absent.
-      state: ['state','business_state','company_state','bstate','b_state'],
+      // NOTE: `state` is deliberately NOT mapped from the source — it is
+      // always derived from PLACE in rowDefaults (ASP → KERALA, else
+      // TAMIL NADU). Adding a state alias here would let a source column
+      // override that rule, which we don't want.
       sale: ['sale','sale_type','type'],
       invo: ['invo','invoice','invoice_no','invno'],
       buyer: ['buyer','buyer_code','code'],
@@ -7434,21 +7437,21 @@ const IMPORT_MODULES = {
       amount: ['amount','cardamom','value'],
       tot: ['tot','total','grand_total','invoice_amount'],
     },
-    // Default `state` to the current business state so the key resolves
-    // even when the source sheet has no state column — mirrors invoice
-    // generation, which stores cfg.business_state in invoices.state.
-    defaults: (db) => ({
-      state: String(getSettingsFlat(db).business_state || 'TAMIL NADU'),
-    }),
-    // Per-row override: rows whose PLACE is prefixed "ASP" belong to the
-    // Amazing Spice Park (ASP) company, which is in KERALA — so their
-    // business state is KERALA, not the flat default above. Only fills a
-    // blank `state`; a state value mapped from the source always wins.
-    // Returns {} for non-ASP rows so they fall back to the flat default.
+    // Flat default for `state` — TAMIL NADU. rowDefaults below always
+    // returns an explicit state, so this is just a safety net (and it
+    // tells the import UI that `state` is a server-filled field, so it's
+    // shown as auto-filled rather than "missing required").
+    defaults: () => ({ state: 'TAMIL NADU' }),
+    // Authoritative per-row state derivation from PLACE:
+    //   • PLACE prefixed "ASP" (Amazing Spice Park, Kerala) → KERALA
+    //   • everything else                                   → TAMIL NADU
+    // `state` is never mapped from the source (no alias), so the field is
+    // always blank-from-source and this value always wins. Independent of
+    // the current business state.
     rowDefaults: (row, mapping) => {
       const placeSrc = mapping.place;
       const place = placeSrc ? String(row[placeSrc] || '').trim().toUpperCase() : '';
-      return place.startsWith('ASP') ? { state: 'KERALA' } : {};
+      return { state: place.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
     },
   },
   purchase: {
@@ -7470,6 +7473,19 @@ const IMPORT_MODULES = {
       total:   ['total','grand_total','invoice_amount'],
       rund:    ['rund','round','round_off'],
       tds:     ['tds','tds_amount'],
+      // NOTE: no `state` alias — state is always derived from BR (see
+      // rowDefaults), never read from a source column.
+    },
+    // Flat default safety net + signals the UI that `state` is server-filled.
+    defaults: () => ({ state: 'TAMIL NADU' }),
+    // Authoritative per-row state derivation from the BR (branch) column:
+    //   • BR prefixed "ASP" (e.g. ASPNEDUMKANDAM) → KERALA
+    //   • everything else                          → TAMIL NADU
+    // Mirrors the sales-invoice PLACE rule, but purchases key off branch.
+    rowDefaults: (row, mapping) => {
+      const brSrc = mapping.br;
+      const br = brSrc ? String(row[brSrc] || '').trim().toUpperCase() : '';
+      return { state: br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
     },
   },
   bills: {
