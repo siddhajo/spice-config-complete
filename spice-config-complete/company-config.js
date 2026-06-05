@@ -168,6 +168,15 @@ const DEFAULTS = [
   // so a fresh install matches the pre-feature behaviour.
   { key: 'flag_crop_receipt',  value: 'false',       category: 'flags',     label: 'Crop Receipt (e-Auction)',   type: 'boolean' },
   { key: 'flag_reserved_price',value: 'false',       category: 'flags',     label: 'Reserved Price (e-Auction)', type: 'boolean' },
+  // Price List Mapping — sister tool of the Lots → Price Import button.
+  // When ON, a "Price List Mapping" sidebar entry (under Lots) and a
+  // quick-access "🗺 Price List Mapping" button on the Lots toolbar
+  // appear; the tab fills the CODE column of a Price List (Before) sheet
+  // from the Buyers master. Gated by business_mode === 'e-Auction' on
+  // top of the flag — flipping the mode away from e-Auction hides both
+  // surfaces regardless of the flag value. Default ON because most
+  // e-Auction operators use the mapping flow.
+  { key: 'flag_price_list_mapping', value: 'true',   category: 'flags',     label: 'Price List Mapping (e-Auction)', type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
   // Single-mode e-Auction build. Default flipped from 'e-Trade' to 'e-Auction'

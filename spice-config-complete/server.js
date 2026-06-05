@@ -3100,6 +3100,182 @@ app.post('/api/lots/unlock', requireAdmin, (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// PRICE LIST (BEFORE) — code mapping tool
+// ══════════════════════════════════════════════════════════════
+// Operator workflow:
+//   1. Export an empty Price List (Before) sheet (Exports tab)
+//   2. Print → buyers write their TRADE NAME (and prices) by hand
+//   3. Type the trade names back into the file
+//   4. Upload here → server resolves CODE from the buyers master
+//   5. Preview the matches; download the updated file
+//   6. Feed the downloaded file into Lots → Price Import
+//
+// Two endpoints share the same parsing/matching code:
+//   POST /api/price-list/map-preview  → JSON summary only
+//   POST /api/price-list/map-download → updated XLSX (Buffer)
+//
+// `ExcelJS` is used end-to-end so the brand header / total row /
+// column widths from the original export survive the round-trip.
+//
+// UI surface (sidebar entry + Lots toolbar button + the Price List
+// Mapping tab) is gated client-side by flag_price_list_mapping AND
+// business_mode === 'e-Auction'. These endpoints stay live regardless
+// so existing data/round-trips keep working if the flag is toggled.
+function _plLocateColumns(ws) {
+  // Find the header row containing both "TRADE NAME" and "CODE".
+  // Match is case-insensitive + whitespace-tolerant so renamed headers
+  // (e.g. "Trade Name", "trade_name") still resolve.
+  const normalize = s => String(s == null ? '' : s).trim().toUpperCase().replace(/[\s_\-]+/g, ' ');
+  let headerRow = 0, tradeCol = 0, codeCol = 0, anoCol = 0, dateCol = 0, lotCol = 0;
+  const maxRow = ws.rowCount || 0;
+  for (let r = 1; r <= maxRow; r++) {
+    const row = ws.getRow(r);
+    const cells = {};
+    row.eachCell({ includeEmpty: false }, (cell, col) => {
+      cells[normalize(cell.value)] = col;
+    });
+    if (cells['TRADE NAME'] && cells['CODE']) {
+      headerRow = r;
+      tradeCol = cells['TRADE NAME'];
+      codeCol = cells['CODE'];
+      anoCol = cells['AUCTION NO'] || cells['ANO'] || cells['TNO'] || 0;
+      dateCol = cells['DATE'] || 0;
+      lotCol = cells['LOT'] || cells['LOT NO'] || cells['LOTNO'] || 0;
+      break;
+    }
+  }
+  return { headerRow, tradeCol, codeCol, anoCol, dateCol, lotCol };
+}
+function _plBuildTradeIndex(db) {
+  // Pre-index every buyer by their trade name so a 1000-row file is one
+  // DB query, not 1000. We index BOTH buyer1 and buyer because operators
+  // sometimes write the full buyer-code string in the TRADE NAME column.
+  const buyers = db.all('SELECT id, buyer, buyer1, code, ti, sale, gstin FROM buyers');
+  const idx = new Map();
+  const push = (key, row) => {
+    if (!key) return;
+    const k = key.trim().toUpperCase();
+    if (!k) return;
+    if (!idx.has(k)) idx.set(k, []);
+    // Avoid duplicate entries when buyer === buyer1.
+    const arr = idx.get(k);
+    if (!arr.some(b => b.id === row.id)) arr.push(row);
+  };
+  for (const b of buyers) {
+    push(b.buyer1, b);
+    push(b.buyer, b);
+  }
+  return idx;
+}
+async function _plProcessFile(filePath) {
+  // Returns { wb, ws, cols, perRow: [{row, tradeName, status, pickedCode, candidates}], summary }
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('No worksheet found');
+  const cols = _plLocateColumns(ws);
+  if (!cols.headerRow) throw new Error('Could not find a row with both "TRADE NAME" and "CODE" columns — is this a Price List (Before) file?');
+
+  const idx = _plBuildTradeIndex(getDb());
+  const perRow = [];
+  let matched = 0, ambiguous = 0, unmatched = 0, blank = 0;
+  const maxRow = ws.rowCount || 0;
+  for (let r = cols.headerRow + 1; r <= maxRow; r++) {
+    const row = ws.getRow(r);
+    const tradeCell = row.getCell(cols.tradeCol);
+    // Skip a TOTAL footer row — the export marks it by leaving TRADE NAME
+    // blank and putting the literal "TOTAL" in the first text column. We
+    // only fill rows that look like data: must have some non-empty
+    // identifier in the row (lot/ano/trade name).
+    const tradeRaw = tradeCell.value;
+    const tradeName = String(tradeRaw == null ? '' : tradeRaw).trim();
+    const lotVal = cols.lotCol ? String(row.getCell(cols.lotCol).value || '').trim() : '';
+    if (!tradeName && !lotVal) continue;
+    const entry = {
+      row: r,
+      lot: lotVal,
+      ano: cols.anoCol ? String(row.getCell(cols.anoCol).value || '').trim() : '',
+      date: cols.dateCol ? String(row.getCell(cols.dateCol).value || '').trim() : '',
+      tradeName,
+      candidates: [],
+      pickedCode: '',
+      status: 'blank',
+    };
+    if (!tradeName) {
+      entry.status = 'blank';
+      blank++;
+      perRow.push(entry);
+      continue;
+    }
+    const key = tradeName.toUpperCase();
+    const cands = idx.get(key) || [];
+    entry.candidates = cands.map(b => ({
+      id: b.id, code: b.code, buyer: b.buyer, buyer1: b.buyer1, sale: b.sale, gstin: b.gstin,
+    }));
+    if (cands.length === 0) {
+      entry.status = 'unmatched';
+      unmatched++;
+    } else if (cands.length === 1) {
+      entry.status = 'matched';
+      entry.pickedCode = cands[0].code || '';
+      matched++;
+    } else {
+      // Ambiguous — multiple buyers share this trade name. Pick the
+      // first by code-sort order. Operator resolves per-lot later
+      // using the multi-code picker in the Lot edit modal.
+      entry.status = 'ambiguous';
+      // Prefer a candidate with a non-blank code; fall back to first.
+      const withCode = cands.find(c => c.code && String(c.code).trim());
+      entry.pickedCode = (withCode || cands[0]).code || '';
+      ambiguous++;
+    }
+    perRow.push(entry);
+  }
+  const summary = {
+    total: perRow.length,
+    matched, ambiguous, unmatched, blank,
+    uniqueTradeNames: Array.from(new Set(perRow.filter(p => p.tradeName).map(p => p.tradeName))).length,
+  };
+  return { wb, ws, cols, perRow, summary };
+}
+app.post('/api/price-list/map-preview', requireView, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { perRow, summary } = await _plProcessFile(req.file.path);
+    res.json({ ...summary, rows: perRow });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    if (req.file) fs.unlink(req.file.path, () => {});
+  }
+});
+app.post('/api/price-list/map-download', requireView, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { wb, ws, cols, perRow } = await _plProcessFile(req.file.path);
+    // Write the resolved code back into each row's CODE cell. We
+    // explicitly set the cell value so the existing column-level numFmt
+    // (which Excel uses to right-pad short codes like "RSH") still
+    // applies — modifying `.value` keeps the format intact.
+    for (const entry of perRow) {
+      if (!entry.pickedCode) continue;
+      ws.getRow(entry.row).getCell(cols.codeCol).value = entry.pickedCode;
+    }
+    const buf = await wb.xlsx.writeBuffer();
+    const baseName = (req.file.originalname || 'price-list-before.xlsx')
+      .replace(/\.xlsx?$/i, '')
+      .replace(/[^A-Za-z0-9._-]+/g, '-');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${baseName}-mapped.xlsx"`);
+    res.send(Buffer.from(buf));
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    if (req.file) fs.unlink(req.file.path, () => {});
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
 // PRICE CHECK — reconcile uploaded price sheet vs. lots table
 // ══════════════════════════════════════════════════════════════
 // Replaces the legacy PriceCheck_VSTL.xlsm macro workbook. The
@@ -3931,7 +4107,7 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   const invoiceState = cfg.business_state || auction.state || '';
   db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,invoiceState,saleType,String(invoiceNo),buyerCode,invoice.buyer.buyer1||'',
+    [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,String(invoiceNo),buyerCode,invoice.buyer.buyer1||'',
      invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
      s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal]);
   
@@ -4151,7 +4327,7 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
       const invoiceState = cfg.business_state || auction.state || '';
       db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,invoiceState,useSaleType,invoNo,row.buyer,invoice.buyer.buyer1||'',
+        [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,invoNo,row.buyer,invoice.buyer.buyer1||'',
          invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
          s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal]);
       // ASP-aware lot update: see single-invoice handler above for rationale.
@@ -4176,7 +4352,7 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
             [useSaleType, invoNo, req.params.auctionId, li.lot, row.buyer]);
         }
       }
-      results.push({ buyer: row.buyer, invoiceNo: invoNo, sale: useSaleType, grandTotal: s.grandTotal });
+      results.push({ buyer: row.buyer, invoiceNo: invoNo, sale: invoice.saleType, grandTotal: s.grandTotal });
       nextNo++;
     } catch (e) { errors.push({ buyer: row.buyer, error: e.message }); }
   }

@@ -1642,6 +1642,36 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 /* ── DataTable ────────────────────────────────────────── */
 .dt-wrap{position:relative;display:flex;flex-direction:column}
 
+/* ── Row actions kebab menu ─────────────────────────────────
+   Every table's Actions column (DataTable key '_actions') collapses its
+   icon buttons behind a vertical-ellipsis (⋮) button. Clicking it opens
+   a small popover holding the row's action icons. The popover is
+   position:fixed (JS-positioned in DataTable._toggleActions) so it
+   escapes the .dt-scroll overflow clip. */
+.dt-act-cell{white-space:nowrap}
+.act-menu-wrap{position:relative;display:inline-block}
+.act-kebab{
+  width:30px;height:30px;padding:0;border-radius:7px;
+  border:1.5px solid var(--border);background:var(--card);color:var(--text2);
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  font-size:18px;line-height:1;font-family:inherit;transition:all .15s
+}
+.act-kebab:hover{border-color:var(--spice-line-strong);color:var(--spice-text-main);box-shadow:0 2px 6px rgba(0,0,0,.08)}
+.act-menu-wrap.open .act-kebab{background:var(--spice-cardamom-lt);border-color:var(--spice-cardamom);color:var(--spice-cardamom-dk)}
+.act-menu{
+  display:none;position:fixed;z-index:1200;
+  background:#fff;border:1px solid var(--spice-line);border-radius:10px;
+  box-shadow:0 10px 28px rgba(31,25,21,.18);padding:6px;
+  align-items:center;gap:4px;flex-wrap:wrap;max-width:240px
+}
+.act-menu-wrap.open .act-menu{display:flex}
+/* Icons keep their existing look; just drop the inline right-margin so
+   they sit evenly in the popover. */
+.act-menu .icon-btn{margin:0}
+.act-menu .lot-lock-badge{margin:0}
+body[data-dark="1"] .act-kebab{background:#1e293b;border-color:#334155;color:#cbd5e1}
+body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
+
 /* Toolbar: single search + x-clear button + row count */
 .dt-toolbar{
   display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap
@@ -1926,7 +1956,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 })();
 </script>
 </head>
-<body data-feat-price-list-mapping="1" data-feat-price-check="1">
+<body data-feat-price-check="1">
 <div id="login">
   <!-- Decorative background blobs — pure CSS, no layout impact -->
   <div class="login-bg" aria-hidden="true">
@@ -2645,6 +2675,7 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="needs-lot-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openPriceImport()">📥 Price Import</button>
+            <button class="btn btn-o feat-price-list-mapping" style="height:38px;padding:0 16px;font-weight:600" onclick="go('plmap')" title="Fill the CODE column on a Price List sheet from TRADE NAME">🗺 Price List Mapping</button>
           </div>
         </div>
 
@@ -3731,6 +3762,38 @@ body[data-dark="1"] .dt-scroll tbody tr:hover{background:#334155}
         <div id="imp-preview" style="overflow-x:auto;max-height:300px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px"></div>
         <div id="imp-verify" style="overflow-x:auto;max-height:520px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px;display:none"></div>
         <div id="imp-history" style="overflow-x:auto;max-height:300px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
+      </div>
+    </div>
+
+    <!-- Price List Mapping — fill the CODE column of a Price List
+         (Before) sheet from the Buyers master (TRADE NAME → CODE).
+         Gated by flag_price_list_mapping AND business_mode === 'e-Auction'
+         via the .feat-price-list-mapping hide rule. -->
+    <div class="tc" id="tc-plmap">
+      <div class="card">
+        <h2>Price List Mapping
+          <span style="font-weight:400;font-size:12px;color:var(--text3)">
+            Upload a Price List (Before) sheet with TRADE NAME filled in — server fills the CODE column from the Buyers master
+          </span>
+        </h2>
+        <div style="font-size:12px;color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);border:1px solid #C5E3D2;border-radius:8px;padding:10px 12px;margin:6px 0 14px 0">
+          <strong>Expected columns:</strong> AUCTION NO, DATE, LOT, BAG, QTY, <strong>CODE</strong>, <strong>TRADE NAME</strong> &nbsp;·&nbsp;
+          The matcher needs both <code>TRADE NAME</code> and <code>CODE</code> headers somewhere on the sheet. Extra columns are kept as-is.
+        </div>
+
+        <div class="sgrid" style="margin-bottom:14px">
+          <div class="fg"><label>File (.xlsx / .xls)</label>
+            <input type="file" id="pl-file" accept=".xls,.xlsx" onchange="plOnFileChange()">
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn btn-g" onclick="plPreview()">1. Preview Mapping</button>
+          <button class="btn btn-a" id="pl-download-btn" onclick="plDownload()" disabled>2. Download Updated File</button>
+        </div>
+
+        <div id="pl-result" style="margin-bottom:14px;font-size:12.5px;color:var(--text2)"></div>
+        <div id="pl-preview" style="overflow-x:auto;max-height:600px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
       </div>
     </div>
 
@@ -5438,6 +5501,18 @@ const DataTable = (function(){
     const bodyRows = visible.map(r => {
       const cells = s.cols.map(c => {
         const v = displayValue(r, c);
+        // Actions column: collapse the row's action icons behind a ⋮ kebab
+        // that opens a popover. Only when there's a real control to show —
+        // plain badges/status text (e.g. a locked-row badge with no buttons)
+        // stay inline so the status remains visible at a glance.
+        if (c.key === '_actions') {
+          if (/<button|<a[\s>]/i.test(v)) {
+            return `<td class="dt-act-cell"><div class="act-menu-wrap">`
+              + `<button type="button" class="act-kebab" title="Actions" aria-label="Actions" aria-haspopup="true" onclick="DataTable._toggleActions(event,this)">⋮</button>`
+              + `<div class="act-menu" role="menu">${v}</div></div></td>`;
+          }
+          return `<td class="dt-act-cell">${v}</td>`;
+        }
         const cls = c.numeric ? ' class="num"' : (c.tdClass ? ` class="${c.tdClass}"` : '');
         return `<td${cls}>${v}</td>`;
       }).join('');
@@ -5518,6 +5593,27 @@ const DataTable = (function(){
     if (loadMore) wrap.insertAdjacentHTML('beforeend', loadMore);
   }
 
+  // Close any open row-actions popover and reset its inline positioning.
+  function closeActions(){
+    document.querySelectorAll('.act-menu-wrap.open').forEach(w => {
+      w.classList.remove('open');
+      const m = w.querySelector('.act-menu');
+      if (m){ m.style.display=''; m.style.left=''; m.style.top=''; m.style.visibility=''; }
+    });
+  }
+  // Global close triggers (registered once). A click anywhere except the
+  // kebab itself closes menus — including a click on a menu item, which
+  // fires the item's own onclick first (target phase) then bubbles here.
+  document.addEventListener('click', (e) => {
+    if (e.target.closest && e.target.closest('.act-kebab')) return;
+    closeActions();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeActions(); });
+  // capture:true so scrolling the inner .dt-scroll (not just the window)
+  // dismisses the fixed-position popover, which would otherwise drift.
+  window.addEventListener('scroll', closeActions, true);
+  window.addEventListener('resize', closeActions);
+
   return {
     mount(tbodyId, data, config){
       state[tbodyId] = {
@@ -5556,7 +5652,35 @@ const DataTable = (function(){
       const s = state[tbodyId]; if (!s) return;
       s.visible += PAGE_SIZE;
       render(tbodyId);
-    }
+    },
+    // Toggle the row-actions popover for a given kebab button. Positions
+    // the menu as a viewport-fixed popover (right-aligned under the
+    // button, flipped above if it would overflow the bottom) so the
+    // .dt-scroll overflow can't clip it.
+    _toggleActions(ev, btn){
+      if (ev) ev.stopPropagation();
+      const wrap = btn.closest('.act-menu-wrap');
+      if (!wrap) return;
+      const wasOpen = wrap.classList.contains('open');
+      closeActions();
+      if (wasOpen) return;
+      const menu = wrap.querySelector('.act-menu');
+      if (!menu) return;
+      wrap.classList.add('open');
+      // Measure off-screen, then place.
+      menu.style.visibility = 'hidden';
+      menu.style.display = 'flex';
+      const r = btn.getBoundingClientRect();
+      const mw = menu.offsetWidth, mh = menu.offsetHeight;
+      let left = Math.min(r.right - mw, window.innerWidth - mw - 8);
+      if (left < 8) left = 8;
+      let top = r.bottom + 4;
+      if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      menu.style.visibility = '';
+    },
+    _closeActions(){ closeActions(); }
   };
 })();
 
@@ -7654,6 +7778,10 @@ function applyFeatureFlags(){
   };
   setFlag('data-feat-crop-receipt',   isEAuc && lookupFlag('flag_crop_receipt'));
   setFlag('data-feat-reserved-price', isEAuc && lookupFlag('flag_reserved_price'));
+  // Price List Mapping — sidebar entry + Lots toolbar button + the
+  // Price List Mapping tab. Gated by business_mode === 'e-Auction' on
+  // top of the flag, so it only shows in e-Auction mode.
+  setFlag('data-feat-price-list-mapping', isEAuc && lookupFlag('flag_price_list_mapping'));
   // Sidebar module toggles — independent of business mode.
   setFlag('data-feat-bills',          lookupFlag('flag_bills'));
   setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
@@ -15508,6 +15636,203 @@ async function loadPriceCheckAuctions(){
     }
   }catch(e){showError(e)}
 }
+// ════════════════════════════════════════════════════════════════
+// PRICE LIST MAPPING — fill the CODE column of a Price List (Before)
+// sheet from the Buyers master. Upload → preview (TRADE NAME → CODE
+// match per row) → download the updated file for Lots → Price Import.
+// Surfaced only when flag_price_list_mapping is ON AND business_mode
+// is e-Auction (the .feat-price-list-mapping hide rule).
+// ════════════════════════════════════════════════════════════════
+let _plLastSummary = null;
+function plOnFileChange(){
+  // Picking a new file invalidates the previous preview, so reset the
+  // download gate. Without this, the user could upload File A, preview
+  // it, swap to File B, and download File B's mapping without seeing
+  // its preview first.
+  _plLastSummary = null;
+  const btn = document.getElementById('pl-download-btn');
+  if (btn) btn.disabled = true;
+  const result = document.getElementById('pl-result');
+  const host = document.getElementById('pl-preview');
+  if (result) result.innerHTML = '';
+  if (host) host.innerHTML = '';
+}
+
+async function plPreview(){
+  const fileEl = document.getElementById('pl-file');
+  const result = document.getElementById('pl-result');
+  const host   = document.getElementById('pl-preview');
+  if (!fileEl.files || !fileEl.files[0]) {
+    result.innerHTML = '<span style="color:#c00">Select a file first.</span>';
+    return;
+  }
+  result.innerHTML = 'Reading & matching…';
+  host.innerHTML = '';
+  const fd = new FormData();
+  fd.append('file', fileEl.files[0]);
+  try {
+    const r = await fetch(B + '/api/price-list/map-preview', {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      result.innerHTML = '<span style="color:#c00">Error: '+esc(data.error||'preview failed')+'</span>';
+      _plLastSummary = null;
+      document.getElementById('pl-download-btn').disabled = true;
+      return;
+    }
+    _plLastSummary = data;
+    document.getElementById('pl-download-btn').disabled = false;
+    _plRenderPreview(data);
+    const blocked = data.unmatched > 0 || data.ambiguous > 0;
+    const summaryLine = '<b>Total rows:</b> '+data.total+
+      ' · <b style="color:#15803d">matched:</b> '+data.matched+
+      ' · <b style="color:#a16207">ambiguous:</b> '+data.ambiguous+
+      ' · <b style="color:#c00">unmatched:</b> '+data.unmatched+
+      (data.blank ? ' · <b style="color:#888">blank:</b> '+data.blank : '');
+    result.innerHTML = summaryLine + ' &nbsp;<span style="color:'+(blocked?'#a16207':'#15803d')+'">'+
+      (blocked
+        ? '⚠ Some rows need attention before this file is ready for Price Import.'
+        : '✓ Every row maps to one code — ready to download.')+
+      '</span>';
+  } catch (e) {
+    result.innerHTML = '<span style="color:#c00">Error: '+esc(e.message||String(e))+'</span>';
+    _plLastSummary = null;
+    document.getElementById('pl-download-btn').disabled = true;
+  }
+}
+
+function _plRenderPreview(data){
+  const host = document.getElementById('pl-preview');
+  if (!host) return;
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+
+  // Card summary on top — same idiom as the Import Old Data verify panel.
+  const card = (label, value, color) =>
+    '<div style="flex:1;min-width:120px;padding:10px 12px;border:1px solid '+color+';border-radius:8px;background:'+color+'1a">'+
+      '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.4px">'+label+'</div>'+
+      '<div style="font-size:22px;font-weight:700;color:'+color+'">'+value+'</div>'+
+    '</div>';
+  let html = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+    card('Total rows', data.total||0, '#374151')+
+    card('Matched',    data.matched||0, '#15803d')+
+    card('Ambiguous',  data.ambiguous||0, '#a16207')+
+    card('Unmatched',  data.unmatched||0, '#c00')+
+    '</div>';
+
+  // Per-row table. We hide rows the user can't act on (blank trade name)
+  // because they pad the table without giving feedback — the summary
+  // card carries the count.
+  const visible = rows.filter(rw => rw.status !== 'blank');
+  if (!visible.length) {
+    html += '<div style="padding:12px;color:#666;font-style:italic">No rows with a TRADE NAME to map. Fill the TRADE NAME column and re-upload.</div>';
+    host.innerHTML = html;
+    return;
+  }
+  html += '<div style="overflow:auto;max-height:520px;border:1px solid var(--border);border-radius:6px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f4f4f4;position:sticky;top:0">'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Row</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Lot</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Trade name (from file)</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Status</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Picked CODE</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Candidates</th>'+
+    '</tr></thead><tbody>';
+  for (const rw of visible) {
+    const bg = rw.status === 'unmatched' ? '#fef2f2'
+             : rw.status === 'ambiguous' ? '#fff7ed'
+             : '#fff';
+    const badge = _plStatusBadge(rw.status);
+    const cands = (rw.candidates || []).map(c =>
+      '<span style="display:inline-block;padding:1px 6px;margin:1px 3px 1px 0;border:1px solid #ddd;border-radius:10px;background:#fafafa;font-size:11px">'+
+      '<b>'+esc(c.code||'(no code)')+'</b>' +
+      ' · ' + esc(c.buyer||'') +
+      (c.sale ? ' · <span style="color:#666">'+esc(c.sale)+'</span>' : '')+
+      '</span>'
+    ).join('');
+    html += '<tr style="background:'+bg+'">'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;font-family:monospace">'+rw.row+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;font-family:monospace">'+esc(rw.lot||'')+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0">'+esc(rw.tradeName||'')+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;white-space:nowrap">'+badge+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;font-weight:'+(rw.pickedCode?'700':'400')+';color:'+(rw.pickedCode?'#15803d':'#c00')+'">'+
+        esc(rw.pickedCode || '— none —')+
+      '</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0">'+(cands || '<span style="color:#c00;font-style:italic">No buyer matches this trade name. Add it in the Buyers tab.</span>')+'</td>'+
+    '</tr>';
+  }
+  html += '</tbody></table></div>';
+
+  if (data.ambiguous) {
+    html += '<div style="margin-top:10px;font-size:12px;color:#a16207;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px">'+
+      '<b>⚠ '+data.ambiguous+' row(s) are ambiguous</b> — the downloaded file uses the first candidate code. '+
+      'Switch a specific lot to a different code from the candidates by editing the lot after Price Import (the lot edit screen lists every code that shares a trade name).'+
+    '</div>';
+  }
+  if (data.unmatched) {
+    html += '<div style="margin-top:10px;font-size:12px;color:#c00;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px">'+
+      '<b>✗ '+data.unmatched+' row(s) have no matching buyer</b> — those CODE cells will be left blank. Add the missing trade names to the Buyers master first.'+
+    '</div>';
+  }
+  host.innerHTML = html;
+}
+
+function _plStatusBadge(status){
+  if (status === 'matched')   return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px">MATCHED</span>';
+  if (status === 'ambiguous') return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#fed7aa;color:#9a3412;font-weight:700;font-size:11px">AMBIGUOUS</span>';
+  if (status === 'unmatched') return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#fecaca;color:#991b1b;font-weight:700;font-size:11px">UNMATCHED</span>';
+  return '<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:#e5e7eb;color:#374151;font-weight:700;font-size:11px">BLANK</span>';
+}
+
+async function plDownload(){
+  const fileEl = document.getElementById('pl-file');
+  const result = document.getElementById('pl-result');
+  if (!fileEl.files || !fileEl.files[0]) {
+    result.innerHTML = '<span style="color:#c00">Select a file first.</span>';
+    return;
+  }
+  if (!_plLastSummary) {
+    result.innerHTML = '<span style="color:#c00">Run "Preview Mapping" first so you can see what will change.</span>';
+    return;
+  }
+  const btn = document.getElementById('pl-download-btn');
+  const origLabel = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Building file…';
+  try {
+    const fd = new FormData();
+    fd.append('file', fileEl.files[0]);
+    const r = await fetch(B + '/api/price-list/map-download', {
+      method: 'POST', body: fd,
+      headers: { 'Authorization': 'Bearer ' + T }
+    });
+    if (!r.ok) {
+      // Server returns JSON errors on failure (since the success path
+      // is binary, we can't blindly .json() — but on error the
+      // Content-Type is JSON, so this is safe).
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || ('Download failed ('+r.status+')'));
+    }
+    const blob = await r.blob();
+    // Pull the filename out of Content-Disposition so the user gets the
+    // "-mapped" suffix the server added; fall back to a generated name.
+    let filename = 'price-list-mapped.xlsx';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = /filename="?([^";]+)"?/i.exec(cd);
+    if (m) filename = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    if (typeof toast === 'function') toast('Mapped file downloaded ✓');
+  } catch (e) {
+    result.innerHTML = '<span style="color:#c00">'+esc(e.message||String(e))+'</span>';
+  } finally {
+    btn.disabled = false; btn.textContent = origLabel;
+  }
+}
+
 // Set of lot_ids the operator has marked "Keep DB price" — those rows
 // stay acknowledged across re-verify of the SAME file so the badge
 // survives a refresh, but reset when a new file is picked or Clear is

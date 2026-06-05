@@ -272,6 +272,18 @@ function calculateTCS(invoiceAmount, priorSales, cfg) {
  * Sale type filter is optional — if lots don't have sale set yet, filter by buyer only
  */
 function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
+  // ASP context = Kerala + e-Trade (sister-company ASP billing). Every ASP
+  // sales invoice is an inter-state transfer regardless of the buyer's GST
+  // state. We don't mutate `saleType` before the lots query (that would
+  // wrongly exclude lots already assigned a different type); instead the
+  // effective sale type is forced to 'I' AFTER the query — see
+  // effectiveSaleType below. It drives IGST (not CGST/SGST), hides
+  // Transport/Insurance, and — because the generate endpoints persist
+  // invoice.saleType — stamps the stored invoice's `sale` column as 'I' to
+  // match the PDF (which already prints 'I' for ASP).
+  const isASP = (String(cfg.business_mode || '').toLowerCase() === 'e-trade')
+             && (String(cfg.business_state || '').toUpperCase() === 'KERALA');
+
   // Get all lots for this buyer in this auction that have amounts.
   // Don't filter by sale — we're ASSIGNING the sale type now.
   // Skip code='WD' lots: those are withdrawn (no actual buyer
@@ -292,7 +304,13 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
   // Get buyer details
   const buyer = db.get('SELECT * FROM buyers WHERE buyer = ?', [buyerCode]);
   const buyerState = buyer ? buyer.gstin.substring(0, 2) : companyState;
-  const isInterState = buyerState !== companyState;
+  // Effective sale type: ASP forces inter-state ('I'); ISP keeps the caller's
+  // type. Used for the GST split, transport/insurance suppression, and the
+  // returned/stored sale type.
+  const effectiveSaleType = isASP ? 'I' : saleType;
+  // ASP invoices are always inter-state; otherwise the GST split follows the
+  // buyer's GST state vs the company's home state.
+  const isInterState = isASP ? true : (buyerState !== companyState);
 
   let totalQty = 0, totalBags = 0, totalAmount = 0;
   const lineItems = [];
@@ -300,10 +318,8 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
   // For ASP invoices (Kerala + e-Trade), invoice values are based on the
   // intra-company transfer price (PurAmt / P_Rate), not the external auction
   // price. Compute both sets of numbers per lot so the PDF can show the right
-  // ones AND the totals/GST align with what's printed.
-  const isASP = (String(cfg.business_mode || '').toLowerCase() === 'e-trade')
-             && (String(cfg.business_state || '').toUpperCase() === 'KERALA');
-
+  // ones AND the totals/GST align with what's printed. `isASP` is computed at
+  // the top of the function (it also forces saleType to 'I').
   for (const lot of lots) {
     totalBags += lot.bags;
     // Run calculateLot to derive prate/puramt (uses isp_profit_pooler/dealer
@@ -346,14 +362,14 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
     }
     return 0;
   };
-  const isLocal = (saleType === 'L');
+  const isLocal = (effectiveSaleType === 'L');
   // ASP invoices (Kerala + e-Trade, already computed in `isASP` above) do NOT
   // bill Transport/Insurance as separate line-items — only Cardamom + Gunny.
   // Force both to zero so subtotal, GST, and grand total agree with the PDF.
   // ISP inter-state invoices ('I') don't bill transport/insurance separately
   // (the buyer covers freight). Match the rendering rule that hides these
   // rows from the PDF — see invoice-pdf.js hideTransportInsurance.
-  const hideTI = !isASP && (String(saleType || '').toUpperCase() === 'I');
+  const hideTI = !isASP && (String(effectiveSaleType || '').toUpperCase() === 'I');
   const transportRate = isASP || hideTI ? 0 : (isLocal
     ? pickRate(cfg.local_transport, cfg.transport, 2.5)
     : pickRate(cfg.transport, 2.5));
@@ -387,7 +403,7 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
 
   return {
     buyer: buyer || {},
-    saleType,
+    saleType: effectiveSaleType,
     lineItems,
     summary: {
       totalQty, totalBags, totalAmount,
