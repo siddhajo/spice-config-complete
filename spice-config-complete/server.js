@@ -1533,9 +1533,11 @@ function syncTraderBanks(db, traderId, banks) {
 function findDuplicateSeller(db, pan, excludeId) {
   const cleanPan = String(pan || '').trim().toUpperCase();
   if (!cleanPan) return null;
+  // UPPER(TRIM(pan)) on the stored side too, so " ABC123 " and "abc123"
+  // are treated as the same PAN regardless of how either was entered.
   const sql = excludeId
-    ? 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(pan) = ? AND id != ? LIMIT 1'
-    : 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(pan) = ? LIMIT 1';
+    ? 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(TRIM(pan)) = ? AND id != ? LIMIT 1'
+    : 'SELECT id, name, pan, cr, tel FROM traders WHERE UPPER(TRIM(pan)) = ? LIMIT 1';
   return db.get(sql, excludeId ? [cleanPan, excludeId] : [cleanPan]);
 }
 
@@ -1547,8 +1549,9 @@ app.post('/api/traders', requireTraderWrite, (req, res) => {
   const dup = findDuplicateSeller(db, t.pan);
   if (dup) {
     return res.status(409).json({
-      error: 'A seller with this PAN already exists.',
+      error: `A seller with PAN "${dup.pan}" already exists: ${dup.name || '(unnamed)'}`,
       duplicate: true,
+      field: 'pan',
       existing: dup,
     });
   }
@@ -1570,8 +1573,9 @@ app.put('/api/traders/:id', requireTraderWrite, (req, res) => {
   const dup = findDuplicateSeller(db, t.pan, parseInt(req.params.id, 10));
   if (dup) {
     return res.status(409).json({
-      error: 'Another seller already has this PAN.',
+      error: `Another seller with PAN "${dup.pan}" already exists: ${dup.name || '(unnamed)'}`,
       duplicate: true,
+      field: 'pan',
       existing: dup,
     });
   }
@@ -1805,15 +1809,15 @@ function findDuplicateBuyer(db, buyer, code, excludeId) {
   const cleanCode  = String(code  || '').trim().toUpperCase();
   if (cleanBuyer) {
     const sql = excludeId
-      ? 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(buyer) = ? AND id != ? LIMIT 1'
-      : 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(buyer) = ? LIMIT 1';
+      ? 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(TRIM(buyer)) = ? AND id != ? LIMIT 1'
+      : 'SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(TRIM(buyer)) = ? LIMIT 1';
     const hit = db.get(sql, excludeId ? [cleanBuyer, excludeId] : [cleanBuyer]);
     if (hit) return { ...hit, field: 'buyer' };
   }
   if (cleanCode) {
     const sql = excludeId
-      ? "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(code) = ? AND code != '' AND id != ? LIMIT 1"
-      : "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(code) = ? AND code != '' LIMIT 1";
+      ? "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(TRIM(code)) = ? AND TRIM(code) != '' AND id != ? LIMIT 1"
+      : "SELECT id, buyer, buyer1, code FROM buyers WHERE UPPER(TRIM(code)) = ? AND TRIM(code) != '' LIMIT 1";
     const hit = db.get(sql, excludeId ? [cleanCode, excludeId] : [cleanCode]);
     if (hit) return { ...hit, field: 'code' };
   }
@@ -1828,10 +1832,10 @@ app.post('/api/buyers', requireBuyerWrite, (req, res) => {
   // elsewhere — duplicates would make alloc / invoice flows ambiguous).
   const dup = findDuplicateBuyer(db, b.buyer, b.code);
   if (dup) {
-    const which = dup.field === 'code' ? 'short alias' : 'buyer code';
     return res.status(409).json({
-      error: `A buyer with this ${which} already exists.`,
+      error: `A buyer with ${dup.field === 'buyer' ? `code "${dup.buyer}"` : `short alias "${dup.code}"`} already exists${dup.buyer1 ? `: ${dup.buyer1}` : ''}`,
       duplicate: true,
+      field: dup.field,
       existing: dup,
     });
   }
@@ -1851,10 +1855,10 @@ app.put('/api/buyers/:id', requireBuyerWrite, (req, res) => {
   // Same duplicate guard on updates, excluding the row being edited.
   const dup = findDuplicateBuyer(db, b.buyer, b.code, parseInt(req.params.id, 10));
   if (dup) {
-    const which = dup.field === 'code' ? 'short alias' : 'buyer code';
     return res.status(409).json({
-      error: `Another buyer already has this ${which}.`,
+      error: `Another buyer with ${dup.field === 'buyer' ? `code "${dup.buyer}"` : `short alias "${dup.code}"`} already exists${dup.buyer1 ? `: ${dup.buyer1}` : ''}`,
       duplicate: true,
+      field: dup.field,
       existing: dup,
     });
   }
