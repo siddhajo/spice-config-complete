@@ -13874,8 +13874,19 @@ async function loadPayments(opts){
           } },
         { key:'name', label:'Seller', sort:'text',
           render:(p)=>{
-            const full = _payExportStatus(aid, p.name, p.lot_count) === 'full';
-            return `<span style="font-weight:600;color:${full ? 'var(--text3)' : 'var(--spice-text-main)'}${full ? '' : ''}">${esc(p.name||'')}</span>`;
+            // Export-status badge sits right beside the name so the
+            // operator sees "already exported / X-of-Y partial" at a
+            // glance without opening the Actions menu.
+            const st = _payExportStatus(aid, p.name, p.lot_count);
+            const full = st === 'full';
+            let badge = '';
+            if (st === 'full') {
+              badge = ` <span title="Already exported — excluded from new Selected exports until restored" style="background:#DCFCE7;color:#15803D;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">✓ exported</span>`;
+            } else if (st === 'partial') {
+              const done = (_payExportedLotsFor(aid, p.name) || []).length;
+              badge = ` <span title="${done} of ${p.lot_count} lots already exported — the rest are still payable" style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🚫 ${done}/${p.lot_count}</span>`;
+            }
+            return `<span style="font-weight:600;color:${full ? 'var(--text3)' : 'var(--spice-text-main)'}">${esc(p.name||'')}</span>${badge}`;
           } },
         { key:'lot_count', label:'Lots', sort:'number', numeric:true },
         { key:'total_qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
@@ -13911,22 +13922,15 @@ async function loadPayments(opts){
             const bankBadge = (bi && bi.multipleBanks)
               ? `<span title="This seller's lots point at more than one bank account. Use Pick lots to export each account's lots separately." style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">⚠ multi-bank</span>`
               : '';
-            // Export-status badge + per-row restore (↶) icon.
+            // Per-row restore (↶) icon shows once anything's been exported.
             const st = _payExportStatus(aid, p.name, p.lot_count);
-            let expBadge = '';
-            if (st === 'full') {
-              expBadge = `<span title="Already exported — excluded from new Selected exports until restored" style="background:#DCFCE7;color:#15803D;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">✓ exported</span>`;
-            } else if (st === 'partial') {
-              const done = (_payExportedLotsFor(aid, p.name) || []).length;
-              expBadge = `<span title="${done} of ${p.lot_count} lots already exported — the rest are still payable" style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🚫 ${done}/${p.lot_count}</span>`;
-            }
             const undoBtn = (st !== 'none')
               ? `<button class="btn" style="padding:3px 8px;font-size:12px;background:#fff;border:1px solid var(--border)" data-seller="${nm}" onclick="event.stopPropagation();undoPaymentExport(this.getAttribute('data-seller'))" title="Restore this seller — re-enable for export">↶</button>`
               : '';
             const waBtn = `<button class="btn" style="padding:3px 9px;font-size:12px;background:#25D366;color:#fff;border:none" data-seller="${nm}" data-payable="${Number(p.total_payable)||0}" onclick="event.stopPropagation();whatsappPayment('${esc(String(aid))}',this.getAttribute('data-seller'),Number(this.getAttribute('data-payable')))" title="WhatsApp a payment-credited message to this seller">💬</button>`;
             return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">`
-              + `<button class="btn btn-a" style="padding:3px 10px;font-size:12px" data-seller="${nm}" onclick="event.stopPropagation();openPayLotsModal('${esc(String(aid))}',this.getAttribute('data-seller'))" title="View this seller's lots — pick a subset, save the export filter, or print a partial-payment statement">🎯 Pick lots</button>`
-              + waBtn + pickBadge + bankBadge + expBadge + undoBtn
+              + `<button class="btn btn-a" style="padding:3px 9px;font-size:12px" data-seller="${nm}" onclick="event.stopPropagation();openPayLotsModal('${esc(String(aid))}',this.getAttribute('data-seller'))" title="Pick lots — view this seller's lots, pick a subset, save the export filter, or print a partial-payment statement">🎯</button>`
+              + waBtn + pickBadge + bankBadge + undoBtn
               + `</div>`;
           } }
       ]
@@ -14306,6 +14310,21 @@ async function openPayLotsModal(auctionId, sellerName){
       try {
         const seller = await j(`/api/traders/${tid}`);
         const banks = (seller && seller.banks) || [];
+        // Legacy fallback: most traders' account details live only in the
+        // flat traders.acctnum/ifsc columns and were never migrated into
+        // the trader_banks table. When trader_banks is empty, synthesize a
+        // single bank entry from those columns so the Bank column resolves
+        // instead of showing "—". id:'legacy' is a sentinel used only for
+        // bankLabels keying (lots without an explicit bank_id route here).
+        if (!banks.length && seller && (seller.acctnum || seller.ifsc)) {
+          banks.push({
+            id: 'legacy',
+            acctnum: seller.acctnum || '',
+            bank_name: seller.bank_name || '',
+            ifsc: seller.ifsc || '',
+            is_default: 1,
+          });
+        }
         const def = banks.find(b => b.is_default) || banks[0] || null;
         _payLotsState.defaultBankId = def ? def.id : null;
         for (const b of banks) {
