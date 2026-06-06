@@ -80,6 +80,8 @@ const DEFAULTS = [
   { key: 'hpc',             value: '10',             category: 'rates',     label: 'Handling %',               type: 'number' },
   { key: 'deduction1',      value: '1.25',           category: 'rates',     label: 'Deduction (Pooler)',       type: 'number' },
   { key: 'deduction2',      value: '1.25',           category: 'rates',     label: 'Deduction (Dealer)',       type: 'number' },
+  // Used by flag_discount_in_prate — applies ONLY to Grade 1 lots.
+  { key: 'deduction1_inclusive', value: '1.25',      category: 'rates',     label: 'Deduction (Pooler) — discount-inclusive (Grade 1 only)', type: 'number' },
   { key: 'asp_profit_pooler', value: '0.75',         category: 'rates',     label: 'ASP Profit Ratio (Pooler)', type: 'number' },
   { key: 'asp_profit_dealer', value: '0.75',         category: 'rates',     label: 'ASP Profit Ratio (Dealer)', type: 'number' },
   { key: 'isp_profit_pooler', value: '0.5',          category: 'rates',     label: 'ISP Profit Ratio (Pooler)', type: 'number' },
@@ -92,12 +94,20 @@ const DEFAULTS = [
   { key: 'tds_purchase_rate', value: '0.1',          category: 'rates',     label: 'TDS on Purchase Rate % (Section 194Q)',  type: 'number' },
   { key: 'tds_threshold',   value: '5000000',        category: 'rates',     label: 'TDS / TCS Annual Threshold (₹) — default ₹50 lakh per Section 194Q/206C(1H)',  type: 'number' },
   { key: 'gunny_rate',      value: '165',            category: 'rates',     label: 'Gunny Rate (₹)',           type: 'number' },
+  // When flag_inter_transport / flag_inter_insurance is OFF the inter-state rate is forced to 0.
+  { key: 'flag_inter_transport', value: 'true',      category: 'rates',     label: 'Inter-State Transport (use inter-state transport rate)', type: 'boolean' },
   { key: 'transport',       value: '2.5',            category: 'rates',     label: 'Transport (₹/kg)',         type: 'number' },
+  { key: 'flag_inter_insurance', value: 'true',      category: 'rates',     label: 'Inter-State Insurance (use inter-state insurance rate)', type: 'boolean' },
   { key: 'insurance',       value: '0.75',           category: 'rates',     label: 'Insurance (₹/kg)',         type: 'number' },
+  { key: 'flag_local_transport', value: 'true',      category: 'rates',     label: 'Local Transport (use local transport rate)', type: 'boolean' },
   { key: 'local_transport', value: '2.5',            category: 'rates',     label: 'Local Transport (₹/kg)',   type: 'number' },
+  { key: 'flag_local_insurance', value: 'true',      category: 'rates',     label: 'Local Insurance (use local insurance rate)', type: 'boolean' },
   { key: 'local_insurance', value: '0.75',           category: 'rates',     label: 'Local Insurance (₹/kg)',   type: 'number' },
   { key: 'discount_pct',    value: '0',              category: 'rates',     label: 'Discount %',               type: 'number' },
   { key: 'discount_days',   value: '0',              category: 'rates',     label: 'No. of Days for Discount', type: 'number' },
+  { key: 'dealer_days',     value: '0',              category: 'rates',     label: 'No. of Days for Dealer',   type: 'number' },
+  { key: 'addl_charge_name',  value: '',             category: 'rates',     label: 'Additional Charge — Name', type: 'text' },
+  { key: 'addl_charge_value', value: '0',            category: 'rates',     label: 'Additional Charge — % of cardamom amount (0 to disable)', type: 'number' },
 
   // ── HSN / SAC CODES ────────────────────────────────────────
   { key: 'hsn_cardamom',    value: '09083120',       category: 'hsn',       label: 'Cardamom HSN',             type: 'text' },
@@ -156,6 +166,8 @@ const DEFAULTS = [
   { key: 'flag_rtds_inv',   value: 'true',           category: 'flags',     label: 'TDS in ASP Purchase',      type: 'boolean' },
   { key: 'flag_wgst',       value: 'false',          category: 'flags',     label: 'TDS on Full Invoice Amount', type: 'boolean' },
   { key: 'flag_disc_gst',   value: 'false',          category: 'flags',     label: 'Discount includes GST',    type: 'boolean' },
+  // Rolls the per-lot Discount into P_Rate using deduction1_inclusive — ONLY for Grade 1 lots.
+  { key: 'flag_discount_in_prate', value: 'false',   category: 'flags',     label: 'Roll Discount into P_Rate (Grade 1 only)', type: 'boolean' },
   { key: 'flag_debit_note', value: 'false',          category: 'flags',     label: 'Debit Note for Discount',  type: 'boolean' },
   { key: 'flag_invoice_stripe', value: 'true',       category: 'flags',     label: 'Alternate Row Stripe in Invoice', type: 'boolean' },
   { key: 'flag_dummy',      value: 'true',           category: 'flags',     label: 'Allow Dummy Invoices',     type: 'boolean' },

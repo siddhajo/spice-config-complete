@@ -7701,7 +7701,10 @@ async function loadSettings(){
 // When mode = e-Trade:   hide commission, handling, SB sample refund
 const _MODE_HIDE_CATS = { 'e-Auction': ['sister'], 'e-Trade': [] };
 const _MODE_HIDE_KEYS = {
-  'e-Auction': ['deduction1','deduction2','asp_profit_pooler','asp_profit_dealer','isp_profit_pooler','isp_profit_dealer','refund'],
+  // The 8 e-Trade-only Rates & Charges fields are hidden in e-Auction mode.
+  'e-Auction': ['deduction1','deduction2','asp_profit_pooler','asp_profit_dealer','isp_profit_pooler','isp_profit_dealer','refund',
+                'deduction1_inclusive','flag_inter_transport','flag_inter_insurance','flag_local_transport','flag_local_insurance',
+                'dealer_days','addl_charge_name','addl_charge_value'],
   'e-Trade':   ['commission','hpc','sb_refund']
 };
 
@@ -8344,6 +8347,9 @@ function renderSettingsPanel(){
   // longer applies. Bound after render so the live checkbox drives it.
   if (ck === 'company') { applyPartnershipGate(''); _bindPartnershipListener(''); }
   else if (ck === 'sister') { applyPartnershipGate('s_'); _bindPartnershipListener('s_'); }
+  // Rates panel: hide each rate input whose enable-flag is OFF, and bind the
+  // flags so toggling re-runs the sweep live (no Save round-trip needed).
+  if (ck === 'rates') { applyRateVisibility(); _bindRateFlagListeners(); }
   // After DOM paint, fetch existing logo status for preview.
   // Company tab shows the ACTIVE preset's logo (matches widget above).
   if (ck === 'company') {
@@ -8402,6 +8408,50 @@ function _bindPartnershipListener(prefix){
   if (flag && !flag.dataset._partnerBound) {
     flag.addEventListener('change', () => applyPartnershipGate(prefix));
     flag.dataset._partnerBound = '1';
+  }
+}
+
+// ── Flag-gated rate fields ────────────────────────────────────────
+// Rate fields whose visibility is gated by a sibling boolean flag.
+// When the flag is OFF, the rate input is hidden (and the calculation
+// uses 0). Re-render of the Settings panel respects this filter; a
+// live click on the flag toggle re-runs the visibility sweep so the
+// rate input appears/disappears immediately.
+const _FLAG_GATED_RATES = {
+  local_transport: 'flag_local_transport',
+  local_insurance: 'flag_local_insurance',
+  transport:       'flag_inter_transport',
+  insurance:       'flag_inter_insurance',
+};
+function isFieldHiddenByFlag(fieldKey){
+  const flagKey = _FLAG_GATED_RATES[fieldKey];
+  if (!flagKey) return false;
+  // Read live from the rendered DOM first (so toggling without saving
+  // still gates immediately); fall back to the in-memory _sdata.
+  const live = document.querySelector(`input[data-key="${flagKey}"]`);
+  if (live) return !live.checked;
+  for (const cat of Object.keys(_sdata || {})) {
+    const f = (_sdata[cat] || []).find(x => x && x.key === flagKey);
+    if (f) return String(f.value).toLowerCase() !== 'true';
+  }
+  return false;
+}
+function applyRateVisibility(){
+  for (const [rateKey, flagKey] of Object.entries(_FLAG_GATED_RATES)) {
+    const input = document.querySelector(`input[data-key="${rateKey}"]`);
+    if (!input) continue;
+    const wrap = input.closest('.fg') || input.parentElement;
+    if (wrap) wrap.style.display = isFieldHiddenByFlag(rateKey) ? 'none' : '';
+  }
+}
+// Live re-sync — wired in renderSettingsPanel after the rates panel renders.
+function _bindRateFlagListeners(){
+  for (const flagKey of Object.values(_FLAG_GATED_RATES)) {
+    const cb = document.querySelector(`input[data-key="${flagKey}"]`);
+    if (cb && !cb.dataset._rateBound) {
+      cb.addEventListener('change', applyRateVisibility);
+      cb.dataset._rateBound = '1';
+    }
   }
 }
 

@@ -462,6 +462,11 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
     ['Total State Tax', totalSgst],
     ['Round UP/DOWN', s.roundDiff || 0],
   ];
+  // Additional Charge (Settings → Rates & Charges) — adds onto Total Value
+  // below the round line. Hidden when zero.
+  if (s.addlCharge && s.addlCharge !== 0) {
+    sumRowsData.push([(s.addlChargeName || cfg.addl_charge_name || 'Additional Charge').toString(), s.addlCharge]);
+  }
   // Capture the y-start so we can later draw a vertical separator
   // between the label column and the value column (spans from the first
   // row down through the Total Value row).
@@ -1187,11 +1192,12 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   const transportH_pre = (summary.transportCost > 0 && !hideTransportInsurance) ? rowH : 0;
   const insuranceH_pre = (summary.insuranceCost > 0 && !hideTransportInsurance) ? rowH : 0;
   const gstRowCount_pre = summary.isInterState ? 1 : 2;
+  const addlH_pre      = (summary.addlCharge && summary.addlCharge !== 0) ? rowH : 0;
   // Required height for the summary + bottom blocks (matches the existing
   // ensureRoomFor estimate below)
   const requiredBottomH =
       gunnyH_pre + transportH_pre + insuranceH_pre
-    + rowH + (rowH * gstRowCount_pre) + rowH + (rowH + 2)
+    + rowH + (rowH * gstRowCount_pre) + rowH + addlH_pre + (rowH + 2)
     + 24 + 90 + 16 + 90 + 10;
   // Only pad if we're still on the first page and have room for it.
   // pageBottom is the y at which content should stop on this page.
@@ -1226,8 +1232,9 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   const transportH = (summary.transportCost > 0 && !hideTransportInsurance) ? rowH : 0;
   const insuranceH = (summary.insuranceCost > 0 && !hideTransportInsurance) ? rowH : 0;
   const gstRowCount = summary.isInterState ? 1 : 2;
+  const addlH = (summary.addlCharge && summary.addlCharge !== 0) ? rowH : 0;
   const summaryBlockH = gunnyH + transportH + insuranceH
-                      + rowH + (rowH * gstRowCount) + rowH + (rowH + 2)
+                      + rowH + (rowH * gstRowCount) + rowH + addlH + (rowH + 2)
                       + 24 + 90 + 16 + 90 + 10; // +10 buffer
   ensureRoomFor(summaryBlockH);
 
@@ -1344,6 +1351,18 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   doc.font('Helvetica-Bold').text(formatINR(summary.roundDiff), colX('amount') + 2, y + 3, { width: colW.amount - 4, align: 'right' });
   doc.font('Helvetica');
   y += rowH;
+
+  // Additional Charge row — name + value from Settings → Rates & Charges.
+  // Computed = sum(cardamom) × cfg.addl_charge_value %. Sits below Round and
+  // adds onto the grand total. Hidden when zero.
+  if (summary.addlCharge && summary.addlCharge !== 0) {
+    rowVerticals(y, rowH);
+    const addlLabel = (summary.addlChargeName || cfg.addl_charge_name || 'Additional Charge').toString();
+    doc.font('Helvetica-Bold').text(addlLabel, colX('desc') + 4, y + 3, { width: colW.desc + colW.hsn - 8 });
+    doc.font('Helvetica-Bold').text(formatINR(summary.addlCharge), colX('amount') + 2, y + 3, { width: colW.amount - 4, align: 'right' });
+    doc.font('Helvetica');
+    y += rowH;
+  }
 
   // Total row (bold) — shipped|billed divider skipped so total qty spans both
   // Draw a horizontal line above Total to visually separate it from the summary rows.

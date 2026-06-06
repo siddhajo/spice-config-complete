@@ -54,6 +54,16 @@ function calculateLot(lot, cfg) {
   const sampleRefundKg = (cfg.refund != null && cfg.refund !== '') ? Number(cfg.refund) : (lot.refud || 0);
   result.pqty = (lot.qty || 0) + (Number(sampleRefundKg) || 0);
 
+  // flag_discount_in_prate roll-in applies ONLY to Grade 1 lots: when ON,
+  // deduction1_inclusive is used for the ISP pooler rate (instead of
+  // deduction1) and the per-lot Discount is forced to 0 below because it's
+  // baked into the rate. Grade 2 / ungraded lots keep the normal deduction +
+  // discount behaviour regardless of the flag.
+  const lotGradeStr = String(lot.grade || '').trim();
+  const discInPrateFlag = cfg.flag_discount_in_prate === true
+    || String(cfg.flag_discount_in_prate || '').toLowerCase() === 'true';
+  const applyRollIn = discInPrateFlag && lotGradeStr === '1';
+
   // ── Compute planter-side numbers for BOTH ISP and ASP views ────────
   // Refer to lot fields directly; doesn't depend on cfg.business_state.
   // Returns { pqty, prate, puramt } — the legacy active-view trio.
@@ -89,9 +99,14 @@ function calculateLot(lot, cfg) {
           ? Number(cfg.isp_profit_dealer || 0)
           : Number(cfg.isp_profit_pooler || 0);
       } else {
-        deduction = (gradeStr === '2')
-          ? Number(cfg.deduction2 || 0)
-          : Number(cfg.deduction1 || 0);
+        if (gradeStr === '2') {
+          deduction = Number(cfg.deduction2 || 0);
+        } else if (applyRollIn) {
+          // Grade 1 + roll-in: use the discount-inclusive pooler deduction.
+          deduction = Number(cfg.deduction1_inclusive || 0);
+        } else {
+          deduction = Number(cfg.deduction1 || 0);
+        }
       }
       const rawRate = (lot.price || 0) * (1 - deduction / 100);
       prate = Math.round(rawRate);
@@ -182,18 +197,32 @@ function calculateLot(lot, cfg) {
     //   Payable  = PurAmt − Discount − CGST − SGST − IGST
     //
     // result.refund is reused as the Discount amount for e-Trade mode.
-    const days    = Number(cfg.discount_days) || 0;
-    const discPct = Number(cfg.discount_pct)  || 0;
-    result.refund = Math.round((result.puramt / 1000) * days * discPct);
+    // Days source depends on seller type:
+    //   GSTIN present (registered dealer) → cfg.dealer_days
+    //   no GSTIN (CR / agriculturist)     → cfg.discount_days
+    // SKIPPED entirely when the roll-in is in effect for THIS lot (flag ON
+    // AND Grade 1) — the discount is already baked into P_Rate via
+    // deduction1_inclusive, so a separate refund would double-count it. GST
+    // on Discount is skipped for the same reason.
+    const sellerHasGstin = sellerGstState !== '';
+    if (applyRollIn) {
+      result.refund = 0;
+    } else {
+      const days    = sellerHasGstin
+        ? (Number(cfg.dealer_days) || 0)
+        : (Number(cfg.discount_days) || 0);
+      const discPct = Number(cfg.discount_pct)  || 0;
+      result.refund = Math.round((result.puramt / 1000) * days * discPct);
 
-    // Only apply GST on the Discount when flag_disc_gst is ON.
-    // Uses Service Rate because the discount is treated as a credit/finance service.
-    if (cfg.flag_disc_gst && result.refund > 0) {
-      if (isIntra) {
-        result.cgst = Math.round(result.refund * halfRate / 100 * 100) / 100;
-        result.sgst = Math.round(result.refund * halfRate / 100 * 100) / 100;
-      } else {
-        result.igst = Math.round(result.refund * gstServiceRate / 100 * 100) / 100;
+      // Only apply GST on the Discount when flag_disc_gst is ON.
+      // Uses Service Rate because the discount is treated as a credit/finance service.
+      if (cfg.flag_disc_gst && result.refund > 0) {
+        if (isIntra) {
+          result.cgst = Math.round(result.refund * halfRate / 100 * 100) / 100;
+          result.sgst = Math.round(result.refund * halfRate / 100 * 100) / 100;
+        } else {
+          result.igst = Math.round(result.refund * gstServiceRate / 100 * 100) / 100;
+        }
       }
     }
 
@@ -370,12 +399,24 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
   // (the buyer covers freight). Match the rendering rule that hides these
   // rows from the PDF — see invoice-pdf.js hideTransportInsurance.
   const hideTI = !isASP && (String(effectiveSaleType || '').toUpperCase() === 'I');
+  // Per-component enable flags from Rates & Charges. When the matching flag
+  // is OFF the rate is forced to 0, so the component drops out of the taxable
+  // value, GST, and PDF entirely. Blank/legacy values default to ON.
+  const flagOn = (k, defaultOn) => {
+    const v = cfg[k];
+    if (v === undefined || v === null || v === '') return defaultOn;
+    return v === true || String(v).toLowerCase() === 'true';
+  };
+  const useLocalTransport = flagOn('flag_local_transport', true);
+  const useLocalInsurance = flagOn('flag_local_insurance', true);
+  const useInterTransport = flagOn('flag_inter_transport', true);
+  const useInterInsurance = flagOn('flag_inter_insurance', true);
   const transportRate = isASP || hideTI ? 0 : (isLocal
-    ? pickRate(cfg.local_transport, cfg.transport, 2.5)
-    : pickRate(cfg.transport, 2.5));
+    ? (useLocalTransport ? pickRate(cfg.local_transport, cfg.transport, 2.5) : 0)
+    : (useInterTransport ? pickRate(cfg.transport, 2.5) : 0));
   const insuranceRate = isASP || hideTI ? 0 : (isLocal
-    ? pickRate(cfg.local_insurance, cfg.insurance, 0.75)
-    : pickRate(cfg.insurance, 0.75));
+    ? (useLocalInsurance ? pickRate(cfg.local_insurance, cfg.insurance, 0.75) : 0)
+    : (useInterInsurance ? pickRate(cfg.insurance, 0.75) : 0));
 
   const transportCost = Math.round(totalQty * transportRate * 100) / 100;
 
@@ -398,8 +439,22 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
   }
 
   const totalBeforeRound = taxableValue + cgst + sgst + igst;
-  const roundDiff = Math.round(totalBeforeRound) - totalBeforeRound;
-  const grandTotal = Math.round(totalBeforeRound);
+  const subtotalRounded = Math.round(totalBeforeRound);
+  const roundDiff = subtotalRounded - totalBeforeRound;
+
+  // Additional Charge — sum(cardamom) × cfg.addl_charge_value % .
+  // The configured value is a PERCENTAGE (e.g. 2 means 2%). Sits BELOW the
+  // Round line and adds straight onto the grand total — does not feed into
+  // GST or round-off math. When the percentage is 0 the charge is fully
+  // skipped (no row, no effect on grand total).
+  const addlChargePct = Number(cfg.addl_charge_value) || 0;
+  const addlCharge = addlChargePct > 0
+    ? Math.round(totalAmount * addlChargePct / 100 * 100) / 100
+    : 0;
+  const addlChargeName = addlCharge > 0 ? String(cfg.addl_charge_name || '').trim() : '';
+  const grandTotal = addlCharge > 0
+    ? Math.round((subtotalRounded + addlCharge) * 100) / 100
+    : subtotalRounded;
 
   return {
     buyer: buyer || {},
@@ -410,6 +465,7 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
       gunnyCost, transportCost, insuranceCost,
       taxableValue, cgst, sgst, igst,
       roundDiff, grandTotal,
+      addlCharge, addlChargeName,
       isInterState
     }
   };
