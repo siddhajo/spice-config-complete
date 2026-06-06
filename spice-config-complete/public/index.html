@@ -17447,7 +17447,7 @@ const _le = {
   recentLots: [],          // currently-loaded page of lots (server-paginated, lot_no DESC)
   recentTotal: 0,          // total rows matching current filter (from server)
   recentPage: 1,           // 1-based current page in the recent-entries panel
-  recentPageSize: 25,      // rows per page
+  recentPageSize: 50,      // rows per page (one of _PAGE_SIZE_OPTIONS)
   recentSearch: '',        // active seller filter (LIKE on lots.name via API)
   recentSearchTimer: null, // debounce for the seller-filter input
   changeSellerPick: null,  // trader chosen in the Change Seller modal
@@ -18407,9 +18407,17 @@ async function leSaveNewSeller(){
 async function loadLeRecent(){
   const aid = document.getElementById('le-auction').value;
   if (!aid) return;
+  // One-time: restore the saved rows-per-page preference.
+  if (!_le._psLoaded) {
+    _le._psLoaded = true;
+    try {
+      const s = parseInt(localStorage.getItem('pageSize:le-recent'), 10);
+      if (_PAGE_SIZE_OPTIONS.includes(s)) _le.recentPageSize = s;
+    } catch (_) {}
+  }
   try {
     const page = Math.max(1, parseInt(_le.recentPage, 10) || 1);
-    const pageSize = Math.max(5, parseInt(_le.recentPageSize, 10) || 25);
+    const pageSize = Math.max(5, parseInt(_le.recentPageSize, 10) || 50);
     const offset = (page - 1) * pageSize;
     const search = String(_le.recentSearch || '').trim();
     // Backed by /api/lots's `name` LIKE filter so the search runs across
@@ -18444,11 +18452,22 @@ async function loadLeRecent(){
 // Pager navigation — called from renderLeRecent's footer Prev/Next /
 // page-input. Clamped to [1, lastPage].
 function leGotoRecentPage(p){
-  const pageSize = Math.max(5, parseInt(_le.recentPageSize, 10) || 25);
+  const pageSize = Math.max(5, parseInt(_le.recentPageSize, 10) || 50);
   const lastPage = Math.max(1, Math.ceil((_le.recentTotal || 0) / pageSize));
   const target = Math.max(1, Math.min(lastPage, parseInt(p, 10) || 1));
   if (target === _le.recentPage) return;
   _le.recentPage = target;
+  loadLeRecent();
+}
+
+// Rows-per-page selector handler. Persists the choice per-table so it
+// sticks across reloads, resets to page 1, and re-fetches the window.
+function leSetRecentPageSize(size){
+  const n = parseInt(size, 10);
+  if (!_PAGE_SIZE_OPTIONS.includes(n)) return;
+  _le.recentPageSize = n;
+  _le.recentPage = 1;
+  try { localStorage.setItem('pageSize:le-recent', String(n)); } catch (_) {}
   loadLeRecent();
 }
 
@@ -18681,7 +18700,7 @@ function renderLeRecent(){
         (sortMode === col ? 'color:var(--green);' : '');
   const total     = _le.recentTotal != null ? _le.recentTotal : visible.length;
   const page      = Math.max(1, parseInt(_le.recentPage, 10) || 1);
-  const pageSize  = Math.max(5, parseInt(_le.recentPageSize, 10) || 25);
+  const pageSize  = Math.max(5, parseInt(_le.recentPageSize, 10) || 50);
   const lastPage  = Math.max(1, Math.ceil(total / pageSize));
   const fromRow   = (page - 1) * pageSize + 1;
   const toRow     = Math.min(total, (page - 1) * pageSize + visible.length);
@@ -18704,7 +18723,7 @@ function renderLeRecent(){
   }
   const COLS = 'grid-template-columns:32px 80px 1fr 90px 70px 70px 80px 88px';
   host.innerHTML = `
-    <div style="display:grid;${COLS};gap:0;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;padding:6px 12px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:1">
+    <div style="display:grid;${COLS};gap:0;font-size:11px;font-weight:700;color:var(--spice-cardamom-dk);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:2px solid var(--spice-cardamom);background:var(--spice-cardamom-lt);position:sticky;top:0;z-index:1">
       <div style="text-align:center"><input type="checkbox" id="le-recent-select-all" onchange="leToggleSelectAll(this.checked)" title="Select all visible" style="cursor:pointer"></div>
       <div onclick="leSortByColumn('lot_no')" title="Sort by Lot No" style="${hdrStyle('lot_no')}">Lot${arrow('lot_no')}</div>
       <div onclick="leSortByColumn('name')"   title="Sort by Seller" style="${hdrStyle('name')}">Seller${arrow('name')}</div>
@@ -18740,29 +18759,36 @@ function renderLeRecent(){
   // a 200-row trade doesn't need 8 Next clicks to reach the end.
   const pagerHost = document.getElementById('le-recent-pager');
   if (pagerHost) {
-    if (lastPage <= 1) {
-      pagerHost.style.display = 'none';
-      pagerHost.innerHTML = '';
-    } else {
-      pagerHost.style.display = 'flex';
-      const btnStyle = 'height:30px;padding:0 12px;border:1px solid var(--border);background:#fff;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer';
-      const disStyle = ';opacity:.4;cursor:not-allowed';
-      const mk = (label, target, dis) =>
-        '<button type="button" style="' + btnStyle + (dis ? disStyle : '') + '"' +
-          (dis ? ' disabled' : ` onclick="leGotoRecentPage(${target})"`) + '>' + label + '</button>';
-      pagerHost.innerHTML =
-        '<div>Page <b>' + page + '</b> of <b>' + lastPage + '</b> · ' + total + ' lot' + (total === 1 ? '' : 's') + '</div>' +
-        '<div style="display:flex;align-items:center;gap:6px">' +
-          mk('« First', 1, page <= 1) +
-          mk('‹ Prev',  page - 1, page <= 1) +
-          '<input type="number" min="1" max="' + lastPage + '" value="' + page + '" ' +
-            'style="width:60px;height:30px;padding:0 6px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:12px;font-weight:600" ' +
-            'onkeydown="if(event.key===\'Enter\'){leGotoRecentPage(this.value);this.blur()}" ' +
-            'onblur="leGotoRecentPage(this.value)">' +
-          mk('Next ›', page + 1, page >= lastPage) +
-          mk('Last »', lastPage,  page >= lastPage) +
-        '</div>';
-    }
+    // Always shown (there are lots in this branch) so the rows-per-page
+    // selector is reachable even on a single page. Prev/Next nav appears
+    // only when there's more than one page.
+    pagerHost.style.display = 'flex';
+    const btnStyle = 'height:30px;padding:0 12px;border:1px solid var(--border);background:#fff;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer';
+    const disStyle = ';opacity:.4;cursor:not-allowed';
+    const mk = (label, target, dis) =>
+      '<button type="button" style="' + btnStyle + (dis ? disStyle : '') + '"' +
+        (dis ? ' disabled' : ` onclick="leGotoRecentPage(${target})"`) + '>' + label + '</button>';
+    // Rows-per-page selector (10/20/50/100/200).
+    const sizeSel =
+      '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)">Rows:' +
+        '<select onchange="leSetRecentPageSize(this.value)" style="height:30px;padding:0 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;background:#fff;cursor:pointer">' +
+          _PAGE_SIZE_OPTIONS.map(n => '<option value="' + n + '"' + (n === pageSize ? ' selected' : '') + '>' + n + ' / page</option>').join('') +
+        '</select></label>';
+    const nav = (lastPage <= 1) ? '' :
+      '<div style="display:flex;align-items:center;gap:6px">' +
+        mk('« First', 1, page <= 1) +
+        mk('‹ Prev',  page - 1, page <= 1) +
+        '<input type="number" min="1" max="' + lastPage + '" value="' + page + '" ' +
+          'style="width:60px;height:30px;padding:0 6px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:12px;font-weight:600" ' +
+          'onkeydown="if(event.key===\'Enter\'){leGotoRecentPage(this.value);this.blur()}" ' +
+          'onblur="leGotoRecentPage(this.value)">' +
+        mk('Next ›', page + 1, page >= lastPage) +
+        mk('Last »', lastPage,  page >= lastPage) +
+      '</div>';
+    pagerHost.innerHTML =
+      '<div style="display:flex;align-items:center;gap:14px">' + sizeSel +
+        '<span>Page <b>' + page + '</b> of <b>' + lastPage + '</b> · ' + total + ' lot' + (total === 1 ? '' : 's') + '</span></div>' +
+      nav;
   }
   // Sync the master "select all" checkbox state with current selection.
   const all = document.getElementById('le-recent-select-all');
