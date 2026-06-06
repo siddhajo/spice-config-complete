@@ -1024,11 +1024,12 @@ function mountMobile(app, deps) {
     db.run('DELETE FROM trader_banks WHERE trader_id = ?', [traderId]);
     for (const b of arr) {
       db.run(
-        `INSERT INTO trader_banks (trader_id, bank_name, acctnum, ifsc, holder_name)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO trader_banks (trader_id, bank_name, branch, acctnum, ifsc, holder_name)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [
           traderId,
           String(b.bank_name || '').trim(),
+          String(b.branch || '').trim(),
           String(b.acctnum || '').trim(),
           String(b.ifsc || '').trim().toUpperCase(),
           String(b.holder_name || '').trim(),

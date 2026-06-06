@@ -294,6 +294,7 @@ async function initDb() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trader_id INTEGER NOT NULL,
     bank_name TEXT DEFAULT '',
+    branch TEXT DEFAULT '',
     acctnum TEXT NOT NULL,
     ifsc TEXT NOT NULL,
     holder_name TEXT DEFAULT '',
@@ -730,6 +731,9 @@ async function initDb() {
     // tab. NULL = unlocked (default).
     "ALTER TABLE lots ADD COLUMN locked_at TEXT",
     "ALTER TABLE lots ADD COLUMN locked_by TEXT",
+    // Bank branch — auto-filled from the IFSC lookup (Razorpay public API)
+    // in the seller edit modal, shown under the Bank Name field.
+    "ALTER TABLE trader_banks ADD COLUMN branch TEXT DEFAULT ''",
     // Mobile-bridge canonical columns. The bridge's ensureBridgeSchema
     // self-heal will still attempt these idempotently as defence in
     // depth on installs that boot mobile-bridge before db.js migrations

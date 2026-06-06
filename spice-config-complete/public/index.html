@@ -930,6 +930,8 @@ tr:hover td{background:var(--spice-cream)}
 .pill-local{background:var(--spice-cardamom-lt);color:var(--spice-cardamom)}
 .pill-inter{background:#E6F0FA;color:#1F5C99}
 .pill-export{background:#F3E6FA;color:#6B2A99}
+.pill-wd{background:var(--spice-chili-lt);color:var(--spice-chili)}
+.pill-na{background:#f1f5f9;color:#64748b}
 .pill-warn{background:var(--spice-turmeric-lt);color:#8B6508}
 .pill-danger{background:var(--spice-chili-lt);color:var(--spice-chili)}
 .pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -2749,6 +2751,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="L">Local (L)</option>
             <option value="I">Inter-state (I)</option>
             <option value="E">Export (E)</option>
+            <option value="WD">Withdrawn (WD)</option>
+            <option value="NA">N/A (NA)</option>
           </select>
 
           <!-- Create group -->
@@ -3650,7 +3654,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div class="fg" style="margin:0"><label>From</label><input type="date" id="jr-from"></div>
           <div class="fg" style="margin:0"><label>To</label><input type="date" id="jr-to"></div>
           <div class="fg" style="margin:0" id="jr-sale-wrap"><label>Sale Type</label>
-            <select id="jr-sale"><option value="">All</option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option></select>
+            <select id="jr-sale"><option value="">All</option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select>
           </div>
           <button class="btn btn-g" onclick="loadJournal()">Load</button>
           <button class="btn btn-a" onclick="exportJournal()">Export XLSX</button>
@@ -4301,6 +4305,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <option value="L">Local (L)</option>
         <option value="I">Inter-state (I)</option>
         <option value="E">Export (E)</option>
+        <option value="WD">Withdrawn (WD)</option>
+        <option value="NA">N/A (NA)</option>
       </select>
     </div>
   </div>
@@ -4493,7 +4499,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label>Buyer Name</label><input id="l-buyer1"></div>
     <div class="fg"><label>Code</label><input id="l-code"></div>
     <div class="fg"><label>Sale Type</label>
-      <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option></select>
+      <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select>
     </div>
     <!-- e-Auction-only fields. Each cell wraps the entire .fg so the
          label + input collapse together when the flag is OFF (.feat-*
@@ -4525,7 +4531,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
 <div class="modal-bg" id="gen-inv-modal"><div class="modal" style="max-width:580px">
   <h2>Generate Sales Invoice(s)</h2>
-  <div class="fg"><label>Sale Type — filters eligible buyers below</label><select id="gi-sale" onchange="loadInvEligibleBuyers()"><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option></select></div>
+  <div class="fg"><label>Sale Type — filters eligible buyers below</label><select id="gi-sale" onchange="loadInvEligibleBuyers()"><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select></div>
   <div class="fg">
     <label style="display:flex;justify-content:space-between;align-items:center">
       <span>Buyers <span style="color:var(--text3);font-weight:400">— tick one or more</span></span>
@@ -4571,6 +4577,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       <option value="L">Local (L) only</option>
       <option value="I">Inter-state (I) only</option>
       <option value="E">Export (E) only</option>
+      <option value="WD">Withdrawn (WD) only</option>
+      <option value="NA">N/A (NA) only</option>
     </select>
     <div style="font-size:11px;color:var(--text3);margin-top:4px">When set, only buyers whose default sale type matches are included.</div>
   </div>
@@ -4811,7 +4819,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="ie-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="ie-date"></div>
     <div class="fg"><label>Sale Type</label>
-      <select id="ie-sale"><option value="L">Local</option><option value="I">Inter-state</option><option value="E">Export</option></select>
+      <select id="ie-sale"><option value="L">Local</option><option value="I">Inter-state</option><option value="E">Export</option><option value="WD">Withdrawn</option><option value="NA">N/A</option></select>
     </div>
     <div class="fg"><label>Invoice No</label><input id="ie-invo"></div>
     <div class="fg"><label>Buyer Code</label><input id="ie-buyer"></div>
@@ -6419,7 +6427,7 @@ async function loadStats(auctionId){
     </div>`;
   }).join('') : '<div style="text-align:center;color:var(--spice-text-hint);padding:24px 0;font-size:13px">No seller data this week</div>';
 
-  const saleMap = {L:['pill-local','Local'], I:['pill-inter','Inter-state'], E:['pill-export','Export']};
+  const saleMap = {L:['pill-local','Local'], I:['pill-inter','Inter-state'], E:['pill-export','Export'], WD:['pill-wd','Withdrawn'], NA:['pill-na','N/A']};
   const avatarColors = ['','c2','c3','c4'];
   const invoicesHTML = I.length ? `
     <table style="width:100%">
@@ -9360,14 +9368,59 @@ function appendBankRow(b){
   row.className = 'bank-row';
   row.style.cssText = 'display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1.2fr auto;gap:8px;align-items:end;padding:8px;background:#fff;border:1px solid var(--border);border-radius:6px';
   // Use fieldsets so the inputs are clearly grouped, with mini-labels.
+  // The bank-branch hint sits under Bank Name and is populated by the
+  // IFSC auto-lookup (Razorpay public API) when the IFSC field changes.
   row.innerHTML = `
-    <div class="fg" style="margin:0"><label style="font-size:11px">Bank Name</label><input class="bank-name" value="${esc(b.bank_name||'')}" placeholder="e.g. HDFC"></div>
+    <div class="fg" style="margin:0">
+      <label style="font-size:11px">Bank Name</label>
+      <input class="bank-name" value="${esc(b.bank_name||'')}" placeholder="e.g. HDFC">
+      <div class="bank-branch-hint" style="font-size:11px;color:var(--text3);margin-top:2px;min-height:14px">${b.branch ? 'Branch: '+esc(b.branch) : ''}</div>
+      <input type="hidden" class="bank-branch" value="${esc(b.branch||'')}">
+    </div>
     <div class="fg" style="margin:0"><label style="font-size:11px">Account No</label><input class="bank-acctnum" value="${esc(b.acctnum||'')}"></div>
-    <div class="fg" style="margin:0"><label style="font-size:11px">IFSC</label><input class="bank-ifsc" value="${esc(b.ifsc||'')}" style="text-transform:uppercase"></div>
+    <div class="fg" style="margin:0"><label style="font-size:11px">IFSC</label><input class="bank-ifsc" value="${esc(b.ifsc||'')}" style="text-transform:uppercase" oninput="onBankIfscInput(this)" onblur="lookupBankByIfsc(this)"></div>
     <div class="fg" style="margin:0"><label style="font-size:11px">Holder Name</label><input class="bank-holder" value="${esc(b.holder_name||'')}"></div>
     <button type="button" class="btn btn-o" onclick="this.closest('.bank-row').remove()" title="Remove this bank" style="padding:6px 10px;font-size:12px">✕</button>
   `;
   c.appendChild(row);
+}
+
+// IFSC → bank/branch auto-lookup via Razorpay's free public IFSC API.
+// Fires when the user types a full 11-char IFSC (debounced) and again on
+// blur. Fills the Bank Name (only when blank, to avoid stomping a manual
+// edit) and the read-only branch hint below it. Failures are silent —
+// the user can still type the fields manually.
+const _ifscLookupCache = new Map(); // ifsc → {BANK, BRANCH} or null
+let _ifscLookupTimer = null;
+function onBankIfscInput(input){
+  const v = input.value.trim().toUpperCase();
+  if (v.length < 11) return;
+  clearTimeout(_ifscLookupTimer);
+  _ifscLookupTimer = setTimeout(() => lookupBankByIfsc(input), 350);
+}
+async function lookupBankByIfsc(input){
+  const row = input.closest('.bank-row');
+  if (!row) return;
+  const ifsc = input.value.trim().toUpperCase();
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return;
+  const nameEl   = row.querySelector('.bank-name');
+  const hintEl   = row.querySelector('.bank-branch-hint');
+  const branchEl = row.querySelector('.bank-branch');
+  let data;
+  if (_ifscLookupCache.has(ifsc)) {
+    data = _ifscLookupCache.get(ifsc);
+  } else {
+    try {
+      const r = await fetch('https://ifsc.razorpay.com/' + encodeURIComponent(ifsc));
+      data = r.ok ? await r.json() : null;
+    } catch (_) { data = null; }
+    _ifscLookupCache.set(ifsc, data);
+  }
+  if (!data) { if (hintEl) hintEl.textContent = ''; return; }
+  // Only overwrite Bank Name when blank — preserves any manual edit.
+  if (nameEl && !nameEl.value.trim() && data.BANK) nameEl.value = data.BANK;
+  if (branchEl) branchEl.value = data.BRANCH || '';
+  if (hintEl)   hintEl.textContent = data.BRANCH ? 'Branch: ' + data.BRANCH : '';
 }
 // Collect the current bank rows into an array of {bank_name, acctnum,
 // ifsc, holder_name}. Skips rows where both acctnum and ifsc are blank
@@ -9379,11 +9432,12 @@ function collectBankRows(){
   const banks = [];
   for (const r of rows) {
     const bank_name   = r.querySelector('.bank-name').value.trim();
+    const branch      = (r.querySelector('.bank-branch')?.value || '').trim();
     const acctnum     = r.querySelector('.bank-acctnum').value.trim();
     const ifsc        = r.querySelector('.bank-ifsc').value.trim().toUpperCase();
     const holder_name = r.querySelector('.bank-holder').value.trim();
     if (!acctnum && !ifsc) continue; // blank row — skip
-    banks.push({ bank_name, acctnum, ifsc, holder_name });
+    banks.push({ bank_name, branch, acctnum, ifsc, holder_name });
   }
   return banks;
 }
@@ -9802,7 +9856,7 @@ async function searchBuyers(q, opts){
   renderPager('buyers-pager', _buyersPager, gotoBuyersPage, query);
 
   const d = rows;
-  const saleMap={L:'Local',I:'Inter-state',E:'Export'};
+  const saleMap={L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'};
   DataTable.mount('buyers-list', d, {
     emptyState: { icon: 'buyers', title: "No buyers yet", body: "Register buyers to generate sales invoices. Use Add Buyer above or import from a template." }, 
     columns: [
@@ -9854,7 +9908,7 @@ async function searchBuyers(q, opts){
 function viewBuyerDetails(b){
   const kv=(k,v)=>v?`<tr><td style="padding:6px 10px;color:var(--text2);font-size:12px;width:40%">${k}</td><td style="padding:6px 10px;font-size:13px">${esc(v)}</td></tr>`:'';
   const section=(title,rows)=>{const filtered=rows.filter(Boolean).join('');return filtered?`<div style="margin-bottom:16px"><h3 style="font-size:13px;color:var(--green);margin:0 0 6px 0;padding-bottom:4px;border-bottom:1.5px solid var(--green-border)">${title}</h3><table style="width:100%">${filtered}</table></div>`:''};
-  const saleMap={L:'Local',I:'Inter-state',E:'Export'};
+  const saleMap={L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'};
   const fullAddress=[b.add1,b.add2].filter(Boolean).join(', ');
   const consigneeAddress=[b.cadd1].filter(Boolean).join(', ');
   let html='';
@@ -11921,7 +11975,7 @@ function lotBulkBuyerPreview(){
     x => String(x.buyer || '').trim().toUpperCase() === code
   );
   if (b) {
-    const saleLabel = b.sale === 'I' ? 'Inter-state' : b.sale === 'E' ? 'Export' : 'Local';
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'}[b.sale] || 'Local';
     prev.innerHTML = `✓ <strong style="color:var(--spice-cardamom)">${esc(b.buyer1 || '(no trade name)')}</strong>`
       + (b.code ? `<span style="color:var(--text3)"> · code ${esc(b.code)}</span>` : '')
       + `<span style="color:var(--text3)"> · sale ${esc(saleLabel)}</span>`;
@@ -11952,7 +12006,7 @@ async function lotBulkBuyerApply(){
     const aid = document.getElementById('lot-auction')?.value;
     if (aid) { try { await j(`/api/lots/calculate/${aid}`, { method: 'POST' }); } catch (_) {} }
     hideModal('lot-bulk-buyer-modal');
-    const saleLabel = r.sale === 'I' ? 'Inter-state' : r.sale === 'E' ? 'Export' : 'Local';
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'}[r.sale] || 'Local';
     toast(`Set buyer ${r.buyer} (${saleLabel}) on ${n} lot${n === 1 ? '' : 's'}${skipNote} · recalculated`);
     if (typeof loadLots === 'function') loadLots({ keepPage: true });
   } catch (e) {
@@ -12538,6 +12592,8 @@ async function loadInvoices(opts){
             L: { bg:'var(--spice-cardamom-lt)', fg:'var(--spice-cardamom-dk)', label:'Local' },
             I: { bg:'var(--spice-turmeric-lt)', fg:'#B45309',                  label:'Inter-state' },
             E: { bg:'var(--spice-saffron-lt)',  fg:'var(--spice-saffron-dk)',  label:'Export' },
+            WD:{ bg:'var(--spice-chili-lt)',    fg:'var(--spice-chili)',       label:'Withdrawn' },
+            NA:{ bg:'#f1f5f9',                  fg:'#64748b',                   label:'N/A' },
           }[s] || { bg:'#f1f5f9', fg:'#64748b', label: s || '—' };
           return `<span title="${cfg.label}" style="display:inline-block;min-width:24px;padding:3px 9px;border-radius:6px;background:${cfg.bg};color:${cfg.fg};font-weight:700;font-size:11px;letter-spacing:.4px;text-align:center">${s || '—'}</span>`;
         },

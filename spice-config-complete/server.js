@@ -1439,7 +1439,7 @@ app.get('/api/traders', requireView, (req, res) => {
     const ids = rows.map(r => r.id);
     const placeholders = ids.map(() => '?').join(',');
     const banks = db.all(
-      `SELECT trader_id, bank_name, acctnum, ifsc, holder_name
+      `SELECT trader_id, bank_name, branch, acctnum, ifsc, holder_name
        FROM trader_banks WHERE trader_id IN (${placeholders})
        ORDER BY trader_id, id`, ids
     );
@@ -1494,7 +1494,7 @@ app.get('/api/traders/:id', requireView, (req, res) => {
   if (!row) return res.status(404).json({ error: 'Not found' });
   // Attach banks array so the edit modal sees all bank accounts.
   row.banks = db.all(
-    'SELECT trader_id, bank_name, acctnum, ifsc, holder_name FROM trader_banks WHERE trader_id = ? ORDER BY id',
+    'SELECT trader_id, bank_name, branch, acctnum, ifsc, holder_name FROM trader_banks WHERE trader_id = ? ORDER BY id',
     [row.id]
   );
   res.json(row);
@@ -1511,8 +1511,8 @@ function syncTraderBanks(db, traderId, banks) {
   db.run('DELETE FROM trader_banks WHERE trader_id = ?', [traderId]);
   for (const b of arr) {
     db.run(
-      'INSERT INTO trader_banks (trader_id, bank_name, acctnum, ifsc, holder_name) VALUES (?,?,?,?,?)',
-      [traderId, b.bank_name||'', String(b.acctnum||''), String(b.ifsc||''), b.holder_name||'']
+      'INSERT INTO trader_banks (trader_id, bank_name, branch, acctnum, ifsc, holder_name) VALUES (?,?,?,?,?,?)',
+      [traderId, b.bank_name||'', b.branch||'', String(b.acctnum||''), String(b.ifsc||''), b.holder_name||'']
     );
   }
   // Mirror first bank into traders row for legacy compatibility
