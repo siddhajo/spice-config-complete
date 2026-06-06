@@ -4963,6 +4963,19 @@ app.get('/api/purchases', requireView, (req, res) => {
                AND UPPER(TRIM(COALESCE(l.sale,''))) = 'E'
           )`;
   }
+  // Company split — match the purchase's stamped state to the active
+  // business context, mirroring the Sales list. ASP rows (state contains
+  // KERALA) show only when business state = KERALA; everything else
+  // (including blank/legacy state on generated rows) shows in Tamil
+  // Nadu. Import stamps state from the BR "ASP" prefix (rowDefaults);
+  // generation stamps the auction state. The lenient NOT-LIKE on the
+  // ISP side keeps blank-state generated purchases from disappearing.
+  const _purBiz = String(getSettingsFlat(db).business_state || 'TAMIL NADU').toUpperCase();
+  if (_purBiz === 'KERALA') {
+    q += " AND UPPER(COALESCE(state,'')) LIKE '%KERALA%'";
+  } else {
+    q += " AND UPPER(COALESCE(state,'')) NOT LIKE '%KERALA%'";
+  }
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=purchases.auction_id)');
   q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC LIMIT 500';
@@ -6090,23 +6103,115 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
   try {
     const db = getDb();
     let buffer;
+    // Optional seller-name filter — drives the "Export Selected" buttons
+    // in the Payments tab. The Bank Payment + Payment XLSX exporters
+    // read this through their 5th arg; every other exporter ignores
+    // unknown opts, so this is a no-op for them. Accept BOTH shapes:
+    //   ?names=A&names=B&names=C   → req.query.names = ['A','B','C']
+    //   ?names=A,B,C               → req.query.names = 'A,B,C'  → split
+    let rawNames = req.query.names;
+    if (typeof rawNames === 'string') rawNames = rawNames.split(',');
+    if (!Array.isArray(rawNames)) rawNames = [];
+    const names = rawNames.map(s => String(s || '').trim()).filter(Boolean);
+    const opts = names.length ? { names } : undefined;
     if (exportDef.needsCfg) {
       const cfg = getSettingsFlat(db);
       // Pass state too so exports that need both (e.g. Praman) can filter
       // by state without losing cfg context. Backward-compatible: existing
-      // needsCfg exports that ignore the 4th arg are unaffected.
-      buffer = await exportDef.fn(db, auctionId, cfg, req.query.state);
+      // needsCfg exports that ignore the 4th/5th args are unaffected.
+      buffer = await exportDef.fn(db, auctionId, cfg, req.query.state, opts);
     } else {
-      buffer = await exportDef.fn(db, auctionId, req.query.state);
+      buffer = await exportDef.fn(db, auctionId, req.query.state, opts);
     }
     // Per-export-type content-type/extension override (defaults to xlsx).
     // CSV exports like Praman use ext:'csv', mime:'text/csv'.
     const ext  = exportDef.ext  || 'xlsx';
     const mime = exportDef.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    // Tag the download filename with "_selected" when a names filter is
+    // active so a partial-export file is obviously a subset on disk and
+    // doesn't get confused with the full export later.
+    const suffix = opts ? '_selected' : '';
     res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}_${auctionId}.${ext}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${auctionId}.${ext}"`);
     res.send(Buffer.from(buffer));
   } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST sibling of the GET export route — same response shape, but the
+// "selected" filters live in the JSON body so:
+//   (a) URL length isn't a constraint when many sellers are ticked,
+//   (b) the per-seller lot-pick map ({ "Alice": ["12","15"] }) can be
+//       sent as a normal nested object instead of being marshalled
+//       through query-string bracket notation.
+//
+// Used by the Payments tab's "Export Bank Payment (Selected)" and
+// "Export Payment XLSX (Selected)" buttons. The GET route stays the
+// canonical path for the no-filter case (all sellers, all lots).
+app.post('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
+  const { type, auctionId } = req.params;
+  const format = String((req.body && req.body.format) || 'xlsx').toLowerCase();
+
+  if (format === 'pdf') {
+    // PDF generation on this route is intentionally not implemented —
+    // the Payments-tab selected exports are XLSX-only. Adding PDF later
+    // is straightforward: thread `opts` through exportAnyPdf the same
+    // way the GET route does for ?state=...
+    return res.status(400).json({ error: 'PDF format is not supported on the selected-export route. Use the GET endpoint for a full PDF.' });
+  }
+
+  const exportDef = EXPORT_TYPES[type];
+  if (!exportDef) return res.status(400).json({ error: 'Unknown export type', available: Object.keys(EXPORT_TYPES) });
+
+  try {
+    const db = getDb();
+    // Normalise the body. names → array of trimmed non-empty strings.
+    // lots → object mapping seller-name → array of lot_no strings.
+    // excludeLots → same shape; lots that already shipped in earlier
+    //               exports and must not be included again. Lets the
+    //               client re-export a seller's remaining lots without
+    //               accidentally double-paying the ones already paid.
+    const body = req.body || {};
+    const names = Array.isArray(body.names)
+      ? body.names.map(s => String(s || '').trim()).filter(Boolean)
+      : [];
+    const lots        = (body.lots        && typeof body.lots        === 'object' && !Array.isArray(body.lots))        ? body.lots        : null;
+    const excludeLots = (body.excludeLots && typeof body.excludeLots === 'object' && !Array.isArray(body.excludeLots)) ? body.excludeLots : null;
+    const opts = (names.length || lots || excludeLots) ? {} : undefined;
+    if (opts) {
+      if (names.length) opts.names = names;
+      const cleanMap = (src) => {
+        const cleaned = {};
+        for (const k of Object.keys(src)) {
+          const arr = Array.isArray(src[k]) ? src[k].map(v => String(v || '').trim()).filter(Boolean) : [];
+          if (arr.length) cleaned[k] = arr;
+        }
+        return Object.keys(cleaned).length ? cleaned : null;
+      };
+      if (lots) {
+        const c = cleanMap(lots);
+        if (c) opts.lots = c;
+      }
+      if (excludeLots) {
+        const c = cleanMap(excludeLots);
+        if (c) opts.excludeLots = c;
+      }
+    }
+    let buffer;
+    if (exportDef.needsCfg) {
+      const cfg = getSettingsFlat(db);
+      buffer = await exportDef.fn(db, auctionId, cfg, body.state || null, opts);
+    } else {
+      buffer = await exportDef.fn(db, auctionId, body.state || null, opts);
+    }
+    const ext  = exportDef.ext  || 'xlsx';
+    const mime = exportDef.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const suffix = opts ? '_selected' : '';
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${auctionId}.${ext}"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
@@ -7904,6 +8009,9 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
   const db = getDb();
   let imported = 0, skipped = 0, failed = 0;
   const errors = [];
+  // Per-row detail of duplicate-skipped rows so the UI can show WHICH
+  // rows were skipped (not just the count). Capped to bound the payload.
+  const skippedDetails = [];
   let total = 0;
   // Captured for /undo so we can roll back a specific import's inserts.
   // Lives outside the try block so the audit-log INSERT below can see
@@ -7980,8 +8088,24 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
         });
         if (keyVals.every(v => v != null && String(v).trim() !== '')) {
           const whereSql = def.keyCols.map(k => `${k} = ?`).join(' AND ');
-          const dup = db.get(`SELECT 1 FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyVals);
-          if (dup) { skipped++; continue; }
+          const dup = db.get(`SELECT id FROM ${def.table} WHERE ${whereSql} LIMIT 1`, keyVals);
+          if (dup) {
+            skipped++;
+            // Record which file row was skipped + the matching key values
+            // + the existing DB row id so the UI can list them (capped).
+            if (skippedDetails.length < 500) {
+              const keyObj = {};
+              def.keyCols.forEach((k, idx) => { keyObj[k] = keyVals[idx]; });
+              skippedDetails.push({
+                row: i + 2,
+                keys: keyObj,
+                existingId: (dup && dup.id != null) ? dup.id : null,
+                reason: 'Duplicate — already in ' + def.table + ' ('
+                      + def.keyCols.map((k, idx) => k + '=' + keyVals[idx]).join(', ') + ')',
+              });
+            }
+            continue;
+          }
         }
 
         // Build positional values from the source mapping. `date` is
@@ -8077,6 +8201,9 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
   res.json({
     success: true, module: moduleKey, dryRun,
     total, imported, skipped, failed,
+    // Per-row detail of duplicate-skipped rows (capped at 500) so the UI
+    // can show exactly which rows were skipped and what they collided with.
+    skippedDetails,
     errors, importLogId,
   });
 });

@@ -1,15 +1,15 @@
 /**
- * date-format.js â shared display-date formatter.
+ * date-format.js — shared display-date formatter.
  *
  * The user picks one of DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD in
- * Settings â Display â Date format. This module reads the choice from
+ * Settings → Display → Date format. This module reads the choice from
  * company_settings (lazily cached) and exposes a single fmtDate(d, fmt?)
  * helper that any PDF / XLSX / UI-feeding code path can call.
  *
  * NOT used for:
- *   â¢ Tally XML (Tally requires its own YYYYMMDD â see tally-xml.js)
- *   â¢ DBF exports (FoxPro requires its own DD/MM/YYYY â see dbf-exports.js)
- *   â¢ DB storage (always ISO YYYY-MM-DD â see normalizeDate in server.js)
+ *   • Tally XML (Tally requires its own YYYYMMDD — see tally-xml.js)
+ *   • DBF exports (FoxPro requires its own DD/MM/YYYY — see dbf-exports.js)
+ *   • DB storage (always ISO YYYY-MM-DD — see normalizeDate in server.js)
  */
 
 let _cache = null;
@@ -28,7 +28,7 @@ function getDateFormat() {
 
 function invalidateDateFormatCache() { _cache = null; }
 
-// Display: ISO yyyy-mm-dd (or any date-ish input) â user-chosen format.
+// Display: ISO yyyy-mm-dd (or any date-ish input) → user-chosen format.
 // Pass `fmt` explicitly when you already have the format string handy
 // (e.g. inside a loop building a PDF), otherwise the cached default is
 // used. Falls through to the original string when the input can't be
@@ -60,7 +60,7 @@ function fmtDate(d, fmt) {
   return `${day}/${mo}/${y}`;   // DD/MM/YYYY (default)
 }
 
-// Today's date in local time as YYYY-MM-DD â use this instead of
+// Today's date in local time as YYYY-MM-DD — use this instead of
 // `new Date()` when you need "today", because Date.toISOString() is
 // UTC and rolls back a day for users east of UTC during early-morning
 // hours (e.g. IST at 5 AM is still the previous day in UTC).

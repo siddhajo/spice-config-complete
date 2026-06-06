@@ -5,6 +5,31 @@
 
 const { getSettingsFlat, getGSTRates } = require('./company-config');
 
+// `round0` = round to integer (whole rupee — used by the Round on/off line).
+// Sign-aware (Excel's "round half away from zero").
+const round0 = (n) => {
+  const x = Number(n);
+  if (!isFinite(x)) return 0;
+  if (x === 0) return 0;
+  return (x < 0 ? -1 : 1) * Math.round(Math.abs(x));
+};
+
+/**
+ * Compact a GROUP_CONCAT'd lot-number list into a clean, de-duplicated,
+ * sorted comma string (e.g. "12,13,14"). Lots that look numeric sort
+ * ascending; mixed/text lot numbers fall back to lexical order. Returns
+ * '' when there are no lots so callers can omit the suffix entirely.
+ */
+function formatLotList(raw) {
+  if (!raw) return '';
+  const uniq = [...new Set(
+    String(raw).split(',').map(s => s.trim()).filter(Boolean)
+  )];
+  const allNumeric = uniq.every(x => /^\d+$/.test(x));
+  uniq.sort(allNumeric ? (a, b) => Number(a) - Number(b) : undefined);
+  return uniq.join(',');
+}
+
 /**
  * Extract the 2-digit state code from a seller's `cr` field.
  *
@@ -627,42 +652,137 @@ function getPaymentSummary(db, auctionId, state, cfg) {
 }
 
 /**
- * Generate bank payment data (BANKPAY.PRG — RTGS/NEFT format)
+ * Generate bank payment data (BANKPAY.PRG — RTGS/NEFT format).
+ * Used by both the "after discount" Bank Payment export (default) and
+ * the "Bank Payment (Before)" export when `opts.before === true`.
  */
-function getBankPaymentData(db, auctionId, cfg) {
-  // Mode-aware: see getPaymentSummary above for column rationale.
-  const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
-  const discountCol = (mode === 'auction') ? 'advance' : 'refund';
+function getBankPaymentData(db, auctionId, cfg, opts) {
+  opts = opts || {};
+  const useBefore = !!opts.before;
+  // Bank Payment lists every seller in the trade with a non-zero
+  // payable (or non-zero pre-discount amount in 'before' mode) — both
+  // registered dealers AND unregistered (URD/agriculturist) farmers.
+  // The earlier WHERE clause filtered to URD-only by excluding rows
+  // whose `cr` looked like a GSTIN. That came from the legacy FoxPro
+  // BANKPAY.PRG which only handled farmers — but the e-Trade flow pays
+  // every seller via RTGS/NEFT, so all sellers must be included.
+  // Result was: registered dealers had IFSC + acctnum on file, but the
+  // SQL excluded them and returned empty rows, so the export was blank.
+  //
+  // Bank details come from `traders` (single-bank legacy) or
+  // `trader_banks` (multi-bank). The LEFT JOIN to traders pulls
+  // address/IFSC; we then COALESCE with trader_banks default for
+  // sellers who maintain multiple bank accounts.
   const payments = db.all(
-    `SELECT l.state, l.name, l.cr, 
-      SUM(l.puramt) as puramt, SUM(l.${discountCol}) as advance, SUM(l.balance) as payable,
-      t.ifsc, t.acctnum, t.padd, t.ppla, t.pin, t.holder_name
+    // GROUP BY l.name (only) — same fix as getPaymentSummary. Splitting
+    // by `cr` produced duplicate bank-payment rows whenever a seller's
+    // lots held inconsistent GSTIN values, leading to NEFT files with
+    // the dealer listed twice for partial amounts.
+    // JOIN trader by lots.trader_id (FK), not by name. Joining by name
+    // multiplied each lot row by the number of traders sharing that
+    // name (multi-branch sellers / accidental dupes), then SUM(puramt)
+    // etc. summed those duplicates → inflated payable. GROUP BY name
+    // alone wasn't enough; the fan-out happened BEFORE the aggregate.
+    `SELECT MAX(l.state) AS state, l.name, MAX(l.cr) AS cr,
+      SUM(l.puramt) as puramt, SUM(l.refund) as advance, SUM(l.balance) as payable,
+      GROUP_CONCAT(l.lot_no) as lot_nos,
+      MAX(t.id) AS trader_id,
+      MAX(t.ifsc) AS t_ifsc, MAX(t.acctnum) AS t_acctnum, MAX(t.holder_name) AS t_holder,
+      MAX(t.padd) AS padd, MAX(t.ppla) AS ppla, MAX(t.pin) AS pin,
+      -- Per-lot bank routing: distinct non-null bank_ids across this
+      -- seller's payable lots, plus counts so we can tell whether they
+      -- ALL share one account (single → use it) or differ (mixed → keep
+      -- the default account and flag multipleBanks for the UI).
+      GROUP_CONCAT(DISTINCT l.bank_id) AS bank_ids,
+      COUNT(*) AS lot_count,
+      COUNT(l.bank_id) AS bank_lot_count
     FROM lots l
-    LEFT JOIN traders t ON t.name = l.name AND t.cr = l.cr
-    WHERE l.auction_id = ? AND l.amount > 0 
-      AND UPPER(COALESCE(l.cr,'')) NOT LIKE 'GSTIN%'
-      AND l.cr NOT GLOB '[0-9][0-9]*'
+    LEFT JOIN traders t ON t.id = l.trader_id
+    WHERE l.auction_id = ? AND l.amount > 0
       AND (l.paid IS NULL OR l.paid = '')
-    GROUP BY l.name, l.cr
-    ORDER BY l.state, l.name`,
+    GROUP BY l.name
+    ORDER BY MAX(l.state), l.name`,
     [auctionId]
   );
+
+  // Per-seller bank-details fallback chain:
+  //   1. trader_banks default (is_default=1) — picks the explicitly
+  //      flagged primary account when the seller has multiple banks
+  //   2. trader_banks first row — when no default flagged
+  //   3. traders.ifsc/acctnum — legacy single-bank
+  // Pre-fetch all default banks once (cheaper than per-seller query).
+  const bankByTraderId = {};
+  // Also index every bank row by its own id so per-lot bank_id routing can
+  // resolve the exact account a seller's lots were tagged with.
+  const bankById = {};
+  try {
+    const banks = db.all(`
+      SELECT trader_id, ifsc, acctnum, holder_name, bank_name, is_default, id
+        FROM trader_banks
+       ORDER BY trader_id, is_default DESC, id ASC
+    `);
+    for (const b of banks) {
+      // First row per trader_id wins (already sorted by is_default DESC).
+      if (bankByTraderId[b.trader_id] == null) bankByTraderId[b.trader_id] = b;
+      bankById[b.id] = b;
+    }
+  } catch (_) { /* trader_banks may not exist on partial migrations */ }
 
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [auctionId]);
   const roundAmounts = cfg.flag_round;
 
-  return payments.map(p => ({
-    transactionType: (p.payable || 0) >= 200000 ? 'RTGS' : 'NEFT',
-    ifsc: p.ifsc || '',
-    accountNo: p.acctnum || '',
-    beneficiaryName: p.name,
-    address1: p.padd || '',
-    address2: p.ppla || '',
-    pin: p.pin || '',
-    amount: roundAmounts ? Math.round(p.payable || 0) : p.payable || 0,
-    remarks: `${auction ? auction.ano : ''} ${p.name} PAYMENT ${(p.payable || 0).toFixed(2)} Credited`,
-    holderName: p.holder_name || p.name
-  }));
+  return payments.map(p => {
+    // 'before' uses puramt — pre-discount, useful when paying suppliers
+    // before the deduction policy is applied. 'after' (default) uses
+    // payable = puramt − discount − GST.
+    const rawAmount = useBefore ? (p.puramt || 0) : (p.payable || 0);
+    const amount = roundAmounts ? round0(rawAmount) : rawAmount;
+    const tb = p.trader_id != null ? bankByTraderId[p.trader_id] : null;
+    // Per-lot bank routing. Distinct non-null bank_ids tagged on this
+    // seller's payable lots:
+    const distinctBankIds = String(p.bank_ids || '')
+      .split(',').map(s => s.trim()).filter(s => s !== '' && s !== 'null')
+      .map(Number).filter(Number.isFinite);
+    const hasUntagged = Number(p.lot_count || 0) > Number(p.bank_lot_count || 0);
+    // Use the lot-tagged account ONLY when every payable lot points at the
+    // same single account (no untagged lots). Otherwise keep the seller's
+    // default account and flag `multipleBanks` so the UI can warn the user
+    // to export each account's lots separately via the lot picker.
+    const lotBank = (distinctBankIds.length === 1 && !hasUntagged)
+      ? bankById[distinctBankIds[0]] : null;
+    const multipleBanks = distinctBankIds.length > 1
+      || (distinctBankIds.length >= 1 && hasUntagged);
+    const ifsc      = (lotBank && lotBank.ifsc)        || (tb && tb.ifsc)        || p.t_ifsc    || '';
+    const acctnum   = (lotBank && lotBank.acctnum)     || (tb && tb.acctnum)     || p.t_acctnum || '';
+    const holderNm  = (lotBank && lotBank.holder_name) || (tb && tb.holder_name) || p.t_holder  || p.name;
+    // Lots this seller's payment covers — surfaced in REMARKS so the
+    // beneficiary can reconcile the credit against the specific lots.
+    const lots = formatLotList(p.lot_nos);
+    return {
+      // Seller name preserved on the row so callers can filter by the
+      // same key the Payments tab UI uses (the ticked checkbox value).
+      // beneficiaryName below can diverge from this (it tracks the bank
+      // account holder, which may be a different person/entity) so it's
+      // not safe to filter against beneficiaryName.
+      name: p.name,
+      transactionType: rawAmount >= 200000 ? 'RTGS' : 'NEFT',
+      ifsc,
+      accountNo: acctnum,
+      beneficiaryName: holderNm,
+      address1: p.padd || '',
+      address2: p.ppla || '',
+      pin: p.pin || '',
+      amount,
+      lots,
+      remarks: `${auction ? auction.ano : ''} ${p.name} PAYMENT ${rawAmount.toFixed(2)} Credited${lots ? ` for lot${lots.includes(',') ? 's' : ''} ${lots}` : ''}`,
+      holderName: holderNm,
+      // True when this seller's lots point at more than one bank account
+      // (or a mix of tagged + untagged). The row still pays a single
+      // account (the default); the Payments UI shows a badge prompting the
+      // user to export each account's lots separately via the lot picker.
+      multipleBanks,
+    };
+  });
 }
 
 /**
@@ -879,6 +999,7 @@ module.exports = {
   listAgriSellers,
   getPaymentSummary,
   getBankPaymentData,
+  formatLotList,
   getTDSReturnData,
   getSalesJournal,
   getPurchaseJournal,

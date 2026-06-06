@@ -2262,7 +2262,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;margin-top:10px">
           <!-- Theme chips -->
           <div style="flex:1;min-width:280px">
-            <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Color theme</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Color theme</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Auto-set by active company — ISP uses Emerald, ASP uses Ocean. Picking a theme here is a temporary override until the company changes.</div>
             <div id="settings-theme-chips" style="display:flex;flex-wrap:wrap;gap:10px">
               <span class="theme-chip-large" data-t="emerald"  title="Emerald (fresh)"   onclick="setTheme('emerald')"><span class="chip-label">Emerald</span></span>
               <span class="theme-chip-large" data-t="coral"    title="Coral sunset"      onclick="setTheme('coral')"><span class="chip-label">Coral</span></span>
@@ -7657,6 +7658,9 @@ function applyLogoBadge(){
     if(!code){badge.style.display='none'}
     else{badge.textContent = code; badge.style.display = 'inline-block'}
   }
+
+  // Auto-apply this company's colour theme (ISP → emerald, ASP → ocean).
+  applyCompanyTheme();
 
   // Topbar H1 + dot image — delegated to refreshTopbarBrand() which
   // hits /api/brand so the resolution matches the login page exactly
@@ -14659,14 +14663,16 @@ window.addEventListener('resize', () => {
 });
 
 // ── Exports ───────────────────────────────────────────────
-const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment:'Bank Payment (RTGS/NEFT)',
+const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',
   pooler_register:'Pooler Register',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',
   payment:'Payment Summary'};
 // Export types that only support a specific format (no XLSX/PDF choice).
 // e.g., Praman is a CSV-only upload format for the Praman auction platform.
 const EXP_CSV_ONLY = new Set(['praman_csv']);
 // Full File has too many columns to fit any printable PDF page — only XLSX.
-const EXP_XLSX_ONLY = new Set(['full_file']);
+// Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
+// renderer for them, so we don't offer a PDF button that would 500.
+const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's
@@ -19258,6 +19264,32 @@ function setTheme(t){
     c.classList.toggle('active', c.dataset.t === t);
   });
 }
+
+// ── Per-company auto-theme ─────────────────────────────────
+// Each sister company gets its own colour identity so the user can tell
+// at a glance which company is active:
+//   ISP (Ideal Spices, Tamil Nadu)        → Emerald (green)
+//   ASP (Amazing Spice Park, Kerala)       → Ocean   (sky blue)
+// Driven by getCurrentLogoCode(). Called from applyLogoBadge(), so it
+// fires on settings load and whenever the business state/mode or the
+// active company preset changes. This intentionally OVERRIDES any manual
+// theme chip selection — company identity is the source of truth.
+const _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
+function applyCompanyTheme(){
+  let code;
+  try { code = String(getCurrentLogoCode() || 'ISP').toUpperCase(); }
+  catch(e){ code = 'ISP'; }
+  const theme = _COMPANY_THEME[code] || 'emerald';
+  if (document.body.getAttribute('data-theme') !== theme){
+    document.body.setAttribute('data-theme', theme);
+    try { localStorage.setItem('theme', theme); } catch(e){}
+  }
+  // Keep the Settings → Appearance chips highlighted on the active theme.
+  document.querySelectorAll('.theme-chip, .theme-chip-large').forEach(c=>{
+    c.classList.toggle('active', c.dataset.t === theme);
+  });
+}
+
 // Apply saved theme on load
 (function(){
   let saved = 'emerald';
@@ -19882,6 +19914,33 @@ async function impRun(){
       h += '<div style="margin-top:8px"><b>Errors (first '+data.errors.length+'):</b><ul style="margin:4px 0 0 18px;font-size:12px">';
       data.errors.forEach(e => { h += '<li>Row '+e.row+': '+_escImp(e.error)+'</li>'; });
       h += '</ul></div>';
+    }
+    // Skipped (duplicate) rows — collapsed so a big dup list doesn't
+    // dominate, but one click shows each skipped row + the key values it
+    // matched + the existing DB id it collided with.
+    if (data.skippedDetails && data.skippedDetails.length) {
+      const sd = data.skippedDetails;
+      const more = (data.skipped || sd.length) - sd.length;
+      h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:700;color:#a16207">'+
+        'Skipped as duplicate ('+(data.skipped||sd.length)+') — click to see which rows</summary>'+
+        '<div style="margin-top:6px;max-height:260px;overflow:auto;border:1px solid #fde68a;border-radius:6px">'+
+        '<table style="width:100%;border-collapse:collapse;font-size:11.5px">'+
+        '<thead><tr style="background:#fffbeb;position:sticky;top:0">'+
+          '<th style="text-align:left;padding:4px 8px;border:1px solid #fde68a">File row</th>'+
+          '<th style="text-align:left;padding:4px 8px;border:1px solid #fde68a">Existing DB id</th>'+
+          '<th style="text-align:left;padding:4px 8px;border:1px solid #fde68a">Matched on</th>'+
+        '</tr></thead><tbody>';
+      sd.forEach(s => {
+        const keyStr = s.keys ? Object.keys(s.keys).map(k => k+'='+(s.keys[k]==null?'':s.keys[k])).join(' · ') : '';
+        h += '<tr>'+
+          '<td style="padding:3px 8px;border:1px solid #fef3c7;font-family:monospace">'+_escImp(String(s.row))+'</td>'+
+          '<td style="padding:3px 8px;border:1px solid #fef3c7;font-family:monospace">'+_escImp(String(s.existingId==null?'—':s.existingId))+'</td>'+
+          '<td style="padding:3px 8px;border:1px solid #fef3c7">'+_escImp(keyStr)+'</td>'+
+        '</tr>';
+      });
+      h += '</tbody></table></div>';
+      if (more > 0) h += '<div style="font-size:11px;color:#888;padding:4px 2px">…and '+more+' more (list capped at '+sd.length+').</div>';
+      h += '</details>';
     }
     result.innerHTML = h;
     impLoadHistory();

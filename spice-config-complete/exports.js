@@ -8,6 +8,7 @@ const { collectionXlsx: newCollectionXlsx, tradeReportXlsx } = require('./auctio
 const {
   getCompanyHeader, writeXlsxCompanyHeader, xlsxNumFmtForHeader,
 } = require('./report-formatters');
+const { fmtDate: fmtUserDate } = require('./date-format');
 
 // Build an XLSX buffer with a unified brand band on top and Indian-format
 // numeric columns. `opts.title` is the report title shown in the middle of
@@ -53,6 +54,9 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
   });
 
   // Data rows. addRow uses keys from ws.columns to map object → cells.
+  // Rows flagged `_isSubtotal: true` get distinct styling (bold + light
+  // yellow fill + thin top border) so callers can interleave per-group
+  // subtotal rows directly in `rows` and have them styled automatically.
   rows.forEach((rowObj) => {
     const dataRow = ws.addRow({});
     columns.forEach((c, i) => {
@@ -64,7 +68,44 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
       }
       dataRow.getCell(i + 1).value = v == null ? '' : v;
     });
+    if (rowObj && rowObj._isSubtotal) {
+      dataRow.font = { bold: true };
+      dataRow.eachCell((cell, ci) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF8E1' } };
+        cell.border = { top: { style: 'thin' } };
+        const fmt = xlsxNumFmtForHeader(columns[ci - 1] && columns[ci - 1].header);
+        if (fmt) cell.numFmt = fmt;
+      });
+    }
   });
+
+  // ── Grand total footer (optional) ──
+  // Bold 11pt, yellow `#FFF3CD` fill, double bottom border. Pass values
+  // keyed by column key; only the listed columns get numbers, the rest are
+  // blank. `label` is placed in the first non-numeric column (defaults to
+  // 'GRAND TOTAL').
+  if (opts.grandTotal) {
+    const gt = opts.grandTotal;
+    const fmts = columns.map(c => xlsxNumFmtForHeader(c.header));
+    const cells = columns.map(c => (gt.values && gt.values[c.key] != null) ? gt.values[c.key] : '');
+    if (gt.label) {
+      const labelIdx = fmts.findIndex(f => !f);
+      const idx = labelIdx >= 0 ? labelIdx : 0;
+      if (cells[idx] === '') cells[idx] = gt.label;
+    }
+    const gRow = ws.addRow(cells);
+    gRow.font = { bold: true, size: 11 };
+    gRow.height = 22;
+    const fill = gt.fillArgb || 'FFFFF3CD';
+    gRow.eachCell((cell, ci) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+      cell.border = { top: { style: 'thin' }, bottom: { style: 'double' } };
+      if (fmts[ci - 1]) {
+        cell.numFmt = fmts[ci - 1];
+        cell.alignment = { horizontal: 'right' };
+      }
+    });
+  }
 
   return wb.xlsx.writeBuffer();
 }
@@ -240,23 +281,212 @@ async function exportPriceList(db, auctionId) {
   });
 }
 
-// ── Export Type 4: Bank Payment (RTGS/NEFT format) ───────────
-async function exportBankPayment(db, auctionId, cfg) {
+// ── Export Type 4: Bank Payment (RTGS/NEFT — bank-import format) ─
+// Bare 13-column sheet (no brand band, no totals) matching the bank's
+// upload template:
+//   TRANSACT_A | MESSAGETYP | DEBITACCOU | PAYMENTAMO | TRANSACT_B |
+//   VALUEDATE  | BENEFICI_A | BENEFIARYN | BENEFIARYB | BENEFIARYE |
+//   BENEFICI_B | REMARKS    | CLIENTCODE
+// Header on row 1, data from row 2. Bank software auto-ingests this
+// shape — adding a brand band would break the import.
+async function exportBankPayment(db, auctionId, cfg, _state, opts) {
+  const { getBankPaymentData, formatLotList } = require('./calculations');
+  let payments = getBankPaymentData(db, auctionId, cfg);
+  // Optional seller-name filter — when the user clicks "Export Bank
+  // Payment (Selected)" in the Payments tab, only the ticked sellers'
+  // rows should appear in the bank upload file. Match against `p.name`
+  // (the seller name) because that's the value the UI checkbox holds;
+  // beneficiaryName tracks the bank account holder which can be a
+  // different entity. When opts.names is absent or empty the full
+  // payment set is exported, preserving the original behaviour.
+  if (opts && Array.isArray(opts.names) && opts.names.length) {
+    const wanted = new Set(opts.names.map(n => String(n || '').trim().toUpperCase()));
+    payments = payments.filter(p =>
+      wanted.has(String(p.name || '').trim().toUpperCase())
+    );
+  }
+  // Optional per-seller lot-picks AND already-exported exclusions.
+  //
+  //   opts.lots[seller]        — operator-picked subset; only these
+  //                              lots' balances count for the bank row.
+  //   opts.excludeLots[seller] — lots that have already gone out in a
+  //                              previous export and must be skipped
+  //                              automatically so re-exporting the
+  //                              seller doesn't double-pay them.
+  //
+  // For each seller in either map we re-query SUM(balance) with the
+  // appropriate WHERE clauses and override the payments[] row in
+  // place. RTGS/NEFT is re-picked from the new amount (₹2L threshold).
+  // REMARKS is rebuilt later at row.map time using p.amount, so just
+  // updating p.amount + p.transactionType here is enough.
+  const lotPicks = (opts && opts.lots && typeof opts.lots === 'object') ? opts.lots : null;
+  const excludeLots = (opts && opts.excludeLots && typeof opts.excludeLots === 'object') ? opts.excludeLots : null;
+  if (lotPicks || excludeLots) {
+    // Index every trader bank by id so a picked-lot subset that all points
+    // at one account can route this export row to THAT account (this is how
+    // "select Account-1's lots → Export Selected" credits Account 1, then a
+    // second export of Account-2's lots credits Account 2).
+    const bankById = {};
+    try {
+      for (const b of db.all('SELECT id, ifsc, acctnum, holder_name FROM trader_banks')) bankById[b.id] = b;
+    } catch (_) { /* table may not exist on partial migrations */ }
+    const sellersToRecompute = new Set();
+    if (lotPicks)     for (const k of Object.keys(lotPicks))     sellersToRecompute.add(k);
+    if (excludeLots)  for (const k of Object.keys(excludeLots))  sellersToRecompute.add(k);
+    for (const sellerName of sellersToRecompute) {
+      const picksArr   = lotPicks    && Array.isArray(lotPicks[sellerName])    ? lotPicks[sellerName]    : null;
+      const excludeArr = excludeLots && Array.isArray(excludeLots[sellerName]) ? excludeLots[sellerName] : null;
+      if ((!picksArr || !picksArr.length) && (!excludeArr || !excludeArr.length)) continue;
+      const wantedUpper = String(sellerName || '').trim().toUpperCase();
+      const idx = payments.findIndex(p =>
+        String(p.name || '').trim().toUpperCase() === wantedUpper
+      );
+      if (idx < 0) continue;   // seller not in the current payments set (e.g. fully paid)
+      const params = [auctionId, wantedUpper];
+      let extraWhere = '';
+      if (picksArr && picksArr.length) {
+        extraWhere += ` AND l.lot_no IN (${picksArr.map(() => '?').join(',')})`;
+        for (const lot of picksArr) params.push(String(lot));
+      }
+      if (excludeArr && excludeArr.length) {
+        extraWhere += ` AND l.lot_no NOT IN (${excludeArr.map(() => '?').join(',')})`;
+        for (const lot of excludeArr) params.push(String(lot));
+      }
+      const sub = db.get(
+        `SELECT COALESCE(SUM(l.balance),0) AS payable,
+                COALESCE(SUM(l.puramt), 0) AS puramt,
+                GROUP_CONCAT(l.lot_no) AS lot_nos,
+                GROUP_CONCAT(DISTINCT l.bank_id) AS bank_ids,
+                COUNT(*) AS lot_count,
+                COUNT(l.bank_id) AS bank_lot_count
+           FROM lots l
+          WHERE l.auction_id = ? AND l.amount > 0
+            AND (l.paid IS NULL OR l.paid = '')
+            AND UPPER(TRIM(l.name)) = ?${extraWhere}`,
+        params
+      ) || { payable: 0, puramt: 0, lot_nos: '' };
+      const rawAmount = Number(sub.payable) || 0;
+      const roundedAmount = cfg.flag_round ? Math.round(rawAmount) : rawAmount;
+      const isRTGS = roundedAmount >= 200000;
+      // If every picked lot points at the same single bank account, route
+      // this row to that account (overrides the seller-default account that
+      // getBankPaymentData put on the base row). Mixed/untagged → leave the
+      // default account as-is.
+      const subBankIds = String(sub.bank_ids || '')
+        .split(',').map(s => s.trim()).filter(s => s !== '' && s !== 'null')
+        .map(Number).filter(Number.isFinite);
+      const subUntagged = Number(sub.lot_count || 0) > Number(sub.bank_lot_count || 0);
+      const subBank = (subBankIds.length === 1 && !subUntagged) ? bankById[subBankIds[0]] : null;
+      payments[idx] = {
+        ...payments[idx],
+        amount: roundedAmount,
+        transactionType: isRTGS ? 'RTGS' : 'NEFT',
+        // Re-derive the covered-lots list from the same picked/excluded
+        // subset so REMARKS lists exactly the lots this row pays for.
+        lots: formatLotList(sub.lot_nos),
+        ...(subBank ? {
+          ifsc: subBank.ifsc || payments[idx].ifsc,
+          accountNo: subBank.acctnum || payments[idx].accountNo,
+          beneficiaryName: subBank.holder_name || payments[idx].beneficiaryName,
+        } : {}),
+      };
+    }
+    // Drop any zero-amount rows produced by the recompute — banks reject
+    // zero-value RTGS rows, and a seller whose remaining lots all net to
+    // zero (everything already exported, or only zero-balance lots
+    // picked) shouldn't appear at all.
+    payments = payments.filter(p => Number(p.amount) > 0);
+  }
+
+  // Sender-side context (state-aware): debit account, IFSC for BT/LBT
+  // detection, and the email used in BENEFIARYE.
+  const isKL = String(cfg.business_state || cfg.state || '').toUpperCase().includes('KERALA');
+  const senderAcct  = (isKL ? cfg.bank_kl_acct  : cfg.bank_tn_acct)  || cfg.bank_tn_acct  || cfg.bank_kl_acct  || '';
+  const senderIfsc  = (isKL ? cfg.bank_kl_ifsc  : cfg.bank_tn_ifsc)  || cfg.bank_tn_ifsc  || cfg.bank_kl_ifsc  || '';
+  const senderEmail = (isKL ? cfg.kl_email      : cfg.tn_email)      || cfg.tn_email      || cfg.kl_email      || '';
+  const senderBankPrefix = String(senderIfsc).slice(0, 4).toUpperCase();
+  // Short tag inserted into REMARKS (e.g. "VSTL" → "5 ANN MARIA SPICES VSTL PAYMENT 5945275.00 Credited").
+  // Falls back to the leading word of trade_name when short_name isn't set.
+  const shortTag = String(cfg.short_name || (cfg.trade_name || '').split(/\s+/)[0] || '').toUpperCase();
+
+  // Auction context: ano (REMARKS prefix) + value date (DD/MM/YYYY).
+  const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+  const ano = a.ano || '';
+  const valueDate = fmtUserDate(String(a.date || '').slice(0, 10));
+
+  const rows = payments.map(p => {
+    const amount = Number(p.amount) || 0;
+    const beneIfsc = String(p.ifsc || '').toUpperCase();
+    const benePrefix = beneIfsc.slice(0, 4);
+    // BT  = book transfer (same bank as sender)
+    // LBT = local bank transfer (different bank, RTGS/NEFT routed)
+    const transactA = (senderBankPrefix && benePrefix === senderBankPrefix) ? 'BT' : 'LBT';
+    return {
+      TRANSACT_A:  transactA,
+      MESSAGETYP:  p.transactionType || 'RTGS',
+      DEBITACCOU:  senderAcct,
+      PAYMENTAMO:  amount,
+      TRANSACT_B:  'INR',
+      VALUEDATE:   valueDate,
+      BENEFICI_A:  p.accountNo || '',
+      BENEFIARYN:  String(p.beneficiaryName || '').toUpperCase(),
+      BENEFIARYB:  beneIfsc,
+      BENEFIARYE:  senderEmail,
+      BENEFICI_B:  '',
+      REMARKS:     `${ano} ${String(p.beneficiaryName || '').toUpperCase()}${shortTag ? ' ' + shortTag : ''} PAYMENT ${amount.toFixed(2)} Credited${p.lots ? ` for lot${p.lots.includes(',') ? 's' : ''} ${p.lots}` : ''}`,
+      CLIENTCODE:  '',
+    };
+  });
+
+  // Build the sheet directly (bypass createExcelBuffer's brand-band).
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('BANK_PAYMENT');
+  const cols = [
+    { key: 'TRANSACT_A',  header: 'TRANSACT_A',  width: 12 },
+    { key: 'MESSAGETYP',  header: 'MESSAGETYP',  width: 12 },
+    { key: 'DEBITACCOU',  header: 'DEBITACCOU',  width: 18 },
+    { key: 'PAYMENTAMO',  header: 'PAYMENTAMO',  width: 14, numFmt: '#,##0.00' },
+    { key: 'TRANSACT_B',  header: 'TRANSACT_B',  width: 10 },
+    { key: 'VALUEDATE',   header: 'VALUEDATE',   width: 12 },
+    { key: 'BENEFICI_A',  header: 'BENEFICI_A',  width: 22 },
+    { key: 'BENEFIARYN',  header: 'BENEFIARYN',  width: 32 },
+    { key: 'BENEFIARYB',  header: 'BENEFIARYB',  width: 16 },
+    { key: 'BENEFIARYE',  header: 'BENEFIARYE',  width: 28 },
+    { key: 'BENEFICI_B',  header: 'BENEFICI_B',  width: 12 },
+    { key: 'REMARKS',     header: 'REMARKS',     width: 60 },
+    { key: 'CLIENTCODE',  header: 'CLIENTCODE',  width: 14 },
+  ];
+  ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
+  cols.forEach((c, i) => {
+    if (c.numFmt) ws.getColumn(i + 1).numFmt = c.numFmt;
+  });
+  // Header row 1 — plain bold, no fill (so bank importers don't choke).
+  const head = ws.getRow(1);
+  cols.forEach((c, i) => { head.getCell(i + 1).value = c.header; });
+  head.font = { bold: true };
+  // Data rows from row 2.
+  rows.forEach(r => ws.addRow(r));
+  return wb.xlsx.writeBuffer();
+}
+
+// ── Export Type 4b: Bank Payment (Before discount) ───────────
+// Same data shape as bank_payment except `amount` is the pre-discount
+// puramt (raw purchase amount before refund/GST). Per the e-Trade spec
+// the Amount + SendertoRcvrInfo columns are omitted from this variant.
+async function exportBankPaymentBefore(db, auctionId, cfg) {
   const { getBankPaymentData } = require('./calculations');
-  const payments = getBankPaymentData(db, auctionId, cfg);
+  const payments = getBankPaymentData(db, auctionId, cfg, { before: true });
   const cols = [
     { header: 'TransactionType', key: 'transactionType', width: 16 },
-    { header: 'BeneIFSCode', key: 'ifsc', width: 14 },
-    { header: 'BeneAcctNo', key: 'accountNo', width: 20 },
-    { header: 'BeneName', key: 'beneficiaryName', width: 30 },
-    { header: 'BeneAddLine1', key: 'address1', width: 30 },
-    { header: 'BeneAddLine2', key: 'address2', width: 20 },
-    { header: 'BeneAddLine3', key: 'pin', width: 10 },
-    { header: 'Amount', key: 'amount', width: 14 },
-    { header: 'SendertoRcvrInfo', key: 'remarks', width: 50 },
+    { header: 'BeneIFSCode',     key: 'ifsc',            width: 14 },
+    { header: 'BeneAcctNo',      key: 'accountNo',       width: 20 },
+    { header: 'BeneName',        key: 'beneficiaryName', width: 30 },
+    { header: 'BeneAddLine1',    key: 'address1',        width: 30 },
+    { header: 'BeneAddLine2',    key: 'address2',        width: 20 },
+    { header: 'BeneAddLine3',    key: 'pin',             width: 10 },
   ];
-  return createExcelBuffer('BankPayment', cols, payments, {
-    db, title: 'Bank Payment (RTGS/NEFT)', metaLines: auctionMeta(db, auctionId),
+  return createExcelBuffer('BankPaymentBefore', cols, payments, {
+    db, title: 'Bank Payment (Before)', metaLines: auctionMeta(db, auctionId),
   });
 }
 
@@ -363,7 +593,7 @@ async function exportSalesTaxes(db, auctionId) {
 }
 
 // ── Export: Payment Summary ──────────────────────────────────
-async function exportPaymentSummary(db, auctionId, cfg) {
+async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   // Match getPaymentSummary semantics: discount includes BOTH the per-lot
   // policy discount AND any manual debit_notes for this auction's sellers.
   // We compute it per-row by adding debit_notes (joined by ano + name).
@@ -381,19 +611,64 @@ async function exportPaymentSummary(db, auctionId, cfg) {
     );
     for (const d of debits) debitMap[d.name] = Number(d.total) || 0;
   }
-  const rows = db.all(
+  // Optional seller-name filter — "Export Payment XLSX (Selected)"
+  // limits the rows to the ticked sellers. We push the filter into the
+  // SQL with a `name IN (…)` clause so we don't waste the SELECT on rows
+  // we'll throw away. Names are matched case-insensitively to be
+  // resilient to slight casing drift between the UI and the DB.
+  const filterNames = (opts && Array.isArray(opts.names) && opts.names.length)
+    ? opts.names.map(n => String(n || '').trim()).filter(Boolean)
+    : null;
+  let whereExtra = '';
+  const params = [auctionId];
+  if (filterNames && filterNames.length) {
+    const placeholders = filterNames.map(() => '?').join(',');
+    whereExtra = ` AND UPPER(TRIM(name)) IN (${placeholders})`;
+    for (const n of filterNames) params.push(n.toUpperCase());
+  }
+  let rows = db.all(
     `SELECT name as poolername, lot_no as lot, bags as bag, qty, price, amount,
       pqty, prate, puramt, ${discountCol} as lot_discount, balance as payable
-     FROM lots WHERE auction_id = ? AND amount > 0
-     ORDER BY state, name`, [auctionId]
+     FROM lots WHERE auction_id = ? AND amount > 0${whereExtra}
+     ORDER BY state, name`, params
   );
+  // Optional per-seller lot-picks AND already-exported exclusions.
+  // Same shape as exportBankPayment:
+  //   opts.lots[seller]        — keep ONLY these lot rows for the seller
+  //   opts.excludeLots[seller] — drop these lots (already shipped before)
+  // Both filters compose: if a seller has both, the row must satisfy
+  // BOTH conditions to survive. Match name case-insensitively to be
+  // tolerant of slight casing drift between localStorage and the DB.
+  const lotPicks    = (opts && opts.lots         && typeof opts.lots         === 'object') ? opts.lots         : null;
+  const excludeLots = (opts && opts.excludeLots  && typeof opts.excludeLots  === 'object') ? opts.excludeLots  : null;
+  if (lotPicks || excludeLots) {
+    const picksUpper   = {};
+    const excludeUpper = {};
+    if (lotPicks) for (const k of Object.keys(lotPicks)) {
+      const arr = Array.isArray(lotPicks[k]) ? lotPicks[k] : [];
+      if (arr.length) picksUpper[k.trim().toUpperCase()] = new Set(arr.map(x => String(x)));
+    }
+    if (excludeLots) for (const k of Object.keys(excludeLots)) {
+      const arr = Array.isArray(excludeLots[k]) ? excludeLots[k] : [];
+      if (arr.length) excludeUpper[k.trim().toUpperCase()] = new Set(arr.map(x => String(x)));
+    }
+    rows = rows.filter(r => {
+      const key = String(r.poolername || '').trim().toUpperCase();
+      const lotKey = String(r.lot);
+      const picks = picksUpper[key];
+      if (picks && !picks.has(lotKey)) return false;
+      const excl = excludeUpper[key];
+      if (excl && excl.has(lotKey)) return false;
+      return true;
+    });
+  }
   // Spread debit_notes amount across the seller's lots proportionally so
   // every row totals to the same SUM as the payments view. Simpler approach:
   // attribute the FULL manual debit on the FIRST row for each seller; later
   // rows show only the lot policy discount. Avoids per-row arithmetic but
   // still preserves the seller-level total.
   const seenSellers = new Set();
-  const enriched = rows.map(r => {
+  const enrichedFlat = rows.map(r => {
     const lotDisc = Number(r.lot_discount) || 0;
     const manualDisc = (!seenSellers.has(r.poolername))
       ? (Number(debitMap[r.poolername]) || 0)
@@ -405,6 +680,31 @@ async function exportPaymentSummary(db, auctionId, cfg) {
       payable: (Number(r.payable) || 0) - manualDisc,
     };
   });
+
+  // Interleave per-pooler subtotal rows after each name group — mirrors
+  // the PDF's groupByKey:'poolername' subtotalKeys behaviour. Rows are
+  // already sorted by (state, name) so a single linear pass groups them.
+  const SUB_KEYS = ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'];
+  const enriched = [];
+  let curName = null;
+  let acc = null;
+  const flushSub = () => {
+    if (!acc || curName == null) return;
+    const sub = { _isSubtotal: true, poolername: `${curName} TOTAL` };
+    SUB_KEYS.forEach(k => { sub[k] = acc[k] || 0; });
+    enriched.push(sub);
+  };
+  for (const r of enrichedFlat) {
+    const k = r.poolername || '';
+    if (k !== curName) {
+      flushSub();
+      curName = k;
+      acc = Object.fromEntries(SUB_KEYS.map(x => [x, 0]));
+    }
+    SUB_KEYS.forEach(x => { acc[x] += Number(r[x]) || 0; });
+    enriched.push(r);
+  }
+  flushSub();
   const cols = [
     { header: 'POOLERNAME', key: 'poolername', width: 30 },
     { header: 'LOT', key: 'lot', width: 8 }, { header: 'BAG', key: 'bag', width: 6 },
@@ -414,8 +714,57 @@ async function exportPaymentSummary(db, auctionId, cfg) {
     { header: 'DISCOUNT', key: 'discount', width: 14 },
     { header: 'PAYABLE', key: 'payable', width: 14 },
   ];
+  // Footer totals — sum every numeric column. The earlier export had no
+  // totals row, so users had to compute payable/discount sums manually
+  // in Excel before reconciling with bank transfers. PRICE/PRATE are
+  // omitted from the sum (averaging rates makes no business sense; a
+  // sum would mislead readers). Sum over enrichedFlat (data rows only)
+  // so interleaved subtotals don't double-count.
+  const sum = (key) => enrichedFlat.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+  const grandTotal = {
+    label: 'GRAND TOTAL',
+    values: {
+      bag:     sum('bag'),
+      qty:     sum('qty'),
+      amount:  sum('amount'),
+      pqty:    sum('pqty'),
+      puramt:  sum('puramt'),
+      discount:sum('discount'),
+      payable: sum('payable'),
+    },
+  };
   return createExcelBuffer('Payment', cols, enriched, {
     db, title: 'Payment Summary', metaLines: auctionMeta(db, auctionId),
+    grandTotal,
+  });
+}
+
+// ── Export: Lot Payment Summary ──────────────────────────────
+// Fully-populated post-auction payment summary, ordered by branch then
+// seller name so the natural printed layout (branch header followed by
+// that branch's lots) emerges from the row sequence.
+async function exportLotPayment(db, auctionId) {
+  const rows = db.all(
+    `SELECT COALESCE(branch,'') AS branch,
+            lot_no AS lot, qty, price AS rate, amount AS cost,
+            pqty, prate, puramt AS purchamt,
+            COALESCE(name,'') AS seller_name
+     FROM lots WHERE auction_id = ? ORDER BY branch, name, lot_no`,
+    [auctionId]
+  );
+  const cols = [
+    { header: 'BRANCH',      key: 'branch',      width: 14 },
+    { header: 'LOT',         key: 'lot',         width: 6  },
+    { header: 'QTY',         key: 'qty',         width: 10 },
+    { header: 'RATE',        key: 'rate',        width: 10 },
+    { header: 'COST',        key: 'cost',        width: 14 },
+    { header: 'PQTY',        key: 'pqty',        width: 10 },
+    { header: 'PRATE',       key: 'prate',       width: 10 },
+    { header: 'PURCHAMT',    key: 'purchamt',    width: 14 },
+    { header: 'SELLER NAME', key: 'seller_name', width: 26 },
+  ];
+  return createExcelBuffer('LotPayment', cols, rows, {
+    db, title: 'Lot Payment Summary', metaLines: auctionMeta(db, auctionId),
   });
 }
 
@@ -629,8 +978,10 @@ const EXPORT_TYPES = {
   lot_buyer:         { fn: exportLotBuyer,        name: 'LotBuyer' },
   lot_name:          { fn: exportLotName,         name: 'LotName' },
   price_list_before: { fn: exportPriceListBefore, name: 'PriceListBefore' },
+  lot_payment:       { fn: exportLotPayment,      name: 'LotPayment' },
   praman_csv:     { fn: exportPramanCSV,     name: 'eTrade_Praman', ext: 'csv', mime: 'text/csv', needsCfg: true },
   price_list:     { fn: exportPriceList,     name: 'PriceList' },
+  bank_payment_before:{ fn: exportBankPaymentBefore, name: 'BankPaymentBefore', needsCfg: true },
   bank_payment:   { fn: exportBankPayment,   name: 'BankPayment', needsCfg: true },
   pooler_register:{ fn: exportPoolerRegister,name: 'PoolerRegister' },
   full_file:      { fn: exportFullFile,      name: 'FullFile' },
@@ -644,8 +995,8 @@ const EXPORT_TYPES = {
 
 module.exports = {
   EXPORT_TYPES,
-  exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportPriceListBefore,
-  exportPramanCSV, exportPriceList, exportBankPayment,
+  exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
+  exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentBefore,
   exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList,
   exportSalesTaxes, exportPaymentSummary, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
