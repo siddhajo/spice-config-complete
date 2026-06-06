@@ -4489,9 +4489,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   <div class="sgrid">
     <div class="fg"><label>Lot No *</label><input id="l-lotno"></div>
     <div class="fg">
-      <label style="display:flex;justify-content:space-between;align-items:center">
-        <span>Name <span id="l-trader-tag" style="color:var(--text3);font-weight:400;font-size:11px"></span></span>
-        <button type="button" class="btn btn-a" style="padding:2px 8px;font-size:11px" onclick="openLotSellerPicker()">Change Seller</button>
+      <label style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+        <span>Name</span>
+        <a href="#" onclick="openLotSellerPicker();return false" style="font-size:11px;font-weight:600;color:var(--green);text-decoration:none">↻ Change Seller…</a>
       </label>
       <input id="l-name">
     </div>
@@ -12233,16 +12233,6 @@ function openLotEdit(l){
   document.getElementById('l-id').value=l.id;
   L_FIELDS.forEach(f=>{const el=document.getElementById(L_IDS[f]);if(el)el.value=l[f]!=null?l[f]:''});
 
-  // Trader-tag chip beside the Name label: reflects the linked seller
-  // FK if the lot has one. Lots imported without a trader_id (legacy
-  // free-text seller) just show "unlinked" so the user knows that
-  // Change Seller will both rewrite the address and create the FK.
-  const tagEl = document.getElementById('l-trader-tag');
-  if (tagEl) {
-    const tid = (l && l.trader_id) ? Number(l.trader_id) : 0;
-    tagEl.textContent = tid > 0 ? `— linked to seller #${tid}` : '— unlinked';
-  }
-
   // Wire field-level reactivity for the edit modal:
   //   1) Changing CODE → look up the matching buyer (by code, ti, or full
   //      buyer string) and auto-fill buyer/buyer1/cr/sale fields. Saves
@@ -12615,8 +12605,6 @@ async function lotSellerPick(traderId){
     setIf('l-ppin',      t.pin       || '');
     setIf('l-pstate',    t.pstate    || '');
     setIf('l-pst-code',  t.pst_code  || '');
-    const tagEl = document.getElementById('l-trader-tag');
-    if (tagEl) tagEl.textContent = '— linked to seller #'+t.id+' (staged, save to commit)';
     hideModal('lot-seller-modal');
     toast('Seller staged — click Save on the lot to apply');
   } catch (e) { showError(e); }
