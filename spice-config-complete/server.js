@@ -4593,7 +4593,7 @@ app.get('/api/invoices/pdf/:id', requireView, async (req, res) => {
 
     // Try to rebuild fresh from lots (gives line-item detail), fall back to stored summary
     let invoice = stored.auction_id
-      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg)
+      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
       : null;
 
     // Defensive: even when lots exist, if buyer lookup missed, enrich from stored invoice fields
@@ -4694,7 +4694,7 @@ app.get('/api/invoices/purchase-pdf/:id', requireView, async (req, res) => {
 
     // Same enrichment pattern as the sales-invoice endpoint
     let invoice = stored.auction_id
-      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg)
+      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
       : null;
 
     const enrichBuyer = (buyer) => {
@@ -4788,7 +4788,7 @@ app.post('/api/invoices/pdf-bulk', requireView, async (req, res) => {
       const stored = db.get('SELECT * FROM invoices WHERE id=?', [id]);
       if (!stored) continue; // silently skip missing IDs
       let invoice = stored.auction_id
-        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg)
+        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
         : null;
       if (invoice) {
         invoice.buyer = enrichBuyer(invoice.buyer, stored);
@@ -4883,7 +4883,7 @@ app.post('/api/invoices/purchase-pdf-bulk', requireView, async (req, res) => {
       const stored = db.get('SELECT * FROM invoices WHERE id=?', [id]);
       if (!stored) continue;
       let invoice = stored.auction_id
-        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg)
+        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
         : null;
       if (invoice) {
         invoice.buyer = enrichBuyer(invoice.buyer, stored);
@@ -5313,6 +5313,18 @@ app.get('/api/bills', requireView, (req, res) => {
             )
           )`;
     p.push(branchTerm, branchTerm);
+  }
+  // Two-company split — same convention as the Sales/Purchases lists:
+  // `state` carries the issuing company (KERALA = ASP, else ISP). Import
+  // Old Data tags Bills of Supply from the BR "ASP" prefix; generation
+  // stamps it from the auction state. Filter by the active business
+  // context so ASP bills show only in ASP and ISP only in ISP. Blank/
+  // legacy state falls into the ISP bucket so nothing disappears.
+  const _billBiz = String(getSettingsFlat(db).business_state || 'TAMIL NADU').toUpperCase();
+  if (_billBiz === 'KERALA') {
+    q += " AND UPPER(COALESCE(state,'')) LIKE '%KERALA%'";
+  } else {
+    q += " AND UPPER(COALESCE(state,'')) NOT LIKE '%KERALA%'";
   }
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=bills.auction_id)');
   q += mw.sql; p.push(...mw.params);
@@ -7816,15 +7828,31 @@ const IMPORT_MODULES = {
     label: 'Bills of Supply',
     table: 'bills',
     keyCols: ['bil'],
+    // `state` is computed from BR, never read from the source — see rowDefaults.
+    derivedFields: ['state'],
     autoFillAuctionId: true,
     fields: ['auction_id','ano','date','state','br','crpt','bil','name','add_line','pla',
              'pstate','st_code','crr','pan','qty','cost','igst','net'],
     aliases: {
       bil: ['bil','bill','bill_no'],
       name: ['name','seller','planter'],
+      br: ['br','branch'],
       qty: ['qty','kilos','weight','kgs'],
       cost: ['cost','amount','cardamom'],
       net: ['net','nett','net_amount'],
+      // NOTE: no `state` alias — state is always derived from BR (see
+      // rowDefaults), never read from a source column.
+    },
+    // Flat default safety net + signals the UI that `state` is server-filled.
+    defaults: () => ({ state: 'TAMIL NADU' }),
+    // Authoritative per-row state derivation from the BR (branch) column:
+    //   • BR prefixed "ASP" (e.g. ASPNEDUMKANDAM) → KERALA
+    //   • everything else                          → TAMIL NADU
+    // Mirrors the Purchases BR rule — Bills of Supply key off branch too.
+    rowDefaults: (row, mapping) => {
+      const brSrc = mapping.br;
+      const br = brSrc ? String(row[brSrc] || '').trim().toUpperCase() : '';
+      return { state: br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
     },
   },
   debit_notes: {

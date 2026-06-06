@@ -325,7 +325,7 @@ function calculateTCS(invoiceAmount, priorSales, cfg) {
  * Aggregates lots by buyer for a given auction
  * Sale type filter is optional — if lots don't have sale set yet, filter by buyer only
  */
-function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
+function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // ASP context = Kerala + e-Trade (sister-company ASP billing). Every ASP
   // sales invoice is an inter-state transfer regardless of the buyer's GST
   // state. We don't mutate `saleType` before the lots query (that would
@@ -343,12 +343,27 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg) {
   // Skip code='WD' lots: those are withdrawn (no actual buyer
   // transaction), so they must not appear as line items, contribute
   // to totals, or get an invo stamped on them.
-  const lots = db.all(
-    `SELECT * FROM lots WHERE auction_id = ? AND buyer = ? AND amount > 0
-     AND UPPER(COALESCE(code, '')) != 'WD'
-     AND (sale IS NULL OR sale = '' OR sale = ?) ORDER BY lot_no`,
-    [auctionId, buyerCode, saleType]
-  );
+  // ASP sales invoices select lots by auction_id + buyer ONLY — the sale
+  // filter is dropped. Why: ASP generation deliberately never stamps
+  // lots.sale (it's left free for the later ISP step — see the generate
+  // route), and ASP invoices imported from old data carry a sale value that
+  // doesn't line up with the lots. Filtering on sale in those cases excludes
+  // every lot, so buildSalesInvoice returns null and the PDF falls back to a
+  // single consolidated line with no lot numbers. `opts.aspInvoice` is set by
+  // the reprint routes from the stored invoice's KERALA state; `isASP` covers
+  // live generation while in ASP (Kerala + e-Trade) context.
+  const aspLotPick = isASP || opts.aspInvoice === true;
+  let lotSql = `SELECT * FROM lots WHERE auction_id = ? AND buyer = ? AND amount > 0
+                AND UPPER(COALESCE(code, '')) != 'WD'`;
+  const lotParams = [auctionId, buyerCode];
+  if (!aspLotPick) {
+    // ISP invoices keep the sale filter so a buyer's lots split across
+    // different sale types don't bleed across invoices.
+    lotSql += ` AND (sale IS NULL OR sale = '' OR sale = ?)`;
+    lotParams.push(saleType);
+  }
+  lotSql += ` ORDER BY lot_no`;
+  const lots = db.all(lotSql, lotParams);
   
   if (!lots.length) return null;
 

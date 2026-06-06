@@ -2761,8 +2761,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="L">Local (L)</option>
             <option value="I">Inter-state (I)</option>
             <option value="E">Export (E)</option>
-            <option value="WD">Withdrawn (WD)</option>
-            <option value="NA">N/A (NA)</option>
+            <option value="W">Withdrawn (W)</option>
+            <option value="N">N/A (N)</option>
           </select>
 
           <!-- Create group -->
@@ -3678,7 +3678,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div class="fg" style="margin:0"><label>From</label><input type="date" id="jr-from"></div>
           <div class="fg" style="margin:0"><label>To</label><input type="date" id="jr-to"></div>
           <div class="fg" style="margin:0" id="jr-sale-wrap"><label>Sale Type</label>
-            <select id="jr-sale"><option value="">All</option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select>
+            <select id="jr-sale"><option value="">All</option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="W">Withdrawn (W)</option><option value="N">N/A (N)</option></select>
           </div>
           <button class="btn btn-g" onclick="loadJournal()">Load</button>
           <button class="btn btn-a" onclick="exportJournal()">Export XLSX</button>
@@ -4329,8 +4329,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <option value="L">Local (L)</option>
         <option value="I">Inter-state (I)</option>
         <option value="E">Export (E)</option>
-        <option value="WD">Withdrawn (WD)</option>
-        <option value="NA">N/A (NA)</option>
+        <option value="W">Withdrawn (W)</option>
+        <option value="N">N/A (N)</option>
       </select>
     </div>
   </div>
@@ -4562,7 +4562,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       </div>
     </div>
     <div class="fg"><label>Sale Type</label>
-      <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select>
+      <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="W">Withdrawn (W)</option><option value="N">N/A (N)</option></select>
     </div>
     <!-- e-Auction-only fields. Each cell wraps the entire .fg so the
          label + input collapse together when the flag is OFF (.feat-*
@@ -4594,7 +4594,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
 <div class="modal-bg" id="gen-inv-modal"><div class="modal" style="max-width:580px">
   <h2>Generate Sales Invoice(s)</h2>
-  <div class="fg"><label>Sale Type — filters eligible buyers below</label><select id="gi-sale" onchange="loadInvEligibleBuyers()"><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select></div>
+  <div class="fg"><label>Sale Type — filters eligible buyers below</label><select id="gi-sale" onchange="loadInvEligibleBuyers()"><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="W">Withdrawn (W)</option><option value="N">N/A (N)</option></select></div>
   <div class="fg">
     <label style="display:flex;justify-content:space-between;align-items:center">
       <span>Buyers <span style="color:var(--text3);font-weight:400">— tick one or more</span></span>
@@ -4640,8 +4640,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       <option value="L">Local (L) only</option>
       <option value="I">Inter-state (I) only</option>
       <option value="E">Export (E) only</option>
-      <option value="WD">Withdrawn (WD) only</option>
-      <option value="NA">N/A (NA) only</option>
+      <option value="W">Withdrawn (W) only</option>
+      <option value="N">N/A (N) only</option>
     </select>
     <div style="font-size:11px;color:var(--text3);margin-top:4px">When set, only buyers whose default sale type matches are included.</div>
   </div>
@@ -4882,7 +4882,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="ie-ano"></div>
     <div class="fg"><label>Date</label><input type="date" id="ie-date"></div>
     <div class="fg"><label>Sale Type</label>
-      <select id="ie-sale"><option value="L">Local</option><option value="I">Inter-state</option><option value="E">Export</option><option value="WD">Withdrawn</option><option value="NA">N/A</option></select>
+      <select id="ie-sale"><option value="L">Local</option><option value="I">Inter-state</option><option value="E">Export</option><option value="W">Withdrawn</option><option value="N">N/A</option></select>
     </div>
     <div class="fg"><label>Invoice No</label><input id="ie-invo"></div>
     <div class="fg"><label>Buyer Code</label><input id="ie-buyer"></div>
@@ -6490,7 +6490,7 @@ async function loadStats(auctionId){
     </div>`;
   }).join('') : '<div style="text-align:center;color:var(--spice-text-hint);padding:24px 0;font-size:13px">No seller data this week</div>';
 
-  const saleMap = {L:['pill-local','Local'], I:['pill-inter','Inter-state'], E:['pill-export','Export'], WD:['pill-wd','Withdrawn'], NA:['pill-na','N/A']};
+  const saleMap = {L:['pill-local','Local'], I:['pill-inter','Inter-state'], E:['pill-export','Export'], W:['pill-wd','Withdrawn'], N:['pill-na','N/A']};
   const avatarColors = ['','c2','c3','c4'];
   const invoicesHTML = I.length ? `
     <table style="width:100%">
@@ -10008,7 +10008,7 @@ async function searchBuyers(q, opts){
   renderPager('buyers-pager', _buyersPager, gotoBuyersPage, query);
 
   const d = rows;
-  const saleMap={L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'};
+  const saleMap={L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'};
   DataTable.mount('buyers-list', d, {
     emptyState: { icon: 'buyers', title: "No buyers yet", body: "Register buyers to generate sales invoices. Use Add Buyer above or import from a template." }, 
     columns: [
@@ -10060,7 +10060,7 @@ async function searchBuyers(q, opts){
 function viewBuyerDetails(b){
   const kv=(k,v)=>v?`<tr><td style="padding:6px 10px;color:var(--text2);font-size:12px;width:40%">${k}</td><td style="padding:6px 10px;font-size:13px">${esc(v)}</td></tr>`:'';
   const section=(title,rows)=>{const filtered=rows.filter(Boolean).join('');return filtered?`<div style="margin-bottom:16px"><h3 style="font-size:13px;color:var(--green);margin:0 0 6px 0;padding-bottom:4px;border-bottom:1.5px solid var(--green-border)">${title}</h3><table style="width:100%">${filtered}</table></div>`:''};
-  const saleMap={L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'};
+  const saleMap={L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'};
   const fullAddress=[b.add1,b.add2].filter(Boolean).join(', ');
   const consigneeAddress=[b.cadd1].filter(Boolean).join(', ');
   let html='';
@@ -12152,7 +12152,7 @@ function lotBulkBuyerPreview(){
     x => String(x.buyer || '').trim().toUpperCase() === code
   );
   if (b) {
-    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'}[b.sale] || 'Local';
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'}[b.sale] || 'Local';
     prev.innerHTML = `✓ <strong style="color:var(--spice-cardamom)">${esc(b.buyer1 || '(no trade name)')}</strong>`
       + (b.code ? `<span style="color:var(--text3)"> · code ${esc(b.code)}</span>` : '')
       + `<span style="color:var(--text3)"> · sale ${esc(saleLabel)}</span>`;
@@ -12183,7 +12183,7 @@ async function lotBulkBuyerApply(){
     const aid = document.getElementById('lot-auction')?.value;
     if (aid) { try { await j(`/api/lots/calculate/${aid}`, { method: 'POST' }); } catch (_) {} }
     hideModal('lot-bulk-buyer-modal');
-    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',WD:'Withdrawn',NA:'N/A'}[r.sale] || 'Local';
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'}[r.sale] || 'Local';
     toast(`Set buyer ${r.buyer} (${saleLabel}) on ${n} lot${n === 1 ? '' : 's'}${skipNote} · recalculated`);
     if (typeof loadLots === 'function') loadLots({ keepPage: true });
   } catch (e) {
