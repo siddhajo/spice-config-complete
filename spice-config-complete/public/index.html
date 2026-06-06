@@ -1035,6 +1035,11 @@ tr:hover td{background:var(--spice-cream)}
 .flag-row:hover{background:var(--spice-cardamom-lt,var(--green-bg))}
 .flag-row:last-child{border-bottom:none}
 .flag-row label{font-size:12px;font-weight:600;cursor:pointer;flex:1;color:var(--text);line-height:1.3}
+/* Feature-flag rows render as compact bordered cards — the same style as
+   the Lot Entry "Allow Lot Edits (non-admin)" boolean (label left, switch
+   right) so the two settings surfaces read consistently. */
+.flag-card{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin-bottom:8px}
+.flag-card > label:first-child{margin:0;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;line-height:1.3}
 /* Pill-shaped toggle. Thumb fills most of the track height with 2px
    padding all around; when checked the thumb slides flush to the
    right and the track turns green. Sizes match the screenshot brief —
@@ -1056,7 +1061,7 @@ tr:hover td{background:var(--spice-cream)}
 body[data-comfort="1"] .sw{width:40px;height:22px}
 body[data-comfort="1"] .sl::before{width:18px;height:18px}
 body[data-comfort="1"] .sw input:checked+.sl::before{transform:translateX(18px)}
-body[data-comfort="1"] .flag-row label{font-size:13px}
+body[data-comfort="1"] .flag-row label,body[data-comfort="1"] .flag-card > label:first-child{font-size:13px}
 
 /* ── Settings collapsible group (used by Feature Flags) ─────
    Restyled to echo the dashboard's "Headline metrics" cards: rounded
@@ -8654,7 +8659,7 @@ function renderFlagsGrouped(fields){
   const flagRow = (f) => {
     const ck2 = (f.value === 'true') ? 'checked' : '';
     const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
-    return `<div class="flag-row"><label>${esc(f.label)}${tip}</label>`
+    return `<div class="flag-card"><label>${esc(f.label)}${tip}</label>`
          + `<label class="sw"><input type="checkbox" data-key="${f.key}" data-type="boolean" ${ck2}><span class="sl"></span></label></div>`;
   };
 
@@ -11558,29 +11563,45 @@ async function lotApplyPickLots(){
   const arr = Array.isArray(_lotsFull) ? _lotsFull : [];
   if (!arr.length) { toast('Load a trade first'); return; }
 
-  // Build TWO lookup maps so we can match lot numbers stored either
-  // padded ("001") or unpadded ("1"). The padded map preserves the
-  // user's intent when they type "001"; the bare-int map catches the
-  // case where lot_no is stored unpadded but the user typed "001".
-  const byLotNo = new Map();      // exact, upper-cased
-  const byLotNoInt = new Map();   // numeric value → id (only for purely-digit lot_nos)
+  // Index lot_no under THREE keys per row so the lookup tolerates every
+  // format real auction data uses — canonical ("001"), numeric ("1",
+  // leading zeros stripped), and digits-only ("1" from "1A"/"JM-001").
+  // The digits-only fallback is what lets the operator tick alphanumeric
+  // lot numbers; canonical/numeric win first. Same logic as the Lot
+  // Entry bulk-tick so both screens behave identically.
+  const byLotNo = new Map();
   for (const l of arr) {
-    const k = String(l.lot_no == null ? '' : l.lot_no).trim().toUpperCase();
-    if (!k) continue;
-    byLotNo.set(k, l.id);
-    if (/^\d+$/.test(k)) byLotNoInt.set(parseInt(k, 10), l.id);
+    const raw = String(l.lot_no == null ? '' : l.lot_no).trim();
+    if (!raw) continue;
+    const canonical = raw.toUpperCase();
+    byLotNo.set(canonical, l.id);
+    const n = Number(raw);
+    if (Number.isFinite(n) && String(n) !== canonical) byLotNo.set(String(n), l.id);
+    const digits = raw.replace(/\D+/g, '');
+    if (digits) {
+      const dn = Number(digits);
+      if (Number.isFinite(dn)) { const ds = String(dn); if (!byLotNo.has(ds)) byLotNo.set(ds, l.id); }
+    }
   }
+  const tryMatch = (token) => {
+    const k = String(token).toUpperCase();
+    if (byLotNo.has(k)) return byLotNo.get(k);
+    const n = Number(token);
+    if (Number.isFinite(n) && byLotNo.has(String(n))) return byLotNo.get(String(n));
+    const digits = String(token).replace(/\D+/g, '');
+    if (digits) {
+      const dn = Number(digits);
+      if (Number.isFinite(dn) && byLotNo.has(String(dn))) return byLotNo.get(String(dn));
+    }
+    return null;
+  };
 
   const matched = new Set();
   const missing = [];
   for (const t of tokens) {
-    const k = t.toUpperCase();
-    if (byLotNo.has(k)) { matched.add(byLotNo.get(k)); continue; }
-    if (/^\d+$/.test(t)){
-      const n = parseInt(t, 10);
-      if (byLotNoInt.has(n)) { matched.add(byLotNoInt.get(n)); continue; }
-    }
-    missing.push(t);
+    const id = tryMatch(t);
+    if (id != null) matched.add(id);
+    else missing.push(t);
   }
 
   // Merge newly-matched ids into the persistent ticked Set.
@@ -18241,11 +18262,15 @@ async function leApplyPickLots() {
 
   if (!_le.selectedForPrint) _le.selectedForPrint = new Set();
 
-  // Index lots by lot_no using BOTH the canonical string ("001") AND
-  // the numeric-stripped form ("1") so "001-005" expanded into
-  // "1","2","3","4","5" matches rows stored as "001","002"… in
-  // legacy spreadsheets. Without the second key, the range
-  // expander silently misses every leading-zero row.
+  // Index lots by lot_no under THREE keys per row so the lookup tolerates
+  // every format auction data shows up in. Without all three, "001-005"
+  // (or an alphanumeric lot) silently misses real rows:
+  //   1. Canonical:    "001"          (raw, upper-cased)
+  //   2. Numeric:      "1"            (Number(raw) — strips leading zeros)
+  //   3. Digits-only:  "1" from "1A"  (only digits, then numeric form)
+  // Canonical/numeric are checked first; digits-only is the fallback that
+  // keeps the operator going on legacy alphanumeric lot numbers
+  // ("1A", "JM-001", "B-7"). Conflicts overwrite — last wins, harmless.
   const indexBy = (l, map) => {
     const raw = String(l.lot_no == null ? '' : l.lot_no).trim();
     if (!raw) return;
@@ -18253,12 +18278,22 @@ async function leApplyPickLots() {
     map.set(canonical, l.id);
     const n = Number(raw);
     if (Number.isFinite(n) && String(n) !== canonical) map.set(String(n), l.id);
+    const digits = raw.replace(/\D+/g, '');
+    if (digits) {
+      const dn = Number(digits);
+      if (Number.isFinite(dn)) { const ds = String(dn); if (!map.has(ds)) map.set(ds, l.id); }
+    }
   };
   const tryMatch = (token, map) => {
-    const k = token.toUpperCase();
+    const k = String(token).toUpperCase();
     if (map.has(k)) return map.get(k);
     const n = Number(token);
     if (Number.isFinite(n) && map.has(String(n))) return map.get(String(n));
+    const digits = String(token).replace(/\D+/g, '');
+    if (digits) {
+      const dn = Number(digits);
+      if (Number.isFinite(dn) && map.has(String(dn))) return map.get(String(dn));
+    }
     return null;
   };
 
