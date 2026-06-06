@@ -2972,6 +2972,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button id="pay-bulk-export-bank" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedBankPayment()" title="Bank-import RTGS/NEFT file for just the ticked sellers (honours per-seller lot picks)">📥 Bank Pay (Selected) <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="pay-bulk-export" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="exportSelectedPaymentXlsx()" title="Detailed Payment XLSX for just the ticked sellers (honours per-seller lot picks)">📊 Payment XLSX (Selected)</button>
+            <button id="pay-bulk-print" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="printSelectedPayments()" title="One merged PDF payment statement, a page per ticked seller">🖨 Print Selected</button>
+            <button id="pay-bulk-wa" class="btn" style="display:none;height:38px;padding:0 16px;background:#25D366;color:#fff;font-weight:600" onclick="whatsappSelectedPayments()" title="WhatsApp a payment-credited message to each ticked seller, one at a time">💬 WhatsApp Selected</button>
           </div>
 
           <!-- Undo Last Export — visible only when this trade has an
@@ -4369,29 +4371,31 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 </div></div>
 
 <!-- ──────────────────────────────────────────────────────────
-     PAYMENT LOT-PICKER modal — opened from the Payments tab's
-     Actions → "Pick lots" button. Lets the operator narrow the
-     next "Selected" export for ONE seller to a subset of their
-     lots (e.g. to route lots tagged to different bank accounts in
-     separate bank-upload files). The pick is saved per-auction in
-     localStorage and consumed by the Bank Pay / Payment XLSX
-     (Selected) exports as the `lots` map. Ticking every lot clears
-     the pick (= export all lots, the default). -->
-<div class="modal-bg" id="pay-lots-modal"><div class="modal" style="max-width:560px">
-  <h2>Pick lots — <span id="pay-lots-seller">—</span></h2>
-  <p style="font-size:12.5px;color:var(--text2);margin:-6px 0 12px;line-height:1.5">
-    Tick the lots to include in the next <strong>Selected</strong> export for this seller.
-    Leave all ticked to export every lot. Useful when a seller's lots are
-    tagged to more than one bank account — pick one account's lots, export,
-    then pick the next.
-  </p>
-  <div id="pay-lots-body" style="max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px">
-    <div style="padding:24px;text-align:center;color:var(--text3)">Loading…</div>
-  </div>
-  <div class="actions">
-    <button class="btn btn-o" onclick="hideModal('pay-lots-modal')">Cancel</button>
-    <button class="btn" style="background:#fff;border:1px solid var(--border)" onclick="clearPayLots()" title="Clear the saved subset — this seller will export ALL lots again">Reset to all</button>
-    <button class="btn btn-g" onclick="savePayLots()">Save picks</button>
+     PAYMENT LOT-DETAIL modal — opened from the Payments tab's
+     Actions → "Pick lots". Lists every payable lot for ONE seller
+     with branch, routing bank, qty/rate/amount/discount/GST/payable
+     and a live totals strip. Two jobs:
+       • Save Lot Selection — persist the ticked subset as the export
+         filter (consumed by Bank Pay / Payment XLSX (Selected)).
+       • Print Payment for Selected — PDF statement covering only the
+         ticked lots (partial-payment flow). -->
+<div class="modal-bg" id="pay-lots-modal"><div class="modal" style="max-width:900px">
+  <h2 style="display:flex;align-items:center;gap:10px">
+    <span style="width:32px;height:32px;border-radius:10px;background:var(--spice-turmeric-lt);display:inline-flex;align-items:center;justify-content:center">📋</span>
+    Lots for <span id="pay-lots-seller" style="color:var(--spice-cardamom-dk)">—</span>
+    <span id="pay-lots-trade" style="font-weight:400;font-size:12px;color:var(--text3);margin-left:auto"></span>
+  </h2>
+  <div id="pay-lots-body" style="margin-top:10px;max-height:60vh;overflow:auto"></div>
+  <div id="pay-lots-totals" style="margin-top:10px;padding:10px 14px;background:var(--spice-cream);border:1px solid var(--spice-line);border-radius:8px;font-size:13px"></div>
+  <!-- Live indicator for the persisted lot-pick state — shows whether
+       the currently ticked lots match what's saved as the export filter. -->
+  <div id="pay-lots-pick-state" style="margin-top:8px;font-size:12px;color:var(--text2);display:none"></div>
+  <div class="actions" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-o" onclick="hideModal('pay-lots-modal')">Close</button>
+    <button class="btn btn-a" type="button" onclick="saveSelectedPayLots()" id="pay-lots-save-btn" title="Persist the ticked lots as the export filter for this seller. Next 'Export Selected' uses ONLY these lots.">💾 Save Lot Selection</button>
+    <button class="btn btn-o" type="button" onclick="clearSelectedPayLots()" id="pay-lots-clear-btn" title="Drop the saved filter; next 'Export Selected' includes all their lots again.">✕ Clear Lot Selection</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-a" onclick="printSelectedPayLots()" id="pay-lots-print-btn" title="PDF payment statement covering only the ticked lots">🖨 Print Payment for Selected</button>
   </div>
 </div></div>
 
@@ -13919,9 +13923,10 @@ async function loadPayments(opts){
             const undoBtn = (st !== 'none')
               ? `<button class="btn" style="padding:3px 8px;font-size:12px;background:#fff;border:1px solid var(--border)" data-seller="${nm}" onclick="event.stopPropagation();undoPaymentExport(this.getAttribute('data-seller'))" title="Restore this seller — re-enable for export">↶</button>`
               : '';
+            const waBtn = `<button class="btn" style="padding:3px 9px;font-size:12px;background:#25D366;color:#fff;border:none" data-seller="${nm}" data-payable="${Number(p.total_payable)||0}" onclick="event.stopPropagation();whatsappPayment('${esc(String(aid))}',this.getAttribute('data-seller'),Number(this.getAttribute('data-payable')))" title="WhatsApp a payment-credited message to this seller">💬</button>`;
             return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">`
-              + `<button class="btn btn-a" style="padding:3px 10px;font-size:12px" data-seller="${nm}" onclick="event.stopPropagation();openPayLots('${esc(String(aid))}',this.getAttribute('data-seller'))" title="Choose which lots to include in the next Selected export">🎯 Pick lots</button>`
-              + pickBadge + bankBadge + expBadge + undoBtn
+              + `<button class="btn btn-a" style="padding:3px 10px;font-size:12px" data-seller="${nm}" onclick="event.stopPropagation();openPayLotsModal('${esc(String(aid))}',this.getAttribute('data-seller'))" title="View this seller's lots — pick a subset, save the export filter, or print a partial-payment statement">🎯 Pick lots</button>`
+              + waBtn + pickBadge + bankBadge + expBadge + undoBtn
               + `</div>`;
           } }
       ]
@@ -14057,7 +14062,7 @@ function _updatePayBulkToolbar(ticked){
     if (on) el.style.removeProperty('display');
     else    el.style.setProperty('display', 'none', 'important');
   };
-  ['pay-bulk-export-bank', 'pay-bulk-export'].forEach(id => show(document.getElementById(id), ticked > 0));
+  ['pay-bulk-export-bank', 'pay-bulk-export', 'pay-bulk-print', 'pay-bulk-wa'].forEach(id => show(document.getElementById(id), ticked > 0));
   if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
 }
 // Delegate: per-row checkbox changes drive the master + bulk toolbar.
@@ -14253,118 +14258,242 @@ function undoLastPaymentExport(){
   loadPayments({ keepPage: true, useCache: true });
 }
 
-// ── Payments: lot-picker modal ───────────────────────────────────
-const _payLotsState = { aid: '', seller: '', lots: [] };
-async function openPayLots(aid, sellerName){
-  _payLotsState.aid = String(aid || '');
+// ── Payments: lot-detail / partial-payment modal ─────────────────
+// Rich per-seller lot view: branch, routing bank, qty/rate/amount/
+// discount/GST/payable per lot + a live totals strip. Drives both the
+// export filter (Save/Clear Lot Selection) and the partial-payment PDF
+// (Print Payment for Selected). Already-exported lots are locked + 🚫.
+const _payLotsState = { aid: 0, seller: '', lots: [], bankLabels: {}, defaultBankId: null };
+async function openPayLotsModal(auctionId, sellerName){
+  _payLotsState.aid = Number(auctionId) || 0;
   _payLotsState.seller = String(sellerName || '');
   _payLotsState.lots = [];
-  const sellerEl = document.getElementById('pay-lots-seller');
-  if (sellerEl) sellerEl.textContent = _payLotsState.seller || '—';
-  const bodyEl = document.getElementById('pay-lots-body');
-  if (bodyEl) bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">Loading…</div>';
+  document.getElementById('pay-lots-seller').textContent = _payLotsState.seller || '—';
+  const tradeLabel = document.getElementById('pay-lots-trade');
+  if (tradeLabel) {
+    const sel = document.getElementById('pay-auction');
+    const opt = sel ? sel.options[sel.selectedIndex] : null;
+    tradeLabel.textContent = opt ? opt.textContent : '';
+  }
+  const body = document.getElementById('pay-lots-body');
+  body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">Loading lots…</div>';
+  document.getElementById('pay-lots-totals').innerHTML = '';
   showModal('pay-lots-modal');
   try {
+    // /api/lots/:aid?name= filters by partial name LIKE — narrow to
+    // exact-name matches client-side so "BOSE SPICES" isn't mixed with
+    // "BOSE SPICES-CUMBUM".
     const all = await j(`/api/lots/${_payLotsState.aid}?name=${encodeURIComponent(_payLotsState.seller)}`);
-    // /api/lots uses LIKE %name%, so filter to the exact (trimmed,
-    // case-insensitive) seller and keep only payable lots (amount > 0,
-    // not yet paid) — the same population the bank export pays.
+    const arr = Array.isArray(all) ? all : (all && all.rows) || [];
     const target = _payLotsState.seller.trim().toLowerCase();
-    _payLotsState.lots = (Array.isArray(all) ? all : []).filter(l =>
-      String(l.name || '').trim().toLowerCase() === target
-      && Number(l.amount) > 0
-      && (l.paid == null || l.paid === '')
+    const filtered = arr.filter(l =>
+      String(l.name || '').trim().toLowerCase() === target &&
+      (Number(l.amount) || 0) > 0
     );
+    filtered.sort((a, b) => {
+      const an = parseInt(a.lot_no, 10), bn = parseInt(b.lot_no, 10);
+      if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+      return String(a.lot_no || '').localeCompare(String(b.lot_no || ''));
+    });
+    _payLotsState.lots = filtered;
+    // bank_id → "AcctNo · Bank · IFSC" map so each lot row shows which
+    // account its payment routes to. Banks come from the seller's trader
+    // record (trader_id denormalised onto every lot).
+    _payLotsState.bankLabels = {};
+    _payLotsState.defaultBankId = null;
+    const tid = (filtered.find(l => l.trader_id) || {}).trader_id;
+    if (tid) {
+      try {
+        const seller = await j(`/api/traders/${tid}`);
+        const banks = (seller && seller.banks) || [];
+        const def = banks.find(b => b.is_default) || banks[0] || null;
+        _payLotsState.defaultBankId = def ? def.id : null;
+        for (const b of banks) {
+          const parts = [b.acctnum, b.bank_name, b.ifsc].filter(Boolean);
+          _payLotsState.bankLabels[b.id] = parts.join(' · ') + (b.is_default ? ' ★' : '');
+        }
+      } catch (_) { /* non-fatal — lots fall back to "—" label */ }
+    }
+    _renderPayLotsTable();
   } catch (e) {
-    if (bodyEl) bodyEl.innerHTML = `<div style="padding:24px;text-align:center;color:var(--red)">Failed to load lots: ${esc(e.message)}</div>`;
-    return;
+    body.innerHTML = `<div style="padding:24px;text-align:center;color:var(--spice-chili,#b91c1c)">Failed to load lots: ${esc(e.message || String(e))}</div>`;
   }
-  _renderPayLots();
 }
-function _renderPayLots(){
-  const bodyEl = document.getElementById('pay-lots-body');
-  if (!bodyEl) return;
+function _renderPayLotsTable(){
+  const body = document.getElementById('pay-lots-body');
   if (!_payLotsState.lots.length) {
-    bodyEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No payable lots for this seller.</div>';
+    body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">No payable lots found for this seller in this trade.</div>';
+    document.getElementById('pay-lots-totals').innerHTML = '';
     return;
   }
-  // Already-exported lots for this seller — shown greyed + unticked +
-  // tagged so the operator picks from the REMAINING lots. ('*' = all
-  // exported.) These are also subtracted server-side via excludeLots, so
-  // ticking one anyway is harmless; this is purely a UX cue.
-  const exportedRaw = _payExportedLotsFor(_payLotsState.aid, _payLotsState.seller);
-  const exportedSet = (exportedRaw === '*')
-    ? new Set(_payLotsState.lots.map(l => String(l.lot_no)))
-    : new Set(Array.isArray(exportedRaw) ? exportedRaw.map(String) : []);
-  // Pre-tick from saved picks; if none saved, every NOT-yet-exported lot
-  // is ticked (= export the remainder, the default).
-  const saved = _payGetLotPicks(_payLotsState.aid, _payLotsState.seller);
-  const savedSet = saved ? new Set(saved.map(String)) : null;
+  const savedPicks = _payGetLotPicks(_payLotsState.aid, _payLotsState.seller);
+  const savedSet = savedPicks ? new Set(savedPicks.map(String)) : null;
+  // Lots already shipped in a previous export — locked (pre-ticked +
+  // disabled + 🚫) so the operator sees what's gone out.
+  const exportedLotsRaw = _payExportedLotsFor(_payLotsState.aid, _payLotsState.seller);
+  const exportedAll = exportedLotsRaw === '*';
+  const exportedSet = Array.isArray(exportedLotsRaw)
+    ? new Set(exportedLotsRaw.map(String))
+    : (exportedAll ? null : new Set());
   const rows = _payLotsState.lots.map(l => {
-    const lotNo = String(l.lot_no);
-    const isExported = exportedSet.has(lotNo);
-    const checked = isExported ? false : (savedSet ? savedSet.has(lotNo) : true);
-    const bal = Number(l.balance) || 0;
-    const bankTag = (l.bank_id != null && l.bank_id !== '')
-      ? `<span style="color:var(--text3);font-size:11px">🏦 #${esc(String(l.bank_id))}</span>`
-      : `<span style="color:var(--text3);font-size:11px">—</span>`;
-    const expTag = isExported
-      ? `<span title="Already exported earlier" style="background:#DCFCE7;color:#15803D;font-weight:600;font-size:10px;padding:0 6px;border-radius:8px">exported</span>`
+    const tax = (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
+    const lotKey = String(l.lot_no || '');
+    const isExported = exportedAll || (exportedSet && exportedSet.has(lotKey));
+    const checked = isExported ? true : (savedSet ? savedSet.has(lotKey) : true);
+    const dis = isExported ? ' disabled' : '';
+    const cls = isExported ? 'pay-lot-cb pay-lot-cb-exported' : 'pay-lot-cb';
+    const rowStyle = isExported ? ' style="background:#fef2f2"' : '';
+    const expCell = isExported
+      ? `<span class="pay-lot-exported-tag" title="Already included in a previous export.">🚫</span>`
       : '';
-    return `<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--spice-line);cursor:pointer;${isExported ? 'opacity:.6' : ''}">
-      <input type="checkbox" class="pay-lot-cb" value="${esc(lotNo)}" ${checked ? 'checked' : ''} style="cursor:pointer;width:16px;height:16px;accent-color:var(--green)">
-      <span style="font-weight:600;min-width:48px">Lot ${esc(lotNo)}</span>
-      <span style="flex:1;color:var(--text2);font-size:12px">${fmtI(Number(l.qty)||0,3)} kg</span>
-      <span style="min-width:110px;text-align:right;font-weight:600;color:var(--spice-cardamom-dk)">₹${fmtI(bal,2)}</span>
-      ${bankTag}${expTag}
-    </label>`;
+    const effBankId = l.bank_id != null ? l.bank_id : _payLotsState.defaultBankId;
+    const bankText = (effBankId != null && _payLotsState.bankLabels) ? _payLotsState.bankLabels[effBankId] : '';
+    const bankLabel = bankText
+      ? `<span title="${esc(bankText)}" style="font-family:monospace;font-size:11.5px">${esc(bankText)}</span>`
+      : '<span style="color:var(--text3)">—</span>';
+    return `<tr${rowStyle}>
+      <td style="text-align:center"><input type="checkbox" class="${cls}" data-id="${l.id}" data-lot="${esc(lotKey)}"${checked ? ' checked' : ''}${dis} onchange="updatePayLotsTotals()" style="cursor:pointer"></td>
+      <td style="font-family:monospace;font-weight:600">${esc(lotKey)} ${expCell}</td>
+      <td>${esc(l.branch || '')}</td>
+      <td>${bankLabel}</td>
+      <td style="text-align:right">${fmtI(Number(l.qty)||0, 3)}</td>
+      <td style="text-align:right">${fmtI(Number(l.prate)||0, 2)}</td>
+      <td style="text-align:right">${fmtI(Number(l.amount)||0, 2)}</td>
+      <td style="text-align:right;color:#B45309">${fmtI(Number(l.refund)||0, 2)}</td>
+      <td style="text-align:right;color:#0891B2">${fmtI(tax, 2)}</td>
+      <td style="text-align:right;font-weight:700;color:var(--spice-cardamom-dk)">${fmtI(Number(l.balance)||0, 2)}</td>
+    </tr>`;
   }).join('');
-  bodyEl.innerHTML =
-    `<div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--spice-cream);position:sticky;top:0">
-       <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer">
-         <input type="checkbox" id="pay-lots-all" checked onchange="_payLotsToggleAll(this.checked)" style="cursor:pointer;width:15px;height:15px;accent-color:var(--green)">
-         Select all
-       </label>
-     </div>` + rows;
-  _payLotsSyncAll();
-  bodyEl.querySelectorAll('.pay-lot-cb').forEach(cb => cb.addEventListener('change', _payLotsSyncAll));
+  body.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead style="position:sticky;top:0;background:#fff;z-index:1">
+        <tr style="border-bottom:2px solid var(--border);text-align:left">
+          <th style="width:36px;text-align:center"><input type="checkbox" id="pay-lot-select-all" checked onchange="togglePayLotSelectAll(this.checked)" title="Select / clear all" style="cursor:pointer"></th>
+          <th>Lot</th>
+          <th>Branch</th>
+          <th>Bank</th>
+          <th style="text-align:right">Qty</th>
+          <th style="text-align:right">Rate</th>
+          <th style="text-align:right">Amount</th>
+          <th style="text-align:right">Discount</th>
+          <th style="text-align:right">GST</th>
+          <th style="text-align:right">Payable</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  updatePayLotsTotals();
 }
-function _payLotsToggleAll(state){
-  document.querySelectorAll('#pay-lots-body .pay-lot-cb').forEach(cb => { cb.checked = state; });
+function togglePayLotSelectAll(checked){
+  // Leave disabled (already-exported) rows pre-ticked but untouched.
+  document.querySelectorAll('.pay-lot-cb').forEach(cb => {
+    if (cb.disabled) return;
+    cb.checked = !!checked;
+  });
+  updatePayLotsTotals();
 }
-function _payLotsSyncAll(){
-  const all = Array.from(document.querySelectorAll('#pay-lots-body .pay-lot-cb'));
-  const master = document.getElementById('pay-lots-all');
-  if (!master) return;
-  const ticked = all.filter(cb => cb.checked).length;
-  master.indeterminate = ticked > 0 && ticked < all.length;
-  master.checked = all.length > 0 && ticked === all.length;
-}
-function savePayLots(){
-  const { aid, seller } = _payLotsState;
-  if (!aid || !seller) { hideModal('pay-lots-modal'); return; }
-  const picked = Array.from(document.querySelectorAll('#pay-lots-body .pay-lot-cb:checked')).map(cb => cb.value);
-  const total = document.querySelectorAll('#pay-lots-body .pay-lot-cb').length;
-  if (!picked.length) { alert('Tick at least one lot, or use "Reset to all".'); return; }
-  // Ticking every lot = no filter (export all). Save a subset otherwise.
-  if (picked.length === total) {
-    _paySetLotPicks(aid, seller, null);
-    toast(`${seller}: exporting all lots`);
-  } else {
-    _paySetLotPicks(aid, seller, picked);
-    toast(`${seller}: ${picked.length} of ${total} lots picked`);
+function updatePayLotsTotals(){
+  // Count only TICKABLE (not-yet-exported) checked lots so already-paid
+  // rows don't inflate "Payable now" or the selected count.
+  const selectedIds = new Set(
+    Array.from(document.querySelectorAll('.pay-lot-cb:not([disabled]):checked')).map(cb => Number(cb.dataset.id))
+  );
+  let qty = 0, amt = 0, disc = 0, tax = 0, payable = 0;
+  for (const l of _payLotsState.lots) {
+    if (!selectedIds.has(l.id)) continue;
+    qty     += Number(l.qty)     || 0;
+    amt     += Number(l.amount)  || 0;
+    disc    += Number(l.refund)  || 0;
+    tax     += (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
+    payable += Number(l.balance) || 0;
   }
-  hideModal('pay-lots-modal');
-  loadPayments({ keepPage: true, useCache: true });
-}
-function clearPayLots(){
-  const { aid, seller } = _payLotsState;
-  if (aid && seller) {
-    _paySetLotPicks(aid, seller, null);
-    toast(`${seller}: reset to all lots`);
+  const n = selectedIds.size;
+  const totalN = document.querySelectorAll('.pay-lot-cb:not([disabled])').length;
+  const exportedN = document.querySelectorAll('.pay-lot-cb[disabled]').length;
+  document.getElementById('pay-lots-totals').innerHTML =
+    `<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center">
+      <div><strong>${n}</strong> of ${totalN} lots selected${exportedN ? ` <span style="color:#b91c1c;font-weight:600">· ${exportedN} already exported (excluded)</span>` : ''}</div>
+      <div>Qty: <strong>${fmtI(qty, 3)} kg</strong></div>
+      <div>Amount: <strong>₹${fmtI(amt, 2)}</strong></div>
+      <div>Discount: <strong style="color:#B45309">₹${fmtI(disc, 2)}</strong></div>
+      <div>GST: <strong style="color:#0891B2">₹${fmtI(tax, 2)}</strong></div>
+      <div style="margin-left:auto;font-size:14px">Payable now: <strong style="color:var(--spice-cardamom-dk)">₹${fmtI(payable, 2)}</strong></div>
+    </div>`;
+  const printBtn = document.getElementById('pay-lots-print-btn');
+  if (printBtn) printBtn.disabled = (n === 0);
+  const tickableChecked = document.querySelectorAll('.pay-lot-cb:not([disabled]):checked').length;
+  const saveBtn = document.getElementById('pay-lots-save-btn');
+  if (saveBtn) saveBtn.disabled = (tickableChecked === 0);
+  // Pick-state indicator.
+  const picks = _payGetLotPicks(_payLotsState.aid, _payLotsState.seller);
+  const stateEl = document.getElementById('pay-lots-pick-state');
+  if (stateEl) {
+    if (!picks) {
+      stateEl.style.display = 'none';
+      stateEl.innerHTML = '';
+    } else {
+      const savedSet = new Set(picks.map(String));
+      const currentLotNos = new Set(Array.from(document.querySelectorAll('.pay-lot-cb:checked'))
+        .map(cb => String(cb.dataset.lot || '')).filter(Boolean));
+      const matches = savedSet.size === currentLotNos.size && [...savedSet].every(v => currentLotNos.has(v));
+      stateEl.style.display = 'block';
+      stateEl.innerHTML = matches
+        ? `<span style="color:var(--spice-cardamom-dk)">✓ Lot selection saved (${savedSet.size} lot${savedSet.size === 1 ? '' : 's'} — will be used by the next Export Selected).</span>`
+        : `<span style="color:#B45309">⚠ Saved selection differs from the current ticks. Hit <b>💾 Save Lot Selection</b> to update or <b>✕ Clear</b> to drop the filter.</span>`;
+    }
   }
-  hideModal('pay-lots-modal');
-  loadPayments({ keepPage: true, useCache: true });
+}
+// Persist the ticked lots as this seller's export filter (lot_no strings,
+// since the server export route filters via `lot_no IN (…)`). Auto-ticks
+// the seller's Payments row so the next Export Selected picks it up.
+async function saveSelectedPayLots(){
+  const aid = _payLotsState.aid;
+  const seller = _payLotsState.seller;
+  if (!aid || !seller) return;
+  const lotNos = Array.from(document.querySelectorAll('.pay-lot-cb:not([disabled]):checked'))
+    .map(cb => String(cb.dataset.lot || '').trim())
+    .filter(Boolean);
+  if (!lotNos.length) { alert('Tick at least one not-yet-exported lot first.'); return; }
+  _paySetLotPicks(aid, seller, lotNos);
+  // Re-render the table FIRST so the lot-pick badge appears, THEN tick
+  // the seller row (the other order races the async re-render).
+  await loadPayments({ keepPage: true, useCache: true });
+  let autoTicked = false;
+  const body = document.getElementById('payments-list');
+  if (body) {
+    const cb = Array.from(body.querySelectorAll('.pay-select-cb'))
+      .find(c => String(c.getAttribute('data-pay-name') || '') === seller);
+    if (cb && !cb.disabled) { cb.checked = true; autoTicked = true; syncPayMaster(); }
+  }
+  toast(`Saved ${lotNos.length} lot${lotNos.length === 1 ? '' : 's'} for ${seller}.` +
+        (autoTicked ? ' Row auto-ticked — use Export Selected.' : ' Tick the row to include it in Export Selected.'));
+  updatePayLotsTotals();
+}
+// Drop this seller's export filter so the next Export Selected pulls all
+// payable lots for them.
+async function clearSelectedPayLots(){
+  const aid = _payLotsState.aid;
+  const seller = _payLotsState.seller;
+  if (!aid || !seller) return;
+  _paySetLotPicks(aid, seller, null);
+  toast(`Cleared lot filter for ${seller}.`);
+  await loadPayments({ keepPage: true, useCache: true });
+  updatePayLotsTotals();
+}
+// Partial-payment PDF — statement covering only the ticked (not-yet-
+// exported) lots.
+async function printSelectedPayLots(){
+  const lot_ids = Array.from(document.querySelectorAll('.pay-lot-cb:not([disabled]):checked'))
+    .map(cb => Number(cb.dataset.id))
+    .filter(Number.isFinite);
+  if (!lot_ids.length) { alert('Tick at least one not-yet-exported lot first'); return; }
+  if (!_payLotsState.aid || !_payLotsState.seller) { alert('Open this from the Payments tab'); return; }
+  const safe = _payLotsState.seller.replace(/[^\w]/g, '_').slice(0, 40);
+  await fetchAndPrint(
+    '/api/payments/pdf-lots',
+    `Payment_${safe}_${_payLotsState.aid}_partial.pdf`,
+    { auction_id: _payLotsState.aid, seller_name: _payLotsState.seller, lot_ids }
+  );
 }
 
 // ── Payments: selected-seller exports (POST, honours lot picks) ───
@@ -14379,6 +14508,57 @@ function exportSelectedBankPayment(){
 }
 function exportSelectedPaymentXlsx(){
   _payDownloadSelected('payment', document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
+}
+// ── Payments: bulk merged PDF + WhatsApp ─────────────────────────
+// Print Selected → one merged PDF, page-break per ticked seller.
+async function printSelectedPayments(){
+  const aid = document.getElementById('pay-auction')?.value || '';
+  const names = _collectSelectedPaymentNames();
+  if (!aid) { alert('Select an auction first'); return; }
+  if (!names.length) { alert('Tick one or more sellers first'); return; }
+  await fetchPdfWithOverlay(
+    `Building merged statement for ${names.length} seller${names.length === 1 ? '' : 's'}…`,
+    '/api/payments/pdf-bulk',
+    `Payments_Batch_${names.length}.pdf`,
+    { auction_id: aid, names }
+  );
+}
+// WhatsApp a single seller's payment-credited message.
+async function whatsappPayment(auctionId, sellerName, payable){
+  try {
+    const [phone, company, ano] = await Promise.all([
+      _lookupSellerPhone(sellerName), _getCompanyName(), _getAuctionAno(auctionId),
+    ]);
+    const amt = Number(payable || 0).toLocaleString('en-IN');
+    const msg = `${ano} ${sellerName} ${company} PAYMENT ${amt} CREDITED`;
+    if (phone && await _waCloudApiAvailable()) {
+      const ok = await _waCloudSendText(phone, [sellerName, `your PAYMENT of ₹${amt} has been CREDITED (Auction ${ano}).`, company]);
+      if (ok) { toast(`WhatsApp sent to ${sellerName}`); return; }
+    }
+    _waOpenText(phone, msg);
+  } catch (e) { showError(e); }
+}
+// WhatsApp every ticked seller — walks them through the bulk queue.
+// Payable per seller comes from the cached _paymentsAll rollup.
+async function whatsappSelectedPayments(){
+  const aid = document.getElementById('pay-auction')?.value || '';
+  const names = _collectSelectedPaymentNames();
+  if (!aid) { alert('Select an auction first'); return; }
+  if (!names.length) { alert('Tick one or more sellers first'); return; }
+  const payableByName = {};
+  for (const p of (_paymentsAll || [])) payableByName[String(p.name || '')] = Number(p.total_payable) || 0;
+  const [company, ano] = await Promise.all([_getCompanyName(), _getAuctionAno(aid)]);
+  const items = [];
+  for (const nm of names) {
+    const phone = await _lookupSellerPhone(nm);
+    const amt = Number(payableByName[nm] || 0).toLocaleString('en-IN');
+    items.push({
+      name: nm, phone,
+      message: `${ano} ${nm} ${company} PAYMENT ${amt} CREDITED`,
+      params: [nm, `your PAYMENT of ₹${amt} has been CREDITED (Auction ${ano}).`, company],
+    });
+  }
+  await _runWaQueue(items);
 }
 async function _payDownloadSelected(type, aid, names){
   if (!aid) { alert('Select an auction first'); return; }
@@ -17126,18 +17306,112 @@ function getDefaultBusinessState() {
     return v || 'TAMIL NADU';
   } catch (_) { return 'TAMIL NADU'; }
 }
-// WhatsApp helpers — minimal stubs that just open wa.me in a tab.
-// The full reference build has a cloud API path; we don't have it
-// here, so every send opens a browser tab.
+// WhatsApp helpers. No cloud API is wired here, so sends use the manual
+// flow: look up the recipient's number, open WhatsApp pre-filled with the
+// message, and let the operator hit Send. The bulk queue walks the list
+// one recipient at a time.
+function _normalizePhoneForWa(tel) {
+  const d = String(tel || '').replace(/\D/g, '');
+  if (!d) return '';
+  return d.length === 10 ? '91' + d : d; // default IN country code
+}
+function _isMobile() {
+  if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') return navigator.userAgentData.mobile;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+}
+// Cloud API not configured in this build → always manual (wa.me) flow.
 async function _waCloudApiAvailable() { return false; }
-async function _lookupSellerPhone(/*name*/) { return null; }
-async function _waCloudSendText(/*phone, msg*/) { return false; }
-function _waOpenText(phone, msg) {
-  const num = String(phone || '').replace(/[^\d]/g, '');
-  const url = num
-    ? `https://wa.me/${num}?text=${encodeURIComponent(msg)}`
-    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+async function _waCloudSendText(/*phone, params*/) { return false; }
+// Real seller-phone lookup (was a stub) — exact name → traders.tel.
+async function _lookupSellerPhone(name) {
+  try {
+    const r = await fetch(B + '/api/traders/by-name/' + encodeURIComponent(name), { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) return '';
+    const d = await r.json();
+    return d.tel || '';
+  } catch (_) { return ''; }
+}
+// Cached company name + auction list (fetched once per page load).
+let _CCFG = null;
+async function _getCompanyName() {
+  if (!_CCFG) { try { _CCFG = await j('/api/company-settings/flat') || {}; } catch (_) { _CCFG = {}; } }
+  return (_CCFG.trade_name || _CCFG.short_name || _CCFG.tally_company_name || _CCFG.legal_name || 'Company').toUpperCase();
+}
+let _AUCTIONS_WA = null;
+async function _getAuctionAno(auctionId) {
+  if (!_AUCTIONS_WA) { try { _AUCTIONS_WA = await j('/api/auctions') || []; } catch (_) { _AUCTIONS_WA = []; } }
+  const a = _AUCTIONS_WA.find(x => Number(x.id) === Number(auctionId));
+  return a ? a.ano : '';
+}
+function _waOpenText(phone, message) {
+  const waPhone = _normalizePhoneForWa(phone);
+  const url = waPhone
+    ? `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`
+    : `https://wa.me/?text=${encodeURIComponent(message)}`;
   try { window.open(url, '_blank'); } catch (_) {}
+}
+// ── Bulk WhatsApp queue ───────────────────────────────────────
+// Sticky modal showing one recipient at a time with Send / Skip / Stop.
+// Manual mode: "Send & Next" opens the WhatsApp tab pre-filled, then the
+// operator hits Send inside WhatsApp and returns to advance.
+function _ensureWaQueueModal() {
+  let m = document.getElementById('wa-queue-modal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'wa-queue-modal';
+  m.className = 'modal-bg';
+  m.innerHTML = `
+    <div class="modal" style="max-width:480px">
+      <h2>Send WhatsApp <span id="wa-q-count" style="font-weight:400;color:var(--text3);font-size:14px"></span></h2>
+      <div id="wa-q-status" style="font-size:12px;color:var(--text3);margin-bottom:8px"></div>
+      <div style="background:var(--spice-cream);border:1px solid var(--spice-line);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">To</div>
+        <div id="wa-q-name" style="font-weight:600;font-size:14px;margin:2px 0"></div>
+        <div id="wa-q-phone" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">Message</div>
+        <div id="wa-q-msg" style="font-size:13px;white-space:pre-wrap;background:#fff;padding:8px;border-radius:6px;border:1px solid var(--spice-line);margin-top:2px;max-height:140px;overflow-y:auto"></div>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="_waQueueAct('stop')" style="background:#eee">Stop</button>
+        <button class="btn" onclick="_waQueueAct('skip')" style="background:var(--spice-turmeric);color:#fff">Skip</button>
+        <button class="btn" id="wa-q-send" onclick="_waQueueAct('send')" style="background:#25D366;color:#fff">Send & Next →</button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  return m;
+}
+let _waQueueState = null;
+function _waQueueAct(action) { if (_waQueueState && _waQueueState.resolve) _waQueueState.resolve(action); }
+async function _runWaQueue(items, opts) {
+  // items: [{ name, phone, message }]
+  const useApi = await _waCloudApiAvailable();
+  _ensureWaQueueModal();
+  showModal('wa-queue-modal');
+  let sent = 0, skipped = 0;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    document.getElementById('wa-q-count').textContent = `(${i+1} of ${items.length})`;
+    document.getElementById('wa-q-name').textContent = it.name || '—';
+    document.getElementById('wa-q-phone').textContent = it.phone ? ('+' + _normalizePhoneForWa(it.phone)) : '(no phone on file)';
+    document.getElementById('wa-q-msg').textContent = it.message;
+    document.getElementById('wa-q-status').textContent = useApi
+      ? 'Cloud API mode — auto-send enabled'
+      : 'Manual mode — "Send & Next" opens WhatsApp; click Send inside WhatsApp, then come back here for the next.';
+    const action = await new Promise(res => { _waQueueState = { resolve: res }; });
+    if (action === 'stop') break;
+    if (action === 'skip') { skipped++; continue; }
+    // action === 'send'
+    if (useApi) {
+      const params = it.params || [it.name || '', it.message || '', ''];
+      const ok = await _waCloudSendText(it.phone, params);
+      if (!ok) _waOpenText(it.phone, it.message);
+    } else {
+      _waOpenText(it.phone, it.message);
+    }
+    sent++;
+  }
+  hideModal('wa-queue-modal');
+  toast(`WhatsApp queue done — sent ${sent}, skipped ${skipped}`);
 }
 
 // LOT ENTRY — fast desktop entry form

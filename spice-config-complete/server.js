@@ -1488,13 +1488,27 @@ app.get('/api/traders', requireView, (req, res) => {
   }
   res.json(hydrateBanks(db.all('SELECT * FROM traders ORDER BY name LIMIT 500')));
 });
+// Phone lookup by exact (case-insensitive) seller name — powers the
+// Payments tab WhatsApp share. Registered before /api/traders/:id (it
+// has a distinct 2-segment path so there's no route conflict).
+app.get('/api/traders/by-name/:name', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const nm = String(req.params.name || '').trim();
+  if (!nm) return res.status(400).json({ error: 'name required' });
+  const row = db.get('SELECT id, name, tel FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [nm]);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  res.json(row);
+});
+
 app.get('/api/traders/:id', requireView, (req, res) => {
   const db = getDb();
   const row = db.get('SELECT * FROM traders WHERE id = ?', [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
   // Attach banks array so the edit modal sees all bank accounts.
+  // id + is_default are needed by the Payments lot-picker to resolve
+  // each lot's routing account and label the default (★).
   row.banks = db.all(
-    'SELECT trader_id, bank_name, branch, acctnum, ifsc, holder_name FROM trader_banks WHERE trader_id = ? ORDER BY id',
+    'SELECT id, trader_id, bank_name, branch, acctnum, ifsc, holder_name, is_default FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id',
     [row.id]
   );
   res.json(row);
@@ -6064,6 +6078,178 @@ app.get('/api/payments/bank/:auctionId', requireView, (req, res) => {
   const cfg = getSettingsFlat(getDb());
   const data = getBankPaymentData(getDb(), req.params.auctionId, cfg);
   res.json(data);
+});
+
+// ── Payment statement PDF ────────────────────────────────────
+// Per-seller payment statement. `lotIds` (optional) narrows the
+// statement to a caller-chosen subset of the seller's lots — powers
+// the Payments tab "partial payment" flow (operator opens the lots
+// modal, ticks the lots being settled now, prints just those).
+function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
+  const auction = db.get('SELECT * FROM auctions WHERE id = ?', [auctionId]) || { ano:'', date:'' };
+  // Match seller by trimmed/case-insensitive name so legacy rows whose
+  // `name` was stored with trailing whitespace or mixed case still pair
+  // up. `prate` (per-kg purchase rate) is aliased as `rate` for display.
+  const lotIdFilter = Array.isArray(lotIds)
+    ? lotIds.map(n => parseInt(n, 10)).filter(Number.isFinite)
+    : [];
+  let lotSql = `SELECT id, lot_no, qty, prate AS rate, amount, puramt, refund, balance, cgst, sgst, igst
+       FROM lots
+      WHERE auction_id = ?
+        AND TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))
+        AND amount > 0`;
+  const lotParams = [auctionId, sellerName];
+  if (lotIdFilter.length) {
+    const placeholders = lotIdFilter.map(() => '?').join(',');
+    lotSql += ` AND id IN (${placeholders})`;
+    lotParams.push(...lotIdFilter);
+  }
+  lotSql += ' ORDER BY CAST(lot_no AS INTEGER), lot_no';
+  const lots = db.all(lotSql, lotParams) || [];
+  const trader = db.get('SELECT * FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [sellerName]);
+  const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const company = (cfg.trade_name || cfg.short_name || cfg.tally_company_name || cfg.legal_name || 'Company').toString();
+
+  const PAGE_L = 30, PAGE_R = 565, PAGE_W = PAGE_R - PAGE_L;
+  let y = 40;
+  doc.font('Helvetica-Bold').fontSize(16).text(company.toUpperCase(), PAGE_L, y, { width: PAGE_W, align: 'center' });
+  y = doc.y + 4;
+  doc.font('Helvetica-Bold').fontSize(13).text('PAYMENT STATEMENT', PAGE_L, y, { width: PAGE_W, align: 'center' });
+  y = doc.y + 10;
+  doc.moveTo(PAGE_L, y).lineTo(PAGE_R, y).lineWidth(1).stroke();
+  y += 10;
+
+  doc.font('Helvetica').fontSize(10);
+  doc.text(`Seller: ${sellerName}`, PAGE_L, y); doc.text(`Auction: ${auction.ano}`, PAGE_L + 280, y);
+  y += 14;
+  doc.text(`Phone: ${trader && trader.tel ? trader.tel : '-'}`, PAGE_L, y);
+  doc.text(`Date: ${fmtDate(auction.date)}`, PAGE_L + 280, y);
+  y += 18;
+
+  const cols = [
+    { k: 'lot_no', label: 'Lot#',     x: PAGE_L,        w: 60,  align: 'left' },
+    { k: 'qty',    label: 'Qty',      x: PAGE_L + 60,   w: 70,  align: 'right', fmt: fmtQty },
+    { k: 'rate',   label: 'Rate',     x: PAGE_L + 130,  w: 60,  align: 'right', fmt: fmtAmt },
+    { k: 'amount', label: 'Amount',   x: PAGE_L + 190,  w: 80,  align: 'right', fmt: fmtAmt },
+    { k: 'refund', label: 'Discount', x: PAGE_L + 270,  w: 75,  align: 'right', fmt: fmtAmt },
+    { k: 'tax',    label: 'GST',      x: PAGE_L + 345,  w: 70,  align: 'right', fmt: fmtAmt },
+    { k: 'balance',label: 'Payable',  x: PAGE_L + 415,  w: 120, align: 'right', fmt: fmtAmt },
+  ];
+  doc.font('Helvetica-Bold').fontSize(9);
+  doc.rect(PAGE_L, y, PAGE_W, 18).fillAndStroke('#f3f4f6', '#999').fillColor('#000');
+  for (const c of cols) doc.text(c.label, c.x + 2, y + 5, { width: c.w - 4, align: c.align });
+  y += 18;
+  doc.font('Helvetica').fontSize(9).fillColor('#000');
+  let tQty=0,tAmt=0,tDisc=0,tTax=0,tPay=0;
+  for (const l of lots) {
+    const tax = (Number(l.cgst)||0)+(Number(l.sgst)||0)+(Number(l.igst)||0);
+    const row = { ...l, tax };
+    tQty+=Number(l.qty)||0; tAmt+=Number(l.amount)||0; tDisc+=Number(l.refund)||0; tTax+=tax; tPay+=Number(l.balance)||0;
+    if (y > 770) { doc.addPage(); y = 40; }
+    for (const c of cols) {
+      const v = c.fmt ? c.fmt(row[c.k]) : String(row[c.k] ?? '');
+      doc.text(v, c.x + 2, y + 4, { width: c.w - 4, align: c.align });
+    }
+    y += 14;
+    doc.moveTo(PAGE_L, y).lineTo(PAGE_R, y).strokeColor('#e5e7eb').lineWidth(0.5).stroke().strokeColor('#000');
+  }
+  doc.font('Helvetica-Bold').fontSize(10);
+  doc.rect(PAGE_L, y, PAGE_W, 20).fillAndStroke('#f3f4f6', '#666').fillColor('#000');
+  doc.text('TOTAL', PAGE_L + 2, y + 6);
+  doc.text(fmtQty(tQty), PAGE_L + 62, y + 6, { width: 66, align: 'right' });
+  doc.text(fmtAmt(tAmt), PAGE_L + 192, y + 6, { width: 76, align: 'right' });
+  doc.text(fmtAmt(tDisc),PAGE_L + 272, y + 6, { width: 71, align: 'right' });
+  doc.text(fmtAmt(tTax), PAGE_L + 347, y + 6, { width: 66, align: 'right' });
+  doc.text(fmtAmt(tPay), PAGE_L + 417, y + 6, { width: 116,align: 'right' });
+  y += 30;
+  doc.font('Helvetica').fontSize(9).text(`Generated: ${new Date().toLocaleString('en-IN')}`, PAGE_L, y, { width: PAGE_W, align: 'right' });
+  return tPay;
+}
+
+// Full per-seller statement (every payable lot).
+app.get('/api/payments/pdf/:auctionId/:sellerName', requireView, (req, res) => {
+  let doc, piped = false;
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const auctionId = req.params.auctionId;
+    const sellerName = decodeURIComponent(req.params.sellerName);
+    const auction = db.get('SELECT id FROM auctions WHERE id = ?', [auctionId]);
+    if (!auction) return res.status(404).json({ error: 'Auction not found' });
+    const PDFDocument = require('pdfkit');
+    doc = new PDFDocument({ size: 'A4', margin: 30 });
+    res.setHeader('Content-Type', 'application/pdf');
+    const safeName = String(sellerName || '').replace(/[^\w]/g, '_').slice(0, 80) || 'seller';
+    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${auctionId}.pdf"`);
+    doc.pipe(res); piped = true;
+    res.on('close', () => { try { doc.destroy(); } catch(_){} });
+    _renderPaymentStatement(doc, db, auctionId, sellerName, cfg);
+    doc.end();
+  } catch (e) {
+    if (piped && doc) { try { doc.end(); } catch(_){} }
+    else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
+  }
+});
+
+// Per-seller, lot-filtered statement. Body { auction_id, seller_name, lot_ids:[...] }
+// Powers the Payments tab "partial payment" flow ("Print Payment for Selected").
+app.post('/api/payments/pdf-lots', requireView, (req, res) => {
+  let doc, piped = false;
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const auctionId = Number(req.body.auction_id);
+    const sellerName = String(req.body.seller_name || '').trim();
+    const lotIds = Array.isArray(req.body.lot_ids) ? req.body.lot_ids : [];
+    if (!auctionId || !sellerName || !lotIds.length) {
+      return res.status(400).json({ error: 'auction_id, seller_name and lot_ids[] are required' });
+    }
+    const auction = db.get('SELECT id FROM auctions WHERE id = ?', [auctionId]);
+    if (!auction) return res.status(404).json({ error: 'Auction not found' });
+    const PDFDocument = require('pdfkit');
+    doc = new PDFDocument({ size: 'A4', margin: 30 });
+    res.setHeader('Content-Type', 'application/pdf');
+    const safeName = sellerName.replace(/[^\w]/g, '_').slice(0, 80) || 'seller';
+    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${auctionId}_partial.pdf"`);
+    doc.pipe(res); piped = true;
+    res.on('close', () => { try { doc.destroy(); } catch(_){} });
+    _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds);
+    doc.end();
+  } catch (e) {
+    if (piped && doc) { try { doc.end(); } catch(_){} }
+    else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
+  }
+});
+
+// Bulk: Body { auction_id, names: [...] } → one merged PDF, page-break
+// per seller. Powers the Payments tab "Print Selected" button.
+app.post('/api/payments/pdf-bulk', requireView, (req, res) => {
+  let doc, piped = false;
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const auctionId = Number(req.body.auction_id);
+    const names = Array.isArray(req.body.names) ? req.body.names : [];
+    if (!auctionId || !names.length) return res.status(400).json({ error: 'auction_id and names[] required' });
+    const auction = db.get('SELECT id FROM auctions WHERE id = ?', [auctionId]);
+    if (!auction) return res.status(404).json({ error: 'Auction not found' });
+    const PDFDocument = require('pdfkit');
+    doc = new PDFDocument({ size: 'A4', margin: 30 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Payments_Batch_${names.length}.pdf"`);
+    doc.pipe(res); piped = true;
+    res.on('close', () => { try { doc.destroy(); } catch(_){} });
+    names.forEach((nm, i) => {
+      if (i > 0) doc.addPage();
+      try { _renderPaymentStatement(doc, db, auctionId, nm, cfg); }
+      catch (e) { try { doc.font('Helvetica').fontSize(10).text(`Error rendering ${nm}: ${e.message}`); } catch(_){} }
+    });
+    doc.end();
+  } catch (e) {
+    if (piped && doc) { try { doc.end(); } catch(_){} }
+    else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════
