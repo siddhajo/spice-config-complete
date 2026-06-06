@@ -637,6 +637,7 @@ body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:no
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
 body:not([data-feat-whatsapp="1"]) .feat-whatsapp{display:none !important}
 body:not([data-feat-set-buyer="1"]) .feat-set-buyer{display:none !important}
+body:not([data-feat-disc-in-prate="1"]) .feat-disc-in-prate{display:none !important}
 /* e-Auction-only fields. Gated by applyFeatureFlags() — sets the body
    attribute to "1" only when the matching flag is ON in Settings AND
    business_mode === 'e-Auction'. Flipping the mode to anything else
@@ -2676,8 +2677,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                the authoritative gate for locked rows; the row tint
                and these buttons are purely UX hints. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
-            <button id="lot-bulk-buyer" class="needs-lot-write btn feat-set-buyer" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="lotBulkSetBuyer()" title="Set the buyer code on every ticked lot — auto-fills the trade name + sale type from the Buyers master">👤 Set Buyer <span id="lot-bulk-buyer-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
-            <button id="lot-bulk-grade" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#fff;font-weight:600" onclick="lotBulkSetGrade1()" title="Set the grade column on every ticked lot to '1' and recalculate">🏷 Set Grade 1 <span id="lot-bulk-grade-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="lot-bulk-buyer" class="needs-lot-write btn feat-disc-in-prate" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="lotBulkSetBuyer()" title="Set the buyer code on every ticked lot — auto-fills the trade name + sale type from the Buyers master">👤 Set Buyer <span id="lot-bulk-buyer-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="lot-bulk-grade" class="needs-lot-write btn feat-set-buyer" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#fff;font-weight:600" onclick="lotBulkSetGrade1()" title="Set the grade column on every ticked lot to '1' and recalculate">🏷 Set Grade 1 <span id="lot-bulk-grade-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-lock" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:#1f2937;color:#fff;font-weight:600" onclick="lotBulkLock()" title="Lock the ticked lots — they become uneditable for non-admins. Admin can unlock.">🔒 Lock Selected <span id="lot-bulk-lock-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-unlock" class="needs-admin btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#1f2937;font-weight:600;border:1px solid #b8860b" onclick="lotBulkUnlock()" title="Unlock the ticked lots — admin only. Lots become editable again.">🔓 Unlock Selected <span id="lot-bulk-unlock-count" style="margin-left:4px;background:rgba(0,0,0,.18);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-del" class="needs-delete btn" style="display:none !important;height:38px;padding:0 14px;background:#c0392b;color:#fff;font-weight:600" onclick="lotBulkDelete()" title="Delete the ticked lots (locked rows are skipped for non-admins)">🗑 Delete Selected <span id="lot-bulk-del-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
@@ -7821,7 +7822,11 @@ function applyFeatureFlags(){
   setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
   // WhatsApp share buttons + Lots bulk "Set Buyer" — independent of mode.
   setFlag('data-feat-whatsapp',       lookupFlag('flag_whatsapp'));
+  // Lots bulk actions, each gated by its own flag:
+  //   Set Grade 1 → flag_set_buyer  ("Lots → Set Buyer (bulk action)" toggle)
+  //   Set Buyer   → flag_discount_in_prate ("Roll Discount into P_Rate" toggle)
   setFlag('data-feat-set-buyer',      lookupFlag('flag_set_buyer'));
+  setFlag('data-feat-disc-in-prate',  lookupFlag('flag_discount_in_prate'));
   // Re-evaluate the ASP-only "Print Selected Purchase" button — it AND's
   // flag_print_purchase with ASP (Kerala + e-Trade) context.
   if (typeof applyAspContextVisibility === 'function') applyAspContextVisibility();
