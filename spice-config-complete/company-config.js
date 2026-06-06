@@ -189,6 +189,12 @@ const DEFAULTS = [
   // surfaces regardless of the flag value. Default ON because most
   // e-Auction operators use the mapping flow.
   { key: 'flag_price_list_mapping', value: 'true',   category: 'flags',     label: 'Price List Mapping (e-Auction)', type: 'boolean' },
+  // Operational feature flags (default ON to preserve existing behaviour;
+  // flag_price_check defaults OFF — matches the previous unset = gate-off state).
+  { key: 'flag_whatsapp',       value: 'true',  category: 'flags',     label: 'WhatsApp Share Buttons',                 type: 'boolean' },
+  { key: 'flag_set_buyer',      value: 'true',  category: 'flags',     label: 'Lots \u2192 Set Buyer (bulk action)',       type: 'boolean' },
+  { key: 'flag_print_purchase', value: 'true',  category: 'flags',     label: 'Print Selected Purchase (ASP / Kerala)', type: 'boolean' },
+  { key: 'flag_price_check',    value: 'false', category: 'flags',     label: 'Price Check + transaction gate',         type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
   // Single-mode e-Auction build. Default flipped from 'e-Trade' to 'e-Auction'

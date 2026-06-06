@@ -635,6 +635,8 @@ body:not([data-feat-bills="1"]) .feat-bills{display:none !important}
 body:not([data-feat-debit-notes="1"]) .feat-debit-notes{display:none !important}
 body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:none !important}
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
+body:not([data-feat-whatsapp="1"]) .feat-whatsapp{display:none !important}
+body:not([data-feat-set-buyer="1"]) .feat-set-buyer{display:none !important}
 /* e-Auction-only fields. Gated by applyFeatureFlags() — sets the body
    attribute to "1" only when the matching flag is ON in Settings AND
    business_mode === 'e-Auction'. Flipping the mode to anything else
@@ -1167,7 +1169,8 @@ body[data-comfort="1"] .flag-row label,body[data-comfort="1"] .flag-card > label
 /* Theme-coloured labels + section heads (matches Spice green).
    Toggle size now inherits the global .sw rules so every flag in
    the app reads the same. */
-.tally-panel .flag-row label{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)));font-weight:600}
+.tally-panel .flag-row label,
+.tally-panel .flag-card > label:first-child{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)));font-weight:600}
 .tally-panel .set-group-title{color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)))}
 /* Match every settings surface to the To Tally label colour: field
    labels (.fg), Feature Flag toggle labels (.flag-row) and group
@@ -2673,7 +2676,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                the authoritative gate for locked rows; the row tint
                and these buttons are purely UX hints. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
-            <button id="lot-bulk-buyer" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="lotBulkSetBuyer()" title="Set the buyer code on every ticked lot — auto-fills the trade name + sale type from the Buyers master">👤 Set Buyer <span id="lot-bulk-buyer-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="lot-bulk-buyer" class="needs-lot-write btn feat-set-buyer" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="lotBulkSetBuyer()" title="Set the buyer code on every ticked lot — auto-fills the trade name + sale type from the Buyers master">👤 Set Buyer <span id="lot-bulk-buyer-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-grade" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#fff;font-weight:600" onclick="lotBulkSetGrade1()" title="Set the grade column on every ticked lot to '1' and recalculate">🏷 Set Grade 1 <span id="lot-bulk-grade-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-lock" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:#1f2937;color:#fff;font-weight:600" onclick="lotBulkLock()" title="Lock the ticked lots — they become uneditable for non-admins. Admin can unlock.">🔒 Lock Selected <span id="lot-bulk-lock-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-unlock" class="needs-admin btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#1f2937;font-weight:600;border:1px solid #b8860b" onclick="lotBulkUnlock()" title="Unlock the ticked lots — admin only. Lots become editable again.">🔓 Unlock Selected <span id="lot-bulk-unlock-count" style="margin-left:4px;background:rgba(0,0,0,.18);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
@@ -4199,7 +4202,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
         <div class="actions">
           <button class="btn btn-o" onclick="hideModal('le-print-modal')">Cancel</button>
-          <button class="btn" id="le-print-whatsapp" onclick="leWhatsappReceipt()" style="background:#25D366;color:#fff;font-weight:600">💬 WhatsApp</button>
+          <button class="btn feat-whatsapp" id="le-print-whatsapp" onclick="leWhatsappReceipt()" style="background:#25D366;color:#fff;font-weight:600">💬 WhatsApp</button>
           <button class="btn btn-g" id="le-print-confirm" onclick="leConfirmPrint()">🖨 Print</button>
         </div>
       </div></div>
@@ -7771,7 +7774,12 @@ function applyAspContextVisibility(){
   const mode  = getCurrentBusinessMode();
   const state = String(getCurrentBusinessState() || '').toUpperCase();
   const isASP = (mode === 'e-Trade' && state === 'KERALA');
-  btn.style.display = isASP ? '' : 'none';
+  // Gated by flag_print_purchase on top of ASP context. A missing flag
+  // (older DB before seed backfill) defaults to ON so the button isn't lost.
+  const _flags = (window._sdata && _sdata.flags) || [];
+  const _fp = _flags.find(x => x && x.key === 'flag_print_purchase');
+  const printPurchaseOn = !_fp || String(_fp.value).toLowerCase() === 'true';
+  btn.style.display = (isASP && printPurchaseOn) ? '' : 'none';
 }
 
 // Apply per-install feature flags to <body> so the matching CSS rules
@@ -7801,6 +7809,12 @@ function applyFeatureFlags(){
   // Sidebar module toggles — independent of business mode.
   setFlag('data-feat-bills',          lookupFlag('flag_bills'));
   setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
+  // WhatsApp share buttons + Lots bulk "Set Buyer" — independent of mode.
+  setFlag('data-feat-whatsapp',       lookupFlag('flag_whatsapp'));
+  setFlag('data-feat-set-buyer',      lookupFlag('flag_set_buyer'));
+  // Re-evaluate the ASP-only "Print Selected Purchase" button — it AND's
+  // flag_print_purchase with ASP (Kerala + e-Trade) context.
+  if (typeof applyAspContextVisibility === 'function') applyAspContextVisibility();
 }
 
 // Hide the off-mode widgets in the To Tally tab. When the active company
@@ -8668,14 +8682,18 @@ const FLAG_GROUPS = [
   ]},
   { id:'tax', title:'Tax, TDS & Discount', icon:'💸', keys:[
     'flag_tds_purchase','flag_tds_sales','flag_rtds_inv','flag_wgst',
-    'flag_disc_gst','flag_debit_note'
+    'flag_disc_gst','flag_debit_note','flag_discount_in_prate'
+  ]},
+  { id:'modules', title:'Modules & Tools', icon:'🧰', keys:[
+    'flag_bills','flag_debit_notes','flag_price_check','flag_whatsapp',
+    'flag_set_buyer','flag_print_purchase'
   ]},
   { id:'special', title:'Special / Advanced', icon:'⚠', keys:[
     'flag_dummy'
   ]},
 ];
 // Default-open groups (others start collapsed). Persists in localStorage.
-const FLAG_GROUPS_DEFAULT_OPEN = ['biz','invoice','tax'];
+const FLAG_GROUPS_DEFAULT_OPEN = ['biz','invoice','tax','modules'];
 
 function _flagGroupCollapseState(){
   try {
@@ -8762,6 +8780,13 @@ const FIELD_HELP = {
   discount_pct:    'Trade credit discount percentage per 1000 rupees per day. Discount = round(PurAmt/1000 × days × %).',
   discount_days:   'Number of days the trade credit is extended. Multiplied with Discount % to compute the Discount amount.',
   flag_disc_gst:   'When ON, GST is charged on top of the Discount amount (using the service rate) and subtracted from the Payable.',
+  flag_discount_in_prate: 'Grade 1 lots only: rolls the per-lot Discount into P_Rate using the discount-inclusive Pooler deduction (Rates settings). Grade 2 / ungraded lots are unaffected.',
+  flag_bills:      'Shows the Bills of Supply module (sidebar tab + related actions).',
+  flag_debit_notes:'Shows the Debit Notes module (sidebar tab + related actions).',
+  flag_whatsapp:   'Shows WhatsApp share buttons (e.g. the Lot Entry receipt share).',
+  flag_set_buyer:  'Enables the Lots tab bulk "Set Buyer" action on ticked lots.',
+  flag_print_purchase: 'Shows the "Print Selected Purchase" button in the Sales tab — only in ASP context (Kerala + e-Trade).',
+  flag_price_check:'Enables the Price Check transaction gate: stamps each trade on a successful check and surfaces the stale/never-checked banner on the Lots tab. OFF = no gate (default).',
   business_mode:   'e-Trade: grade-based deduction + discount workflow. e-Auction: commission + handling + sample refund workflow.',
   business_state:  'Tamil Nadu uses ISP logo + TN office details. Kerala uses ASP logo + KL office details. Invoices adapt automatically.',
   tcs_tds:         'TDS / TCS percentage applied on eligible invoices for tax compliance.',
@@ -8887,14 +8912,16 @@ function renderTallyPanel(fields){
   const assigned = new Set();
   const collapsed = new Set(_tallyGroupCollapseState());
 
-  // One row per field: label on the left, control on the right. The
-  // markup matches Feature Flags' .flag-row + .sw/.sl so the global
-  // toggle CSS (size, theming) applies uniformly.
+  // One row per field: label on the left, control on the right. Boolean
+  // toggles render as bordered .flag-card items — identical to the
+  // Feature Flags panel — while text/number fields keep the compact
+  // .flag-row layout. Shared .sw/.sl markup means the global toggle CSS
+  // (size, theming) applies uniformly.
   const tallyRow = (f) => {
     if (!f) return '';
     if (f.field_type === 'boolean' || f.type === 'boolean') {
       const ck = (f.value === 'true') ? 'checked' : '';
-      return `<div class="flag-row"><label>${esc(f.label)}</label>`
+      return `<div class="flag-card"><label>${esc(f.label)}</label>`
            + `<label class="sw"><input type="checkbox" data-key="${f.key}" data-type="boolean" ${ck}><span class="sl"></span></label></div>`;
     }
     const t = (f.field_type === 'number' || f.type === 'number') ? 'number'
