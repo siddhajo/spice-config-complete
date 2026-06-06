@@ -1795,7 +1795,11 @@ app.get('/api/buyers', requireView, (req, res) => {
       [q, q, q, q, q, q, q, q]
     ));
   }
-  res.json(db.all('SELECT * FROM buyers ORDER BY buyer1 LIMIT 500'));
+  // `?all=1` lifts the default 500-row cap — used by the lot-edit Code
+  // dropdown so buyer codes past the first 500 (alphabetical by buyer1)
+  // still appear in the type-ahead. Backward-compatible: no `all` → cap.
+  const allBuyers = req.query.all != null && !['', '0', 'false'].includes(String(req.query.all).toLowerCase());
+  res.json(db.all('SELECT * FROM buyers ORDER BY buyer1' + (allBuyers ? '' : ' LIMIT 500')));
 });
 // Duplicate-buyer check. Buyers carry two identifiers:
 //   buyer   — primary buyer code (required, e.g. "B042")
@@ -2885,6 +2889,13 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     });
   }
   const l = req.body; const sets = []; const vals = [];
+  // Withdrawn lots (code='WD') carry no sale: force the price (and amount)
+  // to 0 so every derived figure recomputes to 0. Done server-side so all
+  // edit paths (modal, inline, future bulk) behave identically. The code is
+  // normalised to canonical 'WD' to match the `code === 'WD'` checks used
+  // across reporting and invoice eligibility.
+  const codeIsWD = String(l.code || '').trim().toUpperCase() === 'WD';
+  if (codeIsWD) { l.code = 'WD'; l.price = 0; l.amount = 0; }
   for (const [k,v] of Object.entries(l)) {
     // `locked_at` / `locked_by` are managed by the lock/unlock
     // endpoints — never let the generic update slot rewrite them.
@@ -2897,6 +2908,19 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   // the price-check gate to 'stale' (re-surfacing the lots-tab banner).
   const _pcRow = db.get('SELECT auction_id FROM lots WHERE id = ?', [req.params.id]);
   db.run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
+  // After a withdrawal, recompute the derived columns from the now-zeroed
+  // price so prate/puramt/GST/balance all read 0 without a Calculate All.
+  if (codeIsWD) {
+    const fresh = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+    if (fresh) {
+      const cfg = getSettingsFlat(db);
+      const c = calculateLot(fresh, cfg);
+      db.run(
+        `UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+        [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,req.params.id]
+      );
+    }
+  }
   if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
   res.json({ success: true });
 });

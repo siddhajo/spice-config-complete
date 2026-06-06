@@ -4505,7 +4505,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label>Amount (₹)</label><input id="l-amount" type="number" step="0.01"></div>
     <div class="fg"><label>Buyer Code</label><input id="l-buyer"></div>
     <div class="fg"><label>Buyer Name</label><input id="l-buyer1"></div>
-    <div class="fg"><label>Code</label><input id="l-code"></div>
+    <div class="fg"><label>Code
+        <span id="l-code-hint" style="margin-left:6px;font-weight:400;font-size:11px;color:var(--text3)"></span>
+      </label>
+      <!-- Custom type-ahead autocomplete for the buyer Code (strict
+           code-only matching; shows buyer name + sale + place per row;
+           hint when the trade name maps to >1 code). -->
+      <div style="position:relative">
+        <input id="l-code" autocomplete="off">
+        <div id="l-code-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;max-height:240px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:0 8px 24px rgba(0,0,0,.12);font-size:12.5px"></div>
+      </div>
+    </div>
     <div class="fg"><label>Sale Type</label>
       <select id="l-sale"><option value=""></option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="WD">Withdrawn (WD)</option><option value="NA">N/A (NA)</option></select>
     </div>
@@ -12250,26 +12260,50 @@ function openLotEdit(l){
     codeEl.addEventListener('change', async () => {
       const code = (codeEl.value || '').trim().toUpperCase();
       if (!code) return;
+      const setIf = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = val == null ? '' : val;
+      };
+      // Special status markers — not real buyer codes. WD = withdrawn,
+      // NA = not applicable. Each stamps the buyer block + sale type and
+      // zeroes price/amount so figures read 0 before save (the server
+      // re-runs calculateLot on save, recomputing prate/GST/balance to 0).
+      // Sale codes match this build's sale-type values (WD / NA).
+      const SPECIAL = {
+        WD: { buyer: 'WD', buyer1: 'Withdrawn', sale: 'WD', toast: 'Marked as Withdrawn — buyer WD, sale WD, price zeroed' },
+        NA: { buyer: 'NA', buyer1: 'N/A',       sale: 'NA', toast: 'Marked as N/A — buyer NA, sale NA, price zeroed' },
+      };
+      if (SPECIAL[code]) {
+        const sp = SPECIAL[code];
+        if (priceEl) priceEl.value = '0';
+        if (amtEl)   amtEl.value   = '0.00';
+        setIf('l-buyer',  sp.buyer);
+        setIf('l-buyer1', sp.buyer1);
+        setIf('l-cr',     '');
+        setIf('l-sale',   sp.sale);
+        codeEl.value = code;
+        if (typeof toast === 'function') toast(sp.toast);
+        return; // special codes aren't real buyers — skip lookup
+      }
       try {
-        const buyers = await j('/api/buyers');
-        // Match preference: exact code → exact ti → exact buyer
-        const u = code;
-        const match = buyers.find(b => String(b.code||'').trim().toUpperCase() === u)
-          || buyers.find(b => String(b.ti||'').trim().toUpperCase() === u)
-          || buyers.find(b => String(b.buyer||'').trim().toUpperCase() === u);
+        // Prefer the in-memory cache (loaded on modal open); fall back to
+        // the server only if the code isn't cached.
+        let match = (_lotBuyerCache || []).find(b => b.codeUp === code);
+        if (!match) {
+          const buyers = await j('/api/buyers');
+          const u = code;
+          match = buyers.find(b => String(b.code||'').trim().toUpperCase() === u)
+            || buyers.find(b => String(b.ti||'').trim().toUpperCase() === u)
+            || buyers.find(b => String(b.buyer||'').trim().toUpperCase() === u);
+        }
         if (!match) {
           if (typeof toast === 'function') toast(`No buyer found for code '${code}'`);
           return;
         }
-        const setIf = (id, val) => {
-          const el = document.getElementById(id);
-          if (el) el.value = val == null ? '' : val;
-        };
         setIf('l-buyer',  match.buyer  || '');
         setIf('l-buyer1', match.buyer1 || '');
         setIf('l-cr',     match.gstin  || match.cr || '');
         setIf('l-sale',   match.sale   || '');
-        // Normalize the code field too — if user typed lowercase, snap to canonical
         codeEl.value = match.code || code;
         if (typeof toast === 'function') toast(`Filled buyer: ${match.buyer1 || match.buyer}`);
       } catch (e) {
@@ -12286,8 +12320,162 @@ function openLotEdit(l){
   if (qtyEl   && !qtyEl._wiredRecalc)   { qtyEl._wiredRecalc   = true; qtyEl.addEventListener('input', recalcAmount); }
   if (priceEl && !priceEl._wiredRecalc) { priceEl._wiredRecalc = true; priceEl.addEventListener('input', recalcAmount); }
 
+  // Multi-code picker: refresh the buyer cache that drives the custom Code
+  // dropdown, wire the type-ahead, and hint when the lot's trade name maps
+  // to more than one buyer code. Re-runs when Buyer Name is edited.
+  const buyer1El = document.getElementById('l-buyer1');
+  if (buyer1El && !buyer1El._wiredCodePicker) {
+    buyer1El._wiredCodePicker = true;
+    buyer1El.addEventListener('change', () => lotRefreshCodePicker(buyer1El.value, codeEl ? codeEl.value : ''));
+  }
+  lotRefreshCodePicker(l.buyer1, l.code);
+
   showModal('lot-modal');
 }
+// ── Lot-edit Code dropdown (type-ahead over the buyer master) ──────
+// Cached buyer master for the Code dropdown. Refreshed on every modal
+// open so freshly-added buyers appear without a reload, but kept in
+// module scope so input-event filtering doesn't refetch per keystroke.
+let _lotBuyerCache = [];
+
+// Refresh the buyer cache, wire the custom autocomplete, and show a hint
+// when the lot's trade name maps to more than one code in the master.
+async function lotRefreshCodePicker(tradeName, currentCode){
+  const hint = document.getElementById('l-code-hint');
+  if (hint) hint.textContent = '';
+
+  // 1) Refresh the cache that drives the dropdown. ?all=1 lifts the
+  //    500-row cap so codes past that boundary still appear.
+  try {
+    const buyers = await j('/api/buyers?all=1');
+    const seen = new Set();
+    _lotBuyerCache = [];
+    for (const b of (Array.isArray(buyers) ? buyers : [])) {
+      const code = String(b.code || '').trim();
+      if (!code) continue;
+      const key = code.toUpperCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      _lotBuyerCache.push({
+        code, codeUp: key,
+        buyer: b.buyer || '', buyer1: b.buyer1 || '',
+        sale: b.sale || '', pla: b.pla || '',
+        gstin: b.gstin || '', cr: b.cr || '', ti: b.ti || '',
+      });
+    }
+    _lotBuyerCache.sort((a, b) => a.codeUp.localeCompare(b.codeUp));
+  } catch (_) { /* non-fatal — leaves cache as-is */ }
+
+  // 2) Wire input/focus/blur/keydown handlers exactly once.
+  _lotWireCodeAutocomplete();
+
+  // 3) Hint when the current trade name maps to >1 code, computed from
+  //    the cache (no extra endpoint needed).
+  const name = String(tradeName || '').trim().toUpperCase();
+  if (!name || !hint) return;
+  const sameName = _lotBuyerCache.filter(b => String(b.buyer1 || '').trim().toUpperCase() === name);
+  if (sameName.length === 0) { hint.textContent = '(no buyer matches this trade name)'; return; }
+  if (sameName.length > 1) {
+    const codes = sameName.map(b => b.code).filter(Boolean).join(', ');
+    hint.textContent = '(' + sameName.length + ' codes share this trade name: ' + codes + ')';
+  }
+}
+
+// Wire input/focus/blur/keydown on the Code input exactly once.
+//   • focus / input → opens + filters the dropdown (by code, trade name fallback)
+//   • click a row   → fills l-code, fires change (resolves buyer)
+//   • blur          → hides (deferred so a row click registers)
+//   • Esc           → hides;  ArrowUp/Down + Enter → keyboard nav
+//   • WD / NA typed → skip the dropdown so it can't be replaced by a buyer
+//                     whose code starts with W/N (the change handler stamps
+//                     the special buyer block on blur).
+function _lotWireCodeAutocomplete(){
+  const codeEl = document.getElementById('l-code');
+  const ddl    = document.getElementById('l-code-dropdown');
+  if (!codeEl || !ddl || codeEl._wiredAutocomplete) return;
+  codeEl._wiredAutocomplete = true;
+
+  const _escAttr = s => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  let activeIdx = -1;
+
+  const render = () => {
+    const q = String(codeEl.value || '').trim().toUpperCase();
+    if (q === 'WD' || q === 'NA') { hide(); return; }
+    const starts = [];
+    const contains = [];
+    for (const b of _lotBuyerCache) {
+      if (!q) { starts.push(b); continue; }
+      const nameUp = String(b.buyer1 || '').trim().toUpperCase();
+      if (b.codeUp.startsWith(q) || nameUp.startsWith(q)) starts.push(b);
+      else if (b.codeUp.includes(q) || nameUp.includes(q)) contains.push(b);
+    }
+    const matches = starts.concat(contains).slice(0, 50);
+    if (!matches.length) {
+      ddl.innerHTML = '<div style="padding:8px 12px;color:#888;font-style:italic">No matches.</div>';
+      ddl.style.display = 'block';
+      activeIdx = -1;
+      return;
+    }
+    activeIdx = 0;
+    ddl.innerHTML = matches.map((b, i) => {
+      const trade = b.buyer1 || '';
+      const ctxParts = [b.buyer, b.sale ? '['+b.sale+']' : '', b.pla].filter(Boolean);
+      const ctx = ctxParts.join(' · ');
+      return '<div class="lc-row" data-code="'+_escAttr(b.code)+'" data-idx="'+i+'" '+
+        'style="padding:6px 12px;cursor:pointer;border-bottom:1px solid #f1f1f1;display:flex;gap:10px;align-items:baseline'+
+        (i === activeIdx ? ';background:#ecfdf5' : '')+'">'+
+        '<span style="font-weight:700;color:#15803d;min-width:60px">'+_escAttr(b.code)+'</span>'+
+        '<span style="flex:1;color:#222;font-weight:500">'+_escAttr(trade)+'</span>'+
+        '<span style="color:#888;font-size:12px">'+_escAttr(ctx)+'</span>'+
+        '</div>';
+    }).join('');
+    ddl.style.display = 'block';
+  };
+
+  const hide = () => { ddl.style.display = 'none'; activeIdx = -1; };
+
+  const choose = (code) => {
+    if (code == null) return;
+    codeEl.value = code;
+    hide();
+    codeEl.dispatchEvent(new Event('change'));
+  };
+
+  codeEl.addEventListener('focus', render);
+  codeEl.addEventListener('input', render);
+  codeEl.addEventListener('blur', () => { setTimeout(hide, 150); });
+  codeEl.addEventListener('keydown', (e) => {
+    if (ddl.style.display === 'none') return;
+    const rows = ddl.querySelectorAll('.lc-row');
+    if (e.key === 'Escape') { hide(); return; }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!rows.length) return;
+      activeIdx = (activeIdx + 1) % rows.length;
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!rows.length) return;
+      activeIdx = (activeIdx - 1 + rows.length) % rows.length;
+    } else if (e.key === 'Enter') {
+      if (activeIdx >= 0 && rows[activeIdx]) {
+        e.preventDefault();
+        choose(rows[activeIdx].getAttribute('data-code'));
+        return;
+      }
+    } else { return; }
+    rows.forEach((r, i) => { r.style.background = (i === activeIdx) ? '#ecfdf5' : ''; });
+    if (rows[activeIdx]) rows[activeIdx].scrollIntoView({ block: 'nearest' });
+  });
+
+  // mousedown (not click) so the row commits BEFORE blur fires.
+  ddl.addEventListener('mousedown', (e) => {
+    const row = e.target.closest('.lc-row');
+    if (!row) return;
+    e.preventDefault();
+    choose(row.getAttribute('data-code'));
+  });
+}
+
 async function saveLot(){
   const id=document.getElementById('l-id').value;
   if(!id){showError('Lot ID missing');return}
