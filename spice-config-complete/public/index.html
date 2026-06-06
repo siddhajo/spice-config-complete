@@ -9514,8 +9514,16 @@ async function lookupBankByIfsc(input){
     _ifscLookupCache.set(ifsc, data);
   }
   if (!data) { if (hintEl) hintEl.textContent = ''; return; }
-  // Only overwrite Bank Name when blank — preserves any manual edit.
-  if (nameEl && !nameEl.value.trim() && data.BANK) nameEl.value = data.BANK;
+  // Overwrite Bank Name when it's blank OR still holds a value a previous
+  // lookup auto-filled (tracked via data-autofill) — that way changing the
+  // IFSC re-syncs the bank name, while a manual edit is left untouched.
+  if (nameEl && data.BANK) {
+    const cur = nameEl.value.trim();
+    if (!cur || cur === (nameEl.dataset.autofill || '')) {
+      nameEl.value = data.BANK;
+      nameEl.dataset.autofill = data.BANK;
+    }
+  }
   if (branchEl) branchEl.value = data.BRANCH || '';
   if (hintEl)   hintEl.textContent = data.BRANCH ? 'Branch: ' + data.BRANCH : '';
 }
@@ -12023,11 +12031,20 @@ function syncLotMaster(){
     else    el.style.setProperty('display', 'none', 'important');
   };
   const show = ticked > 0;
-  setVis(document.getElementById('lot-bulk-buyer'),  show);
-  setVis(document.getElementById('lot-bulk-grade'),  show);
-  setVis(document.getElementById('lot-bulk-lock'),   show);
+  // When every ticked lot is locked, the only meaningful bulk action is
+  // Unlock — editing/deleting/re-locking locked lots is a no-op (and
+  // blocked server-side for non-admins). Hide the rest so the toolbar
+  // shows just "Unlock Selected". Locked rows carry the `row-locked` class.
+  const tickedCbs = visible.filter(cb => cb.checked);
+  const allLocked = ticked > 0 && tickedCbs.every(cb => {
+    const row = cb.closest('tr');
+    return row && row.classList.contains('row-locked');
+  });
+  setVis(document.getElementById('lot-bulk-buyer'),  show && !allLocked);
+  setVis(document.getElementById('lot-bulk-grade'),  show && !allLocked);
+  setVis(document.getElementById('lot-bulk-lock'),   show && !allLocked);
   setVis(document.getElementById('lot-bulk-unlock'), show);
-  setVis(document.getElementById('lot-bulk-del'),    show);
+  setVis(document.getElementById('lot-bulk-del'),    show && !allLocked);
   const setCount = (id) => {
     const el = document.getElementById(id);
     if (el) el.textContent = ticked > 0 ? '(' + ticked + ')' : '';
@@ -16690,7 +16707,7 @@ const _le = {
   defaultLitre: '',        // from settings — pre-fills litre input on each new lot
   showMoisture: false,     // from settings — toggles the moisture column/input
   gunnyWeight: 0,          // from settings (gunny_weight key) — per-bag tare
-  showExtraFields: false,  // from settings (show_extra_lot_fields key) — reveals gunny pair + crop receipt + reserved price; net wt derives from W/Gunny when on
+  showExtraFields: false,  // from settings (show_extra_lot_fields key) — reveals Crop Receipt + Reserved Price ONLY; the gunny pair is gated separately by gunny_weight > 0
   editEnabled: true,       // from settings — when false, only admins can edit lots
   editTimeoutSec: 0,       // from settings — seconds after creation a non-admin can still edit (0 = no limit)
   editingLotId: null,      // when non-null, Save updates instead of inserts
@@ -17183,14 +17200,21 @@ function leCalcGross(){
 // the CSS reveals Crop Receipt + Reserved Price (OR'd with the existing
 // per-field e-Auction flags). Idempotent — safe to call on every load.
 function leApplyExtraFields(){
+  // "Show Extra Lot Fields" governs ONLY Crop Receipt + Reserved Price
+  // (via the data-feat-extra-lot body attribute + CSS). The Weight-w/-Gunny
+  // pair is NOT wired to this toggle.
   const on = !!_le.showExtraFields;
-  const wrap = document.getElementById('le-gunny-wrap');
-  if (wrap) wrap.style.display = on ? 'grid' : 'none';
   if (on) document.body.setAttribute('data-feat-extra-lot', '1');
   else    document.body.removeAttribute('data-feat-extra-lot');
+  // Weight-w/-Gunny workflow is independent: it appears whenever a per-bag
+  // gunny tare is configured (gunny_weight > 0). With a tare set, Net Wt
+  // derives from W/Gunny − (tare × bags) and is locked read-only.
+  const gunnyOn = (Number(_le.gunnyWeight) || 0) > 0;
+  const wrap = document.getElementById('le-gunny-wrap');
+  if (wrap) wrap.style.display = gunnyOn ? 'grid' : 'none';
   const qty = document.getElementById('le-qty');
   if (qty) {
-    if (on) {
+    if (gunnyOn) {
       // Net Wt is derived from Weight w/ Gunny — lock it and de-emphasise.
       qty.readOnly = true;
       qty.style.background = 'var(--bg)';
@@ -17232,10 +17256,11 @@ function leCalcNetFromGunny(){
   }
 }
 
-// Bags changed → re-derive Net only when the extra-fields toggle is on,
-// so the default operator-typed Net flow is untouched when it's off.
+// Bags changed → re-derive Net only when the gunny-tare workflow is on
+// (gunny_weight > 0), so the default operator-typed Net flow is untouched
+// when no tare is configured.
 function leOnBagsInput(){
-  if (_le.showExtraFields) leCalcNetFromGunny();
+  if ((Number(_le.gunnyWeight) || 0) > 0) leCalcNetFromGunny();
 }
 
 function leShowError(msg){

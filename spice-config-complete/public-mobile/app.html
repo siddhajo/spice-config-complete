@@ -550,19 +550,19 @@ let cfgDefaultLitre='';
 // AND'ed with business_mode === 'e-Auction', so the client only needs
 // to mirror the boolean into the DOM via applyEAuctionVisibility().
 let cfgShowCropReceipt=false, cfgShowReservedPrice=false;
-// Gunny tare default + the unified "extra lot fields" toggle. When
-// cfgShowExtraFields is on, the Weight-w/-Gunny + Gunny Wt pair shows
-// and Net Wt becomes read-only (auto-derived from W/Gunny − tare), AND
-// the Crop Receipt + Reserved Price cells reveal too (OR'd with their
-// per-field flags above). cfgGunnyWeight is the per-bag tare.
+// Gunny tare default + the "Show Extra Lot Fields" toggle. The toggle
+// (cfgShowExtraFields) governs ONLY the Crop Receipt + Reserved Price
+// cells (OR'd with their per-field flags above). The Weight-w/-Gunny +
+// Gunny Wt pair + read-only Net Wt are a SEPARATE workflow, gated purely
+// by whether a per-bag gunny tare is set (cfgGunnyWeight > 0).
 let cfgGunnyWeight=0, cfgShowExtraFields=false;
 
 // Toggle the entry-form + edit-modal e-Auction rows + their two cells.
 // Each cell wraps its own .display so the outer row can stay flex when
 // only one is on; the row hides entirely when both are off. The crop
-// receipt / reserved price cells also reveal when cfgShowExtraFields is
-// on (the unified toggle). The gunny pair + read-only Net Wt are driven
-// purely by cfgShowExtraFields.
+// receipt / reserved price cells reveal when cfgShowExtraFields is on
+// (the unified toggle). The gunny pair + read-only Net Wt are driven by
+// cfgGunnyWeight > 0, independent of the extra-fields toggle.
 function applyEAuctionVisibility(){
   var showCrop = cfgShowCropReceipt   || cfgShowExtraFields;
   var showRsrv = cfgShowReservedPrice || cfgShowExtraFields;
@@ -578,14 +578,17 @@ function applyEAuctionVisibility(){
   if(e1) e1.style.display=showCrop?'block':'none';
   if(e2) e2.style.display=showRsrv?'block':'none';
   if(erow) erow.style.display=(showCrop||showRsrv)?'block':'none';
-  // Gunny pair + Net-Wt read-only state — driven by cfgShowExtraFields
-  // on BOTH the entry form and the edit modal so a partial edit can
-  // recompute the gross-of-gunny value the same way as a fresh entry.
+  // Gunny pair + Net-Wt read-only state — NOT wired to cfgShowExtraFields.
+  // It's an independent workflow gated by whether a per-bag gunny tare is
+  // configured (cfgGunnyWeight > 0), on BOTH the entry form and the edit
+  // modal so a partial edit recomputes the gross-of-gunny value the same
+  // way as a fresh entry.
+  var gunnyOn=(Number(cfgGunnyWeight)||0)>0;
   var gwrap=document.getElementById('le-gunny-wrap');
-  if(gwrap) gwrap.style.display=cfgShowExtraFields?'grid':'none';
+  if(gwrap) gwrap.style.display=gunnyOn?'grid':'none';
   var qtyEl=document.getElementById('le-qty');
   if(qtyEl){
-    if(cfgShowExtraFields){
+    if(gunnyOn){
       // Seed the read-only Gunny Wt with the current tare so it's never
       // stale when the row first appears.
       var bags=parseInt(document.getElementById('le-bags').value,10)||0;
@@ -599,10 +602,10 @@ function applyEAuctionVisibility(){
   // Edit modal mirror — the .fr wrapper reverts to its flex layout when
   // display is cleared ('' not 'grid').
   var egwrap=document.getElementById('ed-gunny-wrap');
-  if(egwrap) egwrap.style.display=cfgShowExtraFields?'':'none';
+  if(egwrap) egwrap.style.display=gunnyOn?'':'none';
   var edQtyEl=document.getElementById('ed-qty');
   if(edQtyEl){
-    if(cfgShowExtraFields){
+    if(gunnyOn){
       var eb=parseInt(document.getElementById('ed-bags').value,10)||0;
       var egwEl=document.getElementById('ed-gunny-wt');
       if(egwEl){var et=(Number(cfgGunnyWeight)||0)*eb;egwEl.value=et>0?et.toFixed(3):'0.000';}
@@ -631,7 +634,7 @@ function calcEditNetFromGunny(){
     calcEditGross();
   }
 }
-function onEditBagsInput(){ if(cfgShowExtraFields) calcEditNetFromGunny(); }
+function onEditBagsInput(){ if((Number(cfgGunnyWeight)||0)>0) calcEditNetFromGunny(); }
 
 // Auto-derive Net = Weight-w/-Gunny − (default gunny weight × bags).
 // Re-runs whenever W/Gunny changes and whenever Bags changes (via
@@ -651,7 +654,7 @@ function calcNetFromGunny(){
 }
 // Bags changed → re-derive Net only when extra fields are active, so the
 // legacy operator-typed Net flow is untouched when the toggle is off.
-function onBagsInput(){ if(cfgShowExtraFields) calcNetFromGunny(); }
+function onBagsInput(){ if((Number(cfgGunnyWeight)||0)>0) calcNetFromGunny(); }
 
 // Crop-receipt auto-increment helper. Preserves the input's
 // zero-padding width: "01208" → "01209". Any non-digit prefix is
@@ -816,18 +819,24 @@ function renderLotGrid(){
   var myBranch=allocStats?allocStats.find(function(s){return s.branch===br}):null;
   if(!myBranch||!myBranch.ranges){grid.innerHTML='<span style="font-size:10px;color:var(--text3)">No lots allocated</span>';return}
   availableLots=[];
-  var html='';
+  var html='';var total=0;
   myBranch.ranges.forEach(function(rng){
     if(rng.lots){
       rng.lots.forEach(function(l){
+        total++;
+        // Show ONLY available (not-yet-entered) lots — skip used ones
+        // so the picker stays focused on what's left to enter.
+        if(l.used)return;
         var cls='lot-chip';
-        if(l.used)cls+=' used';
-        else{availableLots.push(l.lot);if(selectedLots.indexOf(l.lot)>=0)cls+=' selected'}
-        html+='<span class="'+cls+'" data-lot="'+l.lot+'" '+(l.used?'':'onclick="toggleLotChip(this)"')+'>'+l.lot+'</span>';
+        if(selectedLots.indexOf(l.lot)>=0)cls+=' selected';
+        availableLots.push(l.lot);
+        html+='<span class="'+cls+'" data-lot="'+l.lot+'" onclick="toggleLotChip(this)">'+l.lot+'</span>';
       });
     }
   });
-  grid.innerHTML=html||'<span style="font-size:10px;color:var(--text3)">No lots</span>';
+  grid.innerHTML=html||(total>0
+    ? '<span style="font-size:10px;color:var(--green);font-weight:600">✓ All allotted lots entered</span>'
+    : '<span style="font-size:10px;color:var(--text3)">No lots</span>');
   updateLotSelection();
 }
 
@@ -1808,16 +1817,18 @@ function renderAllocBars(){
     allHtml+='<div style="margin-bottom:8px'+(isMine?';background:rgba(29,158,117,.06);border-radius:6px;padding:4px 6px':'')+'">';
     allHtml+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:2px"><strong style="color:var(--text)">'+s.branch+(isMine?' ★':'')+'</strong><div style="display:flex;align-items:center;gap:6px"><span style="color:var(--text3);font-size:10px">'+s.used+'/'+s.total+'</span><button onclick="toggleUserGrid(\'mlg-'+si+'\',this)" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:9px;font-weight:700;cursor:pointer;font-family:inherit">▼ Lots</button></div></div>';
     allHtml+='<div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+barColor+';border-radius:3px"></div></div>';
-    // Grid
+    // Grid — show only AVAILABLE lots (skip used), matching the entry
+    // picker. The used/total count in the header still shows usage.
     var gridHtml='';
     s.ranges.forEach(function(rng){
       if(rng.lots&&rng.lots.length){
-        gridHtml+=rng.lots.map(function(l){
-          return '<span class="lot-chip '+(l.used?'used':'')+'">'+l.lot+'</span>';
-        }).join('');
+        rng.lots.forEach(function(l){
+          if(l.used)return;
+          gridHtml+='<span class="lot-chip">'+l.lot+'</span>';
+        });
       }
     });
-    allHtml+='<div id="mlg-'+si+'" style="display:none;margin-top:4px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg)"><div style="margin-bottom:4px;font-size:9px;color:var(--text3)"><span style="display:inline-block;width:8px;height:8px;background:#0d7c5f;border-radius:2px;vertical-align:middle"></span> used <span style="display:inline-block;width:8px;height:8px;background:var(--border);border-radius:2px;vertical-align:middle;margin-left:6px"></span> available</div><div style="display:flex;flex-wrap:wrap;gap:3px">'+gridHtml+'</div></div></div>';
+    allHtml+='<div id="mlg-'+si+'" style="display:none;margin-top:4px;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg)"><div style="margin-bottom:4px;font-size:9px;color:var(--text3)"><span style="display:inline-block;width:8px;height:8px;background:var(--border);border-radius:2px;vertical-align:middle"></span> available lots</div><div style="display:flex;flex-wrap:wrap;gap:3px">'+(gridHtml||'<span style="font-size:10px;color:var(--green);font-weight:600">✓ All lots entered</span>')+'</div></div></div>';
   });
   document.getElementById('ml-alloc-bar').innerHTML=allHtml;
   document.getElementById('ml-alloc-bar').style.display=allHtml?'block':'none';
