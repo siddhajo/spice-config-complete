@@ -14687,9 +14687,9 @@ function _renderPayLotsTable(){
       <td style="font-family:monospace;font-weight:600">${esc(lotKey)} ${expCell}</td>
       <td>${esc(l.branch || '')}</td>
       <td>${bankLabel}</td>
-      <td style="text-align:right">${fmtI(Number(l.qty)||0, 3)}</td>
-      <td style="text-align:right">${fmtI(Number(l.prate)||0, 2)}</td>
-      <td style="text-align:right">${fmtI(Number(l.amount)||0, 2)}</td>
+      <td style="text-align:right">${fmtI(Number(l.isp_pqty || l.pqty || l.qty)||0, 3)}</td>
+      <td style="text-align:right">${fmtI(Number(l.isp_prate || l.prate)||0, 2)}</td>
+      <td style="text-align:right">${fmtI(Number(l.isp_puramt || l.puramt || l.amount)||0, 2)}</td>
       <td style="text-align:right;color:#B45309">${fmtI(Number(l.refund)||0, 2)}</td>
       <td style="text-align:right;color:#0891B2">${fmtI(tax, 2)}</td>
       <td style="text-align:right;font-weight:700;color:var(--spice-cardamom-dk)">${fmtI(Number(l.balance)||0, 2)}</td>
@@ -14732,8 +14732,9 @@ function updatePayLotsTotals(){
   let qty = 0, amt = 0, disc = 0, tax = 0, payable = 0;
   for (const l of _payLotsState.lots) {
     if (!selectedIds.has(l.id)) continue;
-    qty     += Number(l.qty)     || 0;
-    amt     += Number(l.amount)  || 0;
+    // Qty + Amount follow the table columns: ISP P_Qty / PurAmt.
+    qty     += Number(l.isp_pqty   || l.pqty || l.qty)   || 0;
+    amt     += Number(l.isp_puramt || l.puramt || l.amount) || 0;
     disc    += Number(l.refund)  || 0;
     tax     += (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
     payable += Number(l.balance) || 0;
