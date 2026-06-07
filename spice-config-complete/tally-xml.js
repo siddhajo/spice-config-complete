@@ -221,6 +221,10 @@ function generSalesIspXML(rows, cfg, opts = {}) {
   const dispatchEnabled = cfgBool(cfg, 'tally_dispatch_from', true);
   const tcs           = cfgBool(cfg, 'tally_tcs_enabled', false);
   const shipToOverride = cfgBool(cfg, 'tally_ship_to', false);
+  // Emit the Round Off ledger on every voucher (default ON), matching the
+  // reference: every sale carries the line even when the delta is 0, so
+  // whole-rupee totals aren't left without it.
+  const tlyrnd        = cfgBool(cfg, 'tally_round_enabled', true);
   const intra         = cfgGet(cfg, 'tally_state_code', '33');
   const homeState     = cfgGet(cfg, 'tally_home_state', 'Tamil Nadu');
 
@@ -530,10 +534,12 @@ ${TAGS.DEEMNO}
 </LEDGERENTRIES.LIST>`;
     }
 
-    // Round-off — always emit (matches reference; sign reflects the
-    // adjustment to reach the rounded total). Reference always uses
-    // ISDEEMEDPOSITIVE=No and lets the AMOUNT carry the sign.
-    if (Math.abs(rnd) > 0.001) {
+    // Round-off — always emit when enabled (matches reference; every
+    // voucher carries a Round Off line, even with a 0 amount). The sign
+    // reflects the adjustment to reach the rounded total; ISDEEMEDPOSITIVE
+    // is No and the AMOUNT carries the sign. The previous
+    // `Math.abs(rnd) > 0.001` gate dropped the line on whole-rupee totals.
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
@@ -648,6 +654,8 @@ function generSalesAspXML(rows, cfg, opts = {}) {
   const separator     = opts.separator || cfgGet(cfg, 'tally_separator', '/');
   const ainvPrefix    = cfgGet(cfg, 'tally_ainv_prefix', 'ASP/');
   const detailed      = cfgBool(cfg, 'tally_detailed', true);
+  // Always emit the Round Off ledger (default ON) — see generSalesIspXML.
+  const tlyrnd        = cfgBool(cfg, 'tally_round_enabled', true);
 
   // ASP's home-state code (for intra/inter detection w.r.t. the buyer)
   const intra         = cfgGet(cfg, 'tally_state_code_amazing', '32');
@@ -804,8 +812,9 @@ ${TAGS.DEEMNO}
 </LEDGERENTRIES.LIST>`;
     }
 
-    // Round-off
-    if (Math.abs(rnd) > 0.001) {
+    // Round-off — always emit when enabled (even with a 0 amount), so
+    // whole-rupee totals still carry the Round Off line.
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
@@ -1084,10 +1093,13 @@ ${TAGS.DEEMYES}
 </LEDGERENTRIES.LIST>`;
     }
 
-    // Round-off: emitted only when there's a delta. Sign is preRound −
+    // Round-off — always emit when rounding is enabled (even with a 0
+    // amount), matching the sales/RD/URD generators. Sign is preRound −
     // rounded (opposite of the sale voucher). DEEMEDPOSITIVE=Yes for
-    // purchase round-off (matches reference).
-    if (roundOff !== 0) {
+    // purchase round-off (matches reference). Gating on tlyrnd (rather
+    // than roundOff !== 0) keeps the voucher balanced: when rounding is
+    // off, partyAmt = preRound and no round-off line is needed.
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
@@ -1227,6 +1239,8 @@ function generSalesXML(rows, cfg, opts = {}) {
   const detailed      = cfgBool(cfg, 'tally_detailed', true);
   const dispatchEnabled = cfgBool(cfg, 'tally_dispatch_from', true);
   const tcs           = cfgBool(cfg, 'tally_tcs_enabled', false);
+  // Always emit the Round Off ledger (default ON) — see generSalesIspXML.
+  const tlyrnd        = cfgBool(cfg, 'tally_round_enabled', true);
   const intra         = cfgGet(cfg, 'tally_state_code', '33'); // ISP=33, ASP=32 (set in cfg)
 
   // Ledgers
@@ -1420,8 +1434,8 @@ ${TAGS.DEEMNO}
 </LEDGERENTRIES.LIST>`;
     }
 
-    // Round off
-    if (Math.abs(rnd) > 0.001) {
+    // Round off — always emit when enabled (even with a 0 amount).
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
@@ -1942,7 +1956,9 @@ ${TAGS.DEEMNO}
 <AMOUNT>${tlyrnd ? r0(total) : total}</AMOUNT>${billAlloc}
 </LEDGERENTRIES.LIST>`;
 
-    if (tlyrnd && Math.abs(rnd) > 0.001) {
+    // Always emit the Round Off line when enabled (even with a 0 amount),
+    // matching the sales generators.
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
@@ -2100,7 +2116,9 @@ ${TAGS.DEEMNO}
       }
     }
 
-    if (tlyrnd && Math.abs(rnd) > 0.001) {
+    // Always emit the Round Off line when enabled (even with a 0 amount),
+    // matching the sales generators.
+    if (tlyrnd) {
       xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
