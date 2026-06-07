@@ -1532,16 +1532,41 @@ function generRDPurchaseXML(rows, cfg, opts = {}) {
     const qtytot      = r2(row.qtytot || 0);
     const rt          = r2(row.rate || (qtytot > 0 ? amounttot / qtytot : 0));
 
-    // bill allocations per lot
+    // Bill allocations per lot. When rounding is on, distribute so the
+    // per-lot New Refs sum EXACTLY to round0(Σ bilamt) — the last lot
+    // absorbs the remainder. Rounding each lot independently (the old
+    // r0 per line) let the goods refs drift from the party amount and
+    // broke the bill-wise balance Tally checks on import.
     let billAlloc1 = '';
-    if (detailed && Array.isArray(row.lots)) {
-      for (const lot of row.lots) {
-        billAlloc1 += `
+    let billAllocSum = 0;
+    if (detailed && Array.isArray(row.lots) && row.lots.length) {
+      const lotsArr = row.lots;
+      if (tlyrnd) {
+        const target = r0(lotsArr.reduce((s, l) => s + Number(l.bilamt || 0), 0));
+        let running = 0;
+        for (let i = 0; i < lotsArr.length; i++) {
+          const lot = lotsArr[i];
+          const amt = (i === lotsArr.length - 1) ? (target - running) : r0(lot.bilamt || 0);
+          running += amt;
+          billAllocSum += amt;
+          billAlloc1 += `
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/${lot.lot}/${season}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
-<AMOUNT>${tlyrnd ? r0(lot.bilamt || 0) : r2(lot.bilamt || 0)}</AMOUNT>
+<AMOUNT>${amt}</AMOUNT>
 </BILLALLOCATIONS.LIST>`;
+        }
+      } else {
+        for (const lot of lotsArr) {
+          const amt = r2(lot.bilamt || 0);
+          billAllocSum += amt;
+          billAlloc1 += `
+<BILLALLOCATIONS.LIST>
+<NAME>${xe(`${row.ano}/${lot.lot}/${season}`)}</NAME>
+<BILLTYPE>New Ref</BILLTYPE>
+<AMOUNT>${amt}</AMOUNT>
+</BILLALLOCATIONS.LIST>`;
+        }
       }
     }
 
@@ -1630,7 +1655,16 @@ ${rates.cess}
     // the TDS withholding separately. The TDS bill carries a negative
     // amount so the sum still equals the party AMOUNT.
     const gstSum     = cgst + sgst + igst;
-    const gstAllocAmt = tlyrnd ? r0(gstSum) : r2(gstSum);
+    // Goods bill-ref total (the per-lot New Refs, or the single aggregate).
+    const goodsAllocSum = (detailed && Array.isArray(row.lots) && row.lots.length)
+      ? billAllocSum
+      : (tlyrnd ? r0(bilamttot) : r2(bilamttot));
+    // GST bill-ref carries the COMBINED rounding so goods + GST sum to the
+    // rounded grand total (totalRound), matching the PDF's single round0.
+    // Rounding goods and GST separately drifted by ±1 rupee and broke the
+    // bill-wise balance on import.
+    const gstAllocAmt = tlyrnd ? (totalRound - goodsAllocSum) : r2(gstSum);
+    const tdsAllocAmt = tlyrnd ? -r0(tdsamt) : -r2(tdsamt);
     const gstAlloc   = `
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/GST/${season}`)}</NAME>
@@ -1641,8 +1675,15 @@ ${rates.cess}
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/TDS/${seasonShort}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
-<AMOUNT>${tlyrnd ? r0(-tdsamt) : r2(-tdsamt)}</AMOUNT>
+<AMOUNT>${tdsAllocAmt}</AMOUNT>
 </BILLALLOCATIONS.LIST>` : '';
+    // Party AMOUNT must equal the sum of its bill allocations. In a 194Q
+    // purchase voucher the party is owed (grandTotal − TDS): crediting the
+    // full grandTotal double-credited by exactly the TDS, so debit≠credit
+    // and Tally only reconciled after the operator re-saved each voucher.
+    const partyAmt = tlyrnd
+      ? (goodsAllocSum + gstAllocAmt + tdsAllocAmt)
+      : r2(goodsAllocSum + gstAllocAmt + tdsAllocAmt);
 
     xml += `\n${startVoucher}
 <ADDRESS.LIST TYPE="String">
@@ -1681,11 +1722,11 @@ ${rates.cess}
 <LEDGERNAME>${name}</LEDGERNAME>
 ${TAGS.DEEMNO}
 <ISPARTYLEDGER>Yes</ISPARTYLEDGER>
-<AMOUNT>${tlyrnd ? r0(total) : total}</AMOUNT>${detailed ? billAlloc1 : `
+<AMOUNT>${partyAmt}</AMOUNT>${detailed ? billAlloc1 : `
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/${taxNm}/${season}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
-<AMOUNT>${tlyrnd ? r0(bilamttot) : bilamttot}</AMOUNT>
+<AMOUNT>${goodsAllocSum}</AMOUNT>
 </BILLALLOCATIONS.LIST>`}${gstAlloc}${tdsAlloc}
 </LEDGERENTRIES.LIST>`;
 
@@ -1757,15 +1798,18 @@ ${TAGS.DEEMYES}
 </LEDGERENTRIES.LIST>`;
     }
 
-    // Round Off — always emit (matches target which has it on every voucher).
-    // If round flag is off OR rnd is zero we still emit a 0-amount entry,
-    // because Tally expects the structural slot per the reference XMLs.
+    // Round Off — always emit (matches target which has it on every
+    // voucher). Computed as the exact balancing figure: credits
+    // (party + TDS) minus debits (goods + GST). This guarantees the
+    // voucher's debit and credit totals are equal on import — it works
+    // out to the PDF's round-off when the allocations are consistent.
+    const balancingRnd = r2((partyAmt + tdsamt) - amounttot - cgst - sgst - igst);
     xml += `
 <LEDGERENTRIES.LIST>
 <LEDGERNAME>${xe(Round_LDR)}</LEDGERNAME>
 ${TAGS.DEEMYES}
-<AMOUNT>${-r2(rnd)}</AMOUNT>
-<VATEXPAMOUNT>${-r2(rnd)}</VATEXPAMOUNT>
+<AMOUNT>${-balancingRnd}</AMOUNT>
+<VATEXPAMOUNT>${-balancingRnd}</VATEXPAMOUNT>
 </LEDGERENTRIES.LIST>`;
 
     xml += invEntries;
