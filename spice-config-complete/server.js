@@ -4697,7 +4697,7 @@ app.get('/api/invoices/purchase-pdf/:id', requireView, async (req, res) => {
     if (!stored) return res.status(404).json({ error: 'Invoice not found' });
 
     // Same enrichment pattern as the sales-invoice endpoint. purchaseView
-    // bills using ISP's P_Qty / P_Rate / PurAmt (this is the ISPL-side
+    // bills using ASP's Qty / P_Rate / PurAmt (this is the ISPL-side
     // print of the ASP sale).
     let invoice = stored.auction_id
       ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true })
@@ -4888,7 +4888,7 @@ app.post('/api/invoices/purchase-pdf-bulk', requireView, async (req, res) => {
     for (const id of ids) {
       const stored = db.get('SELECT * FROM invoices WHERE id=?', [id]);
       if (!stored) continue;
-      // purchaseView bills using ISP's P_Qty / P_Rate / PurAmt — matches
+      // purchaseView bills using ASP's Qty / P_Rate / PurAmt — matches
       // the single purchase-view endpoint.
       let invoice = stored.auction_id
         ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true })
