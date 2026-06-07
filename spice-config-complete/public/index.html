@@ -657,6 +657,13 @@ body[data-business-mode="e-Auction"] .mode-eauction-only{display:flex !important
 body[data-business-mode="e-Auction"] .tc.mode-eauction-only{display:none !important}
 body[data-business-mode="e-Auction"] .tc.mode-eauction-only.active{display:block !important}
 
+/* Company-book gate: Purchases, Bills of Supply and Debit Notes are
+   ASP (Kerala) transactions. In Tamil Nadu (ISP) context they don't
+   apply, so their sidebar entries are hidden. The body attribute is
+   stamped by applyAspContextVisibility() at boot + on every state
+   change, so this is pure CSS with no flicker. */
+body[data-business-state="TAMIL NADU"] .state-kerala-only{display:none !important}
+
 /* ── .needs-lot-entry-view permission gate ──
    Mirrors existing .needs-* perm classes: hidden by default, shown
    when body[data-perm-lot-entry-view="1"] is set. */
@@ -2166,15 +2173,15 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
           Sales Invoices
         </button>
-        <button class="side-item" data-tab="purchases" onclick="go('purchases')">
+        <button class="side-item state-kerala-only" data-tab="purchases" onclick="go('purchases')">
           <svg viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
           Purchases
         </button>
-        <button class="side-item feat-bills" data-tab="bills" onclick="go('bills')">
+        <button class="side-item feat-bills state-kerala-only" data-tab="bills" onclick="go('bills')">
           <svg viewBox="0 0 24 24"><path d="M20 14v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8z"/><path d="M14 2v6h6M9 15h4M9 18h6M9 12h2"/></svg>
           Bills of Supply
         </button>
-        <button class="side-item feat-debit-notes" data-tab="debit" onclick="go('debit')">
+        <button class="side-item feat-debit-notes state-kerala-only" data-tab="debit" onclick="go('debit')">
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes
         </button>
@@ -7827,6 +7834,12 @@ function isCategoryHiddenByMode(catKey){
 // produces purchase-side mirror PDFs which only make sense when the
 // active selling company is ASP.
 function applyAspContextVisibility(){
+  // Stamp the active business state onto <body> FIRST (before any early
+  // return) so the company-book CSS gate (.state-kerala-only) can hide the
+  // ASP-only transaction menus — Purchases, Bills of Supply, Debit Notes —
+  // when the operator is in Tamil Nadu (ISP) context.
+  document.body.setAttribute('data-business-state',
+    String(getCurrentBusinessState() || 'TAMIL NADU').toUpperCase());
   const btn = document.getElementById('btn-print-asp-purchase');
   if (!btn) return;
   const mode  = getCurrentBusinessMode();
@@ -8719,8 +8732,18 @@ async function onBusinessStateChanged(newState){
   }
   renderSettingsNav();
   renderSettingsPanel();
-  // Logo code may have flipped (ASP ↔ ISP)
+  // Logo code may have flipped (ASP ↔ ISP) — also re-stamps
+  // data-business-state via applyAspContextVisibility().
   applyLogoBadge();
+  // Purchases / Bills of Supply / Debit Notes are ASP-only and their
+  // sidebar entries are now hidden in Tamil Nadu (ISP) context. If the
+  // operator was sitting on one of those tabs when they flipped to TN,
+  // its content would linger with no way back to it — send them to Sales
+  // Invoices (the sibling transaction tab) instead.
+  if (String(newState || '').toUpperCase() === 'TAMIL NADU'
+      && ['purchases', 'bills', 'debit'].includes(window._currentTab)) {
+    go('invoices');
+  }
   // Refresh invoice list — the listing now filters by business state, so
   // the visible rows change when state flips. Only refreshes if the user
   // is currently looking at Sales Invoices tab (avoids unnecessary calls).
@@ -20306,9 +20329,10 @@ function _impEffectiveDefault(f, row){
     // Firm rule: the driving column prefixed "ASP" → KERALA, else TAMIL
     // NADU. Mirrors the server's rowDefaults exactly. The driving column
     // differs by module: PLACE for sales invoices, BR (branch) for
-    // purchases. Other modules have no such rule → fall back to autoDefaults.
+    // purchases AND bills of supply. Other modules have no such rule →
+    // fall back to autoDefaults.
     const moduleKey = (document.getElementById('imp-module') || {}).value || '';
-    const srcField = moduleKey === 'purchase' ? 'br'
+    const srcField = (moduleKey === 'purchase' || moduleKey === 'bills') ? 'br'
                    : moduleKey === 'sales_invoice' ? 'place'
                    : null;
     if (srcField) {
