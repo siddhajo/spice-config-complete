@@ -4656,18 +4656,24 @@ app.get('/api/invoices/pdf/:id', requireView, async (req, res) => {
     const dispatchedThrough = req.query.dispatchedThrough || '';
     if (dispatchedThrough) invoice.dispatchedThrough = dispatchedThrough;
 
-    // Look up the ASP invoice number from lots so the ISP PDF can show
-    // the cross-reference under "Other References" as ASP/I-{asp}/{season}.
-    // When this invoice IS an ASP one (state=KERALA), aspInvo stays empty.
+    // Cross-reference the ASP invoice number so the ISP PDF can show it
+    // under "Other References" as ASP/I-{asp}/{season}. Imported invoices
+    // carry it on invoices.asp_invo (set by the import linkage pass);
+    // generated ones keep it on their lots. Prefer the stored value, fall
+    // back to lots. ASP invoices (state=KERALA) leave aspInvo empty.
     if (String(stored.state || '').toUpperCase() !== 'KERALA') {
-      const aspRow = db.get(
-        `SELECT asp_invo FROM lots
-         WHERE auction_id = ? AND buyer = ? AND invo = ?
-           AND asp_invo IS NOT NULL AND asp_invo != ''
-         LIMIT 1`,
-        [stored.auction_id, stored.buyer, stored.invo]
-      );
-      if (aspRow && aspRow.asp_invo) invoice.aspInvo = aspRow.asp_invo;
+      let aspInvo = (stored.asp_invo && String(stored.asp_invo).trim()) || '';
+      if (!aspInvo) {
+        const aspRow = db.get(
+          `SELECT asp_invo FROM lots
+           WHERE auction_id = ? AND buyer = ? AND invo = ?
+             AND asp_invo IS NOT NULL AND asp_invo != ''
+           LIMIT 1`,
+          [stored.auction_id, stored.buyer, stored.invo]
+        );
+        if (aspRow && aspRow.asp_invo) aspInvo = aspRow.asp_invo;
+      }
+      if (aspInvo) invoice.aspInvo = aspInvo;
     }
 
     const pdf = await generateSalesInvoicePDF(invoice, cfg, stored.sale, stored.invo, stored.date);
@@ -4820,16 +4826,22 @@ app.post('/api/invoices/pdf-bulk', requireView, async (req, res) => {
         };
       }
       if (dispatchedThrough) invoice.dispatchedThrough = dispatchedThrough;
-      // ASP cross-reference for ISP invoices — see single endpoint for rationale
+      // ASP cross-reference for ISP invoices — see single endpoint for
+      // rationale. Prefer stored invoices.asp_invo (imported), fall back
+      // to lots (generated).
       if (String(stored.state || '').toUpperCase() !== 'KERALA') {
-        const aspRow = db.get(
-          `SELECT asp_invo FROM lots
-           WHERE auction_id = ? AND buyer = ? AND invo = ?
-             AND asp_invo IS NOT NULL AND asp_invo != ''
-           LIMIT 1`,
-          [stored.auction_id, stored.buyer, stored.invo]
-        );
-        if (aspRow && aspRow.asp_invo) invoice.aspInvo = aspRow.asp_invo;
+        let aspInvo = (stored.asp_invo && String(stored.asp_invo).trim()) || '';
+        if (!aspInvo) {
+          const aspRow = db.get(
+            `SELECT asp_invo FROM lots
+             WHERE auction_id = ? AND buyer = ? AND invo = ?
+               AND asp_invo IS NOT NULL AND asp_invo != ''
+             LIMIT 1`,
+            [stored.auction_id, stored.buyer, stored.invo]
+          );
+          if (aspRow && aspRow.asp_invo) aspInvo = aspRow.asp_invo;
+        }
+        if (aspInvo) invoice.aspInvo = aspInvo;
       }
       payloads.push({
         invoiceData: invoice,
