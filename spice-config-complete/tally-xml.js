@@ -2534,39 +2534,33 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
     return (Number(a.id) || 0) - (Number(b.id) || 0);
   });
 
-  // Pull lots for each purchase (matched by name + auction). The
-  // HAS_GSTIN guard keeps an RD voucher from accidentally pulling a
-  // no-GSTIN seller's lots when an unregistered seller happens to share
-  // the same name (those belong on the URD side, which filters NO_GSTIN).
-  const lotsStmt = db.prepare(`
-    SELECT lot_no AS lot, bags AS bag, pqty AS qty, prate AS rate,
-           puramt AS amount, bilamt
-    FROM lots
-    WHERE auction_id = ? AND name = ? AND puramt > 0
-      AND ${HAS_GSTIN_SQL}
-    ORDER BY lot_no
-  `);
+  // Per-lot price (P_Rate / PurAmt / P_Qty), GST and totals are taken from
+  // the SAME builder the purchase-invoice screen uses — buildPurchaseInvoice
+  // with ispView (the ISP planter figures the printed purchase invoice
+  // shows). This keeps the RD Tally voucher's prices and amounts identical
+  // to the purchase invoice regardless of the active business state (the
+  // legacy path read lots.prate/puramt, the active view, which showed ASP
+  // numbers when the active company was ASP). The `purchases` row supplies
+  // only the voucher metadata (number, date, party, GSTIN).
+  const { buildPurchaseInvoice } = require('./calculations');
 
   return raw.map((p) => {
-    const lots = lotsStmt.all(auctionId, p.name).map(l => ({
-      lot: l.lot, bag: l.bag, qty: l.qty, rate: l.rate,
-      amount: l.amount, bilamt: l.bilamt || l.amount,
+    const inv = buildPurchaseInvoice(db, auctionId, p.name, cfg, { ispView: true });
+    const li  = inv ? inv.lineItems : [];
+    const s   = inv ? inv.summary : null;
+    const lots = li.map(x => ({
+      lot: x.lot, bag: x.bags, qty: x.pqty, rate: x.prate,
+      amount: x.puramt, bilamt: x.puramt,
     }));
-    const qtytot = lots.reduce((s, l) => s + Number(l.qty || 0), 0);
-    const amounttot = lots.reduce((s, l) => s + Number(l.amount || 0), 0);
-    const bilamttot = lots.reduce((s, l) => s + Number(l.bilamt || 0), 0);
-    // PRE-round grand total. Prefer the stored round-off when present
-    // (p.rund != 0) so the value reconciles exactly with the purchase
-    // invoice (matches the PDF). For legacy / imported purchases saved
-    // with rund = 0 and a pre-rounded `total` (which made the round-off
-    // come out as 0), recover it from the purchase row's OWN components
-    // (amount + GST; TDS is posted separately, not part of the rounded
-    // total). Use p.amount — not the lots-by-name sum — so the GST it
-    // pairs with stays consistent.
-    const compSum = r2(Number(p.amount || 0) + Number(p.cgst || 0) + Number(p.sgst || 0) + Number(p.igst || 0));
-    const preRound = Number(p.rund)
-      ? r2((p.total || 0) - (p.rund || 0))
-      : (compSum > 0 ? compSum : r2(p.total || 0));
+    const amounttot = s ? r2(s.totalPuramt) : 0;
+    const qtytot    = s ? r2(s.totalQty)    : 0;
+    const cgst = s ? r2(s.totalCgst) : 0;
+    const sgst = s ? r2(s.totalSgst) : 0;
+    const igst = s ? r2(s.totalIgst) : 0;
+    // PRE-round grand total + rounded total straight from the purchase
+    // invoice, so the Round Off (totalRounded − total) matches it too.
+    const preRound     = s ? r2(s.totalPuramt + s.totalCgst + s.totalSgst + s.totalIgst) : 0;
+    const totalRounded = s ? r0(s.grandTotal) : 0;
     return {
       ano: p.ano,
       date: p.date,
@@ -2577,13 +2571,15 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
       gstin: p.gstin,
       pan: '',
       lots,
-      qtytot: r2(qtytot),
-      amounttot: r2(amounttot),
-      bilamttot: r2(bilamttot || p.amount),
-      cgst: p.cgst, sgst: p.sgst, igst: p.igst,
-      tdsamt: p.tds,
+      qtytot,
+      amounttot,
+      bilamttot: amounttot,
+      cgst, sgst, igst,
+      // TDS from the purchase invoice (recomputed on the ISP grand total),
+      // falling back to the stored purchase row's value.
+      tdsamt: (s && s.tdsAmount != null) ? s.tdsAmount : p.tds,
       total: preRound,
-      totalRounded: r0(preRound),
+      totalRounded,
       voucherNum: p.invo || String(p.id),
     };
   });
