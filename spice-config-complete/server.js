@@ -4116,6 +4116,11 @@ app.get('/api/invoices', requireView, (req, res) => {
     // would just be a copy of `invo` — show blank instead of duplicating.
     const isASPRow = String(r.state || '').toLowerCase().includes('kerala');
     if (isASPRow) { r.asp_invo = ''; continue; }
+    // IMPORTED invoices carry the link directly on invoices.asp_invo (set
+    // by the sales-invoice import's ASP↔ISP linkage pass) — prefer it.
+    // GENERATED invoices have it blank here and keep the link on their
+    // lots, so fall back to hydrating from lots.asp_invo.
+    if (r.asp_invo && String(r.asp_invo).trim()) continue;
     const aspRows = aspStmt.all(r.auction_id, r.buyer, r.invo);
     r.asp_invo = aspRows.map(x => x.asp_invo).filter(Boolean).join(', ');
   }
@@ -8401,6 +8406,42 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
   // per-row normalize was added). Idempotent and cheap.
   if (!dryRun) {
     try { repairBadDates(db); } catch (_) { /* non-fatal */ }
+  }
+
+  // ASP↔ISP linkage for imported sales invoices. The old-data file holds
+  // the ASP (Kerala) and ISP (Tamil Nadu) invoices as SEPARATE rows with
+  // no cross-reference column, so we derive the link after insert: for
+  // each ISP invoice, stamp the matching ASP invoice's number into
+  // asp_invo — matched on the same trade + buyer (one ASP invoice per
+  // buyer per trade, mirroring the generation rule and the lots.asp_invo
+  // hydration). Runs after the auction_id back-fill so the auction_id
+  // join key is populated. Only fills BLANK asp_invo rows, so it's
+  // idempotent and order-independent (works whether the ASP rows were
+  // imported before or after the ISP rows). Generated invoices are
+  // untouched — their link already lives on lots.asp_invo.
+  if (!dryRun && moduleKey === 'sales_invoice') {
+    try {
+      db.run(
+        `UPDATE invoices
+            SET asp_invo = (
+              SELECT k.invo FROM invoices k
+               WHERE UPPER(COALESCE(k.state,'')) LIKE '%KERALA%'
+                 AND k.buyer = invoices.buyer
+                 AND ( (invoices.auction_id IS NOT NULL AND k.auction_id = invoices.auction_id)
+                       OR (invoices.auction_id IS NULL AND k.ano = invoices.ano) )
+               LIMIT 1
+            )
+          WHERE UPPER(COALESCE(state,'')) NOT LIKE '%KERALA%'
+            AND COALESCE(asp_invo,'') = ''
+            AND EXISTS (
+              SELECT 1 FROM invoices k
+               WHERE UPPER(COALESCE(k.state,'')) LIKE '%KERALA%'
+                 AND k.buyer = invoices.buyer
+                 AND ( (invoices.auction_id IS NOT NULL AND k.auction_id = invoices.auction_id)
+                       OR (invoices.auction_id IS NULL AND k.ano = invoices.ano) )
+            )`
+      );
+    } catch (e) { console.error('[import] ASP↔ISP linkage failed:', e.message); }
   }
 
   // Log this run regardless of outcome. Dry-runs get an empty

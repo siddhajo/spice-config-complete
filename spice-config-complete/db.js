@@ -509,6 +509,12 @@ async function initDb() {
     gstin TEXT DEFAULT '',
     place TEXT DEFAULT '',
     lot TEXT DEFAULT '',
+    -- asp_invo: the sister-company (ASP, Kerala) invoice number paired
+    -- with this ISP (Tamil Nadu) invoice for the same trade + buyer.
+    -- Populated for IMPORTED invoices by the sales-invoice import's
+    -- ASP↔ISP linkage pass (the generated flow keeps the link on
+    -- lots.asp_invo instead). Surfaced as the "ASP Inv#" sales column.
+    asp_invo TEXT DEFAULT '',
     bag INTEGER DEFAULT 0,
     qty REAL DEFAULT 0,
     price REAL DEFAULT 0,
@@ -839,6 +845,11 @@ async function initDb() {
     // Feeds the Spices Board e-Auction CSV's reserved-price column on
     // export. Stored as REAL — value is in rupees per kg.
     'ALTER TABLE lots ADD COLUMN reserved_price REAL DEFAULT 0',
+    // Sister-company (ASP/Kerala) invoice number paired with an ISP
+    // (Tamil Nadu) invoice. Populated for IMPORTED sales invoices by the
+    // ASP↔ISP linkage pass (matched on trade + buyer). Generated invoices
+    // keep the link on lots.asp_invo. Surfaced as the "ASP Inv#" column.
+    "ALTER TABLE invoices ADD COLUMN asp_invo TEXT DEFAULT ''",
     // ── modified_at / modified_by audit columns ──────────────────
     // WHEN a row last changed and WHO changed it. Stamped automatically
     // by the AFTER INSERT/UPDATE triggers created below (no call site is
