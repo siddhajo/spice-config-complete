@@ -2186,6 +2186,18 @@ function buildSalesIspRows(db, auctionId, cfg) {
     ORDER BY CAST(lot_no AS INTEGER), lot_no
   `);
 
+  // Fallback lookup for the cross-referenced ASP invoice number when the
+  // lots weren't stamped with `asp_invo` (older data, or the ASP step
+  // didn't write it back). The matching ASP invoice shares the same
+  // auction + buyer under the KERALA state, so we resolve it directly —
+  // this is what populates <BASICORDERREF> when lots.asp_invo is blank.
+  const aspInvoStmt = db.prepare(`
+    SELECT invo FROM invoices
+    WHERE auction_id = ? AND buyer = ? AND UPPER(COALESCE(state,'')) = 'KERALA'
+    ORDER BY CAST(invo AS INTEGER), id
+    LIMIT 1
+  `);
+
   // E-way bill DISTANCE resolution. Priority order:
   //   1. invoices.distance_km — manual per-invoice override
   //   2. route_distances[(dispatch, buyer)] — saved route value
@@ -2209,8 +2221,19 @@ function buildSalesIspRows(db, auctionId, cfg) {
     const lotRows = lotsStmt.all(auctionId, r.buyer);
     // Pick the first non-empty asp_invo from the matching lots — used by
     // generSalesIspXML to build BASICORDERREF (the matching ASP voucher).
+    // When no lot carries asp_invo (it wasn't stamped), fall back to the
+    // matching ASP invoice (same auction + buyer, KERALA) so the
+    // cross-reference still appears on the ISP voucher.
     const aspInvoRow = lotRows.find(l => l.asp_invo && String(l.asp_invo).trim());
-    const aspInvo = aspInvoRow ? String(aspInvoRow.asp_invo).trim() : '';
+    let aspInvo = aspInvoRow ? String(aspInvoRow.asp_invo).trim() : '';
+    if (!aspInvo) {
+      try {
+        const aspRow = aspInvoStmt.get(auctionId, r.buyer);
+        if (aspRow && aspRow.invo != null && String(aspRow.invo).trim()) {
+          aspInvo = String(aspRow.invo).trim();
+        }
+      } catch (_) { /* invoices table shape guard */ }
+    }
 
     // Total bags/qty for the gunny inventory line. Use lot sums when
     // available; fall back to invoice aggregate.
