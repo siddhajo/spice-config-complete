@@ -2218,11 +2218,26 @@ function buildSalesIspRows(db, auctionId, cfg) {
       ? lotRows.reduce((s, l) => s + Number(l.bag || 0), 0)
       : Number(r.bag || 0);
 
-    // total = the PRE-round grand total (= rounded total minus the
-    // stored round-off adjustment). This is what the generator needs
-    // so the round-off ledger amount comes out to the right delta.
-    const totalRounded = r0(r.tot || 0);
-    const total = r2((r.tot || 0) - (r.rund || 0));
+    // PRE-round grand total, taken from the ledger components this
+    // voucher actually posts (cardamom + gunny + transport + insurance +
+    // CGST + SGST + IGST + TCS). Deriving it here — instead of from the
+    // stored tot/rund — keeps the Round Off correct even for legacy /
+    // imported invoices that saved `tot` already-rounded with `rund = 0`
+    // (which made the round-off come out as 0). It also guarantees the
+    // voucher balances: party = round(compSum), round-off =
+    // round(compSum) − compSum. For freshly-generated invoices compSum
+    // equals tot − rund, so the value is unchanged.
+    // Prefer the stored round-off when present (reconciles exactly with
+    // the invoice PDF); fall back to the component sum for legacy /
+    // imported invoices saved with rund = 0.
+    const compSum = r2(
+      (r.amount || 0) + (r.gunny || 0) + (r.pava_hc || 0) + (r.ins || 0) +
+      (r.cgst || 0) + (r.sgst || 0) + (r.igst || 0) + (r.tcs || 0)
+    );
+    const total = Number(r.rund)
+      ? r2((r.tot || 0) - (r.rund || 0))
+      : (compSum > 0 ? compSum : r2((r.tot || 0) - (r.rund || 0)));
+    const totalRounded = r0(total);
 
     // Resolve <DISTANCE> per the priority above.
     let distance = '';
@@ -2517,6 +2532,18 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
     const qtytot = lots.reduce((s, l) => s + Number(l.qty || 0), 0);
     const amounttot = lots.reduce((s, l) => s + Number(l.amount || 0), 0);
     const bilamttot = lots.reduce((s, l) => s + Number(l.bilamt || 0), 0);
+    // PRE-round grand total. Prefer the stored round-off when present
+    // (p.rund != 0) so the value reconciles exactly with the purchase
+    // invoice (matches the PDF). For legacy / imported purchases saved
+    // with rund = 0 and a pre-rounded `total` (which made the round-off
+    // come out as 0), recover it from the purchase row's OWN components
+    // (amount + GST; TDS is posted separately, not part of the rounded
+    // total). Use p.amount — not the lots-by-name sum — so the GST it
+    // pairs with stays consistent.
+    const compSum = r2(Number(p.amount || 0) + Number(p.cgst || 0) + Number(p.sgst || 0) + Number(p.igst || 0));
+    const preRound = Number(p.rund)
+      ? r2((p.total || 0) - (p.rund || 0))
+      : (compSum > 0 ? compSum : r2(p.total || 0));
     return {
       ano: p.ano,
       date: p.date,
@@ -2532,12 +2559,8 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
       bilamttot: r2(bilamttot || p.amount),
       cgst: p.cgst, sgst: p.sgst, igst: p.igst,
       tdsamt: p.tds,
-      // total = PRE-round grand total (= rounded total minus the stored
-      // round-off adjustment). The generator computes rnd = totalRounded
-      // - total, so if both are equal the Round Off ledger gets a zero
-      // amount and may be skipped. Reading p.total directly broke that.
-      total: r2((p.total || 0) - (p.rund || 0)),
-      totalRounded: r0(p.total || 0),
+      total: preRound,
+      totalRounded: r0(preRound),
       voucherNum: p.invo || String(p.id),
     };
   });
@@ -2634,19 +2657,26 @@ function buildDebitNoteRows(db, auctionId, cfg) {
     SELECT * FROM debit_notes WHERE ano = ? ORDER BY id
   `);
   const raw = stmt.all(a.ano);
-  return raw.map((d) => ({
-    ano: d.ano,
-    date: d.date,
-    name: d.name,
-    address: '',
-    place: '',
-    pin: '',
-    gstin: '',
-    refundtot: d.amount,
-    cgsttot: d.cgst, sgsttot: d.sgst, igsttot: d.igst,
-    total: d.total,
-    voucherNum: d.note_no || String(d.id),
-  }));
+  return raw.map((d) => {
+    // PRE-round total from components (discount + GST) so the Round Off
+    // is correct even when the stored debit_notes.total was pre-rounded
+    // (which would make the round-off come out as 0). The generator
+    // rounds this and posts the delta. Falls back to the stored total.
+    const dnPre = r2((Number(d.amount) || 0) + (Number(d.cgst) || 0) + (Number(d.sgst) || 0) + (Number(d.igst) || 0));
+    return {
+      ano: d.ano,
+      date: d.date,
+      name: d.name,
+      address: '',
+      place: '',
+      pin: '',
+      gstin: '',
+      refundtot: d.amount,
+      cgsttot: d.cgst, sgsttot: d.sgst, igsttot: d.igst,
+      total: dnPre > 0 ? dnPre : r2(d.total || 0),
+      voucherNum: d.note_no || String(d.id),
+    };
+  });
 }
 
 // =====================================================================
