@@ -2589,7 +2589,7 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
   const { buildPurchaseInvoice } = require('./calculations');
 
   return raw.map((p) => {
-    const inv = buildPurchaseInvoice(db, auctionId, p.name, cfg, { ispView: true });
+    const inv = buildPurchaseInvoice(db, auctionId, p.name, cfg, { ispView: true, useStoredTds: true });
     const li  = inv ? inv.lineItems : [];
     const s   = inv ? inv.summary : null;
     const lots = li.map(x => ({

@@ -636,9 +636,24 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
       WHERE (gstin = ? OR gstin = ?) AND date >= ?`,
     [gstinPrefixed, gstinBare, cfg.season_start || '2026-04-01']
   );
-  const tdsAmount = cfg.flag_tds_purchase 
+  const computedTds = cfg.flag_tds_purchase
     ? calculateTDS(cfg.flag_wgst ? grandTotal : totalPuramt, priorPurchases ? priorPurchases.total : 0, cfg)
     : 0;
+  // When reprinting / exporting an already-recorded purchase
+  // (opts.useStoredTds), honour the value stored on the purchase row
+  // rather than re-deriving 194Q. This keeps imported purchases — saved
+  // with tds = 0 — from showing a freshly-computed TDS on the invoice /
+  // Tally voucher that they were never recorded with. Fresh generation
+  // leaves the flag off, so it still computes (and the generate route
+  // then stores) the 194Q amount as before.
+  let tdsAmount = computedTds;
+  if (opts.useStoredTds) {
+    const storedPur = db.get(
+      `SELECT tds FROM purchases WHERE auction_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) ORDER BY id DESC LIMIT 1`,
+      [auctionId, sellerName]
+    );
+    if (storedPur) tdsAmount = Number(storedPur.tds) || 0;
+  }
   const invoiceAmount = grandTotal - tdsAmount;
 
   return {

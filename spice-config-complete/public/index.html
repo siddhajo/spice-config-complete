@@ -1826,6 +1826,19 @@ body[data-role="lot_entry"] .side-group-lbl{display:none !important}
    authoritative gate — this is purely a visual cue. */
 tr.row-locked > td{background:#FFFBEB !important;border-top:1px solid #FDE68A}
 tr.row-locked:hover > td{background:#FEF3C7 !important}
+
+/* ── Payment row: already fully exported ────────────────────
+   A seller whose lots have all been exported to the bank file can't be
+   re-exported until restored (↶). The `.row-exported` class is applied by
+   the Payments table renderer when _payExportStatus(...) === 'full': the
+   row is tinted red with a red left accent and shows a blocked cursor, so
+   it reads as locked at a glance. Interactive controls inside the row
+   (Restore ↶, WhatsApp) keep a normal pointer so the operator can still
+   act on them. Server/localStorage state is authoritative — purely a cue. */
+tr.row-exported > td{background:#FEF2F2 !important;cursor:not-allowed}
+tr.row-exported > td:first-child{border-left:3px solid #DC2626}
+tr.row-exported:hover > td{background:#FEE2E2 !important}
+tr.row-exported button{cursor:pointer}
 .lot-lock-badge{
   display:inline-flex;align-items:center;gap:3px;
   background:#fef3c7;color:#92400e;border:1px solid #fde68a;
@@ -14153,6 +14166,10 @@ async function loadPayments(opts){
     const _paySlice = applyClientSidePagination(_paymentsPager, 'payments-pager', gotoPaymentsPage, arr);
     DataTable.mount('payments-list', _paySlice, {
       emptyState: { icon: 'payments', title: 'No payments to summarize yet', body: 'Calculate the lots in this ' + termAuction(false, true) + ' to see per-seller payable amounts here.' },
+      // Fully-exported sellers can't be re-exported until restored — tint
+      // the whole row red + blocked cursor (CSS: tr.row-exported) so it
+      // reads as locked, matching the disabled checkbox.
+      rowClass: (p) => (p && _payExportStatus(aid, p.name, p.lot_count) === 'full') ? 'row-exported' : '',
       columns: [
         // Selection column. Payments has no per-row id from the server
         // (the rows are per-seller rollups), so we key checkboxes by
@@ -14176,12 +14193,12 @@ async function loadPayments(opts){
             const full = st === 'full';
             let badge = '';
             if (st === 'full') {
-              badge = ` <span title="Already exported — excluded from new Selected exports until restored" style="background:#DCFCE7;color:#15803D;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">✓ exported</span>`;
+              badge = ` <span title="Already exported — excluded from new Selected exports until restored" style="background:#FEE2E2;color:#B91C1C;font-weight:700;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap;letter-spacing:.3px">🚫 EXPORTED</span>`;
             } else if (st === 'partial') {
               const done = (_payExportedLotsFor(aid, p.name) || []).length;
               badge = ` <span title="${done} of ${p.lot_count} lots already exported — the rest are still payable" style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🚫 ${done}/${p.lot_count}</span>`;
             }
-            return `<span style="font-weight:600;color:${full ? 'var(--text3)' : 'var(--spice-text-main)'}">${esc(p.name||'')}</span>${badge}`;
+            return `<span style="font-weight:600;color:${full ? '#991B1B' : 'var(--spice-text-main)'}">${esc(p.name||'')}</span>${badge}`;
           } },
         { key:'lot_count', label:'Lots', sort:'number', numeric:true },
         { key:'total_qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
