@@ -73,6 +73,23 @@ function registerDbFunctions(database) {
 }
 
 /**
+ * Serialize the live DB to a Buffer for writing to disk.
+ *
+ * IMPORTANT: sql.js's export() resets the connection and DROPS every
+ * user-defined function registered via create_function(). If we don't
+ * re-register immediately, the very next write that fires a modified_by
+ * stamping trigger fails with "no such function: current_actor". Because
+ * saves are debounced, this surfaced intermittently: write → save (200ms
+ * later) wipes the function → next write throws. Re-registering here keeps
+ * current_actor() alive across every save.
+ */
+function exportDb() {
+  const buf = Buffer.from(rawDb.export());
+  registerDbFunctions(rawDb);
+  return buf;
+}
+
+/**
  * One-time data-migration ledger. Some fixes (e.g. retagging invoice
  * state) must run exactly ONCE per database, never on every boot — an
  * unguarded re-run is exactly what silently re-flipped imported ASP
@@ -97,7 +114,7 @@ function scheduleSave() {
     pendingSave = null;
     if (!rawDb) return;
     try {
-      const buf = Buffer.from(rawDb.export());
+      const buf = exportDb();
       const tmp = DB_PATH + '.tmp';
       fs.writeFileSync(tmp, buf);
       fs.renameSync(tmp, DB_PATH);
@@ -201,7 +218,7 @@ function flushSave() {
   if (pendingSave) { clearTimeout(pendingSave); pendingSave = null; }
   if (rawDb) {
     try {
-      const buf = Buffer.from(rawDb.export());
+      const buf = exportDb();
       const tmp = DB_PATH + '.tmp';
       fs.writeFileSync(tmp, buf);
       fs.renameSync(tmp, DB_PATH);
