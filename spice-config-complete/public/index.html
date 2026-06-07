@@ -6,6 +6,12 @@
 <title>Spice Config — Admin</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Per-tenant fonts — loaded once, picked via body[data-font] below.
+   Only the active font's glyphs actually render; the rest are cached
+   but unused. ~30kb extra per tenant install — acceptable for the
+   white-label distinctiveness this enables. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
   /* ═══ DEFAULT (Emerald) — overridden by body[data-theme] rules below ═══ */
@@ -160,6 +166,261 @@ body[data-theme="trust"]{
   --spice-turmeric-lt:#D6F0FA;
   --spice-cream:      #F4F4F4;   /* light gray bg */
 }
+
+/* ═══ THEME: Rose — saturated pink ═══ */
+body[data-theme="rose"]{
+  --sidebar-bg-top: #9F1239;
+  --sidebar-bg-bot: #660A22;
+  --spice-cardamom:    #BE185D;
+  --spice-cardamom-dk: #9F1239;
+  --spice-cardamom-lt: #FCE7F3;
+  --spice-saffron:    #E11D48;
+  --spice-saffron-lt: #FFE4E6;
+  --spice-saffron-md: #FDA4AF;
+  --spice-saffron-dk: #9F1239;
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cream:      #FFF8F8;
+}
+
+/* ═══ THEME: Indigo — deep blue/purple ═══ */
+body[data-theme="indigo"]{
+  --sidebar-bg-top: #3730A3;
+  --sidebar-bg-bot: #1E1B4B;
+  --spice-cardamom:    #4338CA;
+  --spice-cardamom-dk: #3730A3;
+  --spice-cardamom-lt: #EEF2FF;
+  --spice-saffron:    #4F46E5;
+  --spice-saffron-lt: #EEF2FF;
+  --spice-saffron-md: #A5B4FC;
+  --spice-saffron-dk: #3730A3;
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cream:      #F8F9FF;
+}
+
+/* ═══ THEME: Teal — calm cyan-green ═══ */
+body[data-theme="teal"]{
+  --sidebar-bg-top: #115E59;
+  --sidebar-bg-bot: #042F2E;
+  --spice-cardamom:    #0F766E;
+  --spice-cardamom-dk: #115E59;
+  --spice-cardamom-lt: #CCFBF1;
+  --spice-saffron:    #0D9488;
+  --spice-saffron-lt: #CCFBF1;
+  --spice-saffron-md: #5EEAD4;
+  --spice-saffron-dk: #115E59;
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cream:      #F0FDFA;
+}
+
+/* ═══ THEME: Slate — neutral grey-blue ═══ */
+body[data-theme="slate"]{
+  --sidebar-bg-top: #334155;
+  --sidebar-bg-bot: #1E293B;
+  --spice-cardamom:    #475569;
+  --spice-cardamom-dk: #334155;
+  --spice-cardamom-lt: #F1F5F9;
+  --spice-saffron:    #64748B;
+  --spice-saffron-lt: #F1F5F9;
+  --spice-saffron-md: #94A3B8;
+  --spice-saffron-dk: #334155;
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cream:      #F8FAFC;
+}
+
+/* ═══ THEME: Custom — driven by --spice-custom-base set by a preset ═══
+   When a "custom" preset supplies a hex, we set --spice-custom-base on
+   body and switch the active theme to 'custom'. This rule derives the
+   full palette from that single base color via color-mix(). Falls back
+   gracefully on browsers without color-mix (Chrome 111+, FF 113+,
+   Safari 16.2+ — all current). */
+body[data-theme="custom"]{
+  --spice-saffron:    var(--spice-custom-base, #166534);
+  --spice-saffron-lt: color-mix(in srgb, var(--spice-custom-base, #166534) 12%, white);
+  --spice-saffron-md: color-mix(in srgb, var(--spice-custom-base, #166534) 50%, white);
+  --spice-saffron-dk: color-mix(in srgb, var(--spice-custom-base, #166534) 85%, black);
+  --spice-cardamom:    var(--spice-custom-base, #166534);
+  --spice-cardamom-dk: color-mix(in srgb, var(--spice-custom-base, #166534) 85%, black);
+  --spice-cardamom-lt: color-mix(in srgb, var(--spice-custom-base, #166534) 12%, white);
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cream:      color-mix(in srgb, var(--spice-custom-base, #166534) 3%, white);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TENANT PRESET LAYERS — font + density + preset personality
+   ══════════════════════════════════════════════════════════════════
+   Three attribute-driven layers, all set at boot from /api/branding:
+
+     body[data-font]     → typography
+     body[data-density]  → spacing + radii + heights (Option A)
+     body[data-preset]   → preset-specific personality (Option B)
+
+   Two installs with different presets feel visually distinct: not
+   just a color swap, but different proportions, different shapes,
+   different sense of "weight" and "polish".
+   ══════════════════════════════════════════════════════════════════ */
+body[data-font="jakarta"]{font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+body[data-font="inter"]  {font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;letter-spacing:-.005em}
+body[data-font="outfit"] {font-family:'Outfit',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;letter-spacing:-.015em}
+body[data-font="system"] {font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;letter-spacing:0}
+
+/* ─────────────────────────────────────────────────────────────────
+   DENSITY (Option A) — comprehensive coverage
+   ─────────────────────────────────────────────────────────────────
+   Density swaps a coordinated set of design tokens, then applies
+   them to the 20+ surfaces that visibly differ between dense and
+   roomy: sidebar items, cards, modals, inputs, buttons, tables,
+   tabs, KPIs, page padding, headings. The goal is that an install
+   on `compact` and another on `spacious` look like different apps.
+   ───────────────────────────────────────────────────────────────── */
+
+/* COMPACT — tight spacing, sharp 4-8px radii, smaller fonts.
+   Reads as "professional / utility" — Bluehill, Slate. */
+body[data-density="compact"]{
+  --tenant-radius-sm: 4px;
+  --tenant-radius-md: 6px;
+  --tenant-radius-lg: 8px;
+  --tenant-pad-card:  12px 14px;
+  --tenant-row-h:     32px;
+  --tenant-gap:       10px;
+  --tenant-h1:        18px;
+  --tenant-h2:        15px;
+}
+body[data-density="compact"] .card{padding:var(--tenant-pad-card) !important;border-radius:var(--tenant-radius-lg) !important;margin-bottom:var(--tenant-gap)}
+body[data-density="compact"] .btn{border-radius:var(--tenant-radius-sm) !important;height:34px !important;padding:0 12px !important;font-size:13px}
+body[data-density="compact"] table th, body[data-density="compact"] table td{padding:6px 10px !important}
+body[data-density="compact"] .kpi{padding:10px 12px !important;border-radius:var(--tenant-radius-md) !important}
+body[data-density="compact"] .kpi-value{font-size:20px !important}
+body[data-density="compact"] .side-item{padding:8px 12px !important;border-radius:var(--tenant-radius-sm) !important;font-size:13px;margin-bottom:1px}
+body[data-density="compact"] .modal{border-radius:var(--tenant-radius-lg);padding:20px}
+body[data-density="compact"] .modal h2{font-size:17px;margin-bottom:14px}
+body[data-density="compact"] .fg{margin-bottom:10px}
+body[data-density="compact"] .fg input:not([type="checkbox"]):not([type="radio"]),
+body[data-density="compact"] .fg select,
+body[data-density="compact"] .fg textarea{height:34px;padding:6px 10px;border-radius:var(--tenant-radius-sm);font-size:13px}
+body[data-density="compact"] .content{padding:16px 22px !important}
+body[data-density="compact"] .topbar{padding:0 22px}
+body[data-density="compact"] h1{font-size:var(--tenant-h1)}
+body[data-density="compact"] h2{font-size:var(--tenant-h2)}
+
+/* ROOMY — current default-ish spacing, medium radii. Reads as
+   "premium / standard" — Cardamom, Marigold, Ocean. */
+body[data-density="roomy"]{
+  --tenant-radius-sm: 8px;
+  --tenant-radius-md: 12px;
+  --tenant-radius-lg: 14px;
+  --tenant-pad-card:  18px 22px;
+  --tenant-row-h:     40px;
+  --tenant-gap:       16px;
+  --tenant-h1:        22px;
+  --tenant-h2:        17px;
+}
+body[data-density="roomy"] .card{padding:var(--tenant-pad-card) !important;border-radius:var(--tenant-radius-lg) !important;margin-bottom:var(--tenant-gap)}
+body[data-density="roomy"] .btn{border-radius:var(--tenant-radius-sm) !important;height:42px !important;padding:0 18px !important}
+body[data-density="roomy"] table th, body[data-density="roomy"] table td{padding:11px 12px !important}
+body[data-density="roomy"] .kpi{padding:14px 18px !important;border-radius:var(--tenant-radius-md) !important}
+body[data-density="roomy"] .side-item{padding:12px 14px !important;border-radius:10px !important}
+body[data-density="roomy"] .modal{border-radius:var(--tenant-radius-lg);padding:24px}
+body[data-density="roomy"] .fg input:not([type="checkbox"]):not([type="radio"]),
+body[data-density="roomy"] .fg select,
+body[data-density="roomy"] .fg textarea{height:40px;padding:9px 14px;border-radius:var(--tenant-radius-sm)}
+body[data-density="roomy"] .content{padding:28px 36px !important}
+body[data-density="roomy"] h1{font-size:var(--tenant-h1)}
+body[data-density="roomy"] h2{font-size:var(--tenant-h2)}
+
+/* SPACIOUS — generous whitespace, large 14-18px radii, bigger
+   fonts and soft shadows. Reads as "calm / minimal / premium" —
+   Western Ghats. */
+body[data-density="spacious"]{
+  --tenant-radius-sm: 10px;
+  --tenant-radius-md: 14px;
+  --tenant-radius-lg: 18px;
+  --tenant-pad-card:  26px 30px;
+  --tenant-row-h:     46px;
+  --tenant-gap:       22px;
+  --tenant-h1:        26px;
+  --tenant-h2:        19px;
+}
+body[data-density="spacious"] .card{padding:var(--tenant-pad-card) !important;border-radius:var(--tenant-radius-lg) !important;margin-bottom:var(--tenant-gap);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+body[data-density="spacious"] .btn{border-radius:var(--tenant-radius-sm) !important;height:48px !important;padding:0 22px !important;font-size:14px}
+body[data-density="spacious"] table th, body[data-density="spacious"] table td{padding:15px 16px !important}
+body[data-density="spacious"] .kpi{padding:20px 24px !important;border-radius:var(--tenant-radius-md) !important}
+body[data-density="spacious"] .kpi-value{font-size:30px !important}
+body[data-density="spacious"] .side-item{padding:14px 16px !important;border-radius:12px !important;font-size:14.5px;margin-bottom:4px}
+body[data-density="spacious"] .modal{border-radius:var(--tenant-radius-lg);padding:30px}
+body[data-density="spacious"] .modal h2{font-size:21px;margin-bottom:24px}
+body[data-density="spacious"] .fg{margin-bottom:18px}
+body[data-density="spacious"] .fg input:not([type="checkbox"]):not([type="radio"]),
+body[data-density="spacious"] .fg select,
+body[data-density="spacious"] .fg textarea{height:46px;padding:12px 16px;border-radius:var(--tenant-radius-sm);font-size:14px}
+body[data-density="spacious"] .content{padding:38px 48px !important;max-width:1280px}
+body[data-density="spacious"] .topbar{padding:0 48px}
+body[data-density="spacious"] h1{font-size:var(--tenant-h1)}
+body[data-density="spacious"] h2{font-size:var(--tenant-h2)}
+
+/* ─────────────────────────────────────────────────────────────────
+   PRESET PERSONALITY (Option B) — per-preset aesthetic touches
+   ─────────────────────────────────────────────────────────────────
+   Beyond color + density, each preset gets distinct character cues:
+   button shape, shadow weight, accent treatment. This is what makes
+   "Bluehill" feel like a different product from "Western Ghats"
+   even when you mute the colors.
+
+   Set via body[data-preset="<slug>"], applied at boot from
+   /api/branding presetConfig. Layered ON TOP of density rules so
+   density still governs spacing — preset just adds finishing touches.
+   ───────────────────────────────────────────────────────────────── */
+
+/* CARDAMOM — default install. Subtle shadows, medium radii,
+   premium-but-friendly feel. */
+body[data-preset="cardamom"] .card{box-shadow:0 1px 2px rgba(20,83,45,.05)}
+body[data-preset="cardamom"] .btn{font-weight:600;letter-spacing:.2px}
+
+/* BLUEHILL — corporate-modern. Tight 6px corners, subtle indigo
+   shadow tint, sentence-case buttons. */
+body[data-preset="bluehill"] .card{box-shadow:0 1px 2px rgba(79,70,229,.06);border-radius:6px !important}
+body[data-preset="bluehill"] .btn{border-radius:6px !important;font-weight:600}
+body[data-preset="bluehill"] .side-item{border-radius:6px !important}
+body[data-preset="bluehill"] .modal{border-radius:8px !important;box-shadow:0 8px 24px rgba(79,70,229,.12)}
+body[data-preset="bluehill"] .topbar{border-bottom:1px solid rgba(79,70,229,.18)}
+body[data-preset="bluehill"] .kpi{border-left:3px solid var(--spice-saffron);border-radius:6px !important;box-shadow:0 1px 2px rgba(79,70,229,.05)}
+
+/* WESTERN-GHATS — calm premium. Pill buttons, soft shadows on
+   everything, rounded everything. */
+body[data-preset="western-ghats"] .btn{border-radius:999px !important;padding:0 24px !important;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+body[data-preset="western-ghats"] .card{box-shadow:0 2px 8px rgba(13,148,136,.06);border-color:rgba(13,148,136,.12)}
+body[data-preset="western-ghats"] .side-item{border-radius:999px !important;margin:0 4px 4px}
+body[data-preset="western-ghats"] .modal{box-shadow:0 12px 40px rgba(13,148,136,.12)}
+body[data-preset="western-ghats"] .kpi{border-radius:14px !important;box-shadow:0 1px 3px rgba(13,148,136,.06)}
+
+/* SLATE — minimalist grey. 8px corners, hairline borders, subtle
+   shadow. Differentiation comes from restrained palette + minimal
+   shadows, not from sharp corners or all-caps text. */
+body[data-preset="slate"] .card{box-shadow:0 1px 2px rgba(15,23,42,.04);border:1px solid #e2e8f0;border-radius:8px !important}
+body[data-preset="slate"] .btn{border-radius:8px !important;font-weight:500;letter-spacing:0}
+body[data-preset="slate"] .side-item{border-radius:8px !important}
+body[data-preset="slate"] .modal{border-radius:10px !important;box-shadow:0 12px 32px rgba(15,23,42,.16)}
+body[data-preset="slate"] .topbar{border-bottom:1px solid #e2e8f0}
+body[data-preset="slate"] .kpi{border:1px solid #e2e8f0;border-radius:8px !important;box-shadow:0 1px 2px rgba(15,23,42,.03)}
+
+/* MARIGOLD — warm and playful. Rounded everywhere, golden shadows,
+   bold typography. */
+body[data-preset="marigold"] .card{box-shadow:0 2px 6px rgba(245,158,11,.08);border-radius:18px !important}
+body[data-preset="marigold"] .btn{border-radius:12px !important;font-weight:700}
+body[data-preset="marigold"] .side-item{border-radius:12px !important}
+body[data-preset="marigold"] .modal{border-radius:18px !important;box-shadow:0 12px 32px rgba(245,158,11,.16)}
+body[data-preset="marigold"] .kpi{border-radius:14px !important;box-shadow:0 2px 4px rgba(245,158,11,.06)}
+
+/* OCEAN — cool professional. Subtle blue-tinted borders, gentle
+   shadows, balanced. */
+body[data-preset="ocean"] .card{box-shadow:0 1px 3px rgba(6,182,212,.06);border-color:rgba(6,182,212,.15)}
+body[data-preset="ocean"] .btn{border-radius:8px !important;font-weight:600}
+body[data-preset="ocean"] .modal{box-shadow:0 8px 24px rgba(6,182,212,.1)}
+body[data-preset="ocean"] .kpi{border-left:3px solid var(--spice-saffron);box-shadow:0 1px 2px rgba(6,182,212,.04)}
 
 /* Small floating theme switcher at bottom-right */
 /* ── Theme chips (in Settings → Appearance card) ───────────
@@ -20054,8 +20315,17 @@ function renderPreview(inv,type){
 }
 
 // ── Theme switcher ─────────────────────────────────────────
-const _THEMES = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust'];
+const _THEMES = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom'];
+// Set true once a white-label tenant preset has been applied at boot.
+// When active, the preset's theme is locked: applyCompanyTheme() and the
+// per-user theme switcher stop overriding it (the whole point of a
+// white-label lock-down). Driven by the /api/branding fetch below.
+let _brandingPresetActive = false;
 function setTheme(t){
+  // A white-label preset locks the theme — ignore user theme clicks while
+  // one is active (the Appearance card is normally hidden too, but this
+  // guards against any stale UI that slips a click through).
+  if (_brandingPresetActive) return;
   if (!_THEMES.includes(t)) t = 'emerald';
   document.body.setAttribute('data-theme', t);
   try { localStorage.setItem('theme', t); } catch(e){}
@@ -20078,6 +20348,10 @@ function setTheme(t){
 // theme chip selection — company identity is the source of truth.
 const _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
 function applyCompanyTheme(){
+  // A white-label tenant preset locks the look install-wide. Don't let
+  // per-company auto-theming fight it — the preset's theme is the source
+  // of truth once one is active.
+  if (_brandingPresetActive) return;
   let code;
   try { code = String(getCurrentLogoCode() || 'ISP').toUpperCase(); }
   catch(e){ code = 'ISP'; }
@@ -20097,6 +20371,48 @@ function applyCompanyTheme(){
   let saved = 'emerald';
   try { saved = localStorage.getItem('theme') || 'emerald'; } catch(e){}
   document.body.setAttribute('data-theme', saved);
+
+  // Async: pull server-side branding and, if the install's admin has set
+  // a white-label tenant preset via /admin/branding, apply the full
+  // color+density+font+personality bundle. Runs in parallel with the rest
+  // of page init — first paint already used localStorage so there's no
+  // flicker; this upgrades to the install-wide preset as soon as the
+  // network call returns. Network failure is fine — localStorage stays.
+  fetch(B + '/api/branding')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (!d || !d.preset || !d.presetConfig) return; // legacy mode — nothing to lock down
+      const p = d.presetConfig;
+      // Color theme from preset overrides localStorage / company-auto-
+      // theme. We DON'T write it back to localStorage because the user
+      // can't change it anyway — keeping localStorage clean means
+      // clearing the preset reverts the user to whatever they had before.
+      if (p.theme && _THEMES.includes(p.theme)) {
+        document.body.setAttribute('data-theme', p.theme);
+      }
+      if (p.customColor && /^#[0-9a-fA-F]{6}$/.test(p.customColor)) {
+        document.body.style.setProperty('--spice-custom-base', p.customColor);
+      }
+      // Density — sets data-density attr; the CSS rules above respond to
+      // it (smaller padding / corner radius for 'compact', larger for
+      // 'spacious').
+      if (p.density) document.body.setAttribute('data-density', p.density);
+      // Font — sets data-font attr; body[data-font="..."] CSS picks which
+      // of the @import'd web fonts is active.
+      if (p.font) document.body.setAttribute('data-font', p.font);
+      // Preset slug — drives the Option B "personality" CSS that gives
+      // each preset distinct character beyond density+color.
+      document.body.setAttribute('data-preset', d.preset);
+      // Lock it in so applyCompanyTheme() / setTheme() stop overriding.
+      _brandingPresetActive = true;
+      // Hide-appearance — wipe the entire Appearance card from Settings.
+      // The end user never knows it existed.
+      if (p.hideAppearance) {
+        const card = document.getElementById('appearance-card');
+        if (card) card.style.display = 'none';
+      }
+    })
+    .catch(()=>{}); // network failure is fine — localStorage already applied
 })();
 // Highlight active chip + sync dark-mode label whenever the Settings tab renders.
 // Settings uses go('settings') which switches tabs without re-rendering markup,

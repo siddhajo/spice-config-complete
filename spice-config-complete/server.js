@@ -1,3 +1,10 @@
+// Load env vars from .env (if present) BEFORE any other require runs.
+// Anything downstream — db.js, the tenant-preset admin gate, etc. — can
+// then read process.env.<KEY> without caring whether the value came from
+// .env, the shell, or the host's variables panel. A missing .env file is
+// fine (production reads dashboard vars, not a checked-in .env).
+try { require('dotenv').config(); } catch (_) { /* dotenv not installed — fine */ }
+
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
@@ -671,6 +678,341 @@ app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
   res.json({ success: true, updated: count });
 });
 app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSettingsFlat(getDb())));
+
+// ══════════════════════════════════════════════════════════════════
+// BRANDING — public read + white-label tenant preset (developer only)
+// ══════════════════════════════════════════════════════════════════
+
+// Public branding (no auth) — the frontend pulls this at boot to apply
+// the per-install white-label preset (color + density + font + hide
+// flags) BEFORE login, so every device on this install looks identical
+// even before the user signs in. Returns only the safe-to-expose subset.
+app.get('/api/branding', (req, res) => {
+  try {
+    const cfg = getSettingsFlat(getDb());
+    const isKL = String(cfg.business_state || '').toUpperCase().includes('KERALA');
+    const branch = (isKL ? cfg.kl_branch : cfg.tn_branch) || cfg.tn_branch || cfg.kl_branch || '';
+    const gstin  = (isKL ? cfg.kl_gstin  : cfg.tn_gstin)  || cfg.tn_gstin  || cfg.kl_gstin  || '';
+    // Preset = the full white-label bundle (color + density + font +
+    // hide-appearance flag) configured via /admin/branding. Empty when
+    // no preset has been set — the frontend then treats it as the legacy
+    // "default" state with the Appearance card visible to users.
+    let presetConfig = null;
+    if (cfg.preset_config) {
+      try { presetConfig = JSON.parse(cfg.preset_config); }
+      catch (_) { presetConfig = null; }
+    }
+    res.json({
+      tradeName: cfg.trade_name || cfg.short_name || '',
+      shortName: cfg.short_name || cfg.trade_name || '',
+      branch,
+      gstin,
+      logoUrl: '/logo-ispl.png',
+      // Per-install branding choices — empty when the admin hasn't picked
+      // one yet (frontend then falls back to localStorage / 'emerald').
+      theme: cfg.theme || '',
+      themeCustomColor: cfg.theme_custom_color || '',
+      // Preset bundle. preset is the named slug (e.g. 'bluehill');
+      // presetConfig is the full {theme, density, font, hideAppearance}
+      // payload the frontend applies at boot.
+      preset: cfg.tenant_preset || '',
+      presetConfig,
+    });
+  } catch (e) {
+    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null });
+  }
+});
+
+// ── TENANT PRESET (white-label switcher) — DEVELOPER ONLY ────────────
+// The "preset" is a named bundle of color + density + font + hide flags.
+// Lets each customer install look visually distinct without touching the
+// customer's data. End users never see this — the Appearance card in
+// Settings is hidden once a preset is active.
+//
+// Access is gated by ADMIN_BRANDING_KEY (env var). The /admin/branding
+// page expects ?key=<secret> on every request. Default key for dev is
+// 'change-me' so a non-secured deploy is obvious in the URL.
+//
+// Pre-baked presets — extend this list to add more. Each preset is a
+// pure config object; the frontend reads presetConfig from GET
+// /api/branding and applies it at boot.
+const TENANT_PRESETS = {
+  cardamom: {
+    label: 'Cardamom (default — premium spacious)',
+    theme: 'emerald',
+    customColor: '',
+    density: 'roomy',
+    font: 'jakarta',
+    hideAppearance: true,
+  },
+  bluehill: {
+    label: 'Bluehill (indigo + dense + inter)',
+    theme: 'indigo',
+    customColor: '',
+    density: 'compact',
+    font: 'inter',
+    hideAppearance: true,
+  },
+  'western-ghats': {
+    label: 'Western Ghats (teal + spacious + outfit)',
+    theme: 'teal',
+    customColor: '',
+    density: 'spacious',
+    font: 'outfit',
+    hideAppearance: true,
+  },
+  slate: {
+    label: 'Slate (corporate grey + dense + system)',
+    theme: 'slate',
+    customColor: '',
+    density: 'compact',
+    font: 'system',
+    hideAppearance: true,
+  },
+  marigold: {
+    label: 'Marigold (sunshine + roomy + jakarta)',
+    theme: 'sunshine',
+    customColor: '',
+    density: 'roomy',
+    font: 'jakarta',
+    hideAppearance: true,
+  },
+  ocean: {
+    label: 'Ocean (cool blue + roomy + inter)',
+    theme: 'ocean',
+    customColor: '',
+    density: 'roomy',
+    font: 'inter',
+    hideAppearance: true,
+  },
+};
+
+// Available font slugs that the frontend knows how to apply. Keep in
+// sync with the <link>s and CSS variable handling in index.html.
+const TENANT_FONTS = ['jakarta', 'inter', 'outfit', 'system'];
+
+// Available density slugs. Frontend maps each to a `data-density` attr
+// + CSS rules that adjust padding / corner radius / row heights.
+const TENANT_DENSITIES = ['compact', 'roomy', 'spacious'];
+
+// Gatekeeper. Compares against ADMIN_BRANDING_KEY env var, falling back
+// to 'change-me' so an unsecured deploy is loud — running ?key=change-me
+// in production logs is a clear signal to set the env var.
+function checkAdminKey(req) {
+  const expected = process.env.ADMIN_BRANDING_KEY || 'change-me';
+  const supplied = String(req.query.key || req.headers['x-admin-key'] || '');
+  return supplied === expected && supplied.length > 0;
+}
+
+// GET /admin/branding?key=… — hidden HTML control panel. Lists presets,
+// shows current selection, has a small form for the "custom" preset
+// (manual color/density/font picker). NOT linked from anywhere in the
+// app; you reach it by typing the URL.
+app.get('/admin/branding', (req, res) => {
+  if (!checkAdminKey(req)) {
+    return res.status(403).type('html').send(
+      '<html><body style="font-family:system-ui;padding:40px;text-align:center;color:#666"><h2>403 — Access denied</h2><p>This page requires a valid <code>?key=</code> in the URL.</p></body></html>'
+    );
+  }
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+  const currentPreset = cfg.tenant_preset || '';
+  let currentConfig = null;
+  try { currentConfig = JSON.parse(cfg.preset_config || 'null'); } catch (_) {}
+
+  const presetOptions = Object.entries(TENANT_PRESETS).map(([slug, p]) => {
+    const sel = slug === currentPreset ? 'selected' : '';
+    return `<option value="${slug}" ${sel}>${slug} — ${p.label}</option>`;
+  }).join('');
+  const customSel = currentPreset === 'custom' ? 'selected' : '';
+  const noneSel = !currentPreset ? 'selected' : '';
+
+  // Custom-preset form field defaults — populated from current config
+  // if the active preset IS 'custom', otherwise blank.
+  const c = (currentPreset === 'custom' && currentConfig) ? currentConfig : {};
+  const cTheme    = c.theme || 'emerald';
+  const cColor    = c.customColor || '';
+  const cDensity  = c.density || 'roomy';
+  const cFont     = c.font || 'jakarta';
+  const cHide     = c.hideAppearance !== false; // default true
+
+  const themeOpts = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom']
+    .map(t => `<option value="${t}" ${t === cTheme ? 'selected' : ''}>${t}</option>`).join('');
+  const densityOpts = TENANT_DENSITIES.map(d => `<option value="${d}" ${d === cDensity ? 'selected' : ''}>${d}</option>`).join('');
+  const fontOpts = TENANT_FONTS.map(f => `<option value="${f}" ${f === cFont ? 'selected' : ''}>${f}</option>`).join('');
+
+  const keyEsc = String(req.query.key).replace(/[<>'"&]/g, '');
+
+  res.type('html').send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Tenant Branding — Admin</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 20px; color: #1f2937; background: #f9fafb; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 24px 0 10px; color: #374151; }
+  .sub { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  .current { background: #f0fdf4; border-color: #86efac; }
+  label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .3px; }
+  select, input[type=text], input[type=color] { width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; }
+  input[type=color] { height: 36px; padding: 2px; }
+  input[type=checkbox] { margin-right: 6px; }
+  button { background: #166534; color: #fff; border: 0; padding: 10px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #6b7280; }
+  button:hover { opacity: .9; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  pre { background: #f3f4f6; padding: 10px; border-radius: 6px; font-size: 12px; overflow-x: auto; }
+  .msg { display: none; padding: 10px; border-radius: 6px; margin-bottom: 16px; }
+  .msg.ok { display: block; background: #dcfce7; color: #14532d; }
+  .msg.err { display: block; background: #fee2e2; color: #991b1b; }
+</style></head>
+<body>
+  <h1>Tenant branding</h1>
+  <p class="sub">Hidden admin panel. Sets the white-label preset for this install. End users never see this URL or page.</p>
+
+  <div id="msg" class="msg"></div>
+
+  <div class="card current">
+    <h2>Current setting</h2>
+    <p><strong>Active preset:</strong> ${currentPreset || '<em>none (legacy mode — Appearance card visible to users)</em>'}</p>
+    ${currentConfig ? `<pre>${JSON.stringify(currentConfig, null, 2)}</pre>` : ''}
+  </div>
+
+  <div class="card">
+    <h2>Pick a pre-baked preset</h2>
+    <label>Preset</label>
+    <select id="preset-pick">
+      <option value="" ${noneSel}>— none (show Appearance card to users) —</option>
+      ${presetOptions}
+      <option value="custom" ${customSel}>custom (use the form below)</option>
+    </select>
+    <p style="font-size: 12px; color: #6b7280; margin: 10px 0 0">Pick a named preset OR pick "custom" and fill in the form below.</p>
+  </div>
+
+  <div class="card">
+    <h2>Custom preset (used only when preset = "custom")</h2>
+    <div class="row">
+      <div>
+        <label>Color theme</label>
+        <select id="custom-theme">${themeOpts}</select>
+      </div>
+      <div>
+        <label>Custom hex (used when theme = "custom")</label>
+        <input type="color" id="custom-color" value="${cColor || '#166534'}">
+      </div>
+      <div>
+        <label>Density</label>
+        <select id="custom-density">${densityOpts}</select>
+      </div>
+      <div>
+        <label>Font</label>
+        <select id="custom-font">${fontOpts}</select>
+      </div>
+    </div>
+    <label style="margin-top: 16px;">
+      <input type="checkbox" id="custom-hide" ${cHide ? 'checked' : ''}>
+      Hide Appearance card from users
+    </label>
+  </div>
+
+  <div style="display: flex; gap: 10px;">
+    <button onclick="apply()">Apply preset</button>
+    <button class="secondary" onclick="clearPreset()">Clear (revert to legacy mode)</button>
+  </div>
+
+  <script>
+    const KEY = ${JSON.stringify(keyEsc)};
+    const FONTS = ${JSON.stringify(TENANT_FONTS)};
+    const DENSITIES = ${JSON.stringify(TENANT_DENSITIES)};
+    function msg(text, ok) {
+      const el = document.getElementById('msg');
+      el.className = 'msg ' + (ok ? 'ok' : 'err');
+      el.textContent = text;
+    }
+    async function apply() {
+      const preset = document.getElementById('preset-pick').value;
+      const body = { preset };
+      if (preset === 'custom') {
+        body.config = {
+          theme: document.getElementById('custom-theme').value,
+          customColor: document.getElementById('custom-color').value,
+          density: document.getElementById('custom-density').value,
+          font: document.getElementById('custom-font').value,
+          hideAppearance: document.getElementById('custom-hide').checked,
+        };
+      }
+      try {
+        const r = await fetch('/api/admin/preset?key=' + encodeURIComponent(KEY), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (!r.ok) return msg(d.error || 'Failed', false);
+        msg('Applied. Reload your customer-facing app to see the change.', true);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { msg(e.message, false); }
+    }
+    async function clearPreset() {
+      if (!confirm('Clear the active preset and show Appearance to users again?')) return;
+      try {
+        const r = await fetch('/api/admin/preset?key=' + encodeURIComponent(KEY), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: '' }),
+        });
+        if (!r.ok) return msg('Failed to clear', false);
+        msg('Cleared.', true);
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { msg(e.message, false); }
+    }
+  </script>
+</body></html>`);
+});
+
+// POST /api/admin/preset — receives the preset pick from the admin page.
+// Key-gated like the GET. Writes tenant_preset (slug) + preset_config
+// (full bundle as JSON) to company_settings so the frontend can pick
+// it up via GET /api/branding without further auth.
+app.post('/api/admin/preset', (req, res) => {
+  if (!checkAdminKey(req)) return res.status(403).json({ error: 'Invalid admin key' });
+  const db = getDb();
+  const { preset, config } = req.body || {};
+  const slug = String(preset || '').trim();
+
+  let finalConfig = null;
+  if (slug === '') {
+    // Clear — empty preset + clear stored config so the frontend reverts
+    // to legacy mode and the Appearance card reappears.
+    finalConfig = null;
+  } else if (slug === 'custom') {
+    if (!config || typeof config !== 'object') {
+      return res.status(400).json({ error: 'custom preset requires a config object' });
+    }
+    // Whitelist fields so an attacker can't shove arbitrary JSON.
+    finalConfig = {
+      theme: String(config.theme || 'emerald'),
+      customColor: /^#[0-9a-fA-F]{6}$/.test(config.customColor || '') ? config.customColor : '',
+      density: TENANT_DENSITIES.includes(config.density) ? config.density : 'roomy',
+      font: TENANT_FONTS.includes(config.font) ? config.font : 'jakarta',
+      hideAppearance: !!config.hideAppearance,
+    };
+  } else if (TENANT_PRESETS[slug]) {
+    finalConfig = TENANT_PRESETS[slug];
+  } else {
+    return res.status(400).json({ error: `Unknown preset: ${slug}` });
+  }
+
+  // Upsert both keys. INSERT OR REPLACE pattern because tenant_preset /
+  // preset_config don't live in the settings DEFAULTS.
+  const stmt = db.prepare(
+    `INSERT INTO company_settings (key, value, category, label, field_type)
+     VALUES (?, ?, 'branding', ?, 'text')
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  );
+  stmt.run('tenant_preset', slug, 'Tenant preset');
+  stmt.run('preset_config', finalConfig ? JSON.stringify(finalConfig) : '', 'Tenant preset config (JSON)');
+  res.json({ success: true, preset: slug, config: finalConfig });
+});
 
 // ── Company identity presets (ISP / ASP) ─────────────────────────────
 // Two named snapshots of the 8 fields in category='company'. The active

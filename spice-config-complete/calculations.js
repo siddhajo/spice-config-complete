@@ -586,8 +586,28 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
   const sellerState = gstinStateCode(firstLot.cr);
   const isInter = sellerState !== companyState;
 
-  let totalCgst = 0, totalSgst = 0, totalIgst = 0;
-  lineItems.forEach(li => { totalCgst += li.cgst; totalSgst += li.sgst; totalIgst += li.igst; });
+  // GST is charged once on the whole taxable value (single round) — the
+  // GST-standard method and exactly what Tally recomputes when it imports
+  // the voucher. Summing the per-lot rounded GST instead drifts by a
+  // paisa or two on multi-lot invoices, which made Tally flag a "tax
+  // amount mismatch" on import (cleared only after a refresh/recompute).
+  const half = gstGoods / 2;
+  const totalCgst = isInter ? 0 : Math.round(totalPuramt * half / 100 * 100) / 100;
+  const totalSgst = isInter ? 0 : Math.round(totalPuramt * half / 100 * 100) / 100;
+  const totalIgst = isInter ? Math.round(totalPuramt * gstGoods / 100 * 100) / 100 : 0;
+  // Reconcile the per-lot line GST so it sums EXACTLY to the aggregate
+  // (push the rounding remainder onto the last line). The purchase-invoice
+  // PDF totals the per-line GST column, so this keeps the printed lines,
+  // the invoice total, and Tally all in agreement.
+  if (lineItems.length) {
+    const last = lineItems[lineItems.length - 1];
+    const sumc = lineItems.reduce((s, li) => s + (li.cgst || 0), 0);
+    const sums = lineItems.reduce((s, li) => s + (li.sgst || 0), 0);
+    const sumi = lineItems.reduce((s, li) => s + (li.igst || 0), 0);
+    last.cgst = Math.round((last.cgst + (totalCgst - sumc)) * 100) / 100;
+    last.sgst = Math.round((last.sgst + (totalSgst - sums)) * 100) / 100;
+    last.igst = Math.round((last.igst + (totalIgst - sumi)) * 100) / 100;
+  }
 
   const totalBeforeRound = totalPuramt + totalCgst + totalSgst + totalIgst;
   const roundDiff = Math.round(totalBeforeRound) - totalBeforeRound;
