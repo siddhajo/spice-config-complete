@@ -524,7 +524,15 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
  * Build purchase invoice data for a seller
  * Aggregates lots by seller for a given auction (registered dealers only)
  */
-function buildPurchaseInvoice(db, auctionId, sellerName, cfg) {
+function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
+  // ispView: print the ISP planter figures (isp_pqty/isp_prate/isp_puramt)
+  // on the purchase invoice regardless of the active business state. The
+  // legacy pqty/prate/puramt fields mirror whichever state is active, so
+  // in Kerala (ASP) mode they hold ASP figures — but the downloaded
+  // registered-dealer purchase invoice should always reflect ISP. Set by
+  // the purchase-PDF download routes only; the stored-generate / TDS path
+  // leaves it off and keeps its existing behaviour.
+  const ispView = !!opts.ispView;
   // A lot qualifies for a Purchase Invoice if it has a GSTIN-bearing seller —
   // i.e. cr is either "GSTIN.<15-char>" (legacy UI format) or a bare 15-char
   // GSTIN starting with 2 digits (Excel import format). We accept both.
@@ -547,21 +555,28 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg) {
   for (const lot of lots) {
     const sellerState = gstinStateCode(lot.cr);
     const isInter = sellerState !== companyState;
-    const puramt = lot.puramt || 0;
+    // In ISP-view, source the ISP planter trio; otherwise the legacy
+    // active-view fields. Fall back to the legacy values when the ISP
+    // columns are blank (e-Auction, or lots predating the dual-view
+    // backfill — where isp_* == legacy anyway). In non-ISP mode these
+    // resolve to exactly the previous values, so that path is unchanged.
+    const prate  = ispView ? (lot.isp_prate  || lot.prate  || 0)           : (lot.prate  || 0);
+    const puramt = ispView ? (lot.isp_puramt || lot.puramt || 0)           : (lot.puramt || 0);
+    const pqty   = ispView ? (lot.isp_pqty   || lot.pqty   || lot.qty || 0) : (lot.pqty   || lot.qty || 0);
 
     const rcgst = isInter ? 0 : Math.round(puramt * (gstGoods / 2) / 100 * 100) / 100;
     const rsgst = isInter ? 0 : Math.round(puramt * (gstGoods / 2) / 100 * 100) / 100;
     const rigst = isInter ? Math.round(puramt * gstGoods / 100 * 100) / 100 : 0;
 
-    totalQty += lot.pqty || lot.qty;
+    totalQty += pqty;
     totalPuramt += puramt;
     totalBags += lot.bags || 0;
 
     lineItems.push({
       lot: lot.lot_no, bags: lot.bags, grade: lot.grade,
-      qty: lot.qty, pqty: lot.pqty,
-      price: lot.price, prate: lot.prate,
-      amount: lot.amount, puramt, 
+      qty: lot.qty, pqty: pqty,
+      price: lot.price, prate: prate,
+      amount: lot.amount, puramt,
       com: lot.com, sertax: lot.sertax,
       cgst: rcgst, sgst: rsgst, igst: rigst
     });

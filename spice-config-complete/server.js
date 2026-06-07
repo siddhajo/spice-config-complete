@@ -5137,8 +5137,10 @@ app.get('/api/purchases/pdf/:auctionId/:sellerName', requireView, async (req, re
     const auctionId = req.params.auctionId;
     const invoiceNo = req.query.invoiceNo || '001';
     
-    // Try to build fresh invoice from lots
-    let invoice = buildPurchaseInvoice(db, auctionId, sellerName, cfg);
+    // Try to build fresh invoice from lots. ispView → print ISP planter
+    // P_Rate / PurAmt (and matching Qty) on the downloaded purchase
+    // invoice regardless of the active business state.
+    let invoice = buildPurchaseInvoice(db, auctionId, sellerName, cfg, { ispView: true });
     
     // Fallback: if lots data missing, rebuild from stored purchase record
     if (!invoice) {
@@ -5249,9 +5251,10 @@ app.post('/api/purchases/pdf-bulk', requireView, async (req, res) => {
 
     const payloads = [];
     for (const stored of ordered) {
-      // Try fresh rebuild from lots first (richer line-item detail)
+      // Try fresh rebuild from lots first (richer line-item detail).
+      // ispView → ISP planter P_Rate / PurAmt on the downloaded invoice.
       let invoice = stored.auction_id
-        ? buildPurchaseInvoice(db, stored.auction_id, stored.name, cfg)
+        ? buildPurchaseInvoice(db, stored.auction_id, stored.name, cfg, { ispView: true })
         : null;
       if (!invoice) {
         // Fallback: stored summary only (one line item)
