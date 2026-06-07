@@ -389,26 +389,38 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // price. Compute both sets of numbers per lot so the PDF can show the right
   // ones AND the totals/GST align with what's printed. `isASP` is computed at
   // the top of the function (it also forces saleType to 'I').
+  // Purchase view = the ISPL-side print of an ASP sale (Sales-invoice
+  // screen → "Print Purchase Invoice"). It bills the goods using ISP's
+  // P_Qty / P_Rate / PurAmt (sample-refund-inclusive qty + the
+  // deduction1/deduction2 rate) instead of the ASP transfer numbers, so
+  // the document reflects what ISPL actually purchases.
+  const purchaseView = opts.purchaseView === true;
   for (const lot of lots) {
     totalBags += lot.bags;
     // Run calculateLot to derive prate/puramt (uses isp_profit_pooler/dealer
     // for ASP, deduction1/deduction2 for ISP). Doing this here keeps the
-    // calculation logic in one place.
+    // calculation logic in one place. It also exposes the isp_* view used
+    // by the purchase print.
     const calc = calculateLot(lot, cfg);
-    const prate = calc.prate;
-    const puramt = calc.puramt;
+    const prate  = purchaseView ? calc.isp_prate  : calc.prate;
+    const puramt = purchaseView ? calc.isp_puramt : calc.puramt;
 
-    // Totals depend on which company is billing:
-    //   ASP → total qty = lot.qty (no sample refund), total = Σ puramt
-    //   ISP → total qty = lot.qty, total = Σ amount   (unchanged behavior)
-    totalQty += lot.qty;
-    totalAmount += isASP ? puramt : lot.amount;
+    // Totals depend on which view is billing:
+    //   ASP          → total qty = lot.qty (no sample refund), total = Σ puramt
+    //   ISP (sales)  → total qty = lot.qty, total = Σ amount   (unchanged)
+    //   purchase     → total qty = Σ isp_pqty (sample refund IN), total = Σ isp_puramt
+    totalQty += purchaseView ? calc.isp_pqty : lot.qty;
+    totalAmount += (isASP || purchaseView) ? puramt : lot.amount;
 
     lineItems.push({
       lot: lot.lot_no, grade: lot.grade, bags: lot.bags, qty: lot.qty,
       price: lot.price, amount: lot.amount,
-      // Extra fields used by ASP invoice rendering:
+      // Extra fields used by ASP / purchase invoice rendering:
       prate: prate, puramt: puramt,
+      // pqty drives the qty column on ASP/purchase PDFs (falls back to qty
+      // when absent). Set it only for the purchase view so the ISP
+      // sample-refund-inclusive quantity prints.
+      ...(purchaseView ? { pqty: calc.isp_pqty } : {}),
     });
   }
 

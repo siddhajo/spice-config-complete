@@ -11682,7 +11682,13 @@ function syncLotTickedFromDom(){
     if (cb.checked) window._lotsTicked.add(id);
     else window._lotsTicked.delete(id);
   });
-  if (typeof syncLotMaster === 'function') syncLotMaster();
+  // Float the just-(un)ticked row(s) to the top, mirroring the Lot Entry
+  // recent list and the bulk "pick lots" field. Jump to page 1 so the
+  // reordered rows are visible, then re-render (loadLots re-applies the
+  // ticked-first sort and refreshes the bulk toolbar via syncLotMaster).
+  _lotsPager.page = 1;
+  if (typeof loadLots === 'function') loadLots({ keepPage: true });
+  else if (typeof syncLotMaster === 'function') syncLotMaster();
 }
 
 // Re-render the lots table so ticked rows float to the top, in their
@@ -11814,6 +11820,11 @@ async function loadLots(opts){
   // re-fetching. Replaced on every load so it stays in sync with
   // deletes / inserts / branch filter changes.
   _lotsFull = arr;
+  // Float any ticked rows to the top so a multi-select for a bulk action
+  // (or the "pick lots" field, or a per-row tick) keeps the chosen lots
+  // together on page 1. No-op when nothing is ticked — the stable sort
+  // preserves the server's lot_no order within each bucket.
+  _sortLotsTickedFirst();
 
   // Update KPI strip — count, qty, amount, calculated %, sold, withdrawn.
   const kpiStrip = document.getElementById('lot-kpis');
