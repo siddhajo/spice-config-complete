@@ -2459,14 +2459,35 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
       AND (UPPER(COALESCE(p.gstin,'')) LIKE 'GSTIN%' OR p.gstin GLOB '[0-9][0-9]*')
     ORDER BY p.invo, p.id
   `);
-  const raw = stmt.all(auctionId);
+  const rawAll = stmt.all(auctionId);
 
-  // Pull lots for each purchase (matched by name + auction)
+  // Collapse duplicate purchase vouchers for the same dealer. Repeated
+  // invoice generation leaves multiple `purchases` rows per name; since
+  // lots are attached BY NAME below, each duplicate would re-count the
+  // same lots (and emit a duplicate voucher). Keep the latest (highest
+  // id) so every registered dealer yields exactly ONE RD voucher.
+  const byNameRD = new Map();
+  for (const p of rawAll) {
+    const key = String(p.name || '').trim().toUpperCase();
+    const prev = byNameRD.get(key);
+    if (!prev || (Number(p.id) || 0) > (Number(prev.id) || 0)) byNameRD.set(key, p);
+  }
+  const raw = Array.from(byNameRD.values()).sort((a, b) => {
+    const ai = parseInt(a.invo, 10), bi = parseInt(b.invo, 10);
+    if (Number.isFinite(ai) && Number.isFinite(bi) && ai !== bi) return ai - bi;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  // Pull lots for each purchase (matched by name + auction). The
+  // HAS_GSTIN guard keeps an RD voucher from accidentally pulling a
+  // no-GSTIN seller's lots when an unregistered seller happens to share
+  // the same name (those belong on the URD side, which filters NO_GSTIN).
   const lotsStmt = db.prepare(`
     SELECT lot_no AS lot, bags AS bag, pqty AS qty, prate AS rate,
            puramt AS amount, bilamt
     FROM lots
     WHERE auction_id = ? AND name = ? AND puramt > 0
+      AND ${HAS_GSTIN_SQL}
     ORDER BY lot_no
   `);
 
@@ -2514,7 +2535,23 @@ function buildURDPurchaseRows(db, auctionId, cfg) {
     )
     ORDER BY bil, id
   `);
-  const raw = stmt.all(auctionId);
+  const rawAll = stmt.all(auctionId);
+
+  // Collapse duplicate bills for the same agriculturist. Like the RD
+  // side, lots are attached BY NAME below, so a re-generated bill (a
+  // second `bills` row with the same name) would re-count the seller's
+  // lots. Keep the latest (highest id) → one URD voucher per seller.
+  const byNameURD = new Map();
+  for (const b of rawAll) {
+    const key = String(b.name || '').trim().toUpperCase();
+    const prev = byNameURD.get(key);
+    if (!prev || (Number(b.id) || 0) > (Number(prev.id) || 0)) byNameURD.set(key, b);
+  }
+  const raw = Array.from(byNameURD.values()).sort((a, b) => {
+    const ai = parseInt(a.bil, 10), bi = parseInt(b.bil, 10);
+    if (Number.isFinite(ai) && Number.isFinite(bi) && ai !== bi) return ai - bi;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
 
   // Read ISP planter values directly from the dedicated columns. These are
   // populated by calculateLot() on every save (regardless of which

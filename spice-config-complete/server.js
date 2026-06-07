@@ -5,7 +5,7 @@ const fs = require('fs');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
-const { initDb, getDb, flushDb, replaceDbFromBuffer, DB_PATH } = require('./db');
+const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF } = require('./invoice-pdf');
@@ -205,6 +205,10 @@ function requireAuth(req, res, next) {
   db.run(`UPDATE sessions SET last_used_at = datetime('now','localtime') WHERE token = ?`, [token]);
   req.user = user;
   req.session = session;
+  // Attribute every write in this request to the signed-in user via the
+  // modified_by stamping triggers. sql.js runs synchronously, so the actor
+  // set here stays correct through the handler's writes.
+  setActor(user.username);
   next();
 }
 

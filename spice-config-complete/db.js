@@ -48,6 +48,44 @@ let rawDb = null;       // sql.js Database instance
 let wrapped = null;     // our API wrapper
 let pendingSave = null; // debounced fs.writeFile timer
 let lockOwned = false;  // true once we've successfully acquired LOCK_PATH
+let currentActor = '';  // username stamped into modified_by by table triggers
+
+/**
+ * Set the username attributed to subsequent writes via the modified_by
+ * stamping triggers. server.js's requireAuth calls this per request so
+ * every INSERT/UPDATE records WHO made it without touching any call site.
+ * Background / migration writes run with '' (or 'system' during boot).
+ * sql.js executes synchronously, so within one request's run of writes
+ * the actor can't be clobbered by another request mid-statement.
+ */
+function setActor(name) {
+  currentActor = (name == null) ? '' : String(name);
+}
+
+/**
+ * Register per-connection SQL functions. sql.js functions live on the
+ * Database instance, not in the file, so this MUST be re-run after every
+ * open and after replaceDbFromBuffer (restore) — otherwise the stamping
+ * triggers below would fail with "no such function: current_actor".
+ */
+function registerDbFunctions(database) {
+  try { database.create_function('current_actor', () => currentActor); } catch (_) {}
+}
+
+/**
+ * One-time data-migration ledger. Some fixes (e.g. retagging invoice
+ * state) must run exactly ONCE per database, never on every boot — an
+ * unguarded re-run is exactly what silently re-flipped imported ASP
+ * invoices to ISP. These helpers gate such fixes on a marker row.
+ */
+function dataMigrationDone(db, name) {
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)`);
+  return !!db.get('SELECT value FROM schema_meta WHERE key = ?', [name]);
+}
+function markDataMigration(db, name) {
+  db.run('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)',
+    [name, new Date().toISOString()]);
+}
 
 /**
  * Persist the in-memory DB to disk. Debounced 200ms so a burst of writes
@@ -208,6 +246,12 @@ async function initDb() {
 
   // Enable foreign keys
   rawDb.run("PRAGMA foreign_keys = ON;");
+  // Register current_actor() before any write so the stamping triggers
+  // (created in the migrations section) can resolve it. Boot-time and
+  // migration writes are attributed to 'system' until the first
+  // authenticated request calls setActor().
+  registerDbFunctions(rawDb);
+  setActor('system');
 
   wrapped = makeWrapper();
 
@@ -663,6 +707,15 @@ async function initDb() {
   ];
   for (const idx of indexes) { try { wrapped.exec(idx); } catch (e) {} }
 
+  // Business-data tables that carry modified_at / modified_by audit
+  // columns and the stamping triggers. Deliberately EXCLUDES append-only
+  // or system tables (sessions, license_state, audit_log, delete_log,
+  // login_history, import_log, schema_meta) where "who last modified this
+  // row" is either meaningless or already captured by the table itself.
+  const AUDITED_TABLES = ['traders','trader_banks','buyers','auctions',
+    'generation_overrides','lots','invoices','purchases','bills',
+    'debit_notes','lot_allocations','route_distances','users'];
+
   // ── MIGRATIONS (for existing databases created before schema changes) ──
   const migrations = [
     'ALTER TABLE purchases ADD COLUMN auction_id INTEGER',
@@ -769,10 +822,38 @@ async function initDb() {
     // Feeds the Spices Board e-Auction CSV's reserved-price column on
     // export. Stored as REAL — value is in rupees per kg.
     'ALTER TABLE lots ADD COLUMN reserved_price REAL DEFAULT 0',
+    // ── modified_at / modified_by audit columns ──────────────────
+    // WHEN a row last changed and WHO changed it. Stamped automatically
+    // by the AFTER INSERT/UPDATE triggers created below (no call site is
+    // touched). A constant '' default is required because SQLite refuses
+    // ADD COLUMN with a non-constant default like CURRENT_TIMESTAMP —
+    // the trigger fills the real timestamp on the very next write.
+    ...AUDITED_TABLES.flatMap(t => [
+      `ALTER TABLE ${t} ADD COLUMN modified_at TEXT DEFAULT ''`,
+      `ALTER TABLE ${t} ADD COLUMN modified_by TEXT DEFAULT ''`,
+    ]),
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
     catch (e) { /* column already exists — ignore */ }
+  }
+
+  // ── modified_at / modified_by stamping triggers ────────────────
+  // Every write to an audited table records WHEN it changed and WHO
+  // changed it, without any application call site having to pass the
+  // values. modified_at is a localtime timestamp; modified_by is
+  // current_actor() — the username set by setActor() for the in-flight
+  // request, or 'system'/'' for background work. The trigger's own
+  // UPDATE does NOT recurse: PRAGMA recursive_triggers is OFF by default
+  // (verified at boot below), so an AFTER UPDATE trigger that updates its
+  // own row will not re-fire itself.
+  for (const t of AUDITED_TABLES) {
+    try {
+      wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modins AFTER INSERT ON ${t}
+        BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+      wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modupd AFTER UPDATE ON ${t}
+        BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+    } catch (e) { /* table may not exist on a partial schema — ignore */ }
   }
 
   // Price-check backfill: any auction that was already verified BEFORE
@@ -809,48 +890,55 @@ async function initDb() {
     }
   } catch (e) { /* ignore — column may not exist on first run */ }
 
-  // One-time data fix: legacy invoices were stamped with the auction's
-  // state (TAMIL NADU/KERALA based on physical auction location), not the
-  // business context state. Retag them so the sales list can correctly
-  // distinguish ASP rows from ISP rows.
+  // One-time data fix for the sales-invoice ISP/ASP book split.
+  // `invoices.state` records which company book a row belongs to:
+  // KERALA = ASP (Amazing Spice Park), TAMIL NADU = ISP (Ideal Spices).
+  // This corrects two earlier problems:
+  //   1. Legacy rows were stamped with the auction's PHYSICAL state, not
+  //      the company-book state.
+  //   2. A previous version of this fix re-ran on EVERY boot and, having
+  //      no ASP signal for IMPORTED invoices (which carry no lot lineage),
+  //      silently re-stamped them all to TAMIL NADU — so ASP imports
+  //      drifted into ISP after a restart. That is the bug this replaces.
   //
-  // Heuristic per invoice:
-  //   - If the invoice's `invo` equals `lots.asp_invo` for any of its
-  //     buyer/auction lots AND those lots' current `invo` differs from
-  //     `asp_invo` → invoice was the ASP step (stamp KERALA).
-  //   - Else if any of those lots have `asp_invo == invo == this invoice's
-  //     invo` → ASP-only run (stamp KERALA).
-  //   - Otherwise → ISP invoice (stamp TAMIL NADU).
-  // Safe-by-default: only updates rows we can confidently classify.
-  // Idempotent: re-running produces the same labels.
-  try {
-    const allInvs = wrapped.all('SELECT id, auction_id, buyer, invo FROM invoices');
-    let aspCount = 0, ispCount = 0;
-    for (const inv of allInvs) {
-      const lotMatches = wrapped.all(
-        `SELECT invo, asp_invo FROM lots
-         WHERE auction_id = ? AND buyer = ?
-           AND (invo = ? OR asp_invo = ?)`,
-        [inv.auction_id, inv.buyer, inv.invo, inv.invo]
-      );
-      // Determine state: ASP if this invoice matches asp_invo on any lot,
-      // ISP otherwise (lots have a different ISP invo and asp_invo links
-      // back to this row).
-      let isASP = false;
-      for (const l of lotMatches) {
-        if (l.asp_invo === inv.invo) { isASP = true; break; }
-        // If lot's invo == this inv's invo AND lot's asp_invo is empty,
-        // this is most likely an ISP-only invoice — but COULD be an ASP
-        // run pre-asp_invo column. Default to ISP context (TN).
+  // It now runs EXACTLY ONCE (guarded by schema_meta) and classifies each
+  // invoice by the SAME authoritative signals the importer uses, in order:
+  //   • PLACE prefixed "ASP"                                  → KERALA
+  //   • a lot in the same auction+buyer whose asp_invo == invo → KERALA
+  //   • otherwise                                             → TAMIL NADU
+  // Because it is PLACE-aware, the one-time run also RECOVERS rows the
+  // buggy version already flipped (their PLACE still starts with "ASP").
+  // Non-destructive: only writes when the computed book differs from the
+  // stored one.
+  if (!dataMigrationDone(wrapped, 'retag_invoice_state_v2')) {
+    try {
+      const allInvs = wrapped.all('SELECT id, auction_id, buyer, invo, place, state FROM invoices');
+      let aspCount = 0, ispCount = 0, changed = 0;
+      for (const inv of allInvs) {
+        let isASP = String(inv.place || '').trim().toUpperCase().startsWith('ASP');
+        if (!isASP) {
+          // Generated ASP invoices carry no ASP-prefixed place, but their
+          // lots keep the ASP invoice number in asp_invo as lineage.
+          const lineage = wrapped.get(
+            `SELECT 1 FROM lots
+              WHERE auction_id = ? AND buyer = ? AND asp_invo = ? LIMIT 1`,
+            [inv.auction_id, inv.buyer, inv.invo]
+          );
+          isASP = !!lineage;
+        }
+        const newState = isASP ? 'KERALA' : 'TAMIL NADU';
+        if (String(inv.state || '').toUpperCase() !== newState) {
+          wrapped.run('UPDATE invoices SET state = ? WHERE id = ?', [newState, inv.id]);
+          changed++;
+        }
+        if (isASP) aspCount++; else ispCount++;
       }
-      const newState = isASP ? 'KERALA' : 'TAMIL NADU';
-      wrapped.run('UPDATE invoices SET state = ? WHERE id = ?', [newState, inv.id]);
-      if (isASP) aspCount++; else ispCount++;
-    }
-    if (aspCount + ispCount > 0) {
-      console.log(`Migration: retagged ${aspCount} invoices as KERALA (ASP) and ${ispCount} as TAMIL NADU (ISP) based on lot lineage`);
-    }
-  } catch (e) { /* table may not exist on fresh DB — ignore */ }
+      if (aspCount + ispCount > 0) {
+        console.log(`Migration: classified ${aspCount} invoices as KERALA (ASP) and ${ispCount} as TAMIL NADU (ISP) by PLACE + lot lineage (${changed} re-stamped)`);
+      }
+      markDataMigration(wrapped, 'retag_invoice_state_v2');
+    } catch (e) { /* table may not exist on fresh DB — ignore */ }
+  }
 
   const row = wrapped.get('SELECT COUNT(*) as cnt FROM users');
   if (!row || row.cnt === 0) {
@@ -1058,10 +1146,14 @@ function replaceDbFromBuffer(buf) {
   }
   rawDb = new SQL.Database(buf);
   rawDb.run("PRAGMA foreign_keys = ON;");
+  // Re-register current_actor() on the fresh connection — sql.js functions
+  // are per-instance, and the restored DB's stamping triggers reference it,
+  // so any write would otherwise fail with "no such function".
+  registerDbFunctions(rawDb);
   // Schedule a save so the new state is persisted to disk immediately
   // (and not just held in memory until the next write).
   scheduleSave();
   flushSave();
 }
 
-module.exports = { initDb, getDb, closeDb, flushDb, replaceDbFromBuffer, DB_PATH };
+module.exports = { initDb, getDb, closeDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH };
