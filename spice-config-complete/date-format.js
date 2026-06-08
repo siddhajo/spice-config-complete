@@ -19,9 +19,9 @@ function getDateFormat() {
   try {
     const { getSetting } = require('./company-config');
     const { getDb }      = require('./db');
-    _cache = String(getSetting(getDb(), 'date_format') || 'DD/MM/YYYY').toUpperCase();
+    _cache = String(getSetting(getDb(), 'date_format') || 'dd/mm/yyyy');
   } catch (_) {
-    _cache = 'DD/MM/YYYY';
+    _cache = 'dd/mm/yyyy';
   }
   return _cache;
 }
@@ -29,35 +29,16 @@ function getDateFormat() {
 function invalidateDateFormatCache() { _cache = null; }
 
 // Display: ISO yyyy-mm-dd (or any date-ish input) → user-chosen format.
-// Pass `fmt` explicitly when you already have the format string handy
-// (e.g. inside a loop building a PDF), otherwise the cached default is
-// used. Falls through to the original string when the input can't be
-// parsed.
+// Delegates to the single canonical formatter (report-formatters) so the
+// XLSX exports follow the exact same date format as the rest of the app,
+// including the month-name variants. Pass `fmt` to override the setting.
 function fmtDate(d, fmt) {
   if (!d && d !== 0) return '';
-  let iso = '';
-  if (d instanceof Date && !isNaN(d)) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    iso = `${y}-${m}-${day}`;
-  } else {
-    const s = String(d).trim();
-    // ISO yyyy-mm-dd (possibly with time)
-    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) iso = `${m[1]}-${m[2]}-${m[3]}`;
-    else {
-      // dd/mm/yyyy or dd-mm-yyyy
-      m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      if (m) iso = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
-    }
+  try {
+    return require('./report-formatters').formatDateForDisplay(d, fmt || getDateFormat());
+  } catch (_) {
+    return String(d);
   }
-  if (!iso) return String(d);
-  const [y, mo, day] = iso.split('-');
-  const f = String(fmt || getDateFormat() || 'DD/MM/YYYY').toUpperCase();
-  if (f === 'YYYY-MM-DD') return `${y}-${mo}-${day}`;
-  if (f === 'DD-MM-YYYY') return `${day}-${mo}-${y}`;
-  return `${day}/${mo}/${y}`;   // DD/MM/YYYY (default)
 }
 
 // Today's date in local time as YYYY-MM-DD — use this instead of

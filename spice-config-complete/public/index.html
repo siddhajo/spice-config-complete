@@ -5664,24 +5664,44 @@ function fmtI(v, decimals){
   return sign+formatted+(dp?'.'+dp:'');
 }
 // Format any date-ish value → dd/mm/yyyy. Handles ISO, Excel serial numbers, dd/mm/yyyy, Date objects.
+// App-wide display date format, mirrored from the `date_format` setting.
+// Loaded once at startup (_loadAppDateFmt) and refreshed after a settings
+// save, so every fmtD() call across the UI follows the operator's choice.
+let _appDateFmt = 'dd/mm/yyyy';
+async function _loadAppDateFmt(){
+  try { const c = await j('/api/company-settings/flat'); if (c && c.date_format) _appDateFmt = String(c.date_format); }
+  catch(_){}
+}
+// Format pre-split y/mo/day per the chosen token. Mirrors the server's
+// report-formatters.formatDateForDisplay so screen + exports + PDFs match.
+function _fmtDateParts(y, mo, day, fmt){
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const mmm = MON[Number(mo)-1] || mo;
+  switch(String(fmt || _appDateFmt || 'dd/mm/yyyy').toLowerCase()){
+    case 'mm/dd/yyyy':  return `${mo}/${day}/${y}`;
+    case 'yyyy-mm-dd':  return `${y}-${mo}-${day}`;
+    case 'dd-mmm-yyyy': return `${day}-${mmm}-${y}`;
+    case 'dd mmm yyyy': return `${day} ${mmm} ${y}`;
+    default:            return `${day}/${mo}/${y}`;   // dd/mm/yyyy
+  }
+}
 function fmtD(v){
   if(v===null||v===undefined||v==='')return '';
   const s=String(v).trim();
-  // Already ISO yyyy-mm-dd
+  const pad=x=>String(x).padStart(2,'0');
+  // ISO yyyy-mm-dd
   const m1=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if(m1)return m1[3]+'/'+m1[2]+'/'+m1[1];
-  // dd/mm/yyyy or dd-mm-yyyy — already in display format
-  if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}/.test(s))return s.replace(/-/g,'/');
+  if(m1)return _fmtDateParts(m1[1], m1[2], m1[3]);
+  // dd/mm/yyyy or dd-mm-yyyy (already day-first display form)
+  const m2=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if(m2)return _fmtDateParts(m2[3], pad(m2[2]), pad(m2[1]));
   // Numeric Excel serial (days since 1900-01-01, with leap-year bug)
   if(/^\d+(\.\d+)?$/.test(s)){
     const n=Number(s);
     if(n>0&&n<80000){
       const ms=(n-25569)*86400*1000;
       const d=new Date(ms);
-      if(!isNaN(d)){
-        const pad=x=>String(x).padStart(2,'0');
-        return pad(d.getUTCDate())+'/'+pad(d.getUTCMonth()+1)+'/'+d.getUTCFullYear();
-      }
+      if(!isNaN(d))return _fmtDateParts(d.getUTCFullYear(), pad(d.getUTCMonth()+1), pad(d.getUTCDate()));
     }
   }
   return s;
@@ -8055,6 +8075,9 @@ async function loadSettings(){
   try{
     const d=await j('/api/company-settings');
     _cats=d.categories||{};_sdata=d.settings||{};
+    // Mirror the app-wide date format (Settings → Display) so every fmtD()
+    // call across the UI uses the operator's chosen format from boot.
+    try { const _df=(_sdata.display||[]).find(f=>f.key==='date_format'); if(_df&&_df.value)_appDateFmt=String(_df.value); } catch(_){}
     // Load presets (ISP/ASP snapshots of company-category fields). Best-effort
     // — if the endpoint is unavailable (old server), _presets stays empty
     // and the Company tab falls back to plain editing.
@@ -9180,6 +9203,24 @@ function fld(f){
         <option value="ASP"${v==='ASP'?' selected':''}>ASP (Amazing Spice Park Private Limited)</option>
       </select></div>`;
   }
+  // Date format → fixed dropdown of the supported display tokens (the
+  // app-wide date format). Options aren't stored in the DB, so they're
+  // listed here; the value matches report-formatters.formatDateForDisplay.
+  if (f.key === 'date_format') {
+    const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
+    const cur = String(f.value || 'dd/mm/yyyy').toLowerCase();
+    const opts = [
+      ['dd/mm/yyyy',  'DD/MM/YYYY        (08/06/2026)'],
+      ['dd-mmm-yyyy', 'DD-MMM-YYYY       (08-Jun-2026)'],
+      ['dd mmm yyyy', 'DD MMM YYYY       (08 Jun 2026)'],
+      ['yyyy-mm-dd',  'YYYY-MM-DD        (2026-06-08)'],
+      ['mm/dd/yyyy',  'MM/DD/YYYY        (06/08/2026)'],
+    ];
+    return `<div class="fg"><label>${esc(f.label)}${tip}</label>`
+      + `<select data-key="${f.key}">`
+      + opts.map(([v, lbl]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('')
+      + `</select></div>`;
+  }
   // Boolean → toggle switch. Emits data-type="boolean" so captureCurrentPanel()
   // reads it as 'true'/'false' on save. Used by is_partnership (Company)
   // and s_is_partnership (Sister).
@@ -9187,6 +9228,11 @@ function fld(f){
     const ckd = (String(f.value).toLowerCase() === 'true') ? 'checked' : '';
     const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
     return `<div class="fg" style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px 12px"><label style="margin:0">${esc(f.label)}${tip}</label><label class="sw"><input type="checkbox" data-key="${f.key}" data-type="boolean" ${ckd}><span class="sl"></span></label></div>`;
+  }
+  // Multi-line text (e.g. FORM-D Place of Auction — one per line) → textarea.
+  if (f.field_type === 'textarea' || f.type === 'textarea') {
+    const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
+    return `<div class="fg"><label>${esc(f.label)}${tip}</label><textarea data-key="${f.key}" rows="4" style="resize:vertical;min-height:80px">${esc(f.value)}</textarea></div>`;
   }
   const t = f.field_type === 'number' ? 'number' : f.field_type === 'date' ? 'date' : 'text';
   const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
@@ -9513,6 +9559,8 @@ async function saveSettings(){
     await refreshGlobalAidList();
     if (typeof onGlobalAidChange === 'function') onGlobalAidChange();
   }
+  // Pick up a changed date format so fmtD() across the UI uses it right away.
+  if (typeof _loadAppDateFmt === 'function') { try { await _loadAppDateFmt(); } catch (_) {} }
   toast('Settings saved');
 }
 async function exportSettings(){const d=await j('/api/company-settings/export');const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});

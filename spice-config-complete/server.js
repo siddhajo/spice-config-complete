@@ -180,14 +180,22 @@ function normalizeDate(v) {
 }
 
 // Display: yyyy-mm-dd → dd/mm/yyyy (handles Excel serials defensively too)
+// App-wide display date format, read from the `date_format` setting and
+// cached (invalidated on settings save — see the PUT /api/company-settings
+// handler). Falls back to dd/mm/yyyy. Drives every server-rendered date
+// (JSON list `date_fmt` fields, payment statement PDF, etc.).
+let _dateFmtCache = null;
+function _displayDateFormat() {
+  if (_dateFmtCache != null) return _dateFmtCache;
+  try { _dateFmtCache = getSettingsFlat(getDb()).date_format || 'dd/mm/yyyy'; }
+  catch (_) { _dateFmtCache = 'dd/mm/yyyy'; }
+  return _dateFmtCache;
+}
+function invalidateDateFmtCache() { _dateFmtCache = null; }
 function fmtDate(d) {
   if (!d && d !== 0) return '';
   const iso = normalizeDate(d);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    const [y, m, day] = iso.split('-');
-    return `${day}/${m}/${y}`;
-  }
-  return String(d);
+  return require('./report-formatters').formatDateForDisplay(iso, _displayDateFormat());
 }
 
 function withFmtDate(rows, field = 'date') {
@@ -675,6 +683,10 @@ app.get('/api/company-settings', requireView, (req, res) => {
 });
 app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
   const count = updateSettings(getDb(), req.body.settings || {});
+  // The date-format choice is cached by the formatters; drop the caches so
+  // the change takes effect immediately without a restart.
+  invalidateDateFmtCache();
+  try { require('./date-format').invalidateDateFormatCache(); } catch (_) {}
   res.json({ success: true, updated: count });
 });
 app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSettingsFlat(getDb())));
@@ -1112,6 +1124,8 @@ app.get('/api/company-settings/export', requireExport, (req, res) => {
 });
 app.post('/api/company-settings/import', requireSettingsWrite, (req, res) => {
   const count = updateSettings(getDb(), req.body.settings || {});
+  invalidateDateFmtCache();
+  try { require('./date-format').invalidateDateFormatCache(); } catch (_) {}
   res.json({ success: true, imported: count });
 });
 

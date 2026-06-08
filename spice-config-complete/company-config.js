@@ -367,11 +367,23 @@ const DEFAULTS = [
   { key: 'formd_places', value: '', category: 'spice_board',
     label: 'FORM-D Place of Auction (one per line)',
     type: 'textarea' },
+
+  // App-wide date display format. Value is one of the format tokens
+  // understood by report-formatters.formatDateForDisplay (lower-case).
+  // Read by the central formatters (server fmtDate, date-format.js,
+  // the frontend fmtD, and the Spice Board reports) so every on-screen,
+  // exported and printed date follows the operator's choice. Machine
+  // formats (Tally XML's YYYYMMDD, DBF exports, and ISO DB storage) are
+  // deliberately NOT affected.
+  { key: 'date_format', value: 'dd/mm/yyyy', category: 'display',
+    label: 'Date format (used across the app)',
+    type: 'select' },
 ];
 
 const CATEGORIES = {
   mode:       { order: 0, title: 'Business Mode',        icon: '⚙' },
   company:    { order: 1, title: 'Company Details',       icon: '🏢' },
+  display:    { order: 1.5, title: 'Display',             icon: '🗓', description: 'App-wide display preferences. The date format chosen here is used consistently across the screens, exports, and printed reports.' },
   address_kl: { order: 2, title: 'Address (Kerala)',      icon: '📍' },
   address_tn: { order: 3, title: 'Address (Tamil Nadu)',  icon: '📍' },
   sister:     { order: 4, title: 'Sister Company (ASP)',  icon: '🤝' },
