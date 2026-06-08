@@ -68,6 +68,15 @@ select:focus{border-color:var(--green)}
 .tc::before{content:'';position:absolute;top:0;right:0;width:60px;height:60px;background:radial-gradient(circle,rgba(13,124,95,.08) 0%,transparent 70%);pointer-events:none}
 .tc .ti{flex:1}.tc .tn{font-size:13px;font-weight:700;color:var(--green)}.tc .td{font-size:10px;color:var(--text2);line-height:1.5;margin-top:2px}
 .tc .tx{background:none;border:none;color:var(--text3);font-size:18px;cursor:pointer;padding:2px}
+/* Highlighted banner for the trade the admin locked in (set in admin app).
+   Replaces the old tiny grey one-liner so the operator can't miss which
+   trade they're about to enter lots against. */
+.trade-set{background:var(--green-light);border:2px solid var(--green);border-radius:var(--radius);padding:12px 14px;margin-top:8px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.trade-set::before{content:'';position:absolute;top:0;right:0;width:80px;height:80px;background:radial-gradient(circle,rgba(13,124,95,.1) 0%,transparent 70%);pointer-events:none}
+.trade-set .ts-label{font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--green);margin-bottom:5px}
+.trade-set .ts-no{font-size:23px;font-weight:800;color:var(--green);line-height:1.05}
+.trade-set .ts-meta{font-size:15px;color:var(--text);font-weight:600;margin-top:5px;line-height:1.35}
+.trade-set .ts-tag{font-size:10px;color:var(--text3);font-weight:600;margin-top:6px;text-transform:uppercase;letter-spacing:.4px}
 
 /* ── STATUS BAR ── */
 .sb{background:var(--stat-bg);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:relative}
@@ -747,6 +756,7 @@ async function loadAvailableTrades(){
   var info=document.getElementById('ss-trade-info');
   sel.innerHTML='<option value="">Loading...</option>';
   info.textContent='';
+  info.className=''; // shed any prior .trade-set highlight before re-render
   try{
     var r=await fetch(B+'/api/mobile/auctions',{headers:{'Authorization':'Bearer '+token}});
     if(!r.ok){
@@ -808,7 +818,13 @@ async function loadAvailableTrades(){
           var lbl=document.getElementById('ss-trade-label'); if(lbl)lbl.style.display='none';
           sel.style.display='none';
           var intro=document.getElementById('ss-intro'); if(intro)intro.textContent='Select a branch to start entering lots';
-          info.innerHTML='Trade <b>#'+(o?o.getAttribute('data-ano'):ad.auctionId)+'</b> — '+(o?o.textContent.replace(/^Trade #\d+\s*-\s*/,''):'')+' <span style="color:var(--text3)">(set in admin app)</span>';
+          var tradeNo=(o?o.getAttribute('data-ano'):ad.auctionId);
+          var tradeMeta=(o?o.textContent.replace(/^Trade #\d+\s*-\s*/,''):'');
+          info.className='trade-set';
+          info.innerHTML='<div class="ts-label">Current trade</div>'
+            +'<div class="ts-no">Trade #'+tradeNo+'</div>'
+            +(tradeMeta?'<div class="ts-meta">'+tradeMeta+'</div>':'')
+            +'<div class="ts-tag">Set in admin app</div>';
         }
       }
     }catch(_){}
