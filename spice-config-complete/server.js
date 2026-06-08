@@ -6489,7 +6489,15 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   const lotIdFilter = Array.isArray(lotIds)
     ? lotIds.map(n => parseInt(n, 10)).filter(Number.isFinite)
     : [];
-  let lotSql = `SELECT id, lot_no, qty, prate AS rate, amount, puramt, refund, balance, cgst, sgst, igst
+  // Payment statement is purchase-side: show the ISP planter trio
+  // (P_Qty / P_Rate / PurAmt) for Qty / Rate / Amount — consistent with
+  // the Payments screen and the lots modal. Falls back to the active-view
+  // columns for e-Auction / older lots where isp_* wasn't backfilled.
+  let lotSql = `SELECT id, lot_no,
+        CASE WHEN isp_puramt > 0 THEN isp_pqty   ELSE pqty   END AS qty,
+        CASE WHEN isp_puramt > 0 THEN isp_prate  ELSE prate  END AS rate,
+        CASE WHEN isp_puramt > 0 THEN isp_puramt ELSE puramt END AS amount,
+        puramt, refund, balance, cgst, sgst, igst
        FROM lots
       WHERE auction_id = ?
         AND TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))

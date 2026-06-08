@@ -3278,7 +3278,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div style="height:280px;position:relative"><canvas id="pay-top-sellers-chart"></canvas></div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Purchase</th><th>Discount</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="payments-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Discount</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="payments-list"></tbody></table></div>
         <div id="payments-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -14152,7 +14152,7 @@ async function loadPayments(opts){
   if (!opts || !opts.keepPage) _paymentsPager.page = 1;
   const aid=document.getElementById('pay-auction').value;
   const body=document.getElementById('payments-list');
-  if(!aid){body.innerHTML='<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
+  if(!aid){body.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
   try{
     let rows;
     if (opts && opts.useCache && _paymentsAll.length) {
@@ -14261,9 +14261,12 @@ async function loadPayments(opts){
             return `<span style="font-weight:600;color:${full ? '#991B1B' : 'var(--spice-text-main)'}">${esc(p.name||'')}</span>${badge}`;
           } },
         { key:'lot_count', label:'Lots', sort:'number', numeric:true },
+        // Qty + Amount are the ISP purchase figures (P_Qty / PurAmt) from
+        // getPaymentSummary — kept in step with the lots modal and the
+        // printed statement. (The old sale-side "Amount" + separate
+        // "Purchase" columns collapsed into one purchase Amount.)
         { key:'total_qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
         { key:'total_amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
-        { key:'total_puramt', label:'Purchase', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
         { key:'total_discount', label:'Discount', sort:'number', numeric:true,
           fmt:(n)=>fmtI(n,2),
           // Discount in turmeric/amber for visual distinction
@@ -14382,7 +14385,7 @@ async function loadPayments(opts){
       }
     }
   }catch(e){
-    body.innerHTML=`<tr><td colspan="9" style="text-align:center;color:var(--red);padding:24px">Failed to load: ${esc(e.message)}</td></tr>`;
+    body.innerHTML=`<tr><td colspan="8" style="text-align:center;color:var(--red);padding:24px">Failed to load: ${esc(e.message)}</td></tr>`;
   }
 }
 

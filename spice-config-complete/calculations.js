@@ -683,10 +683,17 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
   const discountCol = (mode === 'auction') ? 'advance' : 'refund';
   // First fetch the per-lot summary
+  // Payments are purchase-side: show the ISP planter trio (P_Qty / P_Rate /
+  // PurAmt) consistently — total_qty = Σ isp_pqty and total_amount = Σ
+  // isp_puramt — so the screen, the lots modal and the printed statement
+  // all agree. Falls back to the active-view columns for e-Auction / older
+  // lots where isp_* wasn't backfilled (isp_puramt = 0).
   let query = `SELECT l.name, l.cr,
-    SUM(l.qty) as total_qty, SUM(l.amount) as total_amount,
-    SUM(l.pqty) as total_pqty, SUM(l.prate) as avg_prate,
-    SUM(l.puramt) as total_puramt,
+    SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_qty,
+    SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) as total_amount,
+    SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_pqty,
+    SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_prate  ELSE l.prate  END) as avg_prate,
+    SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) as total_puramt,
     SUM(l.${discountCol}) as lot_discount,
     SUM(l.balance) as total_payable,
     COUNT(*) as lot_count
