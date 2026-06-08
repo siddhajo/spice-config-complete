@@ -825,6 +825,12 @@ const TENANT_FONTS = ['jakarta', 'inter', 'outfit', 'system'];
 // + CSS rules that adjust padding / corner radius / row heights.
 const TENANT_DENSITIES = ['compact', 'roomy', 'spacious'];
 
+// Named colour themes the frontend knows how to render (body[data-theme]).
+// Used both to populate the per-company theme dropdowns on /admin/branding
+// and to validate the saved isp_theme / asp_theme values. Mirrors _THEMES
+// in index.html (minus 'custom', which needs a hex and isn't per-company).
+const THEME_SLUGS = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate'];
+
 // Gatekeeper. Compares against ADMIN_BRANDING_KEY env var, falling back
 // to 'change-me' so an unsecured deploy is loud — running ?key=change-me
 // in production logs is a clear signal to set the env var.

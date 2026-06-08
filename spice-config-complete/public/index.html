@@ -20550,10 +20550,11 @@ const _THEMES = ['emerald','coral','violet','sunshine','electric','ocean','tech'
 // white-label lock-down). Driven by the /api/branding fetch below.
 let _brandingPresetActive = false;
 function setTheme(t){
-  // A white-label preset locks the theme — ignore user theme clicks while
-  // one is active (the Appearance card is normally hidden too, but this
-  // guards against any stale UI that slips a click through).
-  if (_brandingPresetActive) return;
+  // A white-label preset (or admin-configured per-company themes) locks
+  // the theme — ignore user theme clicks while either is active (the
+  // Appearance card is normally hidden too, but this guards against any
+  // stale UI that slips a click through).
+  if (_brandingPresetActive || _companyThemesConfigured) return;
   if (!_THEMES.includes(t)) t = 'emerald';
   document.body.setAttribute('data-theme', t);
   try { localStorage.setItem('theme', t); } catch(e){}
@@ -20574,12 +20575,21 @@ function setTheme(t){
 // fires on settings load and whenever the business state/mode or the
 // active company preset changes. This intentionally OVERRIDES any manual
 // theme chip selection — company identity is the source of truth.
-const _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
+// Defaults below are used until the admin configures per-company themes
+// on /admin/branding (ISP theme + ASP theme), at which point the boot
+// branding fetch overwrites this map and sets _companyThemesConfigured.
+let _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
+// True once the admin has set explicit per-company themes. When set, the
+// per-company colour applies even under a white-label preset, and users
+// can't override it (Appearance card hidden + setTheme() no-op).
+let _companyThemesConfigured = false;
 function applyCompanyTheme(){
   // A white-label tenant preset locks the look install-wide. Don't let
   // per-company auto-theming fight it — the preset's theme is the source
-  // of truth once one is active.
-  if (_brandingPresetActive) return;
+  // of truth once one is active. EXCEPTION: when the admin has configured
+  // explicit per-company themes (ISP theme + ASP theme on /admin/branding),
+  // those win even under a preset, so each company keeps its own colour.
+  if (_brandingPresetActive && !_companyThemesConfigured) return;
   let code;
   try { code = String(getCurrentLogoCode() || 'ISP').toUpperCase(); }
   catch(e){ code = 'ISP'; }
@@ -20609,7 +20619,11 @@ function applyCompanyTheme(){
   fetch(B + '/api/branding')
     .then(r => r.ok ? r.json() : null)
     .then(d => {
-      if (!d || !d.preset || !d.presetConfig) return; // legacy mode — nothing to lock down
+      if (!d) return; // network/legacy — localStorage theme already applied
+      // ── 1) White-label tenant preset (density / font / personality /
+      //    base colour). Applied first so per-company colours below can
+      //    override just the colour while keeping the preset's layout. ──
+      if (d.preset && d.presetConfig) {
       const p = d.presetConfig;
       // Color theme from preset overrides localStorage / company-auto-
       // theme. We DON'T write it back to localStorage because the user
@@ -20638,6 +20652,22 @@ function applyCompanyTheme(){
       if (p.hideAppearance) {
         const card = document.getElementById('appearance-card');
         if (card) card.style.display = 'none';
+      }
+      }
+      // ── 2) Per-company colour themes (ISP / ASP), configured by the
+      //    admin on /admin/branding. When set, each company keeps its OWN
+      //    locked colour — applied per active company by applyCompanyTheme,
+      //    overriding the preset's single colour, and working with or
+      //    without a preset. Appearance card hidden so users can't change it.
+      if (d.ispTheme || d.aspTheme) {
+        _COMPANY_THEME = {
+          ISP: _THEMES.includes(d.ispTheme) ? d.ispTheme : 'emerald',
+          ASP: _THEMES.includes(d.aspTheme) ? d.aspTheme : 'ocean',
+        };
+        _companyThemesConfigured = true;
+        const _ac = document.getElementById('appearance-card');
+        if (_ac) _ac.style.display = 'none';
+        applyCompanyTheme();
       }
     })
     .catch(()=>{}); // network failure is fine — localStorage already applied
