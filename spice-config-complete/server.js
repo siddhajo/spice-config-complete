@@ -14,7 +14,7 @@ const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
-const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
+const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
@@ -673,7 +673,7 @@ app.delete('/api/me/sessions/:tokenSuffix', requireView, (req, res) => {
 // /api/config, /api/lots (query form), /api/logo, and receipt-print
 // routes the PWA's app.html depends on.
 const { mountMobile } = require('./mobile-bridge');
-mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS });
+mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS, auditLog });
 
 // ══════════════════════════════════════════════════════════════
 // COMPANY SETTINGS
@@ -690,6 +690,24 @@ app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
   res.json({ success: true, updated: count });
 });
 app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSettingsFlat(getDb())));
+
+// ── Active trade (shared) ────────────────────────────────────
+// The admin app's topbar trade picker pushes its current selection here
+// so the mobile app can default to the same trade (mobile has no trade
+// selector). Kept in a dedicated `app_state` key/value table — NOT in
+// company_settings — so the Settings save/import round-trip can't clobber
+// it. The mobile read-side lives in mobile-bridge.js (GET
+// /api/active-auction) so it authenticates with the mobile token.
+app.post('/api/active-auction', requireView, (req, res) => {
+  const aid = parseInt(req.body && req.body.auctionId, 10);
+  const db = getDb();
+  db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+  db.run(
+    `INSERT OR REPLACE INTO app_state (key, value) VALUES ('active_auction_id', ?)`,
+    [Number.isFinite(aid) && aid > 0 ? String(aid) : '']
+  );
+  res.json({ success: true, auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
+});
 
 // ══════════════════════════════════════════════════════════════════
 // BRANDING — public read + white-label tenant preset (developer only)
@@ -1312,6 +1330,94 @@ app.get('/api/admin/delete-log', requireDeleteAll, (req, res) => {
       return { ...r, cascade_counts: cascade };
     });
     res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// AUDIT LOG — who did what, from which app (desktop vs mobile)
+// ══════════════════════════════════════════════════════════════
+// auditLog() records a single action against the audit_log table. It is
+// best-effort: a failed insert is logged to the console but must NEVER
+// break the operation that triggered it. The actor (username) and a
+// coarse device class (Mobile/Desktop, derived from the request's
+// User-Agent) are captured automatically so the admin console can tell a
+// phone lot-entry from a desktop one. `details` is any JSON-able object
+// describing the change (lot_no, qty, trader, field diff, …).
+function auditLog(req, action, entity, entityId, details) {
+  try {
+    const db = getDb();
+    const username = (req && req.user && req.user.username) || 'system';
+    const ua = (req && req.headers && req.headers['user-agent']) || '';
+    const device = /Mobile|Android|iPhone|iPad/i.test(ua) ? 'Mobile' : 'Desktop';
+    const payload = JSON.stringify(Object.assign({ device }, details || {}));
+    const eid = Number.isFinite(Number(entityId)) ? parseInt(entityId, 10) : null;
+    db.run(
+      'INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?, ?, ?, ?, ?)',
+      [username, action, entity, eid, payload]
+    );
+  } catch (e) {
+    console.error('[auditLog] insert failed:', e.message);
+  }
+}
+
+// Build a compact before→after diff over a curated set of lot columns so
+// the audit row records WHAT changed on an edit without dumping the whole
+// row. Returns {} when nothing of interest changed.
+function lotChangeDiff(before, after) {
+  const keys = ['lot_no', 'trader_id', 'name', 'branch', 'grade', 'bags', 'litre', 'qty', 'gross_wt', 'sample_wt', 'moisture', 'code'];
+  const diff = {};
+  if (!before || !after) return diff;
+  for (const k of keys) {
+    const a = before[k] == null ? '' : String(before[k]);
+    const b = after[k]  == null ? '' : String(after[k]);
+    if (a !== b) diff[k] = { from: before[k], to: after[k] };
+  }
+  return diff;
+}
+
+// GET /api/admin/audit-log — paginated activity feed, newest first.
+// Optional filters: ?entity=lot &action=create &user=ravi &page=1 &limit=50.
+// requireView so any signed-in operator can review who entered/edited
+// lots from either app; the DELETE (clear) route below stays admin-only.
+app.get('/api/admin/audit-log', requireView, (req, res) => {
+  try {
+    const db = getDb();
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const where = [];
+    const params = [];
+    if (req.query.entity) { where.push('entity = ?'); params.push(String(req.query.entity)); }
+    if (req.query.action) { where.push('action = ?'); params.push(String(req.query.action)); }
+    if (req.query.user)   { where.push('user_id = ?'); params.push(String(req.query.user)); }
+    const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+    const total = (db.get(`SELECT COUNT(*) AS c FROM audit_log ${whereSql}`, params) || { c: 0 }).c || 0;
+    const rows = db.all(
+      `SELECT id, user_id, action, entity, entity_id, details, created_at
+         FROM audit_log ${whereSql}
+        ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, (page - 1) * limit]
+    );
+    // Parse the stored details JSON on the way out so the client renders
+    // it directly. Tolerant of legacy/corrupt rows.
+    const logs = rows.map(r => {
+      let d = {};
+      try { d = r.details ? JSON.parse(r.details) : {}; } catch (_) { d = { raw: r.details }; }
+      return { ...r, details: d };
+    });
+    res.json({ logs, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/admin/audit-log — clear the activity feed (admin only).
+app.delete('/api/admin/audit-log', requireAdmin, (req, res) => {
+  try {
+    const db = getDb();
+    db.run('DELETE FROM audit_log');
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3203,6 +3309,11 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
   // pager. Legacy callers (no paginated flag) still get the flat array
   // sorted by lot_no ASC.
   const db = getDb();
+  // Attach the ISP-view discount per lot (isp_refund) so the Payments
+  // "Lots for seller" modal can show the same discount as the screen and
+  // the printed statement. Derived from isp_puramt via the shared helper.
+  const _cfgLots = getSettingsFlat(db);
+  const withIspRefund = (rows) => rows.map(r => ({ ...r, isp_refund: ispLotDiscount(r, _cfgLots) }));
   if (req.query.paginated === '1' || req.query.paginated === 'true') {
     const limit  = Math.max(1, Math.min(500, parseInt(req.query.limit, 10)  || 25));
     const offset = Math.max(0,            parseInt(req.query.offset, 10) || 0);
@@ -3216,10 +3327,10 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
     const total = (db.get(countQ, p) || { c: 0 }).c || 0;
     q += ' ORDER BY lots.id DESC LIMIT ? OFFSET ?';
     const rows = db.all(q, [...p, limit, offset]);
-    return res.json({ rows, total, limit, offset });
+    return res.json({ rows: withIspRefund(rows), total, limit, offset });
   }
   q += ' ORDER BY lots.lot_no';
-  res.json(db.all(q, p));
+  res.json(withIspRefund(db.all(q, p)));
 });
 
 app.post('/api/lots', requireLotWrite, (req, res) => {
@@ -3230,11 +3341,22 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // when the flag is off so 0 is what flows in by default.
   const reservedPrice = Number(l.reserved_price);
   const _db = getDb();
-  _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
+  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',l.state||'TAMIL NADU',l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
+  // Audit who entered the lot, from which app. The mobile PWA sends
+  // trader_id but no name, so resolve the seller name for a readable
+  // trail when the body didn't carry it.
+  let _traderName = l.name || '';
+  if (!_traderName && l.trader_id) {
+    const _t = _db.get('SELECT name FROM traders WHERE id = ?', [l.trader_id]);
+    if (_t) _traderName = _t.name;
+  }
+  auditLog(req, 'create', 'lot', _ins && _ins.lastInsertRowid, {
+    lot_no: l.lot_no, trader: _traderName, qty: Number(l.qty) || 0, branch: l.branch || '', auction_id: l.auction_id,
+  });
   res.json({ success: true });
 });
 
@@ -3278,9 +3400,11 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     }
   }
   vals.push(req.params.id);
-  // Capture auction_id BEFORE the write so a price/code edit drops
-  // the price-check gate to 'stale' (re-surfacing the lots-tab banner).
-  const _pcRow = db.get('SELECT auction_id FROM lots WHERE id = ?', [req.params.id]);
+  // Capture the row BEFORE the write — auction_id drops the price-check
+  // gate to 'stale' (re-surfacing the lots-tab banner) and the full
+  // snapshot feeds the audit-log field diff below.
+  const _before = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+  const _pcRow = _before ? { auction_id: _before.auction_id } : null;
   db.run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
   // After a withdrawal, recompute the derived columns from the now-zeroed
   // price so prate/puramt/GST/balance all read 0 without a Calculate All.
@@ -3296,6 +3420,14 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     }
   }
   if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
+  // Audit the edit with a compact before→after diff so the admin can see
+  // exactly which fields changed (and who changed them, from which app).
+  const _after = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+  auditLog(req, 'edit', 'lot', parseInt(req.params.id, 10), {
+    lot_no: _after ? _after.lot_no : (_before ? _before.lot_no : ''),
+    branch: _after ? _after.branch : '',
+    changes: lotChangeDiff(_before, _after),
+  });
   res.json({ success: true });
 });
 
@@ -3310,9 +3442,14 @@ app.delete('/api/lots/:id', requireDelete, (req, res) => {
       locked: true,
     });
   }
-  const _pcRow = db.get('SELECT auction_id FROM lots WHERE id = ?', [req.params.id]);
+  // Snapshot the row before it's gone so the audit trail keeps a
+  // readable record (lot_no, qty, branch) of what was deleted.
+  const _row = db.get('SELECT auction_id, lot_no, qty, branch FROM lots WHERE id = ?', [req.params.id]);
   db.run('DELETE FROM lots WHERE id = ?', [req.params.id]);
-  if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
+  if (_row && _row.auction_id) pcClearGate(db, _row.auction_id);
+  if (_row) auditLog(req, 'delete', 'lot', parseInt(req.params.id, 10), {
+    lot_no: _row.lot_no, qty: Number(_row.qty) || 0, branch: _row.branch || '', auction_id: _row.auction_id,
+  });
   res.json({ success: true });
 });
 
@@ -3449,8 +3586,14 @@ app.post('/api/lots/bulk-delete', requireDelete, (req, res) => {
   }
   const placeholders = part.allowedIds.map(() => '?').join(',');
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  // Grab the lot numbers before deletion for a readable audit summary.
+  const _delRows = db.all(`SELECT lot_no FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   db.run(`DELETE FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) pcClearGate(db, r.auction_id);
+  auditLog(req, 'bulk-delete', 'lot', null, {
+    count: part.allowedIds.length,
+    lot_nos: _delRows.map(r => r.lot_no).slice(0, 50),
+  });
   res.json({
     success: true,
     deleted: part.allowedIds.length,
@@ -6493,7 +6636,7 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   // (P_Qty / P_Rate / PurAmt) for Qty / Rate / Amount — consistent with
   // the Payments screen and the lots modal. Falls back to the active-view
   // columns for e-Auction / older lots where isp_* wasn't backfilled.
-  let lotSql = `SELECT id, lot_no,
+  let lotSql = `SELECT id, lot_no, grade, cr, advance, isp_puramt,
         CASE WHEN isp_puramt > 0 THEN isp_pqty   ELSE pqty   END AS qty,
         CASE WHEN isp_puramt > 0 THEN isp_prate  ELSE prate  END AS rate,
         CASE WHEN isp_puramt > 0 THEN isp_puramt ELSE puramt END AS amount,
@@ -6510,6 +6653,10 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   }
   lotSql += ' ORDER BY CAST(lot_no AS INTEGER), lot_no';
   const lots = db.all(lotSql, lotParams) || [];
+  // Discount column = the ISP-view discount (derived from isp_puramt),
+  // matching the Payments screen and the lots modal. Overwrite the stored
+  // active-view `refund` the Discount/Total math below reads.
+  for (const l of lots) l.refund = ispLotDiscount(l, cfg);
   const trader = db.get('SELECT * FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [sellerName]);
   const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });

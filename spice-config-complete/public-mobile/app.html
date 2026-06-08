@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#1D9E75">
 <link rel="manifest" href="/mobile/manifest.json">
-<title>Spice Auction</title>
+<title>AMAZING SPICE PARK PVT LTD</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -204,7 +204,7 @@ select:focus{border-color:var(--green)}
 <div class="screen active" id="s-login"><div class="scroll">
   <div class="logo">
     <img id="login-logo-img" class="login-logo-img" src="">
-    <div id="login-logo" class="logo-title">Spice Auction</div>
+    <div id="login-logo" class="logo-title">AMAZING SPICE PARK PVT LTD</div>
   </div>
   <div class="sub">Login to start entering lots</div>
   <div class="lb">USERNAME</div><input type="text" id="l-user" placeholder="Enter username" autocomplete="username" autocapitalize="none">
@@ -213,10 +213,10 @@ select:focus{border-color:var(--green)}
 </div></div>
 
 <div class="screen" id="s-session">
-  <div class="appbar"><h1 id="ss-title"><img class="appbar-logo" src="" style="display:none">Spice Auction</h1><span class="badge" id="ss-user"></span><button class="btn-icon" onclick="doLogout()" title="Logout">&#x2715;</button></div>
+  <div class="appbar"><h1 id="ss-title"><img class="appbar-logo" src="" style="display:none">AMAZING SPICE PARK PVT LTD</h1><span class="badge" id="ss-user"></span><button class="btn-icon" onclick="doLogout()" title="Logout">&#x2715;</button></div>
   <div class="scroll">
-    <div style="text-align:center;font-size:13px;color:var(--text2);margin-bottom:20px">Select a trade to start entering lots</div>
-    <div class="lb">SELECT TRADE</div>
+    <div id="ss-intro" style="text-align:center;font-size:13px;color:var(--text2);margin-bottom:20px">Select a trade to start entering lots</div>
+    <div class="lb" id="ss-trade-label">SELECT TRADE</div>
     <select id="ss-trade"></select>
     <div id="ss-trade-info" style="font-size:11px;color:var(--text3);margin-top:4px"></div>
     <div class="lb">BRANCH</div><select id="ss-branch"></select>
@@ -543,7 +543,7 @@ const B=window.location.origin;
 let token=localStorage.getItem('sa_token')||'',user='',userBranch='',userRole='';
 let aid=null,tno=1,br='',nxt='',lc=0,tq=0,sessionEnd=null;
 let selT=null,lastId=null,stm=null,editId=null;
-let appTitle='Spice Auction',lastSearchQuery='',editTimeoutMinutes=0;
+let appTitle='AMAZING SPICE PARK PVT LTD',lastSearchQuery='',editTimeoutMinutes=0;
 let allMyLots=[],editEnabled=true;
 let cfgDefaultLitre='';
 // e-Auction-only fields. Server returns these in /api/config already
@@ -736,9 +736,9 @@ function applyLabels(){
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'Spice Auction');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -794,6 +794,24 @@ async function loadAvailableTrades(){
     }
     if(!trades.length) info.textContent='No trades available - ask admin to create one';
     sel.onchange=function(){var o=sel.options[sel.selectedIndex];info.textContent=o&&o.value&&o.getAttribute('data-end')?'Ends at '+o.getAttribute('data-end'):''};
+    // Default to the trade selected in the admin app (shared via
+    // /api/active-auction). When set and available to this user, lock it
+    // in and hide the picker — the mobile app follows the admin's choice.
+    // Falls back to the manual selector when nothing is set.
+    try{
+      var ar=await fetch(B+'/api/active-auction',{headers:{'Authorization':'Bearer '+token}});
+      if(ar.ok){
+        var ad=await ar.json();
+        if(ad&&ad.auctionId&&Array.from(sel.options).some(function(o){return o.value===String(ad.auctionId)})){
+          sel.value=String(ad.auctionId);
+          var o=sel.options[sel.selectedIndex];
+          var lbl=document.getElementById('ss-trade-label'); if(lbl)lbl.style.display='none';
+          sel.style.display='none';
+          var intro=document.getElementById('ss-intro'); if(intro)intro.textContent='Select a branch to start entering lots';
+          info.innerHTML='Trade <b>#'+(o?o.getAttribute('data-ano'):ad.auctionId)+'</b> — '+(o?o.textContent.replace(/^Trade #\d+\s*-\s*/,''):'')+' <span style="color:var(--text3)">(set in admin app)</span>';
+        }
+      }
+    }catch(_){}
   }catch(e){sel.innerHTML='<option value="">Error: '+e.message+'</option>';console.error('Load trades:',e)}
 }
 

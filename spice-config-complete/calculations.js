@@ -668,6 +668,34 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
 }
 
 /**
+ * ISP-view discount for a single lot — the e-Trade discount calculateLot
+ * would compute, but on the ISP planter PurAmt (isp_puramt) so Payments
+ * shows the ISP discount even when the lot was calculated in the ASP
+ * company. Mirrors the calculateLot formula exactly (and the SQL in
+ * getPaymentSummary). e-Auction keeps the stored `advance`.
+ * Falls back to the active `puramt` when isp_puramt isn't populated.
+ */
+function ispLotDiscount(lot, cfg) {
+  const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
+  // Non-e-Trade: mirror getPaymentSummary's stored discount column exactly
+  // (advance for 'auction', refund otherwise) so the modal/statement stay
+  // in step with the screen. ISP P_Qty/P_Rate don't diverge in these modes.
+  if (mode !== 'e-trade') {
+    const col = (mode === 'auction') ? 'advance' : 'refund';
+    return Number(lot[col]) || 0;
+  }
+  const grade = String(lot.grade || '').trim();
+  const rollIn = (cfg.flag_discount_in_prate === true
+      || String(cfg.flag_discount_in_prate || '').toLowerCase() === 'true') && grade === '1';
+  if (rollIn) return 0;
+  const hasGstin = gstinStateCode(lot.cr) !== '';
+  const days = hasGstin ? (Number(cfg.dealer_days) || 0) : (Number(cfg.discount_days) || 0);
+  const discPct = Number(cfg.discount_pct) || 0;
+  const puramt = (Number(lot.isp_puramt) > 0) ? Number(lot.isp_puramt) : (Number(lot.puramt) || 0);
+  return Math.round((puramt / 1000) * days * discPct);
+}
+
+/**
  * Generate payment summary for sellers (PAYCHECK.PRG equivalent)
  */
 function getPaymentSummary(db, auctionId, state, cfg) {
@@ -682,23 +710,40 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // sees both the policy discount and any manual adjustments.
   const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
   const discountCol = (mode === 'auction') ? 'advance' : 'refund';
-  // First fetch the per-lot summary
   // Payments are purchase-side: show the ISP planter trio (P_Qty / P_Rate /
   // PurAmt) consistently — total_qty = Σ isp_pqty and total_amount = Σ
   // isp_puramt — so the screen, the lots modal and the printed statement
   // all agree. Falls back to the active-view columns for e-Auction / older
   // lots where isp_* wasn't backfilled (isp_puramt = 0).
+  //
+  // Discount: e-Trade shows the ISP discount, derived from isp_puramt with
+  // the same formula calculateLot uses (round(puramt/1000 × days × pct),
+  // days = dealer_days for GSTIN sellers else discount_days, 0 on the
+  // Grade-1 roll-in). This matches ispLotDiscount() — kept in lockstep so
+  // the screen, modal (via /api/lots), and statement agree. e-Auction
+  // keeps the stored advance/refund.
+  const useIspDisc = (mode === 'e-trade');
+  const rollFlag   = (cfg && (cfg.flag_discount_in_prate === true || String(cfg.flag_discount_in_prate || '').toLowerCase() === 'true')) ? 1 : 0;
+  const dealerDays = Number(cfg && cfg.dealer_days)   || 0;
+  const discDays   = Number(cfg && cfg.discount_days) || 0;
+  const discPct    = Number(cfg && cfg.discount_pct)  || 0;
+  const ispDiscSql = `SUM(CASE WHEN ? = 1 AND TRIM(COALESCE(l.grade,'')) = '1' THEN 0
+      ELSE ROUND( (CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) / 1000.0
+           * (CASE WHEN (UPPER(COALESCE(l.cr,'')) LIKE 'GSTIN%' OR l.cr GLOB '[0-9][0-9]*') THEN ? ELSE ? END)
+           * ? ) END)`;
+  const discSql = useIspDisc ? ispDiscSql : `SUM(l.${discountCol})`;
   let query = `SELECT l.name, l.cr,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_qty,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) as total_amount,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_pqty,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_prate  ELSE l.prate  END) as avg_prate,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) as total_puramt,
-    SUM(l.${discountCol}) as lot_discount,
+    ${discSql} as lot_discount,
     SUM(l.balance) as total_payable,
     COUNT(*) as lot_count
     FROM lots l WHERE l.auction_id = ? AND l.amount > 0`;
-  const params = [auctionId];
+  // discSql params (if any) appear in the SELECT, so they precede auctionId.
+  const params = useIspDisc ? [rollFlag, dealerDays, discDays, discPct, auctionId] : [auctionId];
   if (state) { query += ' AND l.state = ?'; params.push(state); }
   query += ' GROUP BY l.name, l.cr ORDER BY l.state, l.name';
   const sellers = db.all(query, params);
@@ -1079,6 +1124,7 @@ module.exports = {
   buildDebitNote,
   listAgriSellers,
   getPaymentSummary,
+  ispLotDiscount,
   getBankPaymentData,
   formatLotList,
   getTDSReturnData,

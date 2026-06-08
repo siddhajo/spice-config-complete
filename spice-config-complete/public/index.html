@@ -2683,6 +2683,36 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </details>
         </div>
       </div>
+
+      <!-- ── Lot Activity Log ─────────────────────────────────
+           Reads the audit_log table (/api/admin/audit-log). Every lot
+           created, edited or deleted from EITHER app (admin desktop or
+           the mobile PWA) lands here with the operator, the device class
+           (📱 Mobile / 🖥 Desktop) and a per-edit field diff — so the
+           office can see who entered or changed which lot. -->
+      <div class="card" id="audit-log-card" style="padding:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+          <div style="font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px"><span>📋</span><span>Lot Activity Log</span></div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <select id="audit-action-filter" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit">
+              <option value="">All actions</option>
+              <option value="create">Created</option>
+              <option value="edit">Edited</option>
+              <option value="delete">Deleted</option>
+              <option value="bulk-delete">Bulk deleted</option>
+            </select>
+            <button class="btn btn-o" onclick="auditPage=1;loadAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
+            <button class="btn needs-admin" onclick="clearAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
+          </div>
+        </div>
+        <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin-bottom:12px">
+          Who entered, edited or deleted each lot — across the office desktop and the field-staff mobile app.
+        </div>
+        <div id="audit-log-host" style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
+          <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load lot activity.</div>
+        </div>
+        <div id="audit-log-pager" style="display:none;align-items:center;justify-content:center;gap:8px;margin-top:10px"></div>
+      </div>
     </div>
 
     <!-- USERS -->
@@ -6392,7 +6422,7 @@ function go(tab){
     // Lazy-load the Delete All audit log when Backup opens so the
     // <details> drawer shows fresh data on first expand. loadDeleteLog
     // is idempotent — re-running just re-renders the table.
-    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); },
+    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); if (typeof loadAuditLog === 'function') { auditPage = 1; loadAuditLog(); } },
     // Import Old Data — pre-loads recent imports so the History panel
     // is populated on first open without a separate click. Preview /
     // verify / run remain user-triggered.
@@ -10247,6 +10277,105 @@ async function loadDeleteLog(){
   }
 }
 
+// ── Lot Activity Log (audit feed) ────────────────────────────
+// Renders /api/admin/audit-log — every lot created / edited / deleted
+// from the desktop admin OR the field-staff mobile app. Paginated,
+// newest first, with a coarse device tag and a per-edit field diff.
+let auditPage = 1;
+function _auditEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function _auditActionBadge(action){
+  const map = { create:['#065F46','#D1FAE5','Created'], edit:['#92400E','#FEF3C7','Edited'],
+    'delete':['#991B1B','#FEE2E2','Deleted'], 'bulk-delete':['#991B1B','#FEE2E2','Bulk deleted'],
+    clear:['#3730A3','#E0E7FF','Cleared'] };
+  const m = map[action] || ['#374151','#E5E7EB', action || '—'];
+  return '<span style="background:'+m[1]+';color:'+m[0]+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap">'+_auditEsc(m[2])+'</span>';
+}
+function _auditDetails(d, action){
+  if (!d || typeof d !== 'object') return '—';
+  const parts = [];
+  if (d.trader) parts.push('Seller: <strong>'+_auditEsc(d.trader)+'</strong>');
+  if (d.branch && action !== 'edit') parts.push(_auditEsc(d.branch));
+  if (d.qty != null && Number(d.qty)) parts.push(Number(d.qty).toFixed(3)+' kg');
+  if (action === 'bulk-delete') {
+    if (d.count != null) parts.push('<strong>'+_auditEsc(d.count)+'</strong> lot(s)');
+    if (Array.isArray(d.lot_nos) && d.lot_nos.length) parts.push('#'+d.lot_nos.map(_auditEsc).join(', #'));
+    if (d.scope) parts.push(_auditEsc(d.scope));
+  }
+  if (action === 'edit') {
+    if (d.changes && Object.keys(d.changes).length) {
+      parts.push(Object.entries(d.changes).map(([k,v]) => {
+        const from = v && typeof v === 'object' ? v.from : '';
+        const to   = v && typeof v === 'object' ? v.to   : v;
+        return '<code>'+_auditEsc(k)+'</code>: '+_auditEsc(from==null||from===''?'∅':from)+' → '+_auditEsc(to==null||to===''?'∅':to);
+      }).join(' · '));
+    } else {
+      parts.push('<span style="color:var(--spice-text-mute)">no field changes</span>');
+    }
+  }
+  return parts.length ? parts.join(' · ') : '—';
+}
+async function loadAuditLog(){
+  const host = document.getElementById('audit-log-host');
+  if (!host) return;
+  const action = (document.getElementById('audit-action-filter') || {}).value || '';
+  host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Loading…</div>';
+  try {
+    const qs = 'entity=lot&limit=40&page='+auditPage+(action ? '&action='+encodeURIComponent(action) : '');
+    const r = await fetch(B + '/api/admin/audit-log?'+qs, { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed to load activity log'); }
+    const data = await r.json();
+    const logs = data.logs || [];
+    const pager = document.getElementById('audit-log-pager');
+    if (!logs.length) {
+      host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">No lot activity recorded yet.</div>';
+      if (pager) pager.style.display = 'none';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--bg,#F3F4F6)">' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap">When</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">User</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">From</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Action</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Lot</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Details</th></tr></thead><tbody>';
+    for (const lg of logs) {
+      const d = lg.details || {};
+      const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
+      const lotNo = (d.lot_no != null && d.lot_no !== '') ? '#'+_auditEsc(d.lot_no) : '—';
+      html += '<tr>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(lg.created_at||'')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:700;font-family:monospace">'+lotNo+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-size:11.5px">'+_auditDetails(d, lg.action)+'</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+    const tp = data.totalPages || 1;
+    if (pager && tp > 1) {
+      pager.style.display = 'flex';
+      pager.innerHTML =
+        '<button class="btn btn-o" '+(auditPage<=1?'disabled':'')+' onclick="auditPage=Math.max(1,auditPage-1);loadAuditLog()" style="height:30px;padding:0 12px;font-size:12px">‹ Prev</button>' +
+        '<span style="font-size:12px;color:var(--spice-text-mute)">Page '+data.page+' of '+tp+' · '+data.total+' entries</span>' +
+        '<button class="btn btn-o" '+(auditPage>=tp?'disabled':'')+' onclick="auditPage=Math.min('+tp+',auditPage+1);loadAuditLog()" style="height:30px;padding:0 12px;font-size:12px">Next ›</button>';
+    } else if (pager) { pager.style.display = 'none'; }
+  } catch (e) {
+    host.innerHTML = '<div style="padding:12px;color:#7F1D1D">'+_auditEsc(e.message || String(e))+'</div>';
+  }
+}
+async function clearAuditLog(){
+  if (!confirm('Clear the entire lot activity log?\n\nThe lots themselves are NOT affected — only the audit history is removed. This cannot be undone.')) return;
+  try {
+    const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
+    auditPage = 1; loadAuditLog();
+    if (typeof toast === 'function') toast('Lot activity log cleared.');
+  } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
+}
+
 // ── GST Portal Lookup (Item 4) ───────────────────────────
 // Reads the GSTIN field (prefix='t' for Seller, 'b' for Buyer),
 // calls /api/gst-lookup/{gstin}, auto-fills related fields.
@@ -11299,6 +11428,14 @@ function _restoreGlobalAid(){
 function _persistGlobalAid(aid){
   try { localStorage.setItem(_GLOBAL_AID_KEY, String(aid || '')); }
   catch (_) { /* private mode / storage disabled — non-fatal */ }
+  // Share the admin's active trade server-side so the mobile app can
+  // default to it (the mobile app has no trade selector of its own).
+  // Fire-and-forget — never block the UI on this.
+  try {
+    if (typeof j === 'function') {
+      j('/api/active-auction', { method: 'POST', body: JSON.stringify({ auctionId: aid ? Number(aid) : null }) }).catch(() => {});
+    }
+  } catch (_) { /* non-fatal */ }
 }
 
 // Populate the global picker. Called from loadAuctions, auction creates/
@@ -14753,7 +14890,7 @@ function _renderPayLotsTable(){
       <td style="text-align:right">${fmtI(Number(l.isp_pqty || l.pqty || l.qty)||0, 3)}</td>
       <td style="text-align:right">${fmtI(Number(l.isp_prate || l.prate)||0, 2)}</td>
       <td style="text-align:right">${fmtI(Number(l.isp_puramt || l.puramt || l.amount)||0, 2)}</td>
-      <td style="text-align:right;color:#B45309">${fmtI(Number(l.refund)||0, 2)}</td>
+      <td style="text-align:right;color:#B45309">${fmtI(Number(l.isp_refund != null ? l.isp_refund : l.refund)||0, 2)}</td>
       <td style="text-align:right;color:#0891B2">${fmtI(tax, 2)}</td>
       <td style="text-align:right;font-weight:700;color:var(--spice-cardamom-dk)">${fmtI(Number(l.balance)||0, 2)}</td>
     </tr>`;
@@ -14798,7 +14935,7 @@ function updatePayLotsTotals(){
     // Qty + Amount follow the table columns: ISP P_Qty / PurAmt.
     qty     += Number(l.isp_pqty   || l.pqty || l.qty)   || 0;
     amt     += Number(l.isp_puramt || l.puramt || l.amount) || 0;
-    disc    += Number(l.refund)  || 0;
+    disc    += Number(l.isp_refund != null ? l.isp_refund : l.refund)  || 0;
     tax     += (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
     payable += Number(l.balance) || 0;
   }

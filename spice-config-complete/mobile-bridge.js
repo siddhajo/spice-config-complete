@@ -39,12 +39,13 @@ const PDFDocument = require('pdfkit');
 // The query selects these aliased fields directly so renderSellerReceipt
 // (which is a verbatim port) doesn't need to know about the rename.
 
-// Spice-config logo location (single-company build → always ispl.png).
-// resolveLogoPath checks SPICE_DATA_DIR/logos first so cloud-persisted
-// uploads aren't shadowed by the bundled default of the same name.
+// Spice-config logo location. The mobile app defaults to the sister
+// company (Amazing Spice Park / ASPL) branding, so receipts use the ASP
+// logo. resolveLogoPath checks SPICE_DATA_DIR/logos first so cloud-
+// persisted uploads aren't shadowed by the bundled default of the same name.
 const { resolveLogoPath: _rlpMb } = require('./logo-paths');
 function getLogoPath() {
-  return _rlpMb('logo-ispl.png');
+  return _rlpMb('logo-asp.png');
 }
 
 // Mask an account number for the receipt according to admin-set policy.
@@ -344,6 +345,10 @@ const LOT_SELECT_SQL = `
 
 function mountMobile(app, deps) {
   const { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS } = deps;
+  // auditLog is injected from server.js so mobile-side writes (e.g. a
+  // field user clearing their own lots) land in the same activity feed
+  // the admin console reads. No-op shim if an older host didn't pass it.
+  const auditLog = deps.auditLog || function () {};
 
   // ── 0. LAZY SELF-HEAL SCHEMA (defence in depth) ───────────────────
   // db.js is now the canonical source for every column/table the bridge
@@ -575,7 +580,7 @@ function mountMobile(app, deps) {
     // returned { items: [...] }. Preserve that for any caller that uses it.
     if (type === 'branch')    return res.json({ items: branches });
     if (type === 'crop_type') return res.json({ items: cropTypes });
-    if (type === 'title')     return res.json({ items: [{ id: 1, type: 'title', value: get('trade_name', 'Spice Auction'), sort_order: 0 }] });
+    if (type === 'title')     return res.json({ items: [{ id: 1, type: 'title', value: get('s_short_name', 'AMAZING SPICE PARK PVT LTD'), sort_order: 0 }] });
 
     // e-Auction-only fields. Both inputs are AND-gated by the flag
     // AND business_mode === 'e-Auction' so flipping the mode away
@@ -588,7 +593,9 @@ function mountMobile(app, deps) {
     res.json({
       branches,
       cropTypes,
-      title:           get('trade_name', 'Spice Auction'),
+      // Mobile app defaults to the sister company (ASPL) identity. Prefer
+      // the ASP short name from settings; fall back to the brand string.
+      title:           get('s_short_name', 'AMAZING SPICE PARK PVT LTD'),
       editTimeout:     parseInt(get('edit_timeout_sec', '0'), 10) || 0,
       editEnabled:     getBool('edit_enabled', true),
       sampleWeight:    getNum('sample_weight', 0),
@@ -648,6 +655,26 @@ function mountMobile(app, deps) {
     }
   });
 
+  // ── 3b. ACTIVE TRADE (shared with the admin app) ────────────────
+  // The admin app's topbar trade picker pushes its current selection to
+  // company_settings.active_auction_id (POST /api/active-auction, admin
+  // side). The mobile app reads it here and defaults to that trade
+  // instead of showing its own trade selector. Returns null when nothing
+  // is selected yet, so the mobile app falls back to manual selection.
+  app.get('/api/active-auction', requireAuth, (_req, res) => {
+    try {
+      // Read from the dedicated app_state table (written by the admin
+      // side's POST /api/active-auction). The table may not exist yet if
+      // the admin has never picked a trade — treat that as "none".
+      const db = getDb();
+      const row = db.get("SELECT value FROM app_state WHERE key = 'active_auction_id'");
+      const aid = row && row.value ? parseInt(row.value, 10) : null;
+      res.json({ auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
+    } catch (e) {
+      res.json({ auctionId: null });
+    }
+  });
+
   // ── 4. STATUS ALIAS ─────────────────────────────────────────────
   // PWA's app.html pings /api/status on boot to detect "logged out vs
   // server unreachable". spice-config has /api/health; alias it.
@@ -655,15 +682,14 @@ function mountMobile(app, deps) {
 
   // ── 5. LOGO ALIAS ───────────────────────────────────────────────
   // PWA loads the brand logo via `<img src="/api/logo">`, which means
-  // the response MUST be a raw image, not JSON. Redirect to the
-  // /logo-ispl.png path — server.js has a route handler that falls
-  // through to the bundled default (logo_kj.png) when the user hasn't
-  // uploaded a custom logo, so this works for both fresh installs and
-  // ones with a custom upload. The previous redirect to /api/branding
-  // returned JSON, which the <img> tag couldn't decode and showed as
-  // a broken-image placeholder.
+  // the response MUST be a raw image, not JSON. The mobile app defaults
+  // to the sister company (ASPL) branding, so redirect to /logo-asp.png
+  // — served statically from public/ (and overridable via an admin logo
+  // upload for 'asp'). The previous redirect to /api/branding returned
+  // JSON, which the <img> tag couldn't decode and showed as a broken
+  // image placeholder.
   app.get('/api/logo', (req, res) => {
-    res.redirect(302, '/logo-ispl.png');
+    res.redirect(302, '/logo-asp.png');
   });
 
   // ── 6. LOTS — query-string filter form ──────────────────────────
@@ -1158,6 +1184,9 @@ function mountMobile(app, deps) {
       'DELETE FROM lots WHERE auction_id = ? AND user_id = ?',
       [parseInt(auction_id, 10), req.user.username]
     );
+    auditLog(req, 'bulk-delete', 'lot', null, {
+      auction_id: parseInt(auction_id, 10), count: result.changes || 0, scope: 'clear-mine',
+    });
     res.json({ success: true, deleted: result.changes });
   });
 
