@@ -747,9 +747,15 @@ app.get('/api/branding', (req, res) => {
       // payload the frontend applies at boot.
       preset: cfg.tenant_preset || '',
       presetConfig,
+      // Per-company colour themes. When set, the frontend applies each
+      // company's own colour (ISP active → ispTheme, ASP active → aspTheme)
+      // even under a preset, and locks the Appearance card. Empty = use
+      // the built-in ISP→emerald / ASP→ocean defaults.
+      ispTheme: cfg.isp_theme || '',
+      aspTheme: cfg.asp_theme || '',
     });
   } catch (e) {
-    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null });
+    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null, ispTheme: '', aspTheme: '' });
   }
 });
 
@@ -877,6 +883,14 @@ app.get('/admin/branding', (req, res) => {
   const densityOpts = TENANT_DENSITIES.map(d => `<option value="${d}" ${d === cDensity ? 'selected' : ''}>${d}</option>`).join('');
   const fontOpts = TENANT_FONTS.map(f => `<option value="${f}" ${f === cFont ? 'selected' : ''}>${f}</option>`).join('');
 
+  // Per-company colour themes (ISP / ASP). Empty = use the built-in
+  // ISP→emerald / ASP→ocean defaults.
+  const curIspTheme = cfg.isp_theme || '';
+  const curAspTheme = cfg.asp_theme || '';
+  const perCoThemeOpts = (cur) => ['', ...THEME_SLUGS]
+    .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (ISP→emerald / ASP→ocean) —'}</option>`)
+    .join('');
+
   const keyEsc = String(req.query.key).replace(/[<>'"&]/g, '');
 
   res.type('html').send(`<!DOCTYPE html>
@@ -950,6 +964,25 @@ app.get('/admin/branding', (req, res) => {
     </label>
   </div>
 
+  <div class="card">
+    <h2>Per-company colour themes (ISP / ASP)</h2>
+    <p style="font-size: 12px; color: #6b7280; margin: 0 0 6px">
+      Give each company its own colour. The app applies <strong>ISP theme</strong> when ISP is the active company and
+      <strong>ASP theme</strong> when ASP is active — even with a preset set — and locks the Appearance card so users can't override it.
+      Leave both on “default” to use the built-in ISP→emerald / ASP→ocean. Saved together with <em>Apply preset</em> below.
+    </p>
+    <div class="row">
+      <div>
+        <label>ISP theme</label>
+        <select id="isp-theme">${perCoThemeOpts(curIspTheme)}</select>
+      </div>
+      <div>
+        <label>ASP theme</label>
+        <select id="asp-theme">${perCoThemeOpts(curAspTheme)}</select>
+      </div>
+    </div>
+  </div>
+
   <div style="display: flex; gap: 10px;">
     <button onclick="apply()">Apply preset</button>
     <button class="secondary" onclick="clearPreset()">Clear (revert to legacy mode)</button>
@@ -967,6 +1000,10 @@ app.get('/admin/branding', (req, res) => {
     async function apply() {
       const preset = document.getElementById('preset-pick').value;
       const body = { preset };
+      // Per-company themes are saved alongside the preset. Always sent so
+      // the operator can set them with preset = "none".
+      body.ispTheme = document.getElementById('isp-theme').value;
+      body.aspTheme = document.getElementById('asp-theme').value;
       if (preset === 'custom') {
         body.config = {
           theme: document.getElementById('custom-theme').value,
@@ -1047,7 +1084,24 @@ app.post('/api/admin/preset', (req, res) => {
   );
   stmt.run('tenant_preset', slug, 'Tenant preset');
   stmt.run('preset_config', finalConfig ? JSON.stringify(finalConfig) : '', 'Tenant preset config (JSON)');
-  res.json({ success: true, preset: slug, config: finalConfig });
+
+  // Per-company colour themes (optional). Only written when the field is
+  // present in the request — the page's Apply always sends them; Clear
+  // does not, so clearing a preset leaves per-company themes untouched.
+  // An empty/unknown value disables that company's override (falls back to
+  // the built-in default).
+  let ispTheme, aspTheme;
+  if (Object.prototype.hasOwnProperty.call(req.body, 'ispTheme')) {
+    const v = String(req.body.ispTheme || '').trim();
+    ispTheme = THEME_SLUGS.includes(v) ? v : '';
+    stmt.run('isp_theme', ispTheme, 'ISP colour theme');
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body, 'aspTheme')) {
+    const v = String(req.body.aspTheme || '').trim();
+    aspTheme = THEME_SLUGS.includes(v) ? v : '';
+    stmt.run('asp_theme', aspTheme, 'ASP colour theme');
+  }
+  res.json({ success: true, preset: slug, config: finalConfig, ispTheme, aspTheme });
 });
 
 // ── Company identity presets (ISP / ASP) ─────────────────────────────
