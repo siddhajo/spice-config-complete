@@ -2684,35 +2684,6 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
       </div>
 
-      <!-- ── Lot Activity Log ─────────────────────────────────
-           Reads the audit_log table (/api/admin/audit-log). Every lot
-           created, edited or deleted from EITHER app (admin desktop or
-           the mobile PWA) lands here with the operator, the device class
-           (📱 Mobile / 🖥 Desktop) and a per-edit field diff — so the
-           office can see who entered or changed which lot. -->
-      <div class="card" id="audit-log-card" style="padding:18px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-          <div style="font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px"><span>📋</span><span>Lot Activity Log</span></div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <select id="audit-action-filter" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit">
-              <option value="">All actions</option>
-              <option value="create">Created</option>
-              <option value="edit">Edited</option>
-              <option value="delete">Deleted</option>
-              <option value="bulk-delete">Bulk deleted</option>
-            </select>
-            <button class="btn btn-o" onclick="auditPage=1;loadAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
-            <button class="btn needs-admin" onclick="clearAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
-          </div>
-        </div>
-        <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin-bottom:12px">
-          Who entered, edited or deleted each lot — across the office desktop and the field-staff mobile app.
-        </div>
-        <div id="audit-log-host" style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
-          <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load lot activity.</div>
-        </div>
-        <div id="audit-log-pager" style="display:none;align-items:center;justify-content:center;gap:8px;margin-top:10px"></div>
-      </div>
     </div>
 
     <!-- USERS -->
@@ -4436,6 +4407,38 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
           <div id="le-recent-list" style="font-size:13px"></div>
           <div id="le-recent-pager" style="display:none;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text2)"></div>
+        </div>
+      </div>
+
+      <!-- ── Lot Activity Log (moved here from Backup) ─────────
+           Collapsible audit feed of every lot created / edited / deleted
+           across the desktop + mobile apps. Starts collapsed; the body's
+           host scrolls (overflow:auto, max-height). Controls live in the
+           header with stopPropagation so clicking them doesn't toggle the
+           section. Auto-loads when the Lot Entry tab opens. -->
+      <div class="card le-collapsible is-collapsed" id="audit-log-card" data-section="le-activity" style="padding:0;margin-top:16px">
+        <div class="le-collapse-head" onclick="leToggleSection('le-activity')" role="button" tabindex="0" style="display:flex;align-items:center;gap:8px;padding:14px 20px;cursor:pointer;flex-wrap:wrap">
+          <span class="le-collapse-chev" style="display:inline-block;width:14px;font-weight:700;color:var(--green)">▾</span>
+          <span style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px"><span>📋</span><span>Lot Activity Log</span></span>
+          <span style="flex:1"></span>
+          <select id="audit-action-filter" onclick="event.stopPropagation()" onchange="event.stopPropagation();auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit">
+            <option value="">All actions</option>
+            <option value="create">Created</option>
+            <option value="edit">Edited</option>
+            <option value="delete">Deleted</option>
+            <option value="bulk-delete">Bulk deleted</option>
+          </select>
+          <button class="btn btn-o" onclick="event.stopPropagation();auditPage=1;loadAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
+          <button class="btn needs-admin" onclick="event.stopPropagation();clearAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
+        </div>
+        <div class="le-collapse-body" style="padding:0 20px 16px">
+          <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin:4px 0 12px">
+            Who entered, edited or deleted each lot — across the office desktop and the field-staff mobile app.
+          </div>
+          <div id="audit-log-host" style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
+            <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load lot activity.</div>
+          </div>
+          <div id="audit-log-pager" style="display:none;align-items:center;justify-content:center;gap:8px;margin-top:10px"></div>
         </div>
       </div>
 
@@ -6418,11 +6421,15 @@ function go(tab){
     // etc.), and starts the auto-refresh poller. Loader checks for
     // function existence so the tab is a no-op when the build lacks
     // the Lot Entry feature.
-    lotentry: () => { if (typeof loadLotEntry === 'function') loadLotEntry(); },
+    lotentry: () => {
+      if (typeof loadLotEntry === 'function') loadLotEntry();
+      // Lot Activity Log now lives on the Lot Entry screen (collapsible).
+      if (typeof loadAuditLog === 'function') { auditPage = 1; loadAuditLog(); }
+    },
     // Lazy-load the Delete All audit log when Backup opens so the
     // <details> drawer shows fresh data on first expand. loadDeleteLog
     // is idempotent — re-running just re-renders the table.
-    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); if (typeof loadAuditLog === 'function') { auditPage = 1; loadAuditLog(); } },
+    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); },
     // Import Old Data — pre-loads recent imports so the History panel
     // is populated on first open without a separate click. Preview /
     // verify / run remain user-triggered.
@@ -18069,7 +18076,10 @@ function leRestoreCollapseState(){
     document.querySelectorAll('.le-collapsible[data-section]').forEach(card => {
       const key = card.getAttribute('data-section');
       const v = localStorage.getItem('le_collapsed_'+key);
+      // Honor both saved states so a card's HTML default (e.g. the Lot
+      // Activity Log starts collapsed) can be overridden by the user.
       if (v === '1') card.classList.add('is-collapsed');
+      else if (v === '0') card.classList.remove('is-collapsed');
     });
   } catch(_){}
 }

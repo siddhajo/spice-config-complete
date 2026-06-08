@@ -197,10 +197,12 @@ const DEFAULTS = [
   { key: 'flag_price_check',    value: 'false', category: 'flags',     label: 'Price Check + transaction gate',         type: 'boolean' },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
-  // Single-mode e-Auction build. Default flipped from 'e-Trade' to 'e-Auction'
-  // so fresh installs match the readonly UI input on the Settings → Business
-  // Mode panel and the Spice Board sidebar entry shows up immediately.
-  { key: 'business_mode',   value: 'e-Auction',      category: 'mode',      label: 'Business Mode',            type: 'select' },
+  // Fresh installs default to 'e-Trade'. Operators who run auctions can
+  // switch to 'e-Auction' anytime via Settings → Business Mode (the
+  // dropdown offers both, and the choice persists — no boot-time override).
+  // e-Auction-only surfaces (Spice Board sidebar, e-Auction CSV report,
+  // SB-sample/reserved-price fields) appear once the mode is set there.
+  { key: 'business_mode',   value: 'e-Trade',        category: 'mode',      label: 'Business Mode',            type: 'select' },
   { key: 'business_state',  value: 'TAMIL NADU',     category: 'mode',      label: 'Business State',           type: 'select' },
 
   // ── INTEGRATIONS ───────────────────────────────────────────
@@ -460,18 +462,11 @@ function initCompanySettings(db) {
     db.prepare('DELETE FROM company_settings WHERE key = ?').run('dispatched_through');
   }
 
-  // Migration: business_mode was historically seeded as 'e-Trade' on older
-  // installs, but this build is e-Auction only (the UI input is readonly
-  // and forces 'e-Auction' on save). Silently rewrite any legacy value
-  // so the Spice Board sidebar gate works without forcing every operator
-  // to open Settings → Save once.
-  try {
-    const cur = db.prepare('SELECT value FROM company_settings WHERE key = ?').get('business_mode');
-    if (cur && cur.value && String(cur.value).trim() !== 'e-Auction') {
-      db.prepare('UPDATE company_settings SET value = ? WHERE key = ?').run('e-Auction', 'business_mode');
-      console.log('Migrated business_mode "%s" → "e-Auction" (single-mode build)', cur.value);
-    }
-  } catch (_) { /* non-fatal */ }
+  // NOTE: business_mode is no longer overridden at boot. Fresh installs
+  // default to 'e-Trade' (see DEFAULTS); operators can switch to
+  // 'e-Auction' via Settings → Business Mode and the choice persists.
+  // (A previous single-mode build force-rewrote this to 'e-Auction' on
+  // every boot — that lock has been removed so the mode is selectable.)
 
   console.log('Company settings ready (%d defaults)', DEFAULTS.length);
 }
