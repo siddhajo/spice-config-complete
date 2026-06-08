@@ -2459,7 +2459,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes
         </button>
-        <button class="side-item" data-tab="payments" onclick="go('payments')">
+        <button class="side-item state-kerala-only" data-tab="payments" onclick="go('payments')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
           Payments
         </button>
@@ -6209,20 +6209,65 @@ async function _refreshLicenseBadge(){
 // "7 days left" today without a manual refresh.
 setInterval(_refreshLicenseBadge, 30 * 60 * 1000);
 
+// Resolve the active company's display name from in-memory client state
+// (presets + settings) WITHOUT a network round-trip. Mirrors the server's
+// /api/brand pickName() so the topbar name can flip in the same synchronous
+// frame as the badge + theme — eliminating the lag where the badge/colour
+// changed but the name stayed stale waiting on a fetch.
+function effectiveBrandName(){
+  try {
+    const active = (_presets && _presets.active) || 'ISP';
+    const p = (_presets && _presets[active]) || {};
+    if (p.short_name && String(p.short_name).trim()) return String(p.short_name).trim();
+    if (p.trade_name && String(p.trade_name).trim()) return String(p.trade_name).trim();
+    const findVal = (cat, key) => {
+      const arr = (window._sdata && _sdata[cat]) || [];
+      const f = arr.find(x => x && x.key === key);
+      return f && f.value;
+    };
+    if (active === 'ASP') return String(findVal('sister', 's_short_name') || '').trim();
+    return String(findVal('company', 'short_name') || findVal('company', 'trade_name') || '').trim();
+  } catch (e) { return ''; }
+}
+
+// Set the topbar H1 + page <title> to the given name. Shared by the
+// synchronous client path (applyTopbarName) and the server reconciliation
+// (refreshTopbarBrand) so there's one place that touches the name DOM.
+function _setTopbarNameText(name){
+  if (!name) return;
+  const nameEl = document.getElementById('topbar-brand-name');
+  if (nameEl) nameEl.textContent = name;
+  const titleEl = document.querySelector('title');
+  if (titleEl) titleEl.textContent = name;
+}
+
+// Synchronously flip the topbar name from client state. Called from
+// applyLogoBadge() so name + badge + theme all change in the same frame.
+function applyTopbarName(){
+  _setTopbarNameText(effectiveBrandName());
+}
+
+// Monotonic request counter so only the MOST RECENT /api/brand response is
+// allowed to touch the DOM. Without this, rapid state toggles fire several
+// overlapping fetches and a stale one can resolve last, overwriting the
+// correct name with the previous company's — the "name won't change" bug.
+let _brandSeq = 0;
+
 // Update the in-app topbar with the company short_name + logo image
 // from /api/brand. Auth-free endpoint so this also works pre-login.
 // Idempotent — safe to call from anywhere that changes the active
 // preset / mode. Source-of-truth for the topbar's branding so it stays
 // in sync with the login page (which uses the same endpoint).
 async function refreshTopbarBrand(){
+  const mySeq = ++_brandSeq;
   try {
     const r = await fetch(B + '/api/brand?_=' + Date.now());
     if (!r.ok) return;
     const d = await r.json();
-    const nameEl = document.getElementById('topbar-brand-name');
-    if (nameEl && d.name) nameEl.textContent = d.name;
-    const titleEl = document.querySelector('title');
-    if (titleEl && d.name) titleEl.textContent = d.name;
+    // A newer refresh was kicked off while this one was in flight — drop
+    // this (now stale) response so it can't clobber the latest name/logo.
+    if (mySeq !== _brandSeq) return;
+    _setTopbarNameText(d.name);
     // Topbar logo: prefer the resolved URL from /api/brand (which knows
     // the active preset + falls back across presets). If the <img> was
     // removed earlier by an onerror handler, recreate it inside .dot.
@@ -7986,10 +8031,14 @@ function applyLogoBadge(){
   // Auto-apply this company's colour theme (ISP → emerald, ASP → ocean).
   applyCompanyTheme();
 
-  // Topbar H1 + dot image — delegated to refreshTopbarBrand() which
-  // hits /api/brand so the resolution matches the login page exactly
-  // (active preset + cross-preset logo fallback). Single source of
-  // truth for the topbar's branding.
+  // Topbar H1 — flip the name SYNCHRONOUSLY from client state so it
+  // changes in the same frame as the badge + theme (no lag, no race).
+  if (typeof applyTopbarName === 'function') applyTopbarName();
+  // Topbar dot image (and an authoritative name reconciliation) —
+  // delegated to refreshTopbarBrand() which hits /api/brand so the logo
+  // resolution matches the login page exactly (active preset + cross-
+  // preset logo fallback). Guarded by _brandSeq so a slow/stale response
+  // can never clobber the name we just set above.
   if (typeof refreshTopbarBrand === 'function') refreshTopbarBrand();
   if(!code) return;
   // Cascade: anything keyed off ASP context (e.g. the "Print Selected
@@ -8274,20 +8323,32 @@ function isFieldHiddenByMode(fieldKey){
 // reads from the correct backing keys directly. So even if the user refreshes
 // mid-switch, PDFs stay correct.
 async function applyStateToCompanyProfile(state){
-  // 1. Persist the state change to the server (live)
-  try {
-    await j('/api/company-settings', {
-      method: 'PUT',
-      body: JSON.stringify({ settings: { business_state: state } })
-    });
-  } catch (e) {
-    console.error('Failed to persist state change:', e);
-  }
-
-  // 2. Auto-flip the active Company preset to match the state:
+  const isKerala = String(state || '').toUpperCase() === 'KERALA';
   //    TAMIL NADU → ISP preset, KERALA → ASP preset.
-  const targetPreset = String(state || '').toUpperCase() === 'KERALA' ? 'ASP' : 'ISP';
-  if (_presets && _presets.active && _presets.active !== targetPreset) {
+  const targetPreset = isKerala ? 'ASP' : 'ISP';
+  // Dispatch/Ship-to address blocks: shown for TN/ISP (external customer
+  // billing), hidden for KL/ASP (internal transfers). User can still flip
+  // them manually in Settings → Flags afterwards.
+  const desiredFlagValue = isKerala ? 'false' : 'true';
+
+  // Patch all three company_settings keys in ONE write (was three separate
+  // PUTs spread across two functions). Reflect locally FIRST so client
+  // helpers (badge / name / theme) read the new values synchronously,
+  // before any network await.
+  const settingsPatch = {
+    business_state: state,
+    flag_dispatch:  desiredFlagValue,
+    flag_ship:      desiredFlagValue,
+  };
+  for (const [k, v] of Object.entries(settingsPatch)) updateSdataField(k, v);
+
+  // Align the server's active preset to the state. DETERMINISTIC — we always
+  // set it to the target instead of guarding on a possibly-stale
+  // _presets.active. That stale guard was the core bug: when the cached
+  // active code already (incorrectly) matched the target, the server kept
+  // the old preset and /api/brand kept returning the old company name, even
+  // though the client badge/theme had already flipped.
+  const presetSwitch = (async () => {
     try {
       await j('/api/company-presets/active', {
         method: 'PUT',
@@ -8295,39 +8356,24 @@ async function applyStateToCompanyProfile(state){
       });
       await loadPresets();
       const freshValues = _presets[targetPreset] || {};
-      for (const [k, v] of Object.entries(freshValues)) {
-        updateSdataField(k, v);
-      }
+      for (const [k, v] of Object.entries(freshValues)) updateSdataField(k, v);
     } catch (e) {
       console.error('Failed to auto-switch preset on state change:', e);
     }
-  }
+  })();
 
-  // 3. Auto-toggle "Show Dispatch Address" + "Show Ship To Address" flags.
-  // Rationale: in TN/ISP context, invoices typically need both blocks
-  // (external customer billing). In KL/ASP context, internal transfer
-  // invoices don't need them — keeps the PDF cleaner.
-  // The user can still manually re-enable from Settings → Flags after
-  // state switch if a specific invoice needs them.
-  const isKerala = String(state || '').toUpperCase() === 'KERALA';
-  const desiredFlagValue = isKerala ? 'false' : 'true';
-  const flagsToToggle = ['flag_dispatch', 'flag_ship'];
-  try {
-    const flagSettings = {};
-    for (const k of flagsToToggle) flagSettings[k] = desiredFlagValue;
-    await j('/api/company-settings', {
-      method: 'PUT',
-      body: JSON.stringify({ settings: flagSettings })
-    });
-    // Reflect in client-side _sdata so the Flags panel shows the new
-    // state immediately if the user navigates there
-    for (const k of flagsToToggle) updateSdataField(k, desiredFlagValue);
-    toast(isKerala
-      ? 'Switched to Kerala — Dispatch/Ship-to addresses hidden in PDFs'
-      : 'Switched to Tamil Nadu — Dispatch/Ship-to addresses shown in PDFs');
-  } catch (e) {
-    console.error('Failed to auto-toggle dispatch/ship flags:', e);
-  }
+  // The settings write and the preset switch touch different keys, so run
+  // them CONCURRENTLY rather than serially — total latency ≈ the slower one.
+  const settingsSave = j('/api/company-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ settings: settingsPatch })
+  }).catch(e => console.error('Failed to persist state/flags:', e));
+
+  await Promise.all([presetSwitch, settingsSave]);
+
+  toast(isKerala
+    ? 'Switched to Kerala — Dispatch/Ship-to addresses hidden in PDFs'
+    : 'Switched to Tamil Nadu — Dispatch/Ship-to addresses shown in PDFs');
 }
 
 function renderSettingsNav(){
@@ -8940,91 +8986,57 @@ async function onBusinessStateChanged(newState){
   const f = (_sdata.mode||[]).find(x => x.key === 'business_state');
   if (f) f.value = newState;
   // Persist state change to server LIVE — all downstream reads (PDFs,
-  // invoice headers) now use the right TN/ISP or KL/ASP data set
+  // invoice headers) now use the right TN/ISP or KL/ASP data set. This also
+  // batches the dispatch/ship flag toggles, so there's no separate flag
+  // write here any more (the old TAMIL-NADU re-enable block was redundant).
   await applyStateToCompanyProfile(newState);
 
-  // Auto-enable Ship-To and Dispatch flags when switching to TAMIL NADU.
-  // Rationale: ISP invoices (TN) normally include these addresses; default ON
-  // so the user doesn't have to manually re-enable them after a state swap.
-  // Flags are NOT touched when switching to KERALA — ASP has its own flag
-  // (flag_tnpa) and the user may have intentionally turned flag_dispatch off.
-  if (String(newState || '').toUpperCase() === 'TAMIL NADU') {
-    const toEnable = {};
-    for (const key of ['flag_ship', 'flag_dispatch']) {
-      const flagField = (_sdata.flags || []).find(x => x.key === key);
-      // Only flip if currently off; skip if already true (avoids noise)
-      if (flagField && String(flagField.value).toLowerCase() !== 'true') {
-        flagField.value = 'true';
-        toEnable[key] = 'true';
-      }
-    }
-    if (Object.keys(toEnable).length) {
-      try {
-        await j('/api/company-settings', {
-          method: 'PUT',
-          body: JSON.stringify({ settings: toEnable })
-        });
-      } catch (e) {
-        console.error('Failed to auto-enable flags:', e);
-      }
-      // Re-render the Flags panel if it's currently open so the UI reflects
-      // the new state immediately
-      if (_activeCat === 'flags') renderSettingsPanel();
-    }
+  // ── Update everything VISIBLE first, in one synchronous pass, so the
+  // switch feels instant. The address category visibility flips (TN hides
+  // address_kl, KL hides address_tn); if the user is sitting on a now-hidden
+  // category fall back to 'mode' (always visible).
+  if (isCategoryHiddenByMode(_activeCat)) {
+    _activeCat = 'mode';
+  }
+  renderSettingsNav();
+  renderSettingsPanel();
+  // Badge + theme + topbar name (all flip synchronously) + logo image, and
+  // re-stamps data-business-state via applyAspContextVisibility().
+  applyLogoBadge();
+  toast(`State: ${newState} · Logo: ${newState==='TAMIL NADU'?'ISP':'ASP'}`);
+
+  // Purchases / Bills of Supply / Debit Notes are ASP-only and their sidebar
+  // entries are now hidden in Tamil Nadu (ISP) context. If the operator was
+  // sitting on one of those tabs when they flipped to TN, send them to Sales
+  // Invoices (the sibling transaction tab) instead.
+  if (String(newState || '').toUpperCase() === 'TAMIL NADU'
+      && ['purchases', 'bills', 'debit'].includes(window._currentTab)) {
+    go('invoices');
   }
 
-  // Auto-recalculate lots after the state flip. Calculations depend on
-  // the active business state — CGST/SGST/IGST split changes between
-  // intra and inter-state, and prate/puramt depend on company-level
-  // settings that may be picked up from a different preset. Without a
-  // recalc, stale puramt values from the previous state would persist
-  // into invoice PDFs.
-  // Done as a fire-and-forget call; failures are logged but don't
-  // block the rest of the state-change flow.
+  // ── Heavier follow-up work runs AFTER the UI already updated, so the
+  // visible switch is never blocked on it.
+  // Recalculate lots: CGST/SGST/IGST split changes between intra/inter-state
+  // and puramt depends on the now-active preset, so stale values would
+  // otherwise leak into invoice PDFs. Failures are non-fatal (manual
+  // "Calculate All" remains available).
   try {
     const r = await j('/api/lots/calculate-all', { method: 'POST' });
     if (r && r.calculated > 0) {
       toast(`Recalculated ${r.calculated} lots for ${newState}`);
-      // If the user is viewing the Lots tab, refresh it so the new
-      // values appear immediately
       if (typeof loadLots === 'function' && document.getElementById('lot-auction')?.value) {
         loadLots();
       }
     }
   } catch (e) {
     console.error('Auto-recalc on state change failed:', e);
-    // Non-fatal — user can still hit Calculate All manually
   }
 
-  // Re-render nav AND panel after a state change. The address category
-  // visibility flips (TN hides address_kl, KL hides address_tn), and the
-  // Company panel needs to reflect the new active preset's values.
-  // If the user happens to be viewing the now-hidden category, fall back
-  // to a sensible default ('mode' is always visible).
-  if (isCategoryHiddenByMode(_activeCat)) {
-    _activeCat = 'mode';
-  }
-  renderSettingsNav();
-  renderSettingsPanel();
-  // Logo code may have flipped (ASP ↔ ISP) — also re-stamps
-  // data-business-state via applyAspContextVisibility().
-  applyLogoBadge();
-  // Purchases / Bills of Supply / Debit Notes are ASP-only and their
-  // sidebar entries are now hidden in Tamil Nadu (ISP) context. If the
-  // operator was sitting on one of those tabs when they flipped to TN,
-  // its content would linger with no way back to it — send them to Sales
-  // Invoices (the sibling transaction tab) instead.
-  if (String(newState || '').toUpperCase() === 'TAMIL NADU'
-      && ['purchases', 'bills', 'debit'].includes(window._currentTab)) {
-    go('invoices');
-  }
-  // Refresh invoice list — the listing now filters by business state, so
-  // the visible rows change when state flips. Only refreshes if the user
-  // is currently looking at Sales Invoices tab (avoids unnecessary calls).
+  // Refresh invoice list — the listing filters by business state, so the
+  // visible rows change. Only if the user is on the Sales Invoices tab.
   if (typeof loadInvoices === 'function' && document.getElementById('inv-auction')) {
     try { await loadInvoices(); } catch (_) {}
   }
-  toast(`State: ${newState} · Logo: ${newState==='TAMIL NADU'?'ISP':'ASP'}`);
 }
 function renderSettings(){renderSettingsNav();renderSettingsPanel()}
 
