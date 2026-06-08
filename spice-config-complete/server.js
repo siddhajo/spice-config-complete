@@ -6514,6 +6514,8 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
   const company = (cfg.trade_name || cfg.short_name || cfg.tally_company_name || cfg.legal_name || 'Company').toString();
+  // Mode-aware label: e-Trade calls it a "Trade", e-Auction an "Auction".
+  const termAuc = (String(cfg.business_mode || 'e-Trade').toLowerCase() === 'e-trade') ? 'Trade' : 'Auction';
 
   const PAGE_L = 30, PAGE_R = 565, PAGE_W = PAGE_R - PAGE_L;
   let y = 40;
@@ -6525,7 +6527,7 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   y += 10;
 
   doc.font('Helvetica').fontSize(10);
-  doc.text(`Seller: ${sellerName}`, PAGE_L, y); doc.text(`Auction: ${auction.ano}`, PAGE_L + 280, y);
+  doc.text(`Seller: ${sellerName}`, PAGE_L, y); doc.text(`${termAuc}: ${auction.ano}`, PAGE_L + 280, y);
   y += 14;
   doc.text(`Phone: ${trader && trader.tel ? trader.tel : '-'}`, PAGE_L, y);
   doc.text(`Date: ${fmtDate(auction.date)}`, PAGE_L + 280, y);
