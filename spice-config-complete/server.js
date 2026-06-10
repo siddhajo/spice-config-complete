@@ -3033,6 +3033,20 @@ function termAuction(cfgOrDb, plural, lower) {
   const word = isTrade ? (plural ? 'Trades' : 'Trade') : (plural ? 'Auctions' : 'Auction');
   return lower ? word.toLowerCase() : word;
 }
+// Resolve an auction's DB id to its human-facing `ano` for use in
+// download filenames. Download names must read as the auction NUMBER the
+// user knows (e.g. "INV_12.xlsx" where 12 is ano), never the opaque
+// auctions.id primary key. Sanitises to filename-safe chars and falls
+// back to the raw id only if the auction/ano can't be resolved, so a
+// filename is always produced.
+function anoForFilename(db, auctionId) {
+  try {
+    const a = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
+    const ano = (a && a.ano != null) ? String(a.ano).trim() : '';
+    const safe = ano.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '');
+    return safe || String(auctionId);
+  } catch (_) { return String(auctionId); }
+}
 // Returns { sql, params } that filter rows to the current business mode.
 // `prefix` is the SQL prefix that resolves to the auctions row's `mode`
 // column — usually 'auctions.mode' (when the query already JOINs auctions)
@@ -7348,7 +7362,7 @@ app.get('/api/payments/pdf/:auctionId/:sellerName', requireView, (req, res) => {
     doc = new PDFDocument({ size: 'A4', margin: 30 });
     res.setHeader('Content-Type', 'application/pdf');
     const safeName = String(sellerName || '').replace(/[^\w]/g, '_').slice(0, 80) || 'seller';
-    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${auctionId}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${anoForFilename(db, auctionId)}.pdf"`);
     doc.pipe(res); piped = true;
     res.on('close', () => { try { doc.destroy(); } catch(_){} });
     _renderPaymentStatement(doc, db, auctionId, sellerName, cfg);
@@ -7378,7 +7392,7 @@ app.post('/api/payments/pdf-lots', requireView, (req, res) => {
     doc = new PDFDocument({ size: 'A4', margin: 30 });
     res.setHeader('Content-Type', 'application/pdf');
     const safeName = sellerName.replace(/[^\w]/g, '_').slice(0, 80) || 'seller';
-    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${auctionId}_partial.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="Payment_${safeName}_${anoForFilename(db, auctionId)}_partial.pdf"`);
     doc.pipe(res); piped = true;
     res.on('close', () => { try { doc.destroy(); } catch(_){} });
     _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds);
@@ -7671,7 +7685,7 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
       const buffer = await exportAnyPdf(db, type, auctionId, cfg, { state: req.query.state });
       const niceName = (EXPORT_TYPES[type] && EXPORT_TYPES[type].name) || type;
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${niceName}_${auctionId}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${niceName}_${anoForFilename(db, auctionId)}.pdf"`);
       return res.send(buffer);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -7713,7 +7727,7 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
     // doesn't get confused with the full export later.
     const suffix = opts ? '_selected' : '';
     res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${auctionId}.${ext}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${anoForFilename(db, auctionId)}.${ext}"`);
     res.send(Buffer.from(buffer));
   } catch(e) {
     res.status(500).json({ error: e.message });
@@ -7790,7 +7804,7 @@ app.post('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
     const mime = exportDef.mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     const suffix = opts ? '_selected' : '';
     res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${auctionId}.${ext}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportDef.name}${suffix}_${anoForFilename(db, auctionId)}.${ext}"`);
     res.send(Buffer.from(buffer));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -7828,12 +7842,12 @@ app.get('/api/lorry-reports/:type/:auctionId', requireExport, async (req, res) =
     if (format === 'pdf') {
       const buf = await def.pdf(db, auctionId);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${def.name}_${auctionId}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${def.name}_${anoForFilename(db, auctionId)}.pdf"`);
       return res.send(buf);
     }
     const buf = await def.xlsx(db, auctionId);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${def.name}_${auctionId}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${def.name}_${anoForFilename(db, auctionId)}.xlsx"`);
     return res.send(Buffer.from(buf));
   } catch (e) {
     console.error('lorry-reports error:', e);
@@ -7912,7 +7926,7 @@ app.get('/api/spice-board-reports/:type/export', requireExport, async (req, res)
     const dispo = (mime, ext) => {
       res.setHeader('Content-Type', mime);
       res.setHeader('Content-Disposition',
-        `${inline ? 'inline' : 'attachment'}; filename="${name}_${opts.auctionId}.${ext}"`);
+        `${inline ? 'inline' : 'attachment'}; filename="${name}_${anoForFilename(db, opts.auctionId)}.${ext}"`);
     };
     if (format === 'csv') {
       if (!def.csv) return res.status(400).json({ error: 'CSV not supported for ' + type });
@@ -7941,21 +7955,31 @@ app.get('/api/spice-board-reports/:type/export', requireExport, async (req, res)
 // DBF EXPORTS (FoxPro-compatible format)
 // ══════════════════════════════════════════════════════════════
 
-// List all available DBF export types with labels
+// List all available DBF export types with labels + capability flags so
+// the front-end can render the right filter controls per module.
 app.get('/api/dbf-exports/list', requireExport, (req, res) => {
   const list = {};
   for (const [key, def] of Object.entries(DBF_EXPORTS)) {
     list[key] = {
       label: def.label,
       name: def.name,
-      needsAuction: !!def.needsAuction,
-      needsDateRange: !!def.needsDateRange,
+      auctionFilter: !!def.auctionFilter,
+      dateFilter: !!def.dateFilter,
+      master: !!def.master,
+      xlsx: !!def.xlsxFn,
     };
   }
   res.json(list);
 });
 
-// Generic DBF export endpoint
+// Generic DBF (and master-data XLSX) export endpoint.
+//
+// Filtering — every transactional module accepts EITHER:
+//   ?auctionId=<id>          → trade/auction-wise (resolved to the auction's
+//                              ano for the ano-keyed tables)
+//   ?from=YYYY-MM-DD&to=...  → date-wise
+// Master data (sellers/buyers) ignore filters. `?format=xlsx` switches a
+// master export to a spreadsheet (only modules with an xlsxFn support it).
 app.get('/api/dbf-exports/:type', requireExport, async (req, res) => {
   const { type } = req.params;
   const def = DBF_EXPORTS[type];
@@ -7963,26 +7987,41 @@ app.get('/api/dbf-exports/:type', requireExport, async (req, res) => {
 
   try {
     const db = getDb();
-    let buffer;
+    const format = String(req.query.format || 'dbf').toLowerCase();
+    const { auctionId, from, to } = req.query;
 
-    if (def.needsAuction) {
-      const { auctionId } = req.query;
-      if (!auctionId) return res.status(400).json({ error: 'auctionId query parameter required' });
-      buffer = await def.fn(db, auctionId);
-    } else if (def.needsDateRange) {
-      const { from, to, ano } = req.query;
-      const filters = {};
-      if (ano) filters.ano = ano;
-      if (from && to) { filters.from = from; filters.to = to; }
-      buffer = await def.fn(db, filters);
-    } else {
-      buffer = await def.fn(db);
+    // Resolve the optional filter into the shape the exporters expect. For
+    // the ano-keyed tables we map auctionId → ano; lots filters on auction_id
+    // directly (it carries the auctionId through). Master data takes none.
+    const filters = {};
+    let anoForName = null;
+    if (def.auctionFilter && auctionId) {
+      filters.auctionId = auctionId;
+      anoForName = anoForFilename(db, auctionId);
+      const a = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
+      if (a && a.ano != null) filters.ano = a.ano;
+    } else if (def.dateFilter && from && to) {
+      filters.from = from;
+      filters.to = to;
     }
 
-    // Build filename: LOTS_1.dbf, INV_2026-04-01_to_2026-04-30.dbf, NAM.dbf
+    // XLSX path — master data only (sellers/buyers).
+    if (format === 'xlsx') {
+      if (!def.xlsxFn) return res.status(400).json({ error: 'XLSX format not supported for this export' });
+      const buffer = await def.xlsxFn(db);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${def.name}.xlsx"`);
+      return res.send(Buffer.from(buffer));
+    }
+
+    // DBF path. Master exporters take only (db); transactional take filters.
+    const buffer = def.master ? await def.fn(db) : await def.fn(db, filters);
+
+    // Build filename: CPA1_12.dbf (ano 12), INV_2026-04-01_to_2026-04-30.dbf,
+    // NAM.dbf. Auction-wise names use the human-facing ano, never the id.
     let filename = def.name;
-    if (def.needsAuction && req.query.auctionId) filename += `_${req.query.auctionId}`;
-    if (def.needsDateRange && req.query.from) filename += `_${req.query.from}_to_${req.query.to}`;
+    if (anoForName) filename += `_${anoForName}`;
+    else if (filters.from) filename += `_${filters.from}_to_${filters.to}`;
     filename += '.dbf';
 
     res.setHeader('Content-Type', 'application/x-dbase');
@@ -8362,7 +8401,7 @@ app.get('/api/tally/party-ledger/:kind/:auctionId', requireExport, (req, res) =>
     }
     const xml = generLedgerXML(rows, cfg, { companyName: resolveTallyCompanyName(cfg, partyDef.company) });
     const safeName = String(partyName).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
-    const filename = `Tally_PartyLedger_${kind}_${safeName}_${auctionId}.xml`;
+    const filename = `Tally_PartyLedger_${kind}_${safeName}_${anoForFilename(db, auctionId)}.xml`;
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(xml);
@@ -8434,7 +8473,7 @@ app.get('/api/tally/party-voucher/:type/:auctionId', requireExport, (req, res) =
     }
     const xml = def.generator(rows, cfg, { companyName: resolveTallyCompanyName(cfg, def.company) });
     const safeName = String(partyName).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
-    const filename = `${def.name}_${safeName}_${auctionId}.xml`;
+    const filename = `${def.name}_${safeName}_${anoForFilename(db, auctionId)}.xml`;
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(xml);
@@ -8458,7 +8497,7 @@ app.get('/api/tally/export/:type/:auctionId', requireExport, (req, res) => {
       return res.status(404).json({ error: `No ${what} found for auction ${auctionId}` });
     }
     const xml = def.generator(rows, cfg, { companyName: resolveTallyCompanyName(cfg, def.company) });
-    const filename = `${def.name}_${auctionId}.xml`;
+    const filename = `${def.name}_${anoForFilename(db, auctionId)}.xml`;
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(xml);
@@ -8558,7 +8597,7 @@ app.get('/api/tally/debit-note-print/:auctionId', requireExport, async (req, res
 
     const pdf = await generateDebitNoteBatchPDF(buyers, ourCfg);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="DebitNotes_${auctionId}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="DebitNotes_${anoForFilename(db, auctionId)}.pdf"`);
     res.send(pdf);
   } catch (e) {
     console.error('debit-note-print error:', e);

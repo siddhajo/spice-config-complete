@@ -18,6 +18,7 @@
  */
 
 const { DBFFile } = require('dbffile');
+const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 
@@ -48,6 +49,50 @@ function num(val, dec = 2) {
   return parseFloat(n.toFixed(dec));
 }
 
+// Normalise the filter argument so every exporter accepts either a rich
+// filter object ({ auctionId, ano, from, to }) or — for backward
+// compatibility — a bare auctionId (string/number). Lets the same module
+// be called auction-wise OR date-wise.
+function normFilters(f) {
+  if (f == null) return {};
+  if (typeof f === 'object') return f;
+  return { auctionId: f };
+}
+
+// Build a WHERE clause for the ano-keyed transactional tables (invoices,
+// purchases, bills, debit_notes). Auction-wise wins when an `ano` is
+// supplied; otherwise a date range narrows by the `date` column. With
+// neither, the whole table is exported.
+function anoDateWhere(filters) {
+  filters = normFilters(filters);
+  if (filters.ano != null && String(filters.ano).trim() !== '') {
+    return { sql: 'ano = ?', params: [filters.ano] };
+  }
+  if (filters.from && filters.to) {
+    return { sql: 'date BETWEEN ? AND ?', params: [filters.from, filters.to] };
+  }
+  return { sql: '1=1', params: [] };
+}
+
+/**
+ * Build an XLSX buffer for a flat list of master-data rows. Simple
+ * branded-free sheet: a bold header row plus one row per record. Used for
+ * the Sellers / Buyers "export as .xlsx" option alongside the .dbf form.
+ */
+async function writeXlsxBuffer(sheetName, columns, records) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheetName);
+  ws.columns = columns.map(c => ({ header: c.header, key: c.key, width: c.width || 18 }));
+  const headerRow = ws.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
+  headerRow.eachCell((cell) => {
+    cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' } };
+  });
+  records.forEach(rec => ws.addRow(rec));
+  return wb.xlsx.writeBuffer();
+}
+
 /**
  * Create a DBF file and write records to it
  * Returns a Buffer containing the DBF file contents
@@ -66,12 +111,24 @@ async function writeDbfBuffer(fields, records) {
 }
 
 // ── LOTS (CPA1.DBF structure) ─────────────────────────────────
-async function exportLotsDbf(db, auctionId) {
+// Accepts either a bare auctionId (legacy) or a filter object. Auction-wise
+// filters on lots.auction_id; date-wise filters on the parent auction's date.
+async function exportLotsDbf(db, filters) {
+  filters = normFilters(filters);
+  let where = '1=1';
+  const params = [];
+  if (filters.auctionId != null && String(filters.auctionId).trim() !== '') {
+    where = 'l.auction_id = ?';
+    params.push(filters.auctionId);
+  } else if (filters.from && filters.to) {
+    where = 'a.date BETWEEN ? AND ?';
+    params.push(filters.from, filters.to);
+  }
   const rows = db.all(`
-    SELECT l.*, a.ano as trade_no, a.date as trade_date 
+    SELECT l.*, a.ano as trade_no, a.date as trade_date
     FROM lots l JOIN auctions a ON a.id = l.auction_id
-    WHERE l.auction_id = ? ORDER BY l.lot_no
-  `, [auctionId]);
+    WHERE ${where} ORDER BY a.date, l.lot_no
+  `, params);
 
   const fields = [
     { name: 'ANO',      type: 'C', size: 10 },
@@ -158,12 +215,8 @@ async function exportLotsDbf(db, auctionId) {
 
 // ── SALES INVOICES (INV.DBF structure) ────────────────────────
 async function exportInvoicesDbf(db, filters = {}) {
-  let query = 'SELECT * FROM invoices WHERE 1=1';
-  const params = [];
-  if (filters.ano) { query += ' AND ano = ?'; params.push(filters.ano); }
-  if (filters.from && filters.to) { query += ' AND date BETWEEN ? AND ?'; params.push(filters.from, filters.to); }
-  query += ' ORDER BY date, sale, invo';
-  const rows = db.all(query, params);
+  const w = anoDateWhere(filters);
+  const rows = db.all(`SELECT * FROM invoices WHERE ${w.sql} ORDER BY date, sale, invo`, w.params);
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
@@ -218,12 +271,8 @@ async function exportInvoicesDbf(db, filters = {}) {
 
 // ── PURCHASES (PURCHASE.DBF structure) ────────────────────────
 async function exportPurchasesDbf(db, filters = {}) {
-  let query = 'SELECT * FROM purchases WHERE 1=1';
-  const params = [];
-  if (filters.ano) { query += ' AND ano = ?'; params.push(filters.ano); }
-  if (filters.from && filters.to) { query += ' AND date BETWEEN ? AND ?'; params.push(filters.from, filters.to); }
-  query += ' ORDER BY date, invo';
-  const rows = db.all(query, params);
+  const w = anoDateWhere(filters);
+  const rows = db.all(`SELECT * FROM purchases WHERE ${w.sql} ORDER BY date, invo`, w.params);
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
@@ -270,12 +319,8 @@ async function exportPurchasesDbf(db, filters = {}) {
 
 // ── BILLS of SUPPLY (BILL.DBF structure) ──────────────────────
 async function exportBillsDbf(db, filters = {}) {
-  let query = 'SELECT * FROM bills WHERE 1=1';
-  const params = [];
-  if (filters.ano) { query += ' AND ano = ?'; params.push(filters.ano); }
-  if (filters.from && filters.to) { query += ' AND date BETWEEN ? AND ?'; params.push(filters.from, filters.to); }
-  query += ' ORDER BY date, bil';
-  const rows = db.all(query, params);
+  const w = anoDateWhere(filters);
+  const rows = db.all(`SELECT * FROM bills WHERE ${w.sql} ORDER BY date, bil`, w.params);
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
@@ -398,13 +443,65 @@ async function exportBuyersDbf(db) {
   return writeDbfBuffer(fields, records);
 }
 
+// ── SELLERS / BUYERS as XLSX ──────────────────────────────────
+// Same master-data rows as the .dbf forms above, emitted as a plain
+// spreadsheet so the data is usable outside the legacy FoxPro app.
+async function exportTradersXlsx(db) {
+  const rows = db.all('SELECT * FROM traders ORDER BY name');
+  const columns = [
+    { header: 'Name',           key: 'name',        width: 28 },
+    { header: 'CR / GSTIN',     key: 'cr',          width: 24 },
+    { header: 'PAN',            key: 'pan',         width: 14 },
+    { header: 'Tel',            key: 'tel',         width: 16 },
+    { header: 'Aadhar',         key: 'aadhar',      width: 16 },
+    { header: 'Address',        key: 'padd',        width: 36 },
+    { header: 'Place',          key: 'ppla',        width: 20 },
+    { header: 'PIN',            key: 'pin',         width: 10 },
+    { header: 'State',          key: 'pstate',      width: 16 },
+    { header: 'State Code',     key: 'pst_code',    width: 10 },
+    { header: 'IFSC',           key: 'ifsc',        width: 14 },
+    { header: 'Account Number', key: 'acctnum',     width: 22 },
+    { header: 'Account Holder', key: 'holder_name', width: 26 },
+  ];
+  const records = rows.map(r => ({
+    name: r.name || '', cr: r.cr || '', pan: r.pan || '', tel: r.tel || '',
+    aadhar: r.aadhar || '', padd: r.padd || '', ppla: r.ppla || '', pin: r.pin || '',
+    pstate: r.pstate || '', pst_code: r.pst_code || '', ifsc: r.ifsc || '',
+    acctnum: r.acctnum || '', holder_name: r.holder_name || '',
+  }));
+  return writeXlsxBuffer('Sellers', columns, records);
+}
+
+async function exportBuyersXlsx(db) {
+  const rows = db.all('SELECT * FROM buyers ORDER BY buyer');
+  const columns = [
+    { header: 'Code',       key: 'buyer',    width: 12 },
+    { header: 'Name',       key: 'buyer1',   width: 30 },
+    { header: 'Address 1',  key: 'add1',     width: 32 },
+    { header: 'Address 2',  key: 'add2',     width: 32 },
+    { header: 'Place',      key: 'pla',      width: 20 },
+    { header: 'PIN',        key: 'pin',      width: 10 },
+    { header: 'State',      key: 'state',    width: 16 },
+    { header: 'State Code', key: 'st_code',  width: 10 },
+    { header: 'GSTIN',      key: 'gstin',    width: 20 },
+    { header: 'PAN',        key: 'pan',      width: 14 },
+    { header: 'Tel',        key: 'tel',      width: 16 },
+    { header: 'TI',         key: 'ti',       width: 16 },
+    { header: 'Sale',       key: 'sale',     width: 8 },
+  ];
+  const records = rows.map(r => ({
+    buyer: r.buyer || '', buyer1: r.buyer1 || '', add1: r.add1 || '', add2: r.add2 || '',
+    pla: r.pla || '', pin: r.pin || '', state: r.state || '', st_code: r.st_code || '',
+    gstin: r.gstin || '', pan: r.pan || '', tel: r.tel || '', ti: r.ti || '',
+    sale: r.sale || 'L',
+  }));
+  return writeXlsxBuffer('Buyers', columns, records);
+}
+
 // ── DEBIT NOTES ───────────────────────────────────────────────
 async function exportDebitNotesDbf(db, filters = {}) {
-  let query = 'SELECT * FROM debit_notes WHERE 1=1';
-  const params = [];
-  if (filters.from && filters.to) { query += ' AND date BETWEEN ? AND ?'; params.push(filters.from, filters.to); }
-  query += ' ORDER BY date, note_no';
-  const rows = db.all(query, params);
+  const w = anoDateWhere(filters);
+  const rows = db.all(`SELECT * FROM debit_notes WHERE ${w.sql} ORDER BY date, note_no`, w.params);
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
@@ -436,14 +533,21 @@ async function exportDebitNotesDbf(db, filters = {}) {
 }
 
 // ── Registry for easy routing ─────────────────────────────────
+// Capability flags:
+//   auctionFilter  → can be narrowed to one trade/auction
+//   dateFilter     → can be narrowed to a date range
+//   master         → master data (no transactional filter)
+//   xlsxFn         → also exportable as .xlsx (master data only here)
+// Transactional modules carry BOTH auctionFilter and dateFilter so the
+// user can export either trade/auction-wise or date-wise.
 const DBF_EXPORTS = {
-  lots:         { fn: exportLotsDbf,        name: 'CPA1',     needsAuction: true, label: 'Lots (CPA1.DBF)' },
-  invoices:     { fn: exportInvoicesDbf,    name: 'INV',      needsDateRange: true, label: 'Sales Invoices (INV.DBF)' },
-  purchases:    { fn: exportPurchasesDbf,   name: 'PURCHASE', needsDateRange: true, label: 'Purchases (PURCHASE.DBF)' },
-  bills:        { fn: exportBillsDbf,       name: 'BILL',     needsDateRange: true, label: 'Bills of Supply (BILL.DBF)' },
-  traders:      { fn: exportTradersDbf,     name: 'NAM',      label: 'Sellers (NAM.DBF)' },
-  buyers:       { fn: exportBuyersDbf,      name: 'SBL',      label: 'Buyers (SBL.DBF)' },
-  debit_notes:  { fn: exportDebitNotesDbf,  name: 'DEBIT',    needsDateRange: true, label: 'Debit Notes' },
+  lots:         { fn: exportLotsDbf,        name: 'CPA1',     auctionFilter: true, dateFilter: true, label: 'Lots (CPA1.DBF)' },
+  invoices:     { fn: exportInvoicesDbf,    name: 'INV',      auctionFilter: true, dateFilter: true, label: 'Sales Invoices (INV.DBF)' },
+  purchases:    { fn: exportPurchasesDbf,   name: 'PURCHASE', auctionFilter: true, dateFilter: true, label: 'Purchases (PURCHASE.DBF)' },
+  bills:        { fn: exportBillsDbf,       name: 'BILL',     auctionFilter: true, dateFilter: true, label: 'Bills of Supply (BILL.DBF)' },
+  debit_notes:  { fn: exportDebitNotesDbf,  name: 'DEBIT',    auctionFilter: true, dateFilter: true, label: 'Debit Notes' },
+  traders:      { fn: exportTradersDbf,     name: 'NAM',      master: true, xlsxFn: exportTradersXlsx, label: 'Sellers (NAM.DBF)' },
+  buyers:       { fn: exportBuyersDbf,      name: 'SBL',      master: true, xlsxFn: exportBuyersXlsx, label: 'Buyers (SBL.DBF)' },
 };
 
 module.exports = {
@@ -454,5 +558,7 @@ module.exports = {
   exportBillsDbf,
   exportTradersDbf,
   exportBuyersDbf,
+  exportTradersXlsx,
+  exportBuyersXlsx,
   exportDebitNotesDbf,
 };

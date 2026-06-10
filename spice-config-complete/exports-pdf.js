@@ -316,6 +316,8 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
           });
         }
       });
+      // Bottom separator so subtotal rows are ruled off like every other row.
+      doc.moveTo(m, y + rowH).lineTo(m + usableW, y + rowH).lineWidth(0.5).strokeColor('#999').stroke();
       y += rowH;
       return;
     }
@@ -342,7 +344,8 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
         });
       }
     });
-    doc.moveTo(m, y + rowH).lineTo(m + usableW, y + rowH).lineWidth(0.25).strokeColor('#DDD').stroke();
+    // Horizontal rule under every data row so the table reads as fully ruled.
+    doc.moveTo(m, y + rowH).lineTo(m + usableW, y + rowH).lineWidth(0.4).strokeColor('#999').stroke();
     y += rowH;
   }
 

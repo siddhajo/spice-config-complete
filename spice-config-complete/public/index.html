@@ -2878,7 +2878,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <!-- LOTS -->
     <div class="tc" id="tc-lots">
       <div class="card">
-        <h2>
+        <h2 style="display:flex;align-items:center;gap:10px">
           <span style="display:flex;align-items:center;gap:10px">
             <span style="width:32px;height:32px;border-radius:10px;background:var(--spice-cardamom-lt);display:inline-flex;align-items:center;justify-content:center">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--spice-cardamom)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
@@ -2886,6 +2886,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             Lot Data
             <span style="font-weight:400;font-size:12px;color:var(--text3)">Pick from <span data-term-auction="plural">Auctions</span> tab first</span>
           </span>
+          <a href="https://tradefair.intelloinsights.com/trading/dashboard/sign_in#/login/false" target="_blank" rel="noopener noreferrer" title="Open the trading dashboard in a new tab" style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--spice-cardamom);text-decoration:none;padding:6px 12px;border:1px solid var(--spice-cardamom);border-radius:8px;background:var(--spice-cardamom-lt)">Trading Dashboard <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
         </h2>
 
         <!-- KPI strip — 6 tiles. Lots / Qty / Amount(+min/max/avg) /
@@ -3439,28 +3440,46 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div class="tally-section-body">
             <p style="font-size:12px;color:var(--text2);margin:12px 0">These exports produce .dbf files that your dad's FoxPro application can read directly. Date format: DD/MM/YYYY. Lot numbers preserve leading zeros.</p>
 
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Per <span data-term-auction="singular">Auction</span></h3>
-            <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
-              <div class="fg" style="margin:0;flex:1;min-width:200px"><label><span data-term-auction="singular">Auction</span></label><select id="dbf-auction" style="padding:8px;border:1px solid var(--border);border-radius:6px;width:100%"></select></div>
-              <button class="btn btn-a" onclick="downloadDbf('lots',{auctionId:document.getElementById('dbf-auction').value})">Lots (CPA1.DBF)</button>
-            </div>
+            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Trade Data
+              <span style="font-weight:400;font-size:11px;color:var(--text3);margin-left:6px">Export any module <span data-term-auction="singular-lower">auction</span>-wise or date-wise</span>
+            </h3>
 
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Date Range</h3>
-            <div style="display:flex;gap:8px;align-items:end;margin-bottom:10px;flex-wrap:wrap">
+            <!-- Filter mode for the transactional modules below. Auction-wise
+                 narrows to one trade; date-wise narrows by a date range.
+                 dbfSyncMode() toggles which input row is visible. -->
+            <div style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dbf-mode" value="auction" checked onchange="dbfSyncMode()"> By <span data-term-auction="singular">Auction</span></label>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dbf-mode" value="date" onchange="dbfSyncMode()"> By Date Range</label>
+            </div>
+            <div id="dbf-filter-auction" style="display:flex;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
+              <div class="fg" style="margin:0;flex:1;min-width:200px;max-width:360px"><label><span data-term-auction="singular">Auction</span></label><select id="dbf-auction" style="padding:8px;border:1px solid var(--border);border-radius:6px;width:100%"></select></div>
+            </div>
+            <div id="dbf-filter-date" style="display:none;gap:8px;align-items:end;margin-bottom:12px;flex-wrap:wrap">
               <div class="fg" style="margin:0"><label>From</label><input type="date" id="dbf-from"></div>
               <div class="fg" style="margin:0"><label>To</label><input type="date" id="dbf-to"></div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-              <button class="btn btn-a" onclick="downloadDbfRange('invoices')">Sales Invoices (INV.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfRange('purchases')">Purchases (PURCHASE.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfRange('bills')">Bills of Supply (BILL.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfRange('debit_notes')">Debit Notes</button>
+              <button class="btn btn-a" onclick="downloadDbfModule('lots')">Lots (CPA1.DBF)</button>
+              <button class="btn btn-a" onclick="downloadDbfModule('invoices')">Sales Invoices (INV.DBF)</button>
+              <button class="btn btn-a" onclick="downloadDbfModule('purchases')">Purchases (PURCHASE.DBF)</button>
+              <button class="btn btn-a" onclick="downloadDbfModule('bills')">Bills of Supply (BILL.DBF)</button>
+              <button class="btn btn-a" onclick="downloadDbfModule('debit_notes')">Debit Notes</button>
             </div>
 
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Master Data</h3>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-              <button class="btn btn-a" onclick="downloadDbf('traders')">Sellers (NAM.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbf('buyers')">Buyers (SBL.DBF)</button>
+            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Master Data
+              <span style="font-weight:400;font-size:11px;color:var(--text3);margin-left:6px">Download as .DBF or .XLSX</span>
+            </h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">
+              <div style="display:flex;gap:6px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff">
+                <span style="flex:1;font-size:13px;font-weight:600">Sellers</span>
+                <button class="btn btn-a" style="padding:5px 12px" onclick="downloadDbf('traders')">.DBF</button>
+                <button class="btn btn-g" style="padding:5px 12px" onclick="downloadDbf('traders',{format:'xlsx'})">.XLSX</button>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff">
+                <span style="flex:1;font-size:13px;font-weight:600">Buyers</span>
+                <button class="btn btn-a" style="padding:5px 12px" onclick="downloadDbf('buyers')">.DBF</button>
+                <button class="btn btn-g" style="padding:5px 12px" onclick="downloadDbf('buyers',{format:'xlsx'})">.XLSX</button>
+              </div>
             </div>
           </div>
         </div>
@@ -3694,6 +3713,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       <div class="card">
         <h2>To Tally
           <span style="font-weight:400;font-size:12px;color:var(--text3)">Generate Tally-importable XML files from your auction data</span>
+          <a href="https://in.cloudaccess.tallysolutions.com/login" target="_blank" rel="noopener noreferrer" title="Open Tally Cloud login in a new tab" style="float:right;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--green);text-decoration:none;padding:6px 12px;border:1px solid var(--green);border-radius:8px;background:var(--green-bg)">Tally Cloud <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
         </h2>
 
         <div class="fg" style="max-width:360px"><label>Select <span data-term-auction="singular">Auction</span></label>
@@ -12335,11 +12355,36 @@ async function downloadDbf(type, extraParams={}){
   }catch(e){showError(e)}
 }
 
-async function downloadDbfRange(type){
-  const from=document.getElementById('dbf-from').value;
-  const to=document.getElementById('dbf-to').value;
-  if(!from||!to){alert('Select From and To dates');return}
-  await downloadDbf(type,{from,to});
+// Toggle the auction vs date-range filter rows based on the selected mode.
+function dbfSyncMode(){
+  const mode=(document.querySelector('input[name="dbf-mode"]:checked')||{}).value||'auction';
+  const a=document.getElementById('dbf-filter-auction');
+  const d=document.getElementById('dbf-filter-date');
+  if(a) a.style.display = mode==='auction' ? 'flex' : 'none';
+  if(d) d.style.display = mode==='date'    ? 'flex' : 'none';
+}
+
+// Export one transactional module honouring the active filter mode:
+// auction-wise (?auctionId) or date-wise (?from&to).
+async function downloadDbfModule(type){
+  const mode=(document.querySelector('input[name="dbf-mode"]:checked')||{}).value||'auction';
+  if(mode==='auction'){
+    const aid=document.getElementById('dbf-auction').value;
+    if(!aid){alert('Select a '+termAuctionLower()+' first');return}
+    await downloadDbf(type,{auctionId:aid});
+  }else{
+    const from=document.getElementById('dbf-from').value;
+    const to=document.getElementById('dbf-to').value;
+    if(!from||!to){alert('Select From and To dates');return}
+    await downloadDbf(type,{from,to});
+  }
+}
+
+// Lower-case noun for the active business mode ("trade" / "auction"),
+// used in DBF export prompts. Falls back to "auction".
+function termAuctionLower(){
+  const el=document.querySelector('[data-term-auction="singular-lower"]');
+  return (el && el.textContent.trim()) || 'auction';
 }
 
 // ── Lots ──────────────────────────────────────────────────
@@ -13141,7 +13186,8 @@ function openLotEdit(l){
         if (amtEl)   amtEl.value   = '0.00';
         setIf('l-buyer',  sp.buyer);
         setIf('l-buyer1', sp.buyer1);
-        setIf('l-cr',     '');
+        // Leave l-cr (the SELLER's CR/GSTIN) alone — withdrawing/N/A-ing a
+        // lot changes the buyer/sale, not who the seller is.
         setIf('l-sale',   sp.sale);
         codeEl.value = code;
         if (typeof toast === 'function') toast(sp.toast);
@@ -13164,7 +13210,10 @@ function openLotEdit(l){
         }
         setIf('l-buyer',  match.buyer  || '');
         setIf('l-buyer1', match.buyer1 || '');
-        setIf('l-cr',     match.gstin  || match.cr || '');
+        // NOTE: do NOT touch l-cr here — `cr` is the SELLER's CR/GSTIN,
+        // not the buyer's. Picking a buyer must never overwrite the
+        // seller's CR. (The buyer's GSTIN lives in the buyer master and
+        // flows onto the sales invoice separately.)
         setIf('l-sale',   match.sale   || '');
         codeEl.value = match.code || code;
         if (typeof toast === 'function') toast(`Filled buyer: ${match.buyer1 || match.buyer}`);
