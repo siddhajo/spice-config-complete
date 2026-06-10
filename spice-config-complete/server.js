@@ -2077,6 +2077,97 @@ function runBookingLimitCheck(db, req, { auctionId, traderId, traderName, branch
   };
 }
 
+// ── GRADE-2 SHARE CHECK (whole-trade quality guard) ──────────
+// Independent of the per-seller volume cap above. Watches the Grade-2
+// share of the ENTIRE trade by weight: grade2_kg / total_kg. Crossing
+// grade2_soft_pct alerts the depot manager; crossing grade2_escalate_pct
+// alerts the superior. Deduped per (trade, 'grade2', level) so the ratio
+// bouncing around the threshold can't spam. Reuses the booking_alerts
+// table with the sentinel trader_key 'grade2'.
+function evaluateGrade2Share(db, auctionId) {
+  const cfg = getSettingsFlat(db);
+  if (!cfg.flag_grade2_limit) return { enabled: false, level: 0 };
+  const gradeVal = String(cfg.grade2_grade_value != null ? cfg.grade2_grade_value : '2').trim();
+  const softPct = Number(cfg.grade2_soft_pct)     || 0;
+  const escPct  = Number(cfg.grade2_escalate_pct) || 0;
+  const totRow = db.get('SELECT COALESCE(SUM(qty),0) AS t FROM lots WHERE auction_id = ?', [auctionId]);
+  const totalKg = Number(totRow && totRow.t) || 0;
+  const g2Row = db.get("SELECT COALESCE(SUM(qty),0) AS t FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = ?", [auctionId, gradeVal]);
+  const grade2Kg = Number(g2Row && g2Row.t) || 0;
+  const pct = totalKg > 0 ? (grade2Kg / totalKg * 100) : 0;
+  let level = 0;
+  if (escPct  > 0 && pct > escPct)  level = 2;
+  else if (softPct > 0 && pct > softPct) level = 1;
+  return {
+    enabled: true, level, gradeVal,
+    grade2Kg, totalKg, grade2Mt: +(grade2Kg / 1000).toFixed(3), totalMt: +(totalKg / 1000).toFixed(3),
+    pct: +pct.toFixed(1), softPct, escPct,
+  };
+}
+
+async function dispatchGrade2Alert(db, req, ev, branch, auctionId) {
+  const cfg = getSettingsFlat(db);
+  const level = ev.level;
+  const role = level === 2 ? 'immediate superior' : 'depot manager';
+  const contacts = _bookingContactsFor(db, cfg, branch);
+  const target = level === 2 ? contacts.superior : contacts.manager;
+  let sendOk = false, sendErr = '';
+  try {
+    if (!target) {
+      sendErr = 'No recipient configured';
+    } else {
+      const c = _waConfig(db);
+      if (!c.token || !c.phoneId) sendErr = 'WhatsApp not configured';
+      else if (!c.tplText) sendErr = 'No text template configured';
+      else {
+        const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]) || {};
+        const company = (cfg.trade_name || cfg.short_name || 'Company').toString().toUpperCase();
+        const msg = `GRADE-2 ALERT: Grade-2 lots are ${ev.grade2Mt} MT of ${ev.totalMt} MT booked (${ev.pct}%)`
+          + ` in trade ${auction.ano || auctionId} — exceeds the ${level === 2 ? ev.escPct : ev.softPct}% limit.`
+          + (level === 2 ? ' Escalation: Grade-2 share kept rising past the limit.' : '');
+        const r = await _waSendTemplate(c, {
+          phone: target, templateName: c.tplText, langCode: c.tplTextLang,
+          bodyParams: [role, msg, company],
+        });
+        sendOk = !!r.ok; if (!r.ok) sendErr = r.error || 'send failed';
+      }
+    }
+  } catch (e) { sendErr = (e && e.message) || 'send failed'; }
+  try {
+    db.run('UPDATE booking_alerts SET sent_to = ?, send_ok = ?, send_error = ? WHERE auction_id = ? AND trader_key = ? AND level = ?',
+      [target || '', sendOk ? 1 : 0, sendErr, auctionId, 'grade2', level]);
+  } catch (_) {}
+  try {
+    auditLog(req, 'alert', 'grade2', auctionId, {
+      level, role, grade2_mt: ev.grade2Mt, total_mt: ev.totalMt, pct: ev.pct,
+      branch: branch || '', sent_to: target || '', ok: sendOk, error: sendErr,
+    });
+  } catch (_) {}
+  return { sendOk, sendErr, target };
+}
+
+// Glue for the lot routes — evaluates the trade-wide Grade-2 share,
+// claims the level, fires the alert without blocking, and returns the
+// UI-facing summary (or null when disabled / under threshold).
+function runGrade2ShareCheck(db, req, { auctionId, branch }) {
+  let ev;
+  try { ev = evaluateGrade2Share(db, auctionId); } catch (e) { return null; }
+  if (!ev || !ev.enabled || !ev.level) return null;
+  const limitPct = ev.level === 2 ? ev.escPct : ev.softPct;
+  const won = claimBookingAlert(db, auctionId, 'grade2', ev.level, limitPct, ev.grade2Kg);
+  if (won) {
+    Promise.resolve().then(() => dispatchGrade2Alert(db, req, ev, branch, auctionId)).catch(() => {});
+  }
+  const role = ev.level === 2 ? 'immediate superior' : 'depot manager';
+  return {
+    type: 'grade2_share',
+    level: ev.level, role,
+    grade2_mt: ev.grade2Mt, total_mt: ev.totalMt, pct: ev.pct,
+    threshold_pct: limitPct, branch: branch || '', notified: won,
+    message: `Grade-2 share is ${ev.pct}% of the trade (${ev.grade2Mt} MT of ${ev.totalMt} MT) — over the ${limitPct}% limit. ${role} ${won ? 'is being alerted' : 'was already alerted'}.`,
+  };
+}
+
 // ── Booking-contacts + status API ────────────────────────────
 // Per-branch depot-manager / superior WhatsApp numbers. Falls back to the
 // booking_manager_wa / booking_superior_wa company settings.
@@ -2124,6 +2215,14 @@ app.get('/api/booking/status/:auctionId', requireViewOrLotEntry, (req, res) => {
   }
   const ev = evaluateBookingLimit(db, { auctionId, traderId, traderName });
   res.json(ev);
+});
+
+// Live Grade-2 share for a trade — running grade2 weight vs total booked.
+app.get('/api/booking/grade2-status/:auctionId', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const auctionId = parseInt(req.params.auctionId, 10);
+  if (!auctionId) return res.status(400).json({ error: 'auctionId required' });
+  res.json(evaluateGrade2Share(db, auctionId));
 });
 
 // Booking-alerts log (audit view of who was alerted, when, and whether the
@@ -3795,13 +3894,16 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // Booking-limit check: recompute this seller's running weight for the
   // trade and (when over threshold) alert the depot manager / superior.
   // Non-blocking — any failure here must not fail the lot save.
-  let bookingAlert = null;
+  let bookingAlert = null, grade2Alert = null;
   try {
     bookingAlert = runBookingLimitCheck(_db, req, {
       auctionId: l.auction_id, traderId: l.trader_id, traderName: _traderName, branch: l.branch || '',
     });
   } catch (_) {}
-  res.json({ success: true, booking_alert: bookingAlert });
+  try {
+    grade2Alert = runGrade2ShareCheck(_db, req, { auctionId: l.auction_id, branch: l.branch || '' });
+  } catch (_) {}
+  res.json({ success: true, booking_alert: bookingAlert, grade2_alert: grade2Alert });
 });
 
 // Returns true if `req.user` has the admin role. Admin bypasses the
@@ -3874,16 +3976,17 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   });
   // Re-run the booking-limit check — an edit that raises qty can cross a
   // threshold the same way a new lot does.
-  let bookingAlert = null;
+  let bookingAlert = null, grade2Alert = null;
   try {
     const _row = _after || _before;
     if (_row) {
       bookingAlert = runBookingLimitCheck(db, req, {
         auctionId: _row.auction_id, traderId: _row.trader_id, traderName: _row.name || '', branch: _row.branch || '',
       });
+      grade2Alert = runGrade2ShareCheck(db, req, { auctionId: _row.auction_id, branch: _row.branch || '' });
     }
   } catch (_) {}
-  res.json({ success: true, booking_alert: bookingAlert });
+  res.json({ success: true, booking_alert: bookingAlert, grade2_alert: grade2Alert });
 });
 
 app.delete('/api/lots/:id', requireDelete, (req, res) => {

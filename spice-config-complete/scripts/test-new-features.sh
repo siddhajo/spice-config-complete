@@ -59,6 +59,7 @@ echo "Logged in (token ${TOK:0:10}...)"
 curl -s -X PUT $B/api/company-settings -H "$AUTH" -H "$CT" -d '{"settings":{
   "flag_booking_limit":"true","booking_planned_weight_mt":"0.01",
   "booking_soft_pct":"25","booking_escalate_pct":"40",
+  "flag_grade2_limit":"true","grade2_soft_pct":"25","grade2_escalate_pct":"40","grade2_grade_value":"2",
   "booking_manager_wa":"9000000001","booking_superior_wa":"9000000002",
   "seller_youtube_url":"https://youtu.be/your-channel"}}' >/dev/null
 
@@ -68,18 +69,28 @@ TID=$(curl -s -X POST $B/api/traders -H "$AUTH" -H "$CT" -d '{"name":"TESTSELLER
 echo "Created auction #$AID, seller #$TID"
 echo
 
+# mk LOT_NO QTY GRADE  → create a lot of a given grade/weight
 mk() { curl -s -X POST $B/api/lots -H "$AUTH" -H "$CT" \
-  -d "{\"auction_id\":$AID,\"lot_no\":\"$1\",\"trader_id\":$TID,\"name\":\"TESTSELLER\",\"branch\":\"NEDUMKANDAM\",\"qty\":$2,\"amount\":100}"; }
+  -d "{\"auction_id\":$AID,\"lot_no\":\"$1\",\"trader_id\":$TID,\"name\":\"TESTSELLER\",\"branch\":\"NEDUMKANDAM\",\"qty\":$2,\"grade\":\"${3:-1}\",\"amount\":100}"; }
+g2() { node -pe 'JSON.stringify(JSON.parse(require("fs").readFileSync(0)).grade2_alert)'; }
 
-echo "═══ FEATURE 1: Booking-limit escalation ═══"
-echo -n "Lot 1, 2kg  (20%, under soft)      → "; mk 1 2 | ba
-echo -n "Lot 2, 1kg  (30%, over soft 25%)   → "; mk 2 1 | ba
-echo -n "Lot 3, 2kg  (50%, over escal. 40%) → "; mk 3 2 | ba
-echo -n "Lot 4, 1kg  (60%, dedup — no resend) → "; mk 4 1 | ba
+echo "═══ FEATURE 1a: Per-seller volume cap (vs fixed 20MT planned) ═══"
+echo -n "Lot 1, 2kg grade1 (20%, under soft)      → "; mk 1 2 1 | ba
+echo -n "Lot 2, 1kg grade1 (30%, over soft 25%)   → "; mk 2 1 1 | ba
+echo -n "Lot 3, 2kg grade1 (50%, over escal. 40%) → "; mk 3 2 1 | ba
+echo -n "Lot 4, 1kg grade1 (60%, dedup — no resend) → "; mk 4 1 1 | ba
 echo
-echo "Alerts audit log:"
+echo "═══ FEATURE 1b: Grade-2 share of WHOLE trade (by weight) ═══"
+echo "(trade currently has 6kg, all grade 1 → grade-2 share = 0%)"
+echo -n "Lot 5, 1kg grade2 (1/7 = 14%, under 25%)  → "; mk 5 1 2 | g2
+echo -n "Lot 6, 2kg grade2 (3/9 = 33%, over 25%)   → "; mk 6 2 2 | g2
+echo -n "Lot 7, 2kg grade2 (5/11 = 45%, over 40%)  → "; mk 7 2 2 | g2
+echo -n "grade2-status → "; curl -s "$B/api/booking/grade2-status/$AID" -H "$AUTH" \
+  | node -pe 'const j=JSON.parse(require("fs").readFileSync(0));JSON.stringify({grade2Mt:j.grade2Mt,totalMt:j.totalMt,pct:j.pct,level:j.level})'
+echo
+echo "Alerts audit log (per-seller = id:.. keys, grade-2 = 'grade2' key):"
 curl -s "$B/api/booking/alerts?auction_id=$AID" -H "$AUTH" \
-  | node -pe 'JSON.parse(require("fs").readFileSync(0)).map(r=>`   level ${r.level} → ${r.sent_to}  (sent=${r.send_ok}, note: ${r.send_error||"ok"})`).join("\n")'
+  | node -pe 'JSON.parse(require("fs").readFileSync(0)).map(r=>`   [${r.trader_key}] level ${r.level} → ${r.sent_to}  (sent=${r.send_ok}, note: ${r.send_error||"ok"})`).join("\n")'
 echo
 
 echo "═══ FEATURE 2: WhatsApp seller notifications ═══"

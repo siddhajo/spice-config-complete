@@ -209,6 +209,17 @@ const DEFAULTS = [
   { key: 'booking_escalate_pct',      value: '40',    category: 'booking', label: 'Escalation Threshold (% of planned)',          type: 'number'  },
   { key: 'booking_manager_wa',        value: '',      category: 'booking', label: 'Depot Manager WhatsApp (fallback)',            type: 'text'    },
   { key: 'booking_superior_wa',       value: '',      category: 'booking', label: 'Immediate Superior WhatsApp',                  type: 'text'    },
+  // Grade-mix alert (independent of the per-seller volume cap above).
+  // Watches the Grade-2 share of the WHOLE trade by weight: when
+  // Grade-2 booked weight / total booked weight crosses the soft %, the
+  // depot manager is alerted; past the escalation % the superior is. This
+  // is a quality-composition guard, not a per-seller volume cap — both can
+  // be enabled at once. grade2_grade_value is the lot grade code that
+  // counts as "Grade 2" (stored as '2' on lots; configurable just in case).
+  { key: 'flag_grade2_limit',         value: 'false', category: 'booking', label: 'Enable Grade-2 Share Alerts (whole trade)',     type: 'boolean' },
+  { key: 'grade2_soft_pct',           value: '25',    category: 'booking', label: 'Grade-2 Soft Threshold (% of total booked)',   type: 'number'  },
+  { key: 'grade2_escalate_pct',       value: '40',    category: 'booking', label: 'Grade-2 Escalation Threshold (% of total)',    type: 'number'  },
+  { key: 'grade2_grade_value',        value: '2',     category: 'booking', label: 'Grade-2 grade code (as stored on lots)',       type: 'text'    },
 
   // ── BUSINESS MODE ──────────────────────────────────────────
   // Fresh installs default to 'e-Trade'. Operators who run auctions can

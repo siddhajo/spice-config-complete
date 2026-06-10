@@ -357,7 +357,7 @@ Each install is **time-limited** and must be renewed. This is honest-customer DR
 | WhatsApp send (text + document) | ✅ | Config, test, templates, webhook |
 | WhatsApp seller notifications | ✅ | `notify-seller`, `seller-lot-sold` — alerts + lot-sold + invoice details + YouTube link |
 | Seller tax statement | ✅ | Per-seller PDF (taxable/GST/TDS/net) from purchases + bills; by trade or date range; WhatsApp delivery |
-| Booking-limit escalation | ✅ | Soft alert (depot manager) → escalation (superior) when a seller's booked weight crosses a % of planned weight; per-branch contacts; dedup + audit log |
+| Booking-limit escalation | ✅ | Two independent guards, both soft (depot manager) → escalation (superior): (a) per-seller booked weight vs a % of fixed planned weight; (b) Grade-2 share of the whole trade by weight vs a % of total booked. Per-branch contacts; dedup + audit log |
 
 ### Platform & admin
 
