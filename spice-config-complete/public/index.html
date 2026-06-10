@@ -2526,6 +2526,14 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       </div>
     </div>
 
+    <!-- FORMULAS — read-only reference page (dev-only). Lists every
+         calculation that lot generation, payment summary, and sales
+         invoice generation perform, with the matching config keys in
+         plain English so the user can cross-check against their values.
+         No editable inputs — values typed in Settings drive what shows
+         up in the green pills below. Rendered by loadFormulas(). -->
+    <div class="tc" id="tc-formulas"></div>
+
     <!-- SETTINGS -->
     <div class="tc" id="tc-settings">
       <!-- ── Appearance card — theme + dark mode picker ───────────────
@@ -6402,12 +6410,257 @@ async function refreshTopbarBrand(){
 // Track the most recently activated tab so the topbar Refresh button
 // knows what to re-load. Updated on every go() call.
 window._currentTab = 'dash';
+
+// ── Formulas reference (read-only) ─────────────────────────────────
+// Renders a static page with every calculation the system performs,
+// alongside the live config values that feed each one. Useful for the
+// owner / auditor to verify the math without scrolling through code.
+//
+// All values are pulled fresh from /api/company-settings/flat each
+// time the tab is opened — so changing a rate in Settings, then
+// flipping over to Formulas, shows the new number.
+async function loadFormulas(){
+  const host = document.getElementById('tc-formulas');
+  if (!host) return;
+  host.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:var(--text3)">Loading formulas…</div>';
+  let cfg = {};
+  try {
+    cfg = await j('/api/company-settings/flat') || {};
+  } catch (e) {
+    host.innerHTML = `<div class="card" style="padding:24px;color:#C62828">Failed to load settings: ${esc(e.message||e)}</div>`;
+    return;
+  }
+  // Helpers — all formula values are quoted so the user sees exactly
+  // what the system reads (e.g. blank cells render 'not set'; numbers
+  // keep their stored precision).
+  const v = (key, def) => {
+    const x = cfg[key];
+    if (x === undefined || x === null || x === '') return def == null ? '<em style="color:var(--text3)">not set</em>' : String(def);
+    return esc(String(x));
+  };
+  const num = (key, def) => v(key, def);
+
+  // Inline value pill — distinguishes config-driven values from
+  // hard-coded literals so the eye can spot what's tunable.
+  const pill = (label, val) => `<span style="display:inline-block;padding:1px 7px;margin:0 1px;border-radius:5px;background:var(--green-bg);color:var(--green);font-family:monospace;font-size:12px;font-weight:600" title="${esc(label)}">${val}</span>`;
+  const lit = (s) => `<span style="font-family:monospace;color:var(--text2)">${esc(s)}</span>`;
+
+  // Each formula card: heading + plain-English explanation + the
+  // formula itself (monospace) + the live values used.
+  function card(title, items) {
+    return `
+      <div class="card" style="padding:18px 20px;margin-bottom:16px">
+        <h3 style="margin:0 0 10px;color:var(--spice-cardamom-dk);font-size:15px;display:flex;align-items:center;gap:8px">
+          <span style="width:6px;height:18px;background:var(--green);border-radius:3px;display:inline-block"></span>
+          ${esc(title)}
+        </h3>
+        ${items.map(it => `
+          <div style="padding:10px 0;border-top:1px solid var(--border)">
+            <div style="font-weight:600;color:var(--text);font-size:13px;margin-bottom:4px">${it.label}</div>
+            ${it.note ? `<div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.5">${it.note}</div>` : ''}
+            <div style="font-family:monospace;font-size:13px;background:var(--bg);padding:8px 12px;border-radius:6px;border:1px solid var(--border);overflow-x:auto;white-space:nowrap">${it.formula}</div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  let html = `
+    <div style="max-width:980px;margin:0 auto">
+      <div style="margin-bottom:18px;padding:14px 18px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:10px;color:var(--spice-saffron-dk);font-size:13px;line-height:1.5">
+        <strong>Read-only reference.</strong> These are every formula the app runs. Values in <span style="background:var(--green-bg);color:var(--green);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">green</span> come from Settings — change them there and they'll update here.
+      </div>`;
+
+  // ── Lot calculation (Pooler/Dealer) ────────────────────────
+  html += card('Lot calculation — Pooler & Dealer rates', [
+    {
+      label: 'Purchase Quantity (P_Qty)',
+      note: 'Sample refund is added back so the seller is paid for it.',
+      formula: `P_Qty = Lot Qty + ${pill('Sample Refund (kg)', num('refund', '0'))}`,
+    },
+    {
+      label: 'Purchase Rate (P_Rate)',
+      note: 'Grade 2 lots use Dealer deduction; everything else (1, 1A, 2A, blank, etc.) uses Pooler deduction.',
+      formula: `P_Rate = round( Lot Price × ( 1 − ${pill('Pooler Deduction (%)', num('deduction1', '0'))} / 100 ) )    ${lit('— for non-grade-2')}<br>
+                P_Rate = round( Lot Price × ( 1 − ${pill('Dealer Deduction (%)', num('deduction2', '0'))} / 100 ) )    ${lit('— for grade 2')}`,
+    },
+    {
+      label: 'Purchase Amount (PurAmt)',
+      formula: `PurAmt = P_Qty × P_Rate`,
+    },
+  ]);
+
+  // ── Discount + GST on Discount ─────────────────────────────
+  html += card('Discount on Purchase (e-Trade)', [
+    {
+      label: 'Discount amount',
+      note: 'Quick-pay discount tied to settlement window. Rounded to nearest rupee.',
+      formula: `Discount = round( PurAmt / 1000 × ${pill('Discount Days', num('discount_days', '0'))} × ${pill('Discount %', num('discount_pct', '0'))} )`,
+    },
+    {
+      label: 'GST on Discount (only when "Discount includes GST" flag is ON)',
+      note: 'Discount-on-purchase GST. Configurable separately from goods/service GST — use the Discount GST % setting in Rates.',
+      formula: `Intra-state:  CGST = round( Discount × ${pill('Discount GST/2', '(' + num('discount_gst','5') + '/2)')} / 100 )<br>
+                Intra-state:  SGST = same as CGST<br>
+                Inter-state:  IGST = round( Discount × ${pill('Discount GST', num('discount_gst','5'))} / 100 )<br>
+                Discount-includes-GST flag: ${pill('flag_disc_gst', v('flag_disc_gst','false'))}`,
+    },
+    {
+      label: 'Payable to seller (Balance)',
+      formula: `Payable = PurAmt − Discount − ( CGST + SGST + IGST )`,
+    },
+  ]);
+
+  // ── Sales invoice ───────────────────────────────────────────
+  html += card('Sales invoice — totals', [
+    {
+      label: 'Gunny cost (jute bags charge)',
+      formula: `Gunny Cost = Total Bags × ${pill('Gunny rate (₹/bag)', num('gunny_rate','165'))}`,
+    },
+    {
+      label: 'Transport — sale type "L" (Local)',
+      note: 'Per-kg charge based on local route rate.',
+      formula: `Transport = round( Total Qty × ${pill('Local Transport (₹/kg)', num('local_transport','2.5'))} )`,
+    },
+    {
+      label: 'Transport — sale type "I" (Inter-state)',
+      formula: `Transport = round( Total Qty × ${pill('Transport (₹/kg)', num('transport','2.5'))} )`,
+    },
+    {
+      label: 'Transport — sale type "E" (Export)',
+      note: 'Buyer covers freight — Transport is not billed.',
+      formula: `Transport = 0`,
+    },
+    {
+      label: 'Insurance — sale type "L" (Local)',
+      note: 'Per ₹1000 of (cardamom + gunny + GST on those goods).',
+      formula: `Goods With GST = ( Cardamom Amount + Gunny Cost ) × ( 1 + ${pill('Goods GST %', num('gst_goods','5'))} / 100 )<br>
+                Insurance       = round( Goods With GST / 1000 × ${pill('Local Insurance (₹/₹1000)', num('local_insurance','0.75'))} )`,
+    },
+    {
+      label: 'Insurance — sale type "I" (Inter-state)',
+      formula: `Goods With GST = ( Cardamom Amount + Gunny Cost ) × ( 1 + ${pill('Goods GST %', num('gst_goods','5'))} / 100 )<br>
+                Insurance       = round( Goods With GST / 1000 × ${pill('Insurance (₹/₹1000)', num('insurance','0.75'))} )`,
+    },
+    {
+      label: 'Insurance — sale type "E" (Export)',
+      formula: `Insurance = 0`,
+    },
+    {
+      label: 'Taxable value',
+      formula: `Taxable Value = Cardamom Amount + Gunny Cost + Transport + Insurance`,
+    },
+    {
+      label: 'GST on the invoice',
+      note: 'Intra-state if buyer\'s GSTIN starts with the company state code; otherwise inter-state. Goods, gunny, transport and insurance all share the same goods rate.',
+      formula: `Intra-state:  CGST = round( Taxable Value × ${pill('Goods GST/2', '(' + num('gst_goods','5') + '/2)')} / 100 ),    SGST = same as CGST<br>
+                Inter-state:  IGST = round( Taxable Value × ${pill('Goods GST', num('gst_goods','5'))} / 100 )`,
+    },
+    {
+      label: 'Grand total (with rounding)',
+      formula: `Pre-round = Taxable Value + CGST + SGST + IGST<br>
+                Round Diff = round(Pre-round) − Pre-round<br>
+                Grand Total = round(Pre-round)`,
+    },
+  ]);
+
+  // ── TDS / TCS ───────────────────────────────────────────────
+  html += card('TDS on Purchase (Section 194Q) & TCS on Sale (206C(1H))', [
+    {
+      label: 'TDS / TCS threshold',
+      note: '₹50 lakh per seller (TDS) or buyer (TCS) per financial year. Below the threshold, nothing is deducted; above, only the excess attracts the rate.',
+      formula: `Threshold = ${pill('TDS Threshold (₹)', num('tds_threshold','5000000'))}<br>
+                If prior year purchases &gt; threshold → deduct on full new amount<br>
+                Else if prior + new &gt; threshold → deduct on (prior + new − threshold)<br>
+                Else → 0`,
+    },
+    {
+      label: 'TDS rate (on purchase)',
+      formula: `TDS = ceil( Excess Amount × ${pill('TDS Rate (%)', num('tds_purchase_rate', num('tcs_tds','0.1')))} / 100 )`,
+    },
+    {
+      label: 'TCS rate (on sale)',
+      formula: `TCS = ceil( Excess Amount × ${pill('TCS Rate (%)', num('tcs_tds','0.1'))} / 100 )`,
+    },
+  ]);
+
+  // ── Payment summary ─────────────────────────────────────────
+  html += card('Payment summary (per seller, per auction)', [
+    {
+      label: 'Total Amount, Total Purchase, Total Discount',
+      note: 'Sum across all lots a seller sold in the auction.',
+      formula: `Total Amount   = Σ ( Lot Amount )<br>
+                Total PurAmt   = Σ ( PurAmt )<br>
+                Total Discount = Σ ( Discount )`,
+    },
+    {
+      label: 'GST 5% (column on Payments tab)',
+      note: 'Sum of CGST + SGST + IGST stamped on each lot. Non-zero only when "Discount includes GST" flag is ON.',
+      formula: `GST 5% = Σ ( CGST + SGST + IGST )`,
+    },
+    {
+      label: 'Payable',
+      formula: `Payable = Total PurAmt − Total Discount − GST 5%`,
+    },
+  ]);
+
+  // ── E-way bill distance ─────────────────────────────────────
+  html += card('E-way bill distance resolution', [
+    {
+      label: 'Distance source priority',
+      note: 'Used in the Tally sales voucher\'s &lt;DISTANCE&gt; tag. The PIN-to-PIN route table is populated manually from the NIC e-way bill portal.',
+      formula: `1.  Per-invoice override (invoices.distance_km) ─── if set, wins<br>
+                2.  Saved route (route_distances.km) keyed by (dispatch PIN ↔ buyer PIN) ─── otherwise<br>
+                3.  Blank ─── if neither exists`,
+    },
+    {
+      label: 'Dispatch PIN',
+      note: 'The "from" PIN for every route lookup. Falls through this chain until it finds a value.',
+      formula: `${pill('Dispatch PIN', num('tally_dispatch_pin','—'))} → ${pill('s_pin', num('s_pin','—'))} → ${pill('KL PIN', num('kl_pin','—'))} → ${pill('TN PIN', num('tn_pin','—'))} → 685553`,
+    },
+  ]);
+
+  html += '</div>';
+  host.innerHTML = html;
+}
+
+// ── Dev-only sidebar items (Formulas) ──────────────────────────────
+// The Formulas tab is a read-only reference page for verifying
+// calculation formulas during development — useful for the engineer
+// auditing math against the spec, but noise for the end user (the
+// shop owner shouldn't see "Formulas" in his sidebar). Hidden by
+// default; reveal for the current browser only via the JS console:
+//
+//   spiceDev(true)   → show Formulas + persist the flag
+//   spiceDev(false)  → hide it + clear the flag
+//
+// State lives in localStorage so a reload keeps the choice. The
+// server knows nothing about it — different users / browsers / devices
+// each have their own setting. Safe for customer installs: the menu
+// stays hidden unless someone deliberately runs the console toggle.
+function _applySpiceDevMenu(){
+  const on = localStorage.getItem('spice_dev') === '1';
+  const el = document.getElementById('side-formulas');
+  if (el) el.style.display = on ? '' : 'none';
+}
+window.spiceDev = function(on){
+  if (on) localStorage.setItem('spice_dev', '1');
+  else    localStorage.removeItem('spice_dev');
+  _applySpiceDevMenu();
+  // If the user is currently viewing Formulas and turns dev off, send
+  // them to the dashboard so they can't keep looking at the hidden page.
+  if (!on && window._currentTab === 'formulas') go('dash');
+  return 'spiceDev → ' + (on ? 'ON' : 'OFF');
+};
+// Apply on page load. The button is `display:none` in markup so it's
+// hidden during parse; this re-asserts the state once the DOM is ready
+// in case a dev has the flag set and wants it visible immediately.
+document.addEventListener('DOMContentLoaded', _applySpiceDevMenu);
+
 function go(tab){
   window._currentTab = tab;
   document.querySelectorAll('.side-item').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el=document.getElementById('tc-'+tab);if(el)el.classList.add('active');
-  const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
+  const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,formulas:loadFormulas,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
     bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,tally:loadTallyAuctions,
@@ -8619,11 +8872,11 @@ async function _renderWhatsappCard(){
   const secretPh = (has) => has ? '•••••••• configured — leave blank to keep' : 'not set';
   host.innerHTML = `
     <div style="border:1px solid ${tone.bd};border-radius:10px;background:#fff;overflow:hidden">
-      <div style="padding:13px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid ${tone.bd};background:#f9fafb">
+      <div style="padding:13px 16px;display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;border-bottom:1px solid ${tone.bd};background:#f9fafb">
         <span style="font-size:18px;line-height:1">📱</span>
         <strong style="font-size:13.5px;color:${tone.fg}">WhatsApp Business (Cloud API)</strong>
-        <span style="flex:1"></span>
-        <span style="font-size:11.5px;font-weight:700;color:${tone.fg}">${tone.icon} ${tone.head}</span>
+        <span style="flex:1;min-width:12px"></span>
+        <span style="font-size:11.5px;font-weight:700;color:${tone.fg};min-width:0;max-width:100%;word-break:break-all;overflow-wrap:anywhere">${tone.icon} ${tone.head}</span>
       </div>
       <div style="padding:14px 16px">
         <div style="font-size:11.5px;color:var(--text3);line-height:1.55;margin-bottom:13px">
