@@ -2675,6 +2675,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="btn" onclick="deleteAll('buyers','Buyers',event)"         style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Buyers</button>
             <button class="btn" onclick="deleteAll('traders','Sellers',event)"       style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Sellers</button>
             <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes EVERY trade/auction AND cascades through lots, invoices, purchases, bills, debit notes">🗑 <span data-term-auction="plural">Auctions</span> (full reset)</button>
+            <button class="btn" onclick="deleteAll('everything','Everything',event)" style="height:44px;padding:0 14px;background:#450A0A;color:#fff;font-weight:700;border-color:#450A0A;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="NUKE — wipes ALL transactions (auctions, lots, invoices, purchases, bills, debit notes) AND the master data: Sellers, Buyers. Leaves only users/settings.">☢ Everything (incl. Sellers &amp; Buyers)</button>
           </div>
 
           <details style="margin-top:16px">
@@ -10416,6 +10417,16 @@ async function deleteAll(resource, label, ev){
     else if (resource === 'bills') loadBills && loadBills();
     else if (resource === 'debit-notes') loadDebitNotes && loadDebitNotes();
     else if (resource === 'auctions') loadAuctions && loadAuctions();
+    else if (resource === 'everything') {
+      // Full nuke — refresh every list so no stale rows linger on screen.
+      searchTraders && searchTraders('');
+      searchBuyers && searchBuyers('');
+      loadInvoices && loadInvoices();
+      loadPurchases && loadPurchases();
+      loadBills && loadBills();
+      loadDebitNotes && loadDebitNotes();
+      loadAuctions && loadAuctions();
+    }
     // Refresh the audit log if it's visible so the operator can see
     // their own action recorded.
     if (typeof loadDeleteLog === 'function') loadDeleteLog();

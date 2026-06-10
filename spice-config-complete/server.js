@@ -1322,6 +1322,11 @@ const DELETE_ALL_MAP = {
   // invoices, purchases, bills, debit_notes — because the FKs would
   // otherwise leave orphan rows. Order matters: wipe children first.
   auctions:      { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes'] },
+  // Full nuke — everything `auctions` wipes PLUS the master data
+  // (trader_banks → traders/sellers, buyers). Children before parents
+  // so FK constraints don't reject the deletes; the target `auctions`
+  // is removed last after all its transactional children are gone.
+  everything:    { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'trader_banks', 'traders', 'buyers'] },
 };
 
 // Returns { target: { table, count }, cascade: { table: count, ... } } for
@@ -1531,6 +1536,7 @@ app.delete('/api/purchases/delete-all',   requireDeleteAll, (req, res) => perfor
 app.delete('/api/bills/delete-all',       requireDeleteAll, (req, res) => performDeleteAll(req, res, 'bills'));
 app.delete('/api/debit-notes/delete-all', requireDeleteAll, (req, res) => performDeleteAll(req, res, 'debit-notes'));
 app.delete('/api/auctions/delete-all',    requireDeleteAll, (req, res) => performDeleteAll(req, res, 'auctions'));
+app.delete('/api/everything/delete-all',  requireDeleteAll, (req, res) => performDeleteAll(req, res, 'everything'));
 
 // ══════════════════════════════════════════════════════════════
 // GST LOOKUP — fetch trade name/address/state from GSTIN
