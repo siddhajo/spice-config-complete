@@ -3258,6 +3258,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="discount">Has discount</option>
           </select>
 
+          <!-- Seller-type filter. Splits the per-seller rollup into
+               registered dealers (GSTIN-bearing `cr`) vs poolers (no
+               GSTIN — farmers / URD / agriculturists). Same client-side
+               rule the discount SQL uses (cr LIKE 'GSTIN%' OR starts with
+               two digits). Pure client-side over the cached rows. -->
+          <select id="pay-type-filter" onchange="loadPayments({ keepPage: true })" title="Filter by seller type" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:130px">
+            <option value="">All</option>
+            <option value="dealer">All Dealers</option>
+            <option value="pooler">All Poolers</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="loadPayments()">↻ Reload</button>
           </div>
@@ -14574,6 +14585,15 @@ let _paymentsAll = [];
 // Bank-routing info keyed by upper-cased seller name (from
 // /api/payments/bank). Drives the Actions column's ⚠ multi-bank badge.
 let _payBankInfo = {};
+// A payment row is a registered dealer when its `cr` holds a GSTIN —
+// either the legacy "GSTIN.<…>" UI form or a bare GSTIN that starts with
+// two digits. Mirrors the SQL test in getPaymentSummary so the on-screen
+// dealer/pooler split matches the server's discount classification.
+// Everything else (no GSTIN — farmers / URD / agriculturists) is a pooler.
+function _payIsDealer(p){
+  const cr = String((p && p.cr) || '').trim().toUpperCase();
+  return cr.startsWith('GSTIN') || /^[0-9][0-9]/.test(cr);
+}
 async function loadPayments(opts){
   if (!opts || !opts.keepPage) _paymentsPager.page = 1;
   const aid=document.getElementById('pay-auction').value;
@@ -14604,11 +14624,15 @@ async function loadPayments(opts){
     // trade-wide totals — only the table visualises the filter.
     const search   = (document.getElementById('pay-search')?.value || '').trim().toLowerCase();
     const status   = (document.getElementById('pay-status-filter')?.value || '').trim();
+    const stype    = (document.getElementById('pay-type-filter')?.value || '').trim();
     const arr = rows.filter(p => {
       if (search) {
         const n = String(p.name || '').toLowerCase();
         if (!n.includes(search)) return false;
       }
+      // Seller-type filter: dealers carry a GSTIN in `cr`, poolers don't.
+      if (stype === 'dealer' && !_payIsDealer(p)) return false;
+      if (stype === 'pooler' &&  _payIsDealer(p)) return false;
       const payable = Number(p.total_payable) || 0;
       const discount = Number(p.total_discount) || 0;
       if (status === 'payable' && payable <= 0) return false;
@@ -14632,7 +14656,7 @@ async function loadPayments(opts){
         const totalQty      = arr.reduce((a,i) => a + (Number(i.total_qty)      || 0), 0);
         const totalDiscount = arr.reduce((a,i) => a + (Number(i.total_discount) || 0), 0);
         const totalPayable  = arr.reduce((a,i) => a + (Number(i.total_payable)  || 0), 0);
-        const filterTail    = (search || status)
+        const filterTail    = (search || status || stype)
           ? ` <span style="color:var(--text3);font-weight:400;font-size:11px">(of ${rows.length})</span>`
           : '';
         const $ = (id) => document.getElementById(id);
@@ -14641,7 +14665,7 @@ async function loadPayments(opts){
         if ($('pay-kpi-discount')) $('pay-kpi-discount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalDiscount, 0)}`;
         if ($('pay-kpi-payable'))  $('pay-kpi-payable').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalPayable, 0)}`;
         updateSummaryStats('payments',
-          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status)?` (of ${rows.length})`:''} · `
+          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status||stype)?` (of ${rows.length})`:''} · `
           + `<strong>${fmtI(totalQty,0)} kg</strong> · `
           + `<strong>₹${fmtI(totalPayable,0)}</strong> payable`);
       }

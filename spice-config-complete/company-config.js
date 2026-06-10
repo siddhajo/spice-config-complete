@@ -196,6 +196,20 @@ const DEFAULTS = [
   { key: 'flag_print_purchase', value: 'true',  category: 'flags',     label: 'Print Selected Purchase (ASP / Kerala)', type: 'boolean' },
   { key: 'flag_price_check',    value: 'false', category: 'flags',     label: 'Price Check + transaction gate',         type: 'boolean' },
 
+  // ── BOOKING LIMITS & ALERTS ────────────────────────────────
+  // When flag_booking_limit is ON, every lot save recomputes the seller's
+  // running booked weight for the trade and compares it against a share of
+  // the per-seller planned weight. Crossing the soft threshold alerts the
+  // depot manager on WhatsApp; crossing the escalation threshold alerts the
+  // immediate superior. Each level fires once per (trade, seller) — tracked
+  // in the booking_alerts table — so saves don't spam.
+  { key: 'flag_booking_limit',        value: 'false', category: 'booking', label: 'Enable Booking-Limit Alerts',                 type: 'boolean' },
+  { key: 'booking_planned_weight_mt', value: '20',    category: 'booking', label: 'Planned Weight per Seller (MT)',               type: 'number'  },
+  { key: 'booking_soft_pct',          value: '25',    category: 'booking', label: 'Soft-Alert Threshold (% of planned)',          type: 'number'  },
+  { key: 'booking_escalate_pct',      value: '40',    category: 'booking', label: 'Escalation Threshold (% of planned)',          type: 'number'  },
+  { key: 'booking_manager_wa',        value: '',      category: 'booking', label: 'Depot Manager WhatsApp (fallback)',            type: 'text'    },
+  { key: 'booking_superior_wa',       value: '',      category: 'booking', label: 'Immediate Superior WhatsApp',                  type: 'text'    },
+
   // ── BUSINESS MODE ──────────────────────────────────────────
   // Fresh installs default to 'e-Trade'. Operators who run auctions can
   // switch to 'e-Auction' anytime via Settings → Business Mode (the
@@ -207,6 +221,7 @@ const DEFAULTS = [
 
   // ── INTEGRATIONS ───────────────────────────────────────────
   { key: 'gst_api_key',     value: '',               category: 'integrations', label: 'GST Lookup API Key (gstincheck.co.in)', type: 'text' },
+  { key: 'seller_youtube_url', value: '',            category: 'integrations', label: 'Seller YouTube Link (shared in WhatsApp notices)', type: 'text' },
 
   // ── TALLY EXPORT ──────────────────────────────────────────
   // Settings here mirror the macro's Configration form (UserForm1) field-for-field.
@@ -396,6 +411,7 @@ const CATEGORIES = {
   season:     { order: 9, title: 'Season / Financial Year', icon: '📅' },
   invoice:    { order: 10, title: 'Invoice Settings',     icon: '📄' },
   flags:      { order: 11, title: 'Feature Flags',        icon: '🔧' },
+  booking:    { order: 11.55, title: 'Booking Limits & Alerts', icon: '🚦', description: 'Soft/escalation alerts when a single seller’s booked weight in a trade crosses a share of the planned weight. The limit is a percentage of the per-seller planned weight (MT). At the soft threshold the depot manager is alerted on WhatsApp; if booking continues past the escalation threshold the immediate superior is alerted. Per-branch manager/superior numbers can be set via the Booking Contacts API; the numbers here are fallbacks.' },
   lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, and receipt format.' },
   integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },

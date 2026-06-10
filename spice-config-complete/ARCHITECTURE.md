@@ -355,6 +355,9 @@ Each install is **time-limited** and must be renewed. This is honest-customer DR
 | e-Way bill distance (PIN-to-PIN) | ✅ | Haversine × road factor, cached, manual override |
 | GST lookup (GSTIN verify) | ✅ | Status + real-time lookup endpoints |
 | WhatsApp send (text + document) | ✅ | Config, test, templates, webhook |
+| WhatsApp seller notifications | ✅ | `notify-seller`, `seller-lot-sold` — alerts + lot-sold + invoice details + YouTube link |
+| Seller tax statement | ✅ | Per-seller PDF (taxable/GST/TDS/net) from purchases + bills; by trade or date range; WhatsApp delivery |
+| Booking-limit escalation | ✅ | Soft alert (depot manager) → escalation (superior) when a seller's booked weight crosses a % of planned weight; per-branch contacts; dedup + audit log |
 
 ### Platform & admin
 

@@ -1893,6 +1893,360 @@ app.post('/api/whatsapp/webhook', (req, res) => {
   res.sendStatus(200);
 });
 
+// ══════════════════════════════════════════════════════════════
+// BOOKING LIMITS & ESCALATION
+// When flag_booking_limit is ON, every lot save recomputes a seller's
+// running booked weight for the trade and compares it against a share of
+// the per-seller planned weight (booking_planned_weight_mt). Crossing the
+// soft threshold (booking_soft_pct) alerts the depot manager on WhatsApp;
+// crossing the escalation threshold (booking_escalate_pct) alerts the
+// immediate superior. Each (trade, seller, level) fires exactly once —
+// the INSERT-OR-IGNORE claim into booking_alerts is the dedupe + race
+// guard so two rapid saves can't double-send. The threshold evaluation is
+// synchronous (cheap SUM); the WhatsApp send is fired without blocking the
+// lot-save response so floor entry stays fast.
+// ══════════════════════════════════════════════════════════════
+function _ensureBookingTables(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS booking_depot_contacts (
+    branch TEXT PRIMARY KEY,
+    manager_wa TEXT DEFAULT '',
+    superior_wa TEXT DEFAULT ''
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS booking_alerts (
+    auction_id INTEGER NOT NULL,
+    trader_key TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    total_kg REAL DEFAULT 0,
+    limit_kg REAL DEFAULT 0,
+    sent_to TEXT DEFAULT '',
+    send_ok INTEGER DEFAULT 0,
+    send_error TEXT DEFAULT '',
+    notified_at TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (auction_id, trader_key, level)
+  )`);
+}
+
+// Resolve the manager / superior WhatsApp numbers for a branch, falling
+// back to the global settings numbers when no per-branch row exists.
+function _bookingContactsFor(db, cfg, branch) {
+  _ensureBookingTables(db);
+  let manager = '', superior = '';
+  if (branch) {
+    const row = db.get('SELECT manager_wa, superior_wa FROM booking_depot_contacts WHERE LOWER(branch) = LOWER(?)', [branch]);
+    if (row) { manager = row.manager_wa || ''; superior = row.superior_wa || ''; }
+  }
+  if (!manager)  manager  = cfg.booking_manager_wa  || '';
+  if (!superior) superior = cfg.booking_superior_wa || '';
+  return { manager, superior };
+}
+
+// Synchronous threshold evaluation. Returns the highest level newly
+// reached (0 = none, 1 = soft, 2 = escalate) plus the figures the caller
+// surfaces to the UI. No side effects.
+function evaluateBookingLimit(db, { auctionId, traderId, traderName }) {
+  const cfg = getSettingsFlat(db);
+  if (!cfg.flag_booking_limit) return { enabled: false, level: 0 };
+  const plannedMt = Number(cfg.booking_planned_weight_mt) || 0;
+  if (plannedMt <= 0) return { enabled: true, level: 0 };
+  const plannedKg = plannedMt * 1000;
+  const softKg = plannedKg * (Number(cfg.booking_soft_pct)     || 0) / 100;
+  const escKg  = plannedKg * (Number(cfg.booking_escalate_pct) || 0) / 100;
+
+  let totalKg = 0, seller = traderName || '';
+  const tid = parseInt(traderId, 10);
+  if (Number.isFinite(tid) && tid > 0) {
+    const r = db.get('SELECT COALESCE(SUM(qty),0) AS t, MAX(name) AS nm FROM lots WHERE auction_id = ? AND trader_id = ?', [auctionId, tid]);
+    totalKg = Number(r && r.t) || 0;
+    if (!seller && r && r.nm) seller = r.nm;
+  } else if (traderName) {
+    const r = db.get("SELECT COALESCE(SUM(qty),0) AS t FROM lots WHERE auction_id = ? AND TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))", [auctionId, traderName]);
+    totalKg = Number(r && r.t) || 0;
+  } else {
+    return { enabled: true, level: 0 };
+  }
+
+  let level = 0;
+  if (escKg  > 0 && totalKg > escKg)  level = 2;
+  else if (softKg > 0 && totalKg > softKg) level = 1;
+
+  const traderKey = (Number.isFinite(tid) && tid > 0)
+    ? ('id:' + tid)
+    : ('name:' + String(traderName || '').trim().toLowerCase());
+  const pct = plannedKg > 0 ? Math.round(totalKg / plannedKg * 100) : 0;
+  return {
+    enabled: true, level, traderKey, seller,
+    totalKg, totalMt: +(totalKg / 1000).toFixed(3),
+    softKg, escKg, plannedMt, pctOfPlanned: pct,
+    limitKg: level === 2 ? escKg : softKg,
+    role: level === 2 ? 'immediate superior' : 'depot manager',
+  };
+}
+
+// Claim the alert row for (auction, seller, level). Returns true iff THIS
+// call won the claim (i.e. the level had not fired before) — only the
+// winner dispatches the WhatsApp message. Atomic via INSERT OR IGNORE.
+function claimBookingAlert(db, auctionId, traderKey, level, limitKg, totalKg) {
+  _ensureBookingTables(db);
+  const r = db.run(
+    'INSERT OR IGNORE INTO booking_alerts (auction_id, trader_key, level, total_kg, limit_kg) VALUES (?,?,?,?,?)',
+    [auctionId, traderKey, level, totalKg, limitKg]
+  );
+  return !!(r && r.changes > 0);
+}
+
+// Fire the WhatsApp alert and record its outcome. Best-effort: never
+// throws (the lot save already succeeded). Updates the claimed row with
+// the send result so the booking-alerts log is auditable.
+async function dispatchBookingAlert(db, req, evalResult, branch) {
+  const cfg = getSettingsFlat(db);
+  const { level, traderKey, seller, totalMt, pctOfPlanned, plannedMt, role } = evalResult;
+  const contacts = _bookingContactsFor(db, cfg, branch);
+  const target = level === 2 ? contacts.superior : contacts.manager;
+  let sendOk = false, sendErr = '';
+  try {
+    if (!target) {
+      sendErr = 'No recipient configured';
+    } else {
+      const c = _waConfig(db);
+      if (!c.token || !c.phoneId) {
+        sendErr = 'WhatsApp not configured';
+      } else if (!c.tplText) {
+        sendErr = 'No text template configured';
+      } else {
+        const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [evalResult.auctionId]) || {};
+        const company = (cfg.trade_name || cfg.short_name || 'Company').toString().toUpperCase();
+        const msg = `BOOKING ALERT: Seller ${seller || '-'} has booked ${totalMt} MT (${pctOfPlanned}% of ${plannedMt} MT planned)`
+          + ` in trade ${auction.ano || evalResult.auctionId}${branch ? ' / ' + branch : ''}.`
+          + ` ${level === 2 ? 'Escalation threshold crossed — booking continued past the limit.' : 'Soft limit crossed.'}`;
+        const r = await _waSendTemplate(c, {
+          phone: target, templateName: c.tplText, langCode: c.tplTextLang,
+          bodyParams: [role, msg, company],
+        });
+        sendOk = !!r.ok;
+        if (!r.ok) sendErr = r.error || 'send failed';
+      }
+    }
+  } catch (e) {
+    sendErr = (e && e.message) || 'send failed';
+  }
+  try {
+    db.run('UPDATE booking_alerts SET sent_to = ?, send_ok = ?, send_error = ? WHERE auction_id = ? AND trader_key = ? AND level = ?',
+      [target || '', sendOk ? 1 : 0, sendErr, evalResult.auctionId, traderKey, level]);
+  } catch (_) {}
+  try {
+    auditLog(req, 'alert', 'booking', evalResult.auctionId, {
+      level, role, seller: seller || '', total_mt: totalMt, pct: pctOfPlanned,
+      branch: branch || '', sent_to: target || '', ok: sendOk, error: sendErr,
+    });
+  } catch (_) {}
+  return { sendOk, sendErr, target };
+}
+
+// Glue called from the lot POST/PUT routes. Evaluates synchronously,
+// claims the level, and fires the WhatsApp send WITHOUT blocking the
+// response. Returns the UI-facing summary (or null when disabled / no
+// threshold reached) so the client can show a soft confirmation.
+function runBookingLimitCheck(db, req, { auctionId, traderId, traderName, branch }) {
+  let ev;
+  try {
+    ev = evaluateBookingLimit(db, { auctionId, traderId, traderName });
+  } catch (e) {
+    return null;
+  }
+  if (!ev || !ev.enabled || !ev.level) return ev && ev.level === 0 ? null : null;
+  ev.auctionId = auctionId;
+  const won = claimBookingAlert(db, auctionId, ev.traderKey, ev.level, ev.limitKg, ev.totalKg);
+  ev.firstTime = won;
+  if (won) {
+    // Fire-and-forget: the lot-save response must not wait on Meta's API.
+    Promise.resolve().then(() => dispatchBookingAlert(db, req, ev, branch)).catch(() => {});
+  }
+  return {
+    level: ev.level,
+    role: ev.role,
+    seller: ev.seller,
+    total_mt: ev.totalMt,
+    pct_of_planned: ev.pctOfPlanned,
+    planned_mt: ev.plannedMt,
+    limit_mt: +(ev.limitKg / 1000).toFixed(3),
+    branch: branch || '',
+    notified: won,
+    message: ev.level === 2
+      ? `Escalation: ${ev.seller || 'seller'} has booked ${ev.totalMt} MT (${ev.pctOfPlanned}% of planned). Immediate superior ${won ? 'is being alerted' : 'was already alerted'}.`
+      : `Soft limit reached: ${ev.seller || 'seller'} has booked ${ev.totalMt} MT (${ev.pctOfPlanned}% of planned). Depot manager ${won ? 'is being alerted' : 'was already alerted'}.`,
+  };
+}
+
+// ── Booking-contacts + status API ────────────────────────────
+// Per-branch depot-manager / superior WhatsApp numbers. Falls back to the
+// booking_manager_wa / booking_superior_wa company settings.
+app.get('/api/booking/contacts', requireView, (req, res) => {
+  const db = getDb();
+  _ensureBookingTables(db);
+  const cfg = getSettingsFlat(db);
+  res.json({
+    fallback: { manager_wa: cfg.booking_manager_wa || '', superior_wa: cfg.booking_superior_wa || '' },
+    branches: db.all('SELECT branch, manager_wa, superior_wa FROM booking_depot_contacts ORDER BY branch') || [],
+  });
+});
+
+app.put('/api/booking/contacts', requireSettingsWrite, (req, res) => {
+  const db = getDb();
+  _ensureBookingTables(db);
+  const branch = String((req.body || {}).branch || '').trim();
+  if (!branch) return res.status(400).json({ error: 'branch required' });
+  const manager  = String((req.body || {}).manager_wa  || '').trim();
+  const superior = String((req.body || {}).superior_wa || '').trim();
+  db.run(
+    `INSERT INTO booking_depot_contacts (branch, manager_wa, superior_wa) VALUES (?,?,?)
+       ON CONFLICT(branch) DO UPDATE SET manager_wa = excluded.manager_wa, superior_wa = excluded.superior_wa`,
+    [branch, manager, superior]
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/booking/contacts/:branch', requireSettingsWrite, (req, res) => {
+  const db = getDb();
+  _ensureBookingTables(db);
+  db.run('DELETE FROM booking_depot_contacts WHERE LOWER(branch) = LOWER(?)', [String(req.params.branch || '')]);
+  res.json({ ok: true });
+});
+
+// Live booking status for one seller in a trade — used by the Lot Entry
+// screen to show a running "X MT of Y MT planned" gauge without saving.
+app.get('/api/booking/status/:auctionId', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const auctionId = parseInt(req.params.auctionId, 10);
+  const traderId = req.query.trader_id;
+  const traderName = req.query.name;
+  if (!auctionId || (!traderId && !traderName)) {
+    return res.status(400).json({ error: 'auctionId and trader_id or name required' });
+  }
+  const ev = evaluateBookingLimit(db, { auctionId, traderId, traderName });
+  res.json(ev);
+});
+
+// Booking-alerts log (audit view of who was alerted, when, and whether the
+// WhatsApp send succeeded). Optional ?auction_id= filter.
+app.get('/api/booking/alerts', requireView, (req, res) => {
+  const db = getDb();
+  _ensureBookingTables(db);
+  const aid = parseInt(req.query.auction_id, 10);
+  const rows = aid
+    ? db.all('SELECT * FROM booking_alerts WHERE auction_id = ? ORDER BY notified_at DESC, level DESC', [aid])
+    : db.all('SELECT * FROM booking_alerts ORDER BY notified_at DESC, level DESC LIMIT 200');
+  res.json(rows || []);
+});
+
+// ══════════════════════════════════════════════════════════════
+// SELLER WHATSAPP NOTIFICATIONS
+// Business-initiated alerts/notifications to a seller, built on the same
+// text template the rest of the app uses (3 body params: name, message,
+// company). The configured seller_youtube_url is appended to the message
+// body when present so every notice can carry the auction-house channel
+// link. Resolves the recipient from traders.whatsapp → traders.tel.
+// ══════════════════════════════════════════════════════════════
+function _resolveSellerPhone(db, { traderId, sellerName, phone }) {
+  if (phone) return { phone: String(phone), name: sellerName || '' };
+  let row = null;
+  const tid = parseInt(traderId, 10);
+  if (Number.isFinite(tid) && tid > 0) {
+    row = db.get('SELECT name, tel, whatsapp FROM traders WHERE id = ?', [tid]);
+  } else if (sellerName) {
+    row = db.get('SELECT name, tel, whatsapp FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [String(sellerName).trim()]);
+  }
+  if (!row) return { phone: '', name: sellerName || '' };
+  return { phone: (row.whatsapp || row.tel || ''), name: row.name || sellerName || '' };
+}
+
+// Append the configured YouTube link to a message body when present.
+function _withYoutube(cfg, message, includeYoutube) {
+  const yt = (cfg.seller_youtube_url || '').trim();
+  if (includeYoutube === false || !yt) return message;
+  return `${message}\nWatch: ${yt}`;
+}
+
+// Generic seller alert/notification. Body:
+//   { trader_id?|seller_name?|phone?, message, include_youtube? }
+app.post('/api/whatsapp/notify-seller', requireView, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
+  if (!c.tplText) return res.status(400).json({ error: 'No text template configured', fallback: true });
+  const b = req.body || {};
+  const { phone, name } = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const wa = _waNormPhone(phone);
+  if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
+  const cfg = getSettingsFlat(db);
+  const company = (cfg.trade_name || cfg.short_name || 'Company').toString().toUpperCase();
+  const baseMsg = String(b.message || '').trim();
+  if (!baseMsg) return res.status(400).json({ error: 'message required' });
+  const msg = _withYoutube(cfg, baseMsg, b.include_youtube).replace(/\s*\n\s*/g, ' ').trim();
+  const r = await _waSendTemplate(c, {
+    phone: wa, templateName: c.tplText, langCode: c.tplTextLang,
+    bodyParams: [name || 'there', msg, company],
+  });
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, id: r.id, to: wa });
+});
+
+// "Lot sold" notice for a seller in a trade. Composes the seller's sold
+// lots (lot#, grade, qty, rate, amount), a totals line, any invoice
+// numbers linked to those lots, and the YouTube link — then sends it as a
+// single text-template message. Body: { trader_id?|seller_name }.
+app.post('/api/whatsapp/seller-lot-sold/:auctionId', requireView, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
+  if (!c.tplText) return res.status(400).json({ error: 'No text template configured', fallback: true });
+  const auctionId = parseInt(req.params.auctionId, 10);
+  if (!auctionId) return res.status(400).json({ error: 'auctionId required' });
+  const b = req.body || {};
+  const { phone, name } = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const wa = _waNormPhone(phone);
+  if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
+
+  const tid = parseInt(b.trader_id, 10);
+  const where = (Number.isFinite(tid) && tid > 0)
+    ? { sql: 'trader_id = ?', val: tid }
+    : { sql: "TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))", val: String(b.seller_name || name || '').trim() };
+  const lots = db.all(
+    `SELECT lot_no, grade,
+            CASE WHEN isp_puramt > 0 THEN isp_pqty   ELSE pqty   END AS qty,
+            CASE WHEN isp_puramt > 0 THEN isp_prate  ELSE prate  END AS rate,
+            CASE WHEN isp_puramt > 0 THEN isp_puramt ELSE puramt END AS amount,
+            invo, buyer
+       FROM lots
+      WHERE auction_id = ? AND ${where.sql} AND amount > 0
+      ORDER BY CAST(lot_no AS INTEGER), lot_no`,
+    [auctionId, where.val]
+  ) || [];
+  if (!lots.length) return res.status(404).json({ error: 'No sold lots found for this seller in the trade' });
+
+  const cfg = getSettingsFlat(db);
+  const auction = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+  const company = (cfg.trade_name || cfg.short_name || 'Company').toString().toUpperCase();
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  let tQty = 0, tAmt = 0;
+  const lines = lots.map(l => {
+    tQty += Number(l.qty) || 0; tAmt += Number(l.amount) || 0;
+    return `Lot ${l.lot_no} ${l.grade || ''}: ${fmt(l.qty)}kg @ ${fmt(l.rate)} = Rs.${fmt(l.amount)}`;
+  });
+  const invoices = [...new Set(lots.map(l => (l.invo || '').trim()).filter(Boolean))];
+  let body = `Trade ${auction.ano || auctionId} (${fmtDate(auction.date)}) — your lots sold: `
+    + lines.join('; ')
+    + `. Total: ${fmt(tQty)}kg, Rs.${fmt(tAmt)}.`;
+  if (invoices.length) body += ` Invoice(s): ${invoices.join(', ')}.`;
+  body = _withYoutube(cfg, body, b.include_youtube).replace(/\s*\n\s*/g, ' ').trim();
+
+  const r = await _waSendTemplate(c, {
+    phone: wa, templateName: c.tplText, langCode: c.tplTextLang,
+    bodyParams: [name || 'there', body, company],
+  });
+  if (!r.ok) return res.status(502).json({ error: r.error });
+  res.json({ ok: true, id: r.id, to: wa, lot_count: lots.length, total_qty: +tQty.toFixed(3), total_amount: +tAmt.toFixed(2) });
+});
+
 app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
   const gstin = String(req.params.gstin || '').toUpperCase().trim();
   if (!GSTIN_RE.test(gstin)) {
@@ -3438,7 +3792,16 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   auditLog(req, 'create', 'lot', _ins && _ins.lastInsertRowid, {
     lot_no: l.lot_no, trader: _traderName, qty: Number(l.qty) || 0, branch: l.branch || '', auction_id: l.auction_id,
   });
-  res.json({ success: true });
+  // Booking-limit check: recompute this seller's running weight for the
+  // trade and (when over threshold) alert the depot manager / superior.
+  // Non-blocking — any failure here must not fail the lot save.
+  let bookingAlert = null;
+  try {
+    bookingAlert = runBookingLimitCheck(_db, req, {
+      auctionId: l.auction_id, traderId: l.trader_id, traderName: _traderName, branch: l.branch || '',
+    });
+  } catch (_) {}
+  res.json({ success: true, booking_alert: bookingAlert });
 });
 
 // Returns true if `req.user` has the admin role. Admin bypasses the
@@ -3509,7 +3872,18 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     branch: _after ? _after.branch : '',
     changes: lotChangeDiff(_before, _after),
   });
-  res.json({ success: true });
+  // Re-run the booking-limit check — an edit that raises qty can cross a
+  // threshold the same way a new lot does.
+  let bookingAlert = null;
+  try {
+    const _row = _after || _before;
+    if (_row) {
+      bookingAlert = runBookingLimitCheck(db, req, {
+        auctionId: _row.auction_id, traderId: _row.trader_id, traderName: _row.name || '', branch: _row.branch || '',
+      });
+    }
+  } catch (_) {}
+  res.json({ success: true, booking_alert: bookingAlert });
 });
 
 app.delete('/api/lots/:id', requireDelete, (req, res) => {
@@ -6939,6 +7313,234 @@ app.post('/api/payments/pdf-bulk', requireView, (req, res) => {
   } catch (e) {
     if (piped && doc) { try { doc.end(); } catch(_){} }
     else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// SELLER TAX STATEMENT
+// A per-seller tax statement assembled from the documents the auction
+// house already issues: purchase invoices (registered sellers — carry
+// CGST/SGST/IGST + TDS) and bills of supply (agriculturists — exempt, no
+// GST/TDS). Scoped to one trade (?auction_id=) or a date range
+// (?from=&to=). Rendered as a PDF that can be downloaded or pushed to the
+// seller over WhatsApp using the existing document template.
+// ══════════════════════════════════════════════════════════════
+function _buildSellerTaxStatement(db, cfg, { sellerName, auctionId, from, to }) {
+  const name = String(sellerName || '').trim();
+  const trader = db.get('SELECT name, pan, tel, whatsapp, pstate FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [name]) || {};
+  let periodLabel = '', purchases = [], bills = [];
+  if (auctionId) {
+    const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [parseInt(auctionId, 10)]) || {};
+    periodLabel = `Trade ${auc.ano || auctionId} (${fmtDate(auc.date)})`;
+    purchases = db.all(
+      `SELECT invo, date, qty, amount, cgst, sgst, igst, tds, total
+         FROM purchases
+        WHERE auction_id = ? AND TRIM(LOWER(name)) = TRIM(LOWER(?))
+        ORDER BY date, invo`,
+      [parseInt(auctionId, 10), name]
+    ) || [];
+    bills = db.all(
+      `SELECT bil, date, qty, cost, igst, net
+         FROM bills
+        WHERE ano = ? AND TRIM(LOWER(name)) = TRIM(LOWER(?))
+        ORDER BY date, bil`,
+      [auc.ano || '', name]
+    ) || [];
+  } else {
+    periodLabel = `${fmtDate(from)} to ${fmtDate(to)}`;
+    purchases = db.all(
+      `SELECT invo, date, qty, amount, cgst, sgst, igst, tds, total
+         FROM purchases
+        WHERE date BETWEEN ? AND ? AND TRIM(LOWER(name)) = TRIM(LOWER(?))
+        ORDER BY date, invo`,
+      [from, to, name]
+    ) || [];
+    bills = db.all(
+      `SELECT bil, date, qty, cost, igst, net
+         FROM bills
+        WHERE date BETWEEN ? AND ? AND TRIM(LOWER(name)) = TRIM(LOWER(?))
+        ORDER BY date, bil`,
+      [from, to, name]
+    ) || [];
+  }
+  const t = { qty: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, gst: 0, tds: 0, total: 0 };
+  for (const p of purchases) {
+    const gst = (Number(p.cgst) || 0) + (Number(p.sgst) || 0) + (Number(p.igst) || 0);
+    t.qty += Number(p.qty) || 0; t.taxable += Number(p.amount) || 0;
+    t.cgst += Number(p.cgst) || 0; t.sgst += Number(p.sgst) || 0; t.igst += Number(p.igst) || 0;
+    t.gst += gst; t.tds += Number(p.tds) || 0; t.total += Number(p.total) || 0;
+  }
+  for (const b of bills) {
+    t.qty += Number(b.qty) || 0; t.taxable += Number(b.cost) || 0;
+    t.igst += Number(b.igst) || 0; t.gst += Number(b.igst) || 0; t.total += Number(b.net) || 0;
+  }
+  return { seller: trader.name || name, pan: trader.pan || '', phone: trader.whatsapp || trader.tel || '', periodLabel, purchases, bills, totals: t };
+}
+
+function _renderTaxStatement(doc, cfg, data) {
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtQ = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const company = (cfg.trade_name || cfg.short_name || cfg.legal_name || 'Company').toString();
+  const PAGE_L = 30, PAGE_R = 565, PAGE_W = PAGE_R - PAGE_L;
+  let y = 40;
+  doc.font('Helvetica-Bold').fontSize(16).text(company.toUpperCase(), PAGE_L, y, { width: PAGE_W, align: 'center' });
+  y = doc.y + 4;
+  doc.font('Helvetica-Bold').fontSize(13).text('TAX STATEMENT', PAGE_L, y, { width: PAGE_W, align: 'center' });
+  y = doc.y + 10;
+  doc.moveTo(PAGE_L, y).lineTo(PAGE_R, y).lineWidth(1).stroke();
+  y += 10;
+  doc.font('Helvetica').fontSize(10);
+  doc.text(`Seller: ${data.seller}`, PAGE_L, y); doc.text(`Period: ${data.periodLabel}`, PAGE_L + 280, y);
+  y += 14;
+  doc.text(`PAN: ${data.pan || '-'}`, PAGE_L, y); doc.text(`Phone: ${data.phone || '-'}`, PAGE_L + 280, y);
+  y += 18;
+
+  const cols = [
+    { k: 'doc',     label: 'Invoice/Bill', x: PAGE_L,       w: 78,  align: 'left'  },
+    { k: 'date',    label: 'Date',         x: PAGE_L + 78,  w: 62,  align: 'left'  },
+    { k: 'qty',     label: 'Qty',          x: PAGE_L + 140, w: 58,  align: 'right', fmt: fmtQ },
+    { k: 'taxable', label: 'Taxable',      x: PAGE_L + 198, w: 70,  align: 'right', fmt },
+    { k: 'gst',     label: 'GST',          x: PAGE_L + 268, w: 66,  align: 'right', fmt },
+    { k: 'tds',     label: 'TDS',          x: PAGE_L + 334, w: 60,  align: 'right', fmt },
+    { k: 'total',   label: 'Total',        x: PAGE_L + 394, w: 141, align: 'right', fmt },
+  ];
+  const header = () => {
+    doc.font('Helvetica-Bold').fontSize(9);
+    doc.rect(PAGE_L, y, PAGE_W, 18).fillAndStroke('#f3f4f6', '#999').fillColor('#000');
+    for (const c of cols) doc.text(c.label, c.x + 2, y + 5, { width: c.w - 4, align: c.align });
+    y += 18; doc.font('Helvetica').fontSize(9).fillColor('#000');
+  };
+  header();
+  const rows = [
+    ...data.purchases.map(p => ({
+      doc: String(p.invo || ''), date: fmtDate(p.date), qty: p.qty, taxable: p.amount,
+      gst: (Number(p.cgst) || 0) + (Number(p.sgst) || 0) + (Number(p.igst) || 0), tds: p.tds, total: p.total,
+    })),
+    ...data.bills.map(b => ({
+      doc: 'BOS ' + String(b.bil || ''), date: fmtDate(b.date), qty: b.qty, taxable: b.cost,
+      gst: b.igst, tds: 0, total: b.net,
+    })),
+  ];
+  if (!rows.length) {
+    doc.font('Helvetica-Oblique').fontSize(10).text('No purchase invoices or bills of supply found for this seller in the selected period.', PAGE_L, y + 6, { width: PAGE_W });
+    y += 28;
+  }
+  for (const row of rows) {
+    if (y > 770) { doc.addPage(); y = 40; header(); }
+    for (const c of cols) {
+      const v = c.fmt ? c.fmt(row[c.k]) : String(row[c.k] ?? '');
+      doc.text(v, c.x + 2, y + 4, { width: c.w - 4, align: c.align });
+    }
+    y += 14;
+    doc.moveTo(PAGE_L, y).lineTo(PAGE_R, y).strokeColor('#e5e7eb').lineWidth(0.5).stroke().strokeColor('#000');
+  }
+  const T = data.totals;
+  doc.font('Helvetica-Bold').fontSize(10);
+  doc.rect(PAGE_L, y, PAGE_W, 20).fillAndStroke('#f3f4f6', '#666').fillColor('#000');
+  doc.text('TOTAL', PAGE_L + 2, y + 6);
+  doc.text(fmtQ(T.qty),     PAGE_L + 142, y + 6, { width: 54,  align: 'right' });
+  doc.text(fmt(T.taxable),  PAGE_L + 200, y + 6, { width: 66,  align: 'right' });
+  doc.text(fmt(T.gst),      PAGE_L + 270, y + 6, { width: 62,  align: 'right' });
+  doc.text(fmt(T.tds),      PAGE_L + 336, y + 6, { width: 56,  align: 'right' });
+  doc.text(fmt(T.total),    PAGE_L + 396, y + 6, { width: 137, align: 'right' });
+  y += 28;
+  doc.font('Helvetica').fontSize(9);
+  doc.text(`GST breakup — CGST: ${fmt(T.cgst)}   SGST: ${fmt(T.sgst)}   IGST: ${fmt(T.igst)}`, PAGE_L, y, { width: PAGE_W });
+  y += 14;
+  doc.text(`Net of TDS: Rs. ${fmt(T.total - T.tds)}`, PAGE_L, y, { width: PAGE_W });
+  y += 18;
+  doc.fontSize(8).fillColor('#666').text(`Generated: ${new Date().toLocaleString('en-IN')}. This statement is a summary of purchase invoices and bills of supply issued by ${company}.`, PAGE_L, y, { width: PAGE_W });
+}
+
+function _taxStatementToBuffer(db, cfg, opts) {
+  return new Promise((resolve, reject) => {
+    try {
+      const PDFDocument = require('pdfkit');
+      const doc = new PDFDocument({ size: 'A4', margin: 30 });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      const data = _buildSellerTaxStatement(db, cfg, opts);
+      _renderTaxStatement(doc, cfg, data);
+      doc.end();
+    } catch (e) { reject(e); }
+  });
+}
+
+// Validate + normalise the scope (auction_id OR from/to) shared by both
+// tax-statement endpoints. Returns { ok, opts, error }.
+function _taxStatementScope(src) {
+  const sellerName = String(src.seller || src.seller_name || '').trim();
+  if (!sellerName) return { ok: false, error: 'seller required' };
+  const auctionId = src.auction_id ? parseInt(src.auction_id, 10) : 0;
+  const from = src.from, to = src.to;
+  if (!auctionId && !(from && to)) return { ok: false, error: 'auction_id or (from & to) required' };
+  return { ok: true, opts: { sellerName, auctionId, from, to } };
+}
+
+app.get('/api/tax-statement/pdf', requireView, (req, res) => {
+  let doc, piped = false;
+  try {
+    const scope = _taxStatementScope(req.query);
+    if (!scope.ok) return res.status(400).json({ error: scope.error });
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const data = _buildSellerTaxStatement(db, cfg, scope.opts);
+    const PDFDocument = require('pdfkit');
+    doc = new PDFDocument({ size: 'A4', margin: 30 });
+    res.setHeader('Content-Type', 'application/pdf');
+    const safe = String(scope.opts.sellerName).replace(/[^\w]/g, '_').slice(0, 60) || 'seller';
+    res.setHeader('Content-Disposition', `inline; filename="TaxStatement_${safe}.pdf"`);
+    doc.pipe(res); piped = true;
+    res.on('close', () => { try { doc.destroy(); } catch (_) {} });
+    _renderTaxStatement(doc, cfg, data);
+    doc.end();
+  } catch (e) {
+    if (piped && doc) { try { doc.end(); } catch (_) {} }
+    else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
+  }
+});
+
+// Generate the tax statement and deliver it to the seller over WhatsApp.
+// Body: { seller, auction_id?|from?+to?, trader_id?|phone? }
+app.post('/api/tax-statement/whatsapp', requireView, async (req, res) => {
+  const db = getDb();
+  const c = _waConfig(db);
+  if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
+  if (!c.tplDocument) return res.status(400).json({ error: 'No document template configured', fallback: true });
+  const scope = _taxStatementScope(req.body || {});
+  if (!scope.ok) return res.status(400).json({ error: scope.error });
+  const cfg = getSettingsFlat(db);
+  const { phone, name } = _resolveSellerPhone(db, {
+    traderId: (req.body || {}).trader_id, sellerName: scope.opts.sellerName, phone: (req.body || {}).phone,
+  });
+  const wa = _waNormPhone(phone);
+  if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
+  try {
+    const buf = await _taxStatementToBuffer(db, cfg, scope.opts);
+    const company = (cfg.trade_name || cfg.short_name || 'Company').toString().toUpperCase();
+    const filename = `TaxStatement_${String(scope.opts.sellerName).replace(/[^\w]/g, '_').slice(0, 40) || 'seller'}.pdf`;
+    // Upload to Meta's media store, then reference it in the document
+    // template header (mirrors /api/whatsapp/send-template-document).
+    const fd = new FormData();
+    fd.append('messaging_product', 'whatsapp');
+    fd.append('type', 'application/pdf');
+    fd.append('file', new Blob([buf], { type: 'application/pdf' }), filename);
+    const up = await fetch(`${WA_GRAPH}/${encodeURIComponent(c.phoneId)}/media`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + c.token }, body: fd, signal: AbortSignal.timeout(20000),
+    });
+    const upd = await up.json().catch(() => ({}));
+    if (!up.ok || !upd.id) throw new Error((upd.error && upd.error.message) || 'media upload failed');
+    const r = await _waSendTemplate(c, {
+      phone: wa, templateName: c.tplDocument, langCode: c.tplDocumentLang,
+      bodyParams: [name || 'there', company],
+      headerDocument: { id: upd.id, filename },
+    });
+    if (!r.ok) return res.status(502).json({ error: r.error });
+    res.json({ ok: true, id: r.id, to: wa });
+  } catch (e) {
+    res.status(502).json({ error: (e && e.message) || 'send failed' });
   }
 });
 
