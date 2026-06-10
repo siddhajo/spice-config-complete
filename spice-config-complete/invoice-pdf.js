@@ -610,7 +610,105 @@ function generateCropReceiptPDF(lot, cfg) {
   });
 }
 
-module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF };
+// ── Lot-Entry Receipt PDF ────────────────────────────────────
+// A4-portrait receipt for one seller's lots — the printable companion to
+// the lot-entry WhatsApp text summary. Company header + Trade/date + a
+// lots table (Lot / Bags / Qty / Rate / Amount) + totals. Mirrors the
+// content of the on-screen lot-entry receipt so the seller gets the same
+// document over WhatsApp.
+function generateLotReceiptPDF(lots, cfg, opts) {
+  opts = opts || {};
+  const co = effectiveCompany(cfg);
+  const traderName = opts.traderName || (lots[0] && lots[0].name) || '';
+  const ano = opts.ano != null ? opts.ano : (lots[0] && lots[0].ano) || '';
+  const dateStr = opts.date
+    ? String(opts.date).slice(0, 10).split('-').reverse().join('/')
+    : new Date().toLocaleDateString('en-GB');
+
+  const doc = new PDFDocument({ size: 'A4', margin: 36 });
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  const x = 36, w = 523; let y = 36;
+
+  // Header
+  doc.fillColor('#000').fontSize(15).font('Helvetica-Bold')
+     .text((co.name || 'COMPANY').toUpperCase(), x, y, { align: 'center', width: w });
+  y += 19;
+  doc.fontSize(8).font('Helvetica');
+  const addrLine = [co.address1, co.address2].filter(Boolean).join(', ');
+  if (addrLine) { doc.text(addrLine, x, y, { align: 'center', width: w }); y += 10; }
+  const placeLine = [co.place, co.pin].filter(Boolean).join(' - ');
+  if (placeLine) { doc.text(placeLine, x, y, { align: 'center', width: w }); y += 10; }
+  if (co.gstin) { doc.text('GSTIN: ' + co.gstin, x, y, { align: 'center', width: w }); y += 12; }
+
+  doc.moveTo(x, y).lineTo(x + w, y).stroke(); y += 9;
+  doc.fontSize(12).font('Helvetica-Bold').text('LOT RECEIPT', x, y, { align: 'center', width: w });
+  y += 18;
+
+  // Meta line: Trade No (left) + Date (right)
+  doc.fontSize(9).font('Helvetica-Bold').text('Trade No: ', x, y, { continued: true })
+     .font('Helvetica').text(String(ano || '-'));
+  doc.font('Helvetica-Bold').text('Date: ', x + w - 150, y, { continued: true, width: 150 })
+     .font('Helvetica').text(dateStr);
+  y += 14;
+  doc.font('Helvetica-Bold').text('To: ', x, y, { continued: true }).font('Helvetica').text(traderName || '-');
+  y += 16;
+
+  // Table columns
+  const cols = [
+    { key: 'lot',  label: 'Lot',     cx: x,        cw: 70,        align: 'left'  },
+    { key: 'bags', label: 'Bags',    cx: x + 70,   cw: 70,        align: 'right' },
+    { key: 'qty',  label: 'Qty (kg)',cx: x + 140,  cw: 120,       align: 'right' },
+    { key: 'rate', label: 'Rate',    cx: x + 260,  cw: 120,       align: 'right' },
+    { key: 'amt',  label: 'Amount',  cx: x + 380,  cw: w - 380,   align: 'right' },
+  ];
+  const fmtN = (n, dp = 2) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+  const drawHeader = () => {
+    doc.rect(x, y, w, 16).fill('#f0f0f0'); doc.fillColor('#000');
+    doc.fontSize(8).font('Helvetica-Bold');
+    for (const c of cols) doc.text(c.label, c.cx + 3, y + 4, { width: c.cw - 6, align: c.align });
+    y += 16;
+  };
+  drawHeader();
+
+  let totBags = 0, totQty = 0, totAmt = 0;
+  doc.font('Helvetica').fontSize(8);
+  for (const l of lots) {
+    if (y > 760) { doc.addPage(); y = 40; drawHeader(); doc.font('Helvetica').fontSize(8); }
+    const bags = Number(l.bags) || 0, qty = Number(l.qty) || 0, price = Number(l.price) || 0;
+    const amt = Number(l.amount) || (qty * price);
+    totBags += bags; totQty += qty; totAmt += amt;
+    doc.rect(x, y, w, 14).stroke();
+    doc.fillColor('#000');
+    doc.text(String(l.lot_no || ''), cols[0].cx + 3, y + 3, { width: cols[0].cw - 6, align: cols[0].align });
+    doc.text(String(bags),           cols[1].cx + 3, y + 3, { width: cols[1].cw - 6, align: cols[1].align });
+    doc.text(fmtN(qty, 3),           cols[2].cx + 3, y + 3, { width: cols[2].cw - 6, align: cols[2].align });
+    doc.text(fmtN(price),            cols[3].cx + 3, y + 3, { width: cols[3].cw - 6, align: cols[3].align });
+    doc.text(fmtN(amt),              cols[4].cx + 3, y + 3, { width: cols[4].cw - 6, align: cols[4].align });
+    y += 14;
+  }
+
+  // Totals row
+  doc.rect(x, y, w, 16).fill('#f0f0f0'); doc.fillColor('#000');
+  doc.font('Helvetica-Bold').fontSize(8);
+  doc.text('Total',          cols[0].cx + 3, y + 4, { width: cols[0].cw - 6, align: 'left'  });
+  doc.text(String(totBags),  cols[1].cx + 3, y + 4, { width: cols[1].cw - 6, align: 'right' });
+  doc.text(fmtN(totQty, 3),  cols[2].cx + 3, y + 4, { width: cols[2].cw - 6, align: 'right' });
+  doc.text(fmtN(totAmt),     cols[4].cx + 3, y + 4, { width: cols[4].cw - 6, align: 'right' });
+  y += 28;
+
+  doc.font('Helvetica').fontSize(7).fillColor('#555')
+     .text('This is a computer-generated lot receipt.', x, y, { align: 'center', width: w });
+
+  return new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF };
 
 /**
  * Sales Invoice PDF (Tax Invoice)

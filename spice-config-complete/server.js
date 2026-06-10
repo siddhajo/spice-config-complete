@@ -15,7 +15,7 @@ const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
-const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF } = require('./invoice-pdf');
+const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
 const { exportPdf: exportAnyPdf } = require('./exports-pdf');
@@ -2030,6 +2030,21 @@ app.get('/api/traders/by-name/:name', requireViewOrLotEntry, (req, res) => {
   const row = db.get('SELECT id, name, tel FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [nm]);
   if (!row) return res.status(404).json({ error: 'Not found' });
   res.json(row);
+});
+
+// Buyer phone lookup by trade name (or short code). Used by the WhatsApp
+// "send document" flow for sales invoices and debit notes — the recipient
+// is the dealer/buyer. Returns an array (possibly empty) so the frontend
+// can read rows[0].tel uniformly. buyer1 = long trade name, buyer = code.
+app.get('/api/buyers/by-tradename', requireView, (req, res) => {
+  const db = getDb();
+  const nm = String(req.query.name || '').trim();
+  if (!nm) return res.json([]);
+  const rows = db.all(
+    'SELECT id, buyer, buyer1, tel FROM buyers WHERE LOWER(buyer1) = LOWER(?) OR LOWER(buyer) = LOWER(?) LIMIT 5',
+    [nm, nm]
+  );
+  res.json(rows || []);
 });
 
 app.get('/api/traders/:id', requireView, (req, res) => {
@@ -6588,6 +6603,62 @@ app.post('/api/debit-notes/bulk-delete', requireDelete, (req, res) => {
   res.json({ ok: true, deleted: r.changes });
 });
 
+// Single debit-note PDF (one buyer/dealer). Same layout as the auction
+// batch print, but scoped to one note so it can be shared over WhatsApp.
+// Reuses generateDebitNoteBatchPDF with a one-element buyers array.
+app.get('/api/debit-notes/:id/pdf', requireView, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const note = db.get('SELECT * FROM debit_notes WHERE id = ?', [req.params.id]);
+    if (!note) return res.status(404).json({ error: 'Debit note not found' });
+
+    // Resolve the auction (by ano) so we can pull the buyer's lots for the
+    // discount table. Fall back gracefully if the auction row is missing.
+    const auc = db.get('SELECT * FROM auctions WHERE ano = ? LIMIT 1', [note.ano]) || null;
+    const lots = auc
+      ? db.all(
+          `SELECT lot_no, qty, price, amount FROM lots
+             WHERE auction_id = ? AND amount > 0 AND (buyer1 = ? OR buyer = ?)
+             ORDER BY CAST(lot_no AS INTEGER), lot_no`,
+          [auc.id, note.name, note.name]
+        )
+      : [];
+    const b = db.get(
+      'SELECT buyer1, add1, add2, pla, gstin FROM buyers WHERE buyer1 = ? OR buyer = ? LIMIT 1',
+      [note.name, note.name]
+    ) || {};
+    const addrParts = [b.add1, b.add2, b.pla].map(s => (s || '').trim()).filter(Boolean);
+    const buyer = {
+      name: note.name,
+      address: addrParts.join(', '),
+      gstin: b.gstin || '',
+      noteNo: note.note_no || '',
+      date: note.date,
+      totalDiscount: Number(note.amount || 0),
+      lots,
+    };
+
+    const ourCfg = {
+      tally_company_name: cfg.tally_company_name || cfg.short_name || cfg.company || '',
+      tally_dispatch_place: cfg.tally_dispatch_place || cfg.place || '',
+      place: cfg.place || '',
+      gstin: cfg.gstin || '',
+      state: cfg.state || cfg.business_state || '',
+      tally_season: cfg.tally_season || cfg.season_code || '',
+      tally_hsn_cardamom: cfg.tally_hsn_cardamom || '09083120',
+    };
+
+    const pdf = await generateDebitNoteBatchPDF([buyer], ourCfg);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="DebitNote_${note.note_no || note.id}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('debit-note single pdf error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Update debit note (edit)
 app.put('/api/debit-notes/:id', requireInvoiceWrite, (req, res) => {
   const n = req.body;
@@ -7786,6 +7857,38 @@ app.get('/api/tally/debit-note-print/:auctionId', requireExport, async (req, res
     res.send(pdf);
   } catch (e) {
     console.error('debit-note-print error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Lot-Entry Receipt PDF (multi-lot, one seller) ────────────
+// Used by the lot-entry "WhatsApp" action to attach the receipt PDF
+// alongside the text summary. Body: { lotIds:[...] } (one seller's lots).
+app.post('/api/lot-receipt/pdf', requireView, async (req, res) => {
+  try {
+    const db = getDb(); const cfg = getSettingsFlat(db);
+    const ids = Array.isArray((req.body || {}).lotIds)
+      ? req.body.lotIds.map(Number).filter(Number.isFinite) : [];
+    if (!ids.length) return res.status(400).json({ error: 'lotIds required' });
+    const ph = ids.map(() => '?').join(',');
+    const lots = db.all(
+      `SELECT l.*, a.ano, a.date AS auction_date
+         FROM lots l JOIN auctions a ON a.id = l.auction_id
+        WHERE l.id IN (${ph})
+        ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no`,
+      ids
+    );
+    if (!lots.length) return res.status(404).json({ error: 'No lots found' });
+    const traderName = lots[0].name || '';
+    const pdf = await generateLotReceiptPDF(lots, cfg, {
+      traderName, ano: lots[0].ano, date: lots[0].auction_date,
+    });
+    const safe = (traderName || 'lots').replace(/[^a-zA-Z0-9]+/g, '_');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Receipt_${safe}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('lot-receipt pdf error:', e);
     res.status(500).json({ error: e.message });
   }
 });
