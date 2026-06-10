@@ -8398,7 +8398,7 @@ const IMPORT_MODULES = {
   purchase: {
     label: 'Purchase Invoices',
     table: 'purchases',
-    keyCols: ['invo'],
+    keyCols: ['ano', 'invo'],
     // `state` is computed from BR, never read from the source — see rowDefaults.
     derivedFields: ['state'],
     autoFillAuctionId: true,
@@ -8434,7 +8434,7 @@ const IMPORT_MODULES = {
   bills: {
     label: 'Bills of Supply',
     table: 'bills',
-    keyCols: ['bil'],
+    keyCols: ['ano', 'bil'],
     // `state` is computed from BR, never read from the source — see rowDefaults.
     derivedFields: ['state'],
     autoFillAuctionId: true,
