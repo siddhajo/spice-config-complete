@@ -6756,8 +6756,14 @@ async function loadFixData(){
       table.fd-grid th,table.fd-grid td{border-bottom:1px solid var(--line,#e9edf2);border-right:1px solid var(--line,#eef1f5);padding:9px 12px;text-align:left;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
       tr.fd-hrow th{position:sticky;top:0;z-index:3;background:var(--fdc);color:#fff;font-weight:700;font-size:13.5px}
       tr.fd-filterrow th{position:sticky;top:40px;z-index:2;background:#eef2f7;padding:5px 6px}
-      .fd-fcell{width:100%;box-sizing:border-box;padding:5px 8px;font-size:12.5px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#111;caret-color:#2563eb}
+      .fd-fwrap{position:relative;display:block}
+      .fd-fcell{width:100%;box-sizing:border-box;padding:5px 24px 5px 8px;font-size:12.5px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;color:#111;caret-color:#2563eb}
       .fd-fcell:focus{outline:2px solid var(--fdc);outline-offset:-1px}
+      /* Clear (✕) icon — only shown while the filter has text (placeholder
+         hidden). Clears just that column without disturbing the others. */
+      .fd-fclear{position:absolute;right:3px;top:50%;transform:translateY(-50%);display:none;border:0;background:transparent;cursor:pointer;color:#94a3b8;font-size:13px;line-height:1;padding:2px 4px;border-radius:5px}
+      .fd-fclear:hover{color:#dc2626;background:#fee2e2}
+      .fd-fwrap:has(.fd-fcell:not(:placeholder-shown)) .fd-fclear{display:block}
       table.fd-grid tbody tr:nth-child(even){background:var(--zebra,#f7f9fc)}
       table.fd-grid tbody tr:hover{background:color-mix(in srgb,var(--fdc) 8%,#fff)}
       td.fd-edit{cursor:text;background:#fffbeb}
@@ -6830,7 +6836,7 @@ async function fdRender(){
   html += `<div class="fd-scroll"><table class="fd-grid"><thead>
     <tr class="fd-hrow">${FD.edit?'<th></th>':''}${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr>
     <tr class="fd-filterrow">${FD.edit?'<th></th>':''}${cols.map(c=>
-      `<th><input class="fd-fcell" placeholder="filter…" value="${esc(FD.filters[c.name]||'')}" oninput="fdFilterChanged('${esc(c.name)}',this.value)"></th>`).join('')}</tr>
+      `<th><span class="fd-fwrap"><input class="fd-fcell" placeholder="filter…" value="${esc(FD.filters[c.name]||'')}" oninput="fdFilterChanged('${esc(c.name)}',this.value)"><button type="button" class="fd-fclear" title="Clear filter" onclick="fdClearFilter('${esc(c.name)}',this)">✕</button></span></th>`).join('')}</tr>
     </thead><tbody id="fd-tbody">${fdRowsHtml(d.rows)}</tbody></table></div>`;
   view.innerHTML = html;
   fdUpdateCount();
@@ -6873,6 +6879,14 @@ function fdSearchChanged(val){ FD.q=val; FD.offset=0; clearTimeout(FD._t); FD._t
 function fdFilterChanged(col,val){
   if(val==='') delete FD.filters[col]; else FD.filters[col]=val;
   FD.offset=0; clearTimeout(FD._t); FD._t=setTimeout(fdFetch,300);
+}
+// Clear one column's filter via its ✕ icon — empties just that input and
+// re-fetches, leaving the other filter inputs (and any focus) untouched.
+function fdClearFilter(col,btn){
+  delete FD.filters[col];
+  const inp = btn.parentElement.querySelector('.fd-fcell');
+  if(inp){ inp.value=''; inp.focus(); }
+  FD.offset=0; clearTimeout(FD._t); fdFetch();
 }
 
 // Add a new record: a friendly form of the editable fields, then the same
