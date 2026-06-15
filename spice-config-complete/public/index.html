@@ -3460,7 +3460,18 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </h3>
           <div class="tally-section-body">
             <p style="font-size:12px;color:var(--text2);margin:12px 0">Download these before importing prices. Once prices are imported the lots table is overwritten with the auctioneer's data, so these are the only record of the pre-trade state. Uses the <span data-term-auction="singular">auction</span> selected in the Export Center above.</p>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:12px" id="pretrade-export-btns"></div>
+            <div class="fg" style="max-width:340px;margin:0 0 6px"><label>Report</label>
+              <select id="pretrade-type" onchange="ptOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0">
+              <button class="btn btn-g" onclick="ptLoadPreview()">Preview</button>
+              <button class="btn btn-a" onclick="ptDownloadCurrent('xlsx')" id="pt-btn-xlsx">XLSX</button>
+              <button class="btn btn-orange" onclick="ptDownloadCurrent('pdf')" id="pt-btn-pdf">PDF</button>
+              <button class="btn btn-o" onclick="ptPrintCurrent()" id="pt-btn-print">Print</button>
+              <button class="btn btn-a" onclick="ptDownloadCurrent('csv')" id="pt-btn-csv" style="display:none">CSV</button>
+            </div>
+            <div id="pretrade-meta" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+            <div id="pretrade-preview" style="overflow:auto;max-height:600px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
           </div>
         </div>
       </div>
@@ -3473,16 +3484,14 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <span style="font-weight:400;font-size:12px;color:var(--text3);margin-left:8px">FoxPro-compatible format for legacy integration</span>
           </h3>
           <div class="tally-section-body">
-            <p style="font-size:12px;color:var(--text2);margin:12px 0">These exports produce .dbf files that your dad's FoxPro application can read directly. Date format: DD/MM/YYYY. Lot numbers preserve leading zeros.</p>
-
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Trade Data
-              <span style="font-weight:400;font-size:11px;color:var(--text3);margin-left:6px">Export any module <span data-term-auction="singular-lower">auction</span>-wise or date-wise</span>
-            </h3>
-
-            <!-- Filter mode for the transactional modules below. Auction-wise
-                 narrows to one trade; date-wise narrows by a date range.
-                 dbfSyncMode() toggles which input row is visible. -->
-            <div style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+            <p style="font-size:12px;color:var(--text2);margin:12px 0">These exports produce .dbf files that your dad's FoxPro application can read directly (master data — Sellers / Buyers — also exports as .xlsx). Date format: DD/MM/YYYY. Lot numbers preserve leading zeros.</p>
+            <div class="fg" style="max-width:340px;margin:0 0 10px"><label>Module</label>
+              <select id="dbf-type" onchange="dbfOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+            </div>
+            <!-- Filter mode for transactional modules. Auction-wise narrows to
+                 one trade; date-wise narrows by a date range. Hidden for master
+                 data (Sellers / Buyers), which ignore filters. -->
+            <div id="dbf-filter-mode" style="display:flex;gap:18px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
               <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dbf-mode" value="auction" checked onchange="dbfSyncMode()"> By <span data-term-auction="singular">Auction</span></label>
               <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="dbf-mode" value="date" onchange="dbfSyncMode()"> By Date Range</label>
             </div>
@@ -3493,29 +3502,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
               <div class="fg" style="margin:0"><label>From</label><input type="date" id="dbf-from"></div>
               <div class="fg" style="margin:0"><label>To</label><input type="date" id="dbf-to"></div>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-              <button class="btn btn-a" onclick="downloadDbfModule('lots')">Lots (CPA1.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfModule('invoices')">Sales Invoices (INV.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfModule('purchases')">Purchases (PURCHASE.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfModule('bills')">Bills of Supply (BILL.DBF)</button>
-              <button class="btn btn-a" onclick="downloadDbfModule('debit_notes')">Debit Notes</button>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px">
+              <button class="btn btn-g" onclick="dbfLoadPreview()">Preview</button>
+              <button class="btn btn-a" onclick="dbfDownloadCurrent('dbf')" id="dbf-btn-dbf">DBF</button>
+              <button class="btn btn-g" onclick="dbfDownloadCurrent('xlsx')" id="dbf-btn-xlsx" style="display:none">XLSX</button>
             </div>
-
-            <h3 style="font-size:13px;margin:16px 0 8px 0;color:var(--spice)">Master Data
-              <span style="font-weight:400;font-size:11px;color:var(--text3);margin-left:6px">Download as .DBF or .XLSX</span>
-            </h3>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">
-              <div style="display:flex;gap:6px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff">
-                <span style="flex:1;font-size:13px;font-weight:600">Sellers</span>
-                <button class="btn btn-a" style="padding:5px 12px" onclick="downloadDbf('traders')">.DBF</button>
-                <button class="btn btn-g" style="padding:5px 12px" onclick="downloadDbf('traders',{format:'xlsx'})">.XLSX</button>
-              </div>
-              <div style="display:flex;gap:6px;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:#fff">
-                <span style="flex:1;font-size:13px;font-weight:600">Buyers</span>
-                <button class="btn btn-a" style="padding:5px 12px" onclick="downloadDbf('buyers')">.DBF</button>
-                <button class="btn btn-g" style="padding:5px 12px" onclick="downloadDbf('buyers',{format:'xlsx'})">.XLSX</button>
-              </div>
-            </div>
+            <div id="dbf-meta" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+            <div id="dbf-preview" style="overflow:auto;max-height:600px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
           </div>
         </div>
       </div>
@@ -7767,8 +7760,10 @@ window.addEventListener('resize', () => {
 });
 
 // Fills #dash-headline-grid by querying /api/insights. When auctionId
-// is set we ask for that single trade; otherwise the endpoint defaults
-// to the current calendar month — the same default Insights uses.
+// is set we ask for that single trade; otherwise we ask for ALL trades
+// (cumulative) — matching the "All Trades · Cumulative" hero/label above.
+// (Passing no scope makes the endpoint default to the current month,
+// which mislabelled the all-trades view as showing only this month.)
 async function renderDashHeadlineTiles(auctionId){
   const grid = document.getElementById('dash-headline-grid');
   if (!grid) return;
@@ -7793,7 +7788,7 @@ async function renderDashHeadlineTiles(auctionId){
   try {
     const url = auctionId
       ? `/api/insights?auction_id=${auctionId}&_=${Date.now()}`
-      : `/api/insights?_=${Date.now()}`;
+      : `/api/insights?auction_id=all&_=${Date.now()}`;
     const d = await j(url);
     const t = (d && d.totals) || {};
     grid.innerHTML =
@@ -12385,6 +12380,7 @@ function loadPayAuctions(){fillAucSelect('pay-auction').then(()=>loadPayments())
 function loadExpAuctions(){
   fillAucSelect('exp-auction').then(renderExportBtns);
   fillAucSelect('dbf-auction');
+  dbfPopulateTypes();
   // Default DBF date range: current month
   const today=new Date().toISOString().slice(0,10);
   const firstOfMonth=today.slice(0,8)+'01';
@@ -16633,12 +16629,10 @@ function _exportBtnCard(k, v){
   </div>`;
 }
 function renderExportBtns(){
-  // Export Center is now a spice-board-style panel: report dropdown +
-  // Preview/XLSX/PDF/Print + a live HTML-table preview. Pre-Trade Exports
-  // keeps its card grid (those are the before-import snapshots).
+  // Export Center + Pre-Trade Exports are now spice-board-style panels:
+  // a report dropdown + Preview/XLSX/PDF/Print + a live HTML-table preview.
   expPopulateTypes();
-  const pt=document.getElementById('pretrade-export-btns');
-  if(pt) pt.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>_exportBtnCard(k,v)).join('');
+  ptPopulateTypes();
   expOnAuctionChange(); // refresh the price-import gate for the current trade
 }
 
@@ -16700,31 +16694,27 @@ async function expOnAuctionChange(){
   }
 }
 
-async function expLoadPreview(){
+function expLoadPreview(){
   const aid=expCurrentAid();
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
   const t=expCurrentType();
-  const meta=document.getElementById('exp-meta');
-  const root=document.getElementById('exp-preview');
-  await withOverlay('Loading preview…', async()=>{
-    try{
-      const r=await fetch(B+`/api/exports/${t}/${aid}?format=preview`,{headers:{'Authorization':'Bearer '+T}});
-      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||`HTTP ${r.status}`);}
-      expRenderPreview(await r.json());
-    }catch(e){
-      if(meta) meta.textContent='';
-      if(root) root.innerHTML=`<div style="padding:14px;color:#7F1D1D">Preview failed: ${esc(e.message||String(e))}</div>`;
-    }
-  });
+  return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',EXP_LABELS[t]);
 }
+function expRenderPreview(data){ _renderExportRows('exp-meta','exp-preview',data,EXP_LABELS[expCurrentType()]); }
+function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
+function expPrintCurrent(){ return _printExportPdf(expCurrentType(), expCurrentAid()); }
 
-// Render the export's row matrix (array-of-arrays; first row = headers)
-// into a sticky-header HTML table.
-function expRenderPreview(data){
-  const meta=document.getElementById('exp-meta');
-  const root=document.getElementById('exp-preview');
+// ── Shared export-preview helpers (Export Center / Pre-Trade / DBF) ──
+// Render a row matrix (array-of-arrays; first row = headers) into a
+// sticky-header HTML table in `previewId`, with a row-count line in
+// `metaId`. Faithful to the file since the server parses the real export
+// buffer back into rows.
+function _renderExportRows(metaId, previewId, data, fallbackLabel){
+  const meta=document.getElementById(metaId);
+  const root=document.getElementById(previewId);
   const rows=Array.isArray(data.rows)?data.rows:[];
-  if(meta) meta.textContent=`${data.name||EXP_LABELS[expCurrentType()]||''} — ${data.total||rows.length} row(s)`+(data.truncated?` · showing first ${rows.length}`:'');
+  if(meta) meta.textContent=`${data.name||fallbackLabel||''} — ${data.total||rows.length} row(s)`+(data.truncated?` · showing first ${rows.length}`:'');
+  if(!root) return;
   if(!rows.length){ root.innerHTML='<div style="padding:14px;color:var(--text3)">No data to preview for this report.</div>'; return; }
   const header=rows[0]||[];
   const body=rows.slice(1);
@@ -16742,20 +16732,116 @@ function expRenderPreview(data){
   root.innerHTML=html;
 }
 
-function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
+// Fetch a preview (rows JSON) from any export endpoint and render it.
+async function _fetchPreview(path, metaId, previewId, fallbackLabel){
+  const meta=document.getElementById(metaId), root=document.getElementById(previewId);
+  await withOverlay('Loading preview…', async()=>{
+    try{
+      const r=await fetch(B+path,{headers:{'Authorization':'Bearer '+T}});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||`HTTP ${r.status}`);}
+      _renderExportRows(metaId, previewId, await r.json(), fallbackLabel);
+    }catch(e){
+      if(meta) meta.textContent='';
+      if(root) root.innerHTML=`<div style="padding:14px;color:#7F1D1D">Preview failed: ${esc(e.message||String(e))}</div>`;
+    }
+  });
+}
 
-async function expPrintCurrent(){
-  const aid=expCurrentAid();
+// Open a report's PDF inline and fire the print dialog (Export endpoints).
+async function _printExportPdf(type, aid){
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
-  const t=expCurrentType();
   await withOverlay('Preparing print…', async()=>{
-    const r=await fetch(B+`/api/exports/${t}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+    const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
     if(!r.ok){const e=await r.json().catch(()=>({}));alert('Print failed: '+(e.error||`HTTP ${r.status}`));return;}
-    const blob=await r.blob();
-    const url=URL.createObjectURL(blob);
-    const w=window.open(url);
+    const blob=await r.blob();const url=URL.createObjectURL(blob);const w=window.open(url);
     if(w) w.addEventListener('load',()=>{try{w.focus();w.print();}catch(_){}});
   });
+}
+
+// ── Pre-Trade Exports (spice-board-style; shares #exp-auction) ──────
+// Before-import snapshots — NOT gated on price import (they're meant to be
+// taken before prices land).
+function ptCurrentType(){ return document.getElementById('pretrade-type')?.value || Object.keys(PRETRADE_EXP_LABELS)[0]; }
+function ptPopulateTypes(){
+  const sel=document.getElementById('pretrade-type');
+  if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && PRETRADE_EXP_LABELS[cur]) sel.value=cur;
+  ptOnTypeChange();
+}
+function ptOnTypeChange(){
+  const t=ptCurrentType();
+  const isCsv=EXP_CSV_ONLY.has(t), isXlsx=EXP_XLSX_ONLY.has(t);
+  const show=(id,v)=>{const el=document.getElementById(id);if(el)el.style.display=v?'':'none';};
+  show('pt-btn-xlsx', !isCsv);
+  show('pt-btn-pdf',  !isCsv && !isXlsx);
+  show('pt-btn-print',!isCsv && !isXlsx);
+  show('pt-btn-csv',  isCsv);
+  const prev=document.getElementById('pretrade-preview'); if(prev) prev.innerHTML='';
+  const meta=document.getElementById('pretrade-meta'); if(meta) meta.textContent='';
+}
+function ptLoadPreview(){
+  const aid=document.getElementById('exp-auction')?.value||'';
+  if(!aid){alert('Select '+termAuction(false,true)+' first');return}
+  const t=ptCurrentType();
+  return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pretrade-meta','pretrade-preview',PRETRADE_EXP_LABELS[t]);
+}
+function ptDownloadCurrent(format){ return exportType(ptCurrentType(), format); }
+function ptPrintCurrent(){ return _printExportPdf(ptCurrentType(), document.getElementById('exp-auction')?.value||''); }
+
+// ── DBF Exports (spice-board-style; native .dbf + master XLSX) ──────
+const DBF_LABELS={lots:'Lots (CPA1.DBF)',invoices:'Sales Invoices (INV.DBF)',purchases:'Purchases (PURCHASE.DBF)',
+  bills:'Bills of Supply (BILL.DBF)',debit_notes:'Debit Notes (DEBIT.DBF)',traders:'Sellers (NAM.DBF)',buyers:'Buyers (SBL.DBF)'};
+const DBF_MASTER=new Set(['traders','buyers']); // ignore filters; offer XLSX too
+function dbfCurrentType(){ return document.getElementById('dbf-type')?.value || Object.keys(DBF_LABELS)[0]; }
+function dbfPopulateTypes(){
+  const sel=document.getElementById('dbf-type');
+  if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML=Object.entries(DBF_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && DBF_LABELS[cur]) sel.value=cur;
+  dbfOnTypeChange();
+}
+function dbfOnTypeChange(){
+  const t=dbfCurrentType();
+  const isMaster=DBF_MASTER.has(t);
+  // Master data ignores auction/date filters → hide the filter controls.
+  const fm=document.getElementById('dbf-filter-mode'); if(fm) fm.style.display=isMaster?'none':'';
+  if(isMaster){
+    const a=document.getElementById('dbf-filter-auction'); if(a) a.style.display='none';
+    const d=document.getElementById('dbf-filter-date');    if(d) d.style.display='none';
+  } else { dbfSyncMode(); }
+  const xb=document.getElementById('dbf-btn-xlsx'); if(xb) xb.style.display=isMaster?'':'none'; // XLSX = master only
+  const prev=document.getElementById('dbf-preview'); if(prev) prev.innerHTML='';
+  const meta=document.getElementById('dbf-meta'); if(meta) meta.textContent='';
+}
+// Resolve the active filter into query params, or null if invalid (the
+// helper alerts). Master data needs no filter.
+function dbfFilterParams(){
+  if(DBF_MASTER.has(dbfCurrentType())) return {};
+  const mode=(document.querySelector('input[name="dbf-mode"]:checked')||{}).value||'auction';
+  if(mode==='auction'){
+    const aid=document.getElementById('dbf-auction').value;
+    if(!aid){alert('Select a '+termAuctionLower()+' first');return null}
+    return {auctionId:aid};
+  }
+  const from=document.getElementById('dbf-from').value, to=document.getElementById('dbf-to').value;
+  if(!from||!to){alert('Select From and To dates');return null}
+  return {from,to};
+}
+function dbfLoadPreview(){
+  const params=dbfFilterParams();
+  if(params===null) return;
+  const t=dbfCurrentType();
+  const qs=new URLSearchParams({...params,format:'preview'}).toString();
+  return _fetchPreview(`/api/dbf-exports/${t}?${qs}`,'dbf-meta','dbf-preview',DBF_LABELS[t]);
+}
+function dbfDownloadCurrent(format){
+  const params=dbfFilterParams();
+  if(params===null) return;
+  if(format==='xlsx') params.format='xlsx';
+  return downloadDbf(dbfCurrentType(), params);
 }
 async function exportType(type,format,aidArg){format=format||'xlsx';
   // aidArg lets callers (e.g. the Price Import snapshot banner via

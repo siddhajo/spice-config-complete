@@ -8059,6 +8059,24 @@ app.get('/api/dbf-exports/:type', requireExport, async (req, res) => {
       filters.to = to;
     }
 
+    // Preview path — generate the real DBF buffer, then parse it back into a
+    // row matrix (array-of-arrays; first row = field names) for an on-screen
+    // HTML table on the Exports screen. SheetJS reads .dbf natively, so the
+    // preview is faithful to the downloaded file.
+    if (format === 'preview') {
+      const buffer = def.master ? await def.fn(db) : await def.fn(db, filters);
+      const wb = XLSX.read(Buffer.from(buffer), { type: 'buffer' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const allRows = ws ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) : [];
+      const CAP = 500;
+      return res.json({
+        name: def.name || type,
+        rows: allRows.slice(0, CAP),
+        total: allRows.length,
+        truncated: allRows.length > CAP,
+      });
+    }
+
     // XLSX path — master data only (sellers/buyers).
     if (format === 'xlsx') {
       if (!def.xlsxFn) return res.status(400).json({ error: 'XLSX format not supported for this export' });
@@ -8991,11 +9009,27 @@ app.get('/api/insights', requireView, (req, res) => {
   // ── Resolve scope → the auctions in play + the date range label. ──
   let auctions, range;
   const rawAid = req.query.auction_id;
+  const wantAll = String(rawAid || '').trim() === 'all'
+    || req.query.all === '1' || req.query.all === 'true';
   if (rawAid && String(rawAid).trim() !== '' && String(rawAid) !== 'all') {
     const aid = parseInt(rawAid, 10);
     auctions = db.all(`SELECT id, ano, date, crop_type, state FROM auctions a WHERE a.id = ?`, [aid]);
     const a0 = auctions[0];
     range = { from: (a0 && a0.date) || '', to: (a0 && a0.date) || '' };
+  } else if (wantAll) {
+    // All trades, cumulative — every auction (respecting the business-mode
+    // filter), with NO date constraint. Backs the Dashboard's "All Trades ·
+    // Cumulative" headline tiles, which previously fell through to the
+    // current-month default below and so only ever showed this month's
+    // trades despite the "All trades" label.
+    auctions = db.all(
+      `SELECT id, ano, date, crop_type, state FROM auctions a
+       WHERE 1=1 ${mwAa.sql}
+       ORDER BY date(a.date) ASC, a.id ASC`,
+      mwAa.params
+    );
+    const dts = auctions.map(a => a.date).filter(Boolean);
+    range = { from: dts[0] || '', to: dts[dts.length - 1] || '', all: true };
   } else {
     let from = String(req.query.from || '').trim();
     let to   = String(req.query.to   || '').trim();
