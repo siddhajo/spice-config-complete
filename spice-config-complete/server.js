@@ -753,9 +753,15 @@ app.get('/api/branding', (req, res) => {
       // the built-in ISP→emerald / ASP→ocean defaults.
       ispTheme: cfg.isp_theme || '',
       aspTheme: cfg.asp_theme || '',
+      // e-Auction colour themes per business state. e-Auction always runs
+      // as the primary company (no sister), so without these TN and KL look
+      // identical; setting them lets each state carry its own colour while
+      // in auction mode. Empty = fall back to the company default theme.
+      eauctionTnTheme: cfg.eauction_tn_theme || '',
+      eauctionKlTheme: cfg.eauction_kl_theme || '',
     });
   } catch (e) {
-    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null, ispTheme: '', aspTheme: '' });
+    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null, ispTheme: '', aspTheme: '', eauctionTnTheme: '', eauctionKlTheme: '' });
   }
 });
 
@@ -887,8 +893,15 @@ app.get('/admin/branding', (req, res) => {
   // ISP→emerald / ASP→ocean defaults.
   const curIspTheme = cfg.isp_theme || '';
   const curAspTheme = cfg.asp_theme || '';
+  // e-Auction colour themes per state (Tamil Nadu / Kerala). Empty = fall
+  // back to the active company's theme (so behaviour is unchanged until set).
+  const curEaTnTheme = cfg.eauction_tn_theme || '';
+  const curEaKlTheme = cfg.eauction_kl_theme || '';
   const perCoThemeOpts = (cur) => ['', ...THEME_SLUGS]
     .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (ISP→emerald / ASP→ocean) —'}</option>`)
+    .join('');
+  const eaThemeOpts = (cur) => ['', ...THEME_SLUGS]
+    .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (use company theme) —'}</option>`)
     .join('');
 
   const keyEsc = String(req.query.key).replace(/[<>'"&]/g, '');
@@ -983,6 +996,24 @@ app.get('/admin/branding', (req, res) => {
     </div>
   </div>
 
+  <div class="card">
+    <h2>e-Auction colours by state (Tamil Nadu / Kerala)</h2>
+    <p style="font-size: 12px; color: #6b7280; margin: 0 0 6px">
+      When <strong>business mode is e-Auction</strong>, give each business state its own colour so Tamil Nadu and Kerala auctions are visually distinct.
+      These apply only in e-Auction mode; e-Trade is unaffected. Leave a state on “default” to keep the active company's normal theme. Saved together with <em>Apply preset</em> below.
+    </p>
+    <div class="row">
+      <div>
+        <label>e-Auction · Tamil Nadu theme</label>
+        <select id="eauction-tn-theme">${eaThemeOpts(curEaTnTheme)}</select>
+      </div>
+      <div>
+        <label>e-Auction · Kerala theme</label>
+        <select id="eauction-kl-theme">${eaThemeOpts(curEaKlTheme)}</select>
+      </div>
+    </div>
+  </div>
+
   <div style="display: flex; gap: 10px;">
     <button onclick="apply()">Apply preset</button>
     <button class="secondary" onclick="clearPreset()">Clear (revert to legacy mode)</button>
@@ -1004,6 +1035,9 @@ app.get('/admin/branding', (req, res) => {
       // the operator can set them with preset = "none".
       body.ispTheme = document.getElementById('isp-theme').value;
       body.aspTheme = document.getElementById('asp-theme').value;
+      // e-Auction per-state colour themes — saved alongside the preset too.
+      body.eauctionTnTheme = document.getElementById('eauction-tn-theme').value;
+      body.eauctionKlTheme = document.getElementById('eauction-kl-theme').value;
       if (preset === 'custom') {
         body.config = {
           theme: document.getElementById('custom-theme').value,
@@ -1101,7 +1135,21 @@ app.post('/api/admin/preset', (req, res) => {
     aspTheme = THEME_SLUGS.includes(v) ? v : '';
     stmt.run('asp_theme', aspTheme, 'ASP colour theme');
   }
-  res.json({ success: true, preset: slug, config: finalConfig, ispTheme, aspTheme });
+  // e-Auction per-state colour themes (optional). Same semantics as the
+  // per-company themes above — empty/unknown disables the override for that
+  // state and it falls back to the active company's theme.
+  let eauctionTnTheme, eauctionKlTheme;
+  if (Object.prototype.hasOwnProperty.call(req.body, 'eauctionTnTheme')) {
+    const v = String(req.body.eauctionTnTheme || '').trim();
+    eauctionTnTheme = THEME_SLUGS.includes(v) ? v : '';
+    stmt.run('eauction_tn_theme', eauctionTnTheme, 'e-Auction Tamil Nadu colour theme');
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body, 'eauctionKlTheme')) {
+    const v = String(req.body.eauctionKlTheme || '').trim();
+    eauctionKlTheme = THEME_SLUGS.includes(v) ? v : '';
+    stmt.run('eauction_kl_theme', eauctionKlTheme, 'e-Auction Kerala colour theme');
+  }
+  res.json({ success: true, preset: slug, config: finalConfig, ispTheme, aspTheme, eauctionTnTheme, eauctionKlTheme });
 });
 
 // ── Company identity presets (ISP / ASP) ─────────────────────────────
@@ -1326,8 +1374,38 @@ const DELETE_ALL_MAP = {
   // (trader_banks → traders/sellers, buyers). Children before parents
   // so FK constraints don't reject the deletes; the target `auctions`
   // is removed last after all its transactional children are gone.
-  everything:    { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'trader_banks', 'traders', 'buyers'] },
+  // `everything` is the ONLY resource that wipes across both business
+  // modes (it has to, because it removes the shared master data that the
+  // surviving mode's rows would otherwise dangle against). The per-entity
+  // resources above are mode-scoped — see modeDeleteWhere().
+  everything:    { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'trader_banks', 'traders', 'buyers'], crossMode: true },
 };
+
+// Transactional tables whose rows belong to one business mode (via their
+// auction's `mode`). A Delete All in e-Auction must touch only e-Auction
+// rows and vice versa, mirroring exactly what the operator can see on each
+// tab (the same legacy-tolerant rule as modeWhereClause: NULL/empty mode
+// matches either side, so pre-cutover data stays deletable in both modes).
+const MODE_SCOPED_TABLES = new Set(['auctions', 'lots', 'invoices', 'purchases', 'bills', 'debit_notes']);
+// Master data shared across BOTH modes — never mode-scoped. Wiping these
+// affects e-Trade and e-Auction alike, which the UI warns about.
+const MASTER_TABLES = new Set(['traders', 'buyers', 'trader_banks']);
+
+// Returns { sql, params } — a WHERE clause (with leading ' WHERE ') that
+// restricts a Delete All on `table` to the current business mode. Empty
+// for master tables, for the cross-mode `everything` nuke, or when no mode
+// is set. Reuses modeWhereClause() so the delete filter is identical to
+// the read filter used by the tabs.
+function modeDeleteWhere(db, table, opts) {
+  if (opts && opts.crossMode) return { sql: '', params: [] };
+  if (!MODE_SCOPED_TABLES.has(table)) return { sql: '', params: [] };
+  const prefix = (table === 'auctions')
+    ? 'mode'
+    : `(SELECT mode FROM auctions WHERE id=${table}.auction_id)`;
+  const mw = modeWhereClause(db, prefix);   // ' AND (prefix = ? OR prefix IS NULL OR prefix = \'\')'
+  if (!mw.sql) return { sql: '', params: [] };
+  return { sql: mw.sql.replace(/^\s*AND/, ' WHERE'), params: mw.params };
+}
 
 // Returns { target: { table, count }, cascade: { table: count, ... } } for
 // the given resource. Used by the UI to show concrete numbers in the
@@ -1337,11 +1415,13 @@ function preflightCounts(resource) {
   if (!spec) return null;
   const db = getDb();
   const out = {};
-  out[spec.table] = (db.get(`SELECT COUNT(*) as c FROM ${spec.table}`) || { c: 0 }).c || 0;
-  for (const t of spec.cascade) {
-    try { out[t] = (db.get(`SELECT COUNT(*) as c FROM ${t}`) || { c: 0 }).c || 0; }
-    catch (_) { out[t] = 0; }
-  }
+  const countOf = (t) => {
+    const w = modeDeleteWhere(db, t, spec);
+    try { return (db.get(`SELECT COUNT(*) as c FROM ${t}${w.sql}`, w.params) || { c: 0 }).c || 0; }
+    catch (_) { return 0; }
+  };
+  out[spec.table] = countOf(spec.table);
+  for (const t of spec.cascade) out[t] = countOf(t);
   return out;
 }
 
@@ -1349,7 +1429,24 @@ app.get('/api/admin/delete-all/preflight', requireDeleteAll, (req, res) => {
   const resource = String(req.query.resource || '');
   const counts = preflightCounts(resource);
   if (!counts) return res.status(400).json({ error: 'Unknown resource: ' + resource });
-  res.json({ resource, counts });
+  const spec = DELETE_ALL_MAP[resource];
+  const db = getDb();
+  // Tell the client what the wipe will and won't touch so it can word the
+  // confirm prompt: `mode` is the active mode the scoped delete is limited
+  // to; `scoped` flags a mode-limited wipe; `masterTables` lists shared
+  // master-data tables (sellers/buyers) that, when present, get wiped
+  // across BOTH modes regardless of the active mode.
+  const tables = [spec.table, ...spec.cascade];
+  const masterTables = tables.filter(t => MASTER_TABLES.has(t));
+  const scoped = !spec.crossMode && tables.some(t => MODE_SCOPED_TABLES.has(t));
+  res.json({
+    resource,
+    counts,
+    mode: currentBusinessMode(db),
+    scoped,
+    crossMode: !!spec.crossMode,
+    masterTables,
+  });
 });
 
 // Records the wipe in delete_log. Safe-by-default: if the insert fails
@@ -1526,12 +1623,19 @@ function performDeleteAll(req, res, resource) {
     // wipes are best-effort: if the table isn't in sqlite_sequence (no rows
     // ever inserted), the DELETE is a no-op. Wrapped in try/catch so a
     // missing sqlite_sequence (some empty DBs) doesn't fail the operation.
+    // Each table is wiped only for rows in the active business mode (the
+    // master tables and the cross-mode `everything` nuke have an empty
+    // WHERE). sqlite_sequence is reset ONLY on an unscoped full wipe — a
+    // mode-scoped delete leaves the other mode's rows behind, so rewinding
+    // the autoincrement counter could collide their ids on the next insert.
     for (const child of spec.cascade) {
-      db.run(`DELETE FROM ${child}`);
-      try { db.exec(`DELETE FROM sqlite_sequence WHERE name = '${child}'`); } catch (_) {}
+      const w = modeDeleteWhere(db, child, spec);
+      db.run(`DELETE FROM ${child}${w.sql}`, w.params);
+      if (!w.sql) { try { db.exec(`DELETE FROM sqlite_sequence WHERE name = '${child}'`); } catch (_) {} }
     }
-    db.run(`DELETE FROM ${spec.table}`);
-    try { db.exec(`DELETE FROM sqlite_sequence WHERE name = '${spec.table}'`); } catch (_) {}
+    const wt = modeDeleteWhere(db, spec.table, spec);
+    db.run(`DELETE FROM ${spec.table}${wt.sql}`, wt.params);
+    if (!wt.sql) { try { db.exec(`DELETE FROM sqlite_sequence WHERE name = '${spec.table}'`); } catch (_) {} }
     // Flush so the snapshot we just made + the new empty state are both
     // on disk before we report success to the client.
     flushDb();
@@ -3080,6 +3184,27 @@ function modeWhereClause(db, prefix) {
   };
 }
 
+// Resolve a human auction number (ANO/TNO) to its auctions.id WITHIN the
+// current business mode — so importing e-Trade invoices never attaches
+// them to an e-Auction trade that happens to share the same number (and
+// vice versa). Preference order: an exact current-mode match first, then
+// legacy rows with no mode stamped (pre-cutover data stays importable),
+// and finally — only when no mode is configured at all — any match.
+// Returns the id or null. Used by the "Import Old Data" auction_id backfill.
+function resolveAuctionIdForMode(db, ano) {
+  const key = String(ano == null ? '' : ano).trim();
+  if (!key) return null;
+  const mode = currentBusinessMode(db);
+  if (mode) {
+    const exact = db.get('SELECT id FROM auctions WHERE ano = ? AND mode = ? ORDER BY date DESC, id DESC LIMIT 1', [key, mode]);
+    if (exact) return exact.id;
+    const legacy = db.get("SELECT id FROM auctions WHERE ano = ? AND (mode IS NULL OR mode = '') ORDER BY date DESC, id DESC LIMIT 1", [key]);
+    return legacy ? legacy.id : null;   // never fall through to the other mode's row
+  }
+  const any = db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC, id DESC LIMIT 1', [key]);
+  return any ? any.id : null;
+}
+
 // ══════════════════════════════════════════════════════════════
 // AUCTIONS
 // ══════════════════════════════════════════════════════════════
@@ -3590,11 +3715,23 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), asy
     const resolveAuction = (ano, dateStr) => {
       const key = `${ano}|${dateStr}`;
       if (auctionCache.has(key)) return auctionCache.get(key);
-      let auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ?', [ano, dateStr]);
+      // Dedup WITHIN the import's mode (plus legacy rows with no mode) so an
+      // e-Trade import never reuses an e-Auction trade that shares the same
+      // number/date — and vice versa. Each mode keeps an independent
+      // numbering scheme; a new auction here is always stamped importMode.
+      let auc;
+      if (importMode) {
+        auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ? AND mode = ?', [ano, dateStr, importMode])
+           || db.get("SELECT * FROM auctions WHERE ano = ? AND date = ? AND (mode IS NULL OR mode = '')", [ano, dateStr]);
+      } else {
+        auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ?', [ano, dateStr]);
+      }
       if (!auc) {
         db.run('INSERT INTO auctions (ano, date, crop_type, state, mode) VALUES (?,?,?,?,?)',
           [ano, dateStr || new Date().toISOString().slice(0, 10), cropType, state, importMode]);
-        auc = db.get('SELECT * FROM auctions WHERE ano = ? AND date = ? ORDER BY id DESC LIMIT 1', [ano, dateStr]);
+        auc = importMode
+          ? db.get('SELECT * FROM auctions WHERE ano = ? AND date = ? AND mode = ? ORDER BY id DESC LIMIT 1', [ano, dateStr, importMode])
+          : db.get('SELECT * FROM auctions WHERE ano = ? AND date = ? ORDER BY id DESC LIMIT 1', [ano, dateStr]);
       }
       auctionCache.set(key, auc);
       return auc;
@@ -9593,8 +9730,7 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
       const key = String(ano || '').trim();
       if (!key) return null;
       if (auctionIdCache.has(key)) return auctionIdCache.get(key);
-      const row = db.get('SELECT id FROM auctions WHERE ano = ? LIMIT 1', [key]);
-      const id  = row ? row.id : null;
+      const id = resolveAuctionIdForMode(db, key);
       auctionIdCache.set(key, id);
       return id;
     };
@@ -9830,8 +9966,7 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
       const key = String(ano || '').trim();
       if (!key) return null;
       if (auctionIdCache.has(key)) return auctionIdCache.get(key);
-      const row = db.get('SELECT id FROM auctions WHERE ano = ? LIMIT 1', [key]);
-      const id  = row ? row.id : null;
+      const id = resolveAuctionIdForMode(db, key);
       auctionIdCache.set(key, id);
       return id;
     };
@@ -9941,13 +10076,35 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
   // without a second pass.
   if (def.autoFillAuctionId) {
     try {
-      getDb().run(
-        `UPDATE ${def.table}
-            SET auction_id = (SELECT id FROM auctions WHERE auctions.ano = ${def.table}.ano)
-          WHERE auction_id IS NULL
-            AND ano IS NOT NULL AND ano != ''
-            AND EXISTS (SELECT 1 FROM auctions WHERE auctions.ano = ${def.table}.ano)`
-      );
+      const _bf = getDb();
+      const _bfMode = currentBusinessMode(_bf);
+      if (_bfMode) {
+        // Mode-scoped backfill: attach only to an auction of the CURRENT
+        // mode (preferred) or a legacy row with no mode — never the other
+        // mode's auction that happens to share the same number. Keeps
+        // e-Trade and e-Auction imports from cross-linking.
+        const _scope = `(auctions.mode = ? OR auctions.mode IS NULL OR auctions.mode = '')`;
+        _bf.run(
+          `UPDATE ${def.table}
+              SET auction_id = (SELECT id FROM auctions
+                                 WHERE auctions.ano = ${def.table}.ano AND ${_scope}
+                                 ORDER BY (auctions.mode = ?) DESC, auctions.date DESC, auctions.id DESC
+                                 LIMIT 1)
+            WHERE auction_id IS NULL
+              AND ano IS NOT NULL AND ano != ''
+              AND EXISTS (SELECT 1 FROM auctions WHERE auctions.ano = ${def.table}.ano AND ${_scope})`,
+          [_bfMode, _bfMode, _bfMode]
+        );
+      } else {
+        // No business mode configured — original unscoped backfill.
+        _bf.run(
+          `UPDATE ${def.table}
+              SET auction_id = (SELECT id FROM auctions WHERE auctions.ano = ${def.table}.ano)
+            WHERE auction_id IS NULL
+              AND ano IS NOT NULL AND ano != ''
+              AND EXISTS (SELECT 1 FROM auctions WHERE auctions.ano = ${def.table}.ano)`
+        );
+      }
     } catch (_) { /* non-fatal */ }
   }
 

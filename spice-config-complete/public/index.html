@@ -2690,7 +2690,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <span>🗑</span><span>Delete All — wipe an entire table</span>
           </div>
           <div style="font-size:12.5px;color:#7F1D1D;line-height:1.55;margin-bottom:14px">
-            Each button wipes <strong>every row</strong> from the named table (ignoring any filters elsewhere in the app). The server snapshots the database to <code style="background:#FEE2E2;padding:1px 5px;border-radius:3px;font-size:11px">data/backups/before-delete-…&lt;timestamp&gt;.db</code> first, so a misclick is recoverable via Restore above. Every wipe is audit-logged.
+            Transactional wipes (Invoices, Purchases, Bills, Debit Notes, <span data-term-auction="plural-lower">auctions</span>) only remove records for the <strong>current business mode</strong> — an e-Auction wipe never touches e-Trade data and vice versa. <strong>Sellers &amp; Buyers are master data shared by both modes</strong>, so wiping them affects e-Trade and e-Auction alike; the <strong>Everything</strong> reset wipes the whole database across both modes. The server snapshots the database to <code style="background:#FEE2E2;padding:1px 5px;border-radius:3px;font-size:11px">data/backups/before-delete-…&lt;timestamp&gt;.db</code> first, so a misclick is recoverable via Restore above. Every wipe is audit-logged.
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
@@ -2700,7 +2700,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="btn feat-debit-notes" onclick="deleteAll('debit-notes','Debit Notes',event)" style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Debit Notes</button>
             <button class="btn" onclick="deleteAll('buyers','Buyers',event)"         style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Buyers</button>
             <button class="btn" onclick="deleteAll('traders','Sellers',event)"       style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Sellers</button>
-            <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes EVERY trade/auction AND cascades through lots, invoices, purchases, bills, debit notes">🗑 <span data-term-auction="plural">Auctions</span> (full reset)</button>
+            <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes the CURRENT mode's trades/auctions AND cascades through their lots, invoices, purchases, bills, debit notes. The other mode's data is left untouched.">🗑 <span data-term-auction="plural">Auctions</span> (full reset)</button>
             <button class="btn" onclick="deleteAll('everything','Everything',event)" style="height:44px;padding:0 14px;background:#450A0A;color:#fff;font-weight:700;border-color:#450A0A;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="NUKE — wipes ALL transactions (auctions, lots, invoices, purchases, bills, debit notes) AND the master data: Sellers, Buyers. Leaves only users/settings.">☢ Everything (incl. Sellers &amp; Buyers)</button>
           </div>
 
@@ -7237,7 +7237,7 @@ async function loadStats(auctionId){
         <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">All ${termAuction(true)} · Cumulative</div>
         ${picker}
       </div>
-      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">${CUM.auctions||0} Trade${CUM.auctions===1?'':'s'}</div>
+      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">${CUM.auctions||0} ${termAuction(CUM.auctions!==1)}</div>
       <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Lifetime totals across every auction</div>
       <div class="auction-hero-stats">
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${CUM.lots||0}</strong>Total Lots</div>
@@ -7576,9 +7576,9 @@ async function loadStats(auctionId){
       <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div>
           <h2 style="font-size:17px;font-weight:700;margin:0 0 2px;color:var(--spice-text-main)">🎯 Headline metrics</h2>
-          <p style="margin:0;font-size:12.5px;color:var(--spice-text-mute)" id="dash-headline-sub">${isAllMode ? 'At-a-glance totals across every trade.' : 'At-a-glance totals for the selected trade.'}</p>
+          <p style="margin:0;font-size:12.5px;color:var(--spice-text-mute)" id="dash-headline-sub">${isAllMode ? `At-a-glance totals across every ${termAuction(false, true)}.` : `At-a-glance totals for the selected ${termAuction(false, true)}.`}</p>
         </div>
-        <div style="font-size:12px;color:var(--spice-text-hint)" id="dash-headline-range">${isAllMode ? 'All trades' : (A ? `Trade #${esc(A.ano)} · ${fmtD(A.date)}` : '')}</div>
+        <div style="font-size:12px;color:var(--spice-text-hint)" id="dash-headline-range">${isAllMode ? `All ${termAuction(true, true)}` : (A ? `${termAuction()} #${esc(A.ano)} · ${fmtD(A.date)}` : '')}</div>
       </div>
       <div style="padding:14px 22px 18px" id="dash-headline-body">
         <div class="kpi-grid" id="dash-headline-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:0">
@@ -10754,13 +10754,13 @@ function confirmTwoClick(key, btn, opts){
 async function deleteAll(resource, label, ev){
   // 1) Preflight — fetch concrete row counts to show in the confirm.
   //    Failure here is non-fatal; we fall back to a generic prompt.
-  let counts = null;
+  let counts = null, pf = null;
   try {
     const r = await fetch(B + '/api/admin/delete-all/preflight?resource=' + encodeURIComponent(resource), {
       headers: { 'Authorization': 'Bearer ' + T }
     });
     const d = await r.json();
-    if (r.ok) counts = d.counts || {};
+    if (r.ok) { counts = d.counts || {}; pf = d; }
   } catch (_) { /* preflight failed — fall through to generic confirm */ }
 
   let breakdown = '';
@@ -10774,12 +10774,34 @@ async function deleteAll(resource, label, ev){
     }
   }
 
+  // Mode scoping — the server only deletes rows for the active business
+  // mode, so spell out which mode this wipe is limited to ("auctions" in
+  // e-Auction, "trades" in e-Trade). Master data (sellers/buyers) is
+  // shared across BOTH modes, so any wipe that touches it gets a loud
+  // heads-up that it affects e-Trade AND e-Auction alike.
+  let scopeNote = '';
+  if (pf && pf.scoped && pf.mode) {
+    scopeNote += `\n\nScope: only ${termAuction(false, true)} (${pf.mode}) records will be deleted. The other mode's data is left untouched.`;
+  }
+  if (pf && pf.crossMode) {
+    scopeNote += `\n\n⚠ This is a FULL reset — it wipes ALL data across BOTH e-Trade and e-Auction, including the shared master data (Sellers & Buyers). Business mode is ignored here.`;
+  } else if (pf && pf.masterTables && pf.masterTables.length) {
+    scopeNote += `\n\n⚠ ${label} is MASTER DATA shared by both modes of operation — deleting it wipes these records for e-Trade AND e-Auction. There is no per-mode separation for Sellers/Buyers.`;
+  }
+
+  // Master-data and full-reset wipes hit BOTH modes, so the two-click
+  // button shortcut (which hides the detail text) isn't enough — force the
+  // native confirm so the operator actually reads the cross-mode warning.
+  const forceNativeWarn = !!(pf && (pf.crossMode || (pf.masterTables && pf.masterTables.length)));
+  // For a mode-scoped wipe, name the mode right in the arm label so it's
+  // obvious the delete is limited to the current side.
+  const scopeTag = (pf && pf.scoped && pf.mode) ? `${pf.mode} ` : '';
   // Two-click confirm on the triggering button — first click arms with
   // a red "click again" label, second click within 3s commits.
   const ok = await confirmTwoClick('deleteAll:' + resource,
-    ev && ev.currentTarget,
-    { confirmLabel: `⚠ Click again to DELETE ALL ${label} — cannot undo`,
-      fallbackMessage: `Delete ALL ${label}?${breakdown}\n\nThe server will snapshot the database to data/backups/ first, then permanently remove these rows.\nA misclick can be recovered by restoring the snapshot (Backup tab → Restore from File).\n\nContinue?` });
+    forceNativeWarn ? null : (ev && ev.currentTarget),
+    { confirmLabel: `⚠ Click again to DELETE ALL ${scopeTag}${label} — cannot undo`,
+      fallbackMessage: `Delete ALL ${label}?${breakdown}${scopeNote}\n\nThe server will snapshot the database to data/backups/ first, then permanently remove these rows.\nA misclick can be recovered by restoring the snapshot (Backup tab → Restore from File).\n\nContinue?` });
   if (!ok) return;
   try{
     const r = await fetch(B + `/api/${resource}/delete-all`, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
@@ -21699,17 +21721,35 @@ let _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
 // per-company colour applies even under a white-label preset, and users
 // can't override it (Appearance card hidden + setTheme() no-op).
 let _companyThemesConfigured = false;
+// e-Auction colour themes per business state, configured by the admin on
+// /admin/branding. Empty string = no override (fall back to the company
+// theme). Only consulted while business_mode === 'e-Auction'.
+let _EAUCTION_STATE_THEME = { TN: '', KL: '' };
+let _eauctionStateThemesConfigured = false;
 function applyCompanyTheme(){
   // A white-label tenant preset locks the look install-wide. Don't let
   // per-company auto-theming fight it — the preset's theme is the source
   // of truth once one is active. EXCEPTION: when the admin has configured
   // explicit per-company themes (ISP theme + ASP theme on /admin/branding),
   // those win even under a preset, so each company keeps its own colour.
-  if (_brandingPresetActive && !_companyThemesConfigured) return;
+  if (_brandingPresetActive && !_companyThemesConfigured && !_eauctionStateThemesConfigured) return;
   let code;
   try { code = String(getCurrentLogoCode() || 'ISP').toUpperCase(); }
   catch(e){ code = 'ISP'; }
-  const theme = _COMPANY_THEME[code] || 'emerald';
+  let theme = _COMPANY_THEME[code] || 'emerald';
+  // e-Auction per-state override: in auction mode each business state can
+  // carry its own colour so Tamil Nadu and Kerala look distinct. Falls back
+  // to the company theme above when the state has no configured override.
+  try {
+    const mode = (typeof getCurrentBusinessMode === 'function') ? getCurrentBusinessMode() : '';
+    if (mode === 'e-Auction') {
+      const st = String((typeof getCurrentBusinessState === 'function' ? getCurrentBusinessState() : '') || '').toUpperCase();
+      const stTheme = st.includes('KERALA') ? _EAUCTION_STATE_THEME.KL
+                    : st.includes('TAMIL')  ? _EAUCTION_STATE_THEME.TN
+                    : '';
+      if (stTheme && _THEMES.includes(stTheme)) theme = stTheme;
+    }
+  } catch(e){}
   if (document.body.getAttribute('data-theme') !== theme){
     document.body.setAttribute('data-theme', theme);
     try { localStorage.setItem('theme', theme); } catch(e){}
@@ -21783,6 +21823,17 @@ function applyCompanyTheme(){
         _companyThemesConfigured = true;
         const _ac = document.getElementById('appearance-card');
         if (_ac) _ac.style.display = 'none';
+        applyCompanyTheme();
+      }
+      // ── 3) e-Auction colour themes per state (Tamil Nadu / Kerala),
+      //    configured by the admin on /admin/branding. Applied only while
+      //    business_mode === 'e-Auction'; empty = use the company theme. ──
+      if (d.eauctionTnTheme || d.eauctionKlTheme) {
+        _EAUCTION_STATE_THEME = {
+          TN: _THEMES.includes(d.eauctionTnTheme) ? d.eauctionTnTheme : '',
+          KL: _THEMES.includes(d.eauctionKlTheme) ? d.eauctionKlTheme : '',
+        };
+        _eauctionStateThemesConfigured = true;
         applyCompanyTheme();
       }
     })
