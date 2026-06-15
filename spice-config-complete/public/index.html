@@ -3423,15 +3423,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <span>Export Center</span>
           </h3>
           <div class="tally-section-body">
-            <!-- Report + auction pickers (spice-board style). The auction
-                 selector also drives the price-import gate below. -->
-            <div class="sgrid" style="margin-top:12px;margin-bottom:6px">
-              <div class="fg" style="margin:0"><label>Select <span data-term-auction="singular">Auction</span></label>
-                <select id="exp-auction" onchange="expOnAuctionChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
-              </div>
-              <div class="fg" style="margin:0"><label>Report</label>
-                <select id="exp-type" onchange="expOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
-              </div>
+            <!-- The trade/auction is chosen once in the top bar (global
+                 picker); the per-screen selector was redundant. #exp-auction
+                 is kept as a HIDDEN mirror so the global picker still drives
+                 the price-import gate and every export reads the right id. -->
+            <select id="exp-auction" onchange="expOnAuctionChange()" style="display:none"></select>
+            <div class="fg" style="margin-top:12px;margin-bottom:6px"><label>Report</label>
+              <select id="exp-type" onchange="expOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
             </div>
             <!-- Gate notice — shown until prices are imported for the selected trade. -->
             <div id="exp-gate-notice" style="display:none;margin:12px 0 0;padding:12px 14px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:8px;font-size:13px;color:var(--text2);line-height:1.5"></div>
@@ -3459,7 +3457,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <span style="font-weight:400;font-size:12px;color:var(--text3);margin-left:8px">"Before trade" snapshots — your record of the pre-trade state</span>
           </h3>
           <div class="tally-section-body">
-            <p style="font-size:12px;color:var(--text2);margin:12px 0">Download these before importing prices. Once prices are imported the lots table is overwritten with the auctioneer's data, so these are the only record of the pre-trade state. Uses the <span data-term-auction="singular">auction</span> selected in the Export Center above.</p>
+            <p style="font-size:12px;color:var(--text2);margin:12px 0">Download these before importing prices. Once prices are imported the lots table is overwritten with the auctioneer's data, so these are the only record of the pre-trade state. Uses the <span data-term-auction="singular">auction</span> selected in the top bar.</p>
             <div class="fg" style="max-width:340px;margin:0 0 6px"><label>Report</label>
               <select id="pretrade-type" onchange="ptOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
             </div>
@@ -16729,7 +16727,12 @@ function expLoadPreview(){
   const aid=expCurrentAid();
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
   const t=expCurrentType();
-  return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',EXP_LABELS[t]);
+  // Show the actual inline PDF so the preview matches the printed output.
+  // CSV-only / XLSX-only reports have no PDF form, so they keep the table.
+  if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',EXP_LABELS[t]);
+  }
+  return _renderPdfPreview(t, aid, 'exp-meta', 'exp-preview', EXP_LABELS[t]);
 }
 function expRenderPreview(data){ _renderExportRows('exp-meta','exp-preview',data,EXP_LABELS[expCurrentType()]); }
 function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
@@ -16778,6 +16781,30 @@ async function _fetchPreview(path, metaId, previewId, fallbackLabel){
   });
 }
 
+// Render a report's PDF inline inside the preview pane (instead of the
+// HTML-table preview). Embeds the real PDF the operator would download, so
+// "Preview" matches the printed output exactly. Tracks the blob URL per
+// container so re-previewing revokes the previous one (no URL leak).
+const _pdfPreviewUrls = {};
+async function _renderPdfPreview(type, aid, metaId, previewId, label){
+  const meta=document.getElementById(metaId), root=document.getElementById(previewId);
+  await withOverlay('Loading preview…', async()=>{
+    try{
+      const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||`HTTP ${r.status}`);}
+      const blob=await r.blob();
+      if(_pdfPreviewUrls[previewId]){ try{URL.revokeObjectURL(_pdfPreviewUrls[previewId]);}catch(_){} }
+      const url=URL.createObjectURL(blob);
+      _pdfPreviewUrls[previewId]=url;
+      if(meta) meta.textContent=label||'';
+      if(root) root.innerHTML=`<iframe src="${url}#toolbar=1&navpanes=0" title="PDF preview" style="width:100%;height:600px;border:0;background:#fff"></iframe>`;
+    }catch(e){
+      if(meta) meta.textContent='';
+      if(root) root.innerHTML=`<div style="padding:14px;color:#7F1D1D">Preview failed: ${esc(e.message||String(e))}</div>`;
+    }
+  });
+}
+
 // Open a report's PDF inline and fire the print dialog (Export endpoints).
 async function _printExportPdf(type, aid){
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
@@ -16816,7 +16843,11 @@ function ptLoadPreview(){
   const aid=document.getElementById('exp-auction')?.value||'';
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
   const t=ptCurrentType();
-  return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pretrade-meta','pretrade-preview',PRETRADE_EXP_LABELS[t]);
+  // Inline PDF preview (matches print); CSV/XLSX-only reports keep the table.
+  if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pretrade-meta','pretrade-preview',PRETRADE_EXP_LABELS[t]);
+  }
+  return _renderPdfPreview(t, aid, 'pretrade-meta', 'pretrade-preview', PRETRADE_EXP_LABELS[t]);
 }
 function ptDownloadCurrent(format){ return exportType(ptCurrentType(), format); }
 function ptPrintCurrent(){ return _printExportPdf(ptCurrentType(), document.getElementById('exp-auction')?.value||''); }

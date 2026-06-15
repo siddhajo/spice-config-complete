@@ -3184,6 +3184,22 @@ function modeWhereClause(db, prefix) {
   };
 }
 
+// State stamped onto a NEW transactional record (lot, invoice, purchase,
+// bill, debit note). In e-Auction mode the state is taken DIRECTLY from the
+// business_state setting — NOT derived the e-Trade way (from the auction's
+// physical `state`, an upstream purchase row, or the branch/PLACE "ASP →
+// KERALA" import prefix). In e-Trade mode the caller's existing derived
+// value is returned untouched. Accepts a flat-settings object (preferred)
+// or a db handle; `derived` is the value the e-Trade path would use.
+function stateForRecord(cfgOrDb, derived) {
+  let cfg = cfgOrDb;
+  if (cfgOrDb && typeof cfgOrDb.get === 'function') cfg = getSettingsFlat(cfgOrDb);
+  if (cfg && String(cfg.business_mode || '') === 'e-Auction') {
+    return String(cfg.business_state || 'TAMIL NADU');
+  }
+  return derived;
+}
+
 // Resolve a human auction number (ANO/TNO) to its auctions.id WITHIN the
 // current business mode — so importing e-Trade invoices never attaches
 // them to an e-Auction trade that happens to share the same number (and
@@ -4065,7 +4081,7 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   const _db = getDb();
   const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',l.state||'TAMIL NADU',l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
   // Audit who entered the lot, from which app. The mobile PWA sends
@@ -5422,7 +5438,7 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   // the auction's physical state. This lets us distinguish ASP invoices
   // from ISP invoices in the same auction, which matters for the sales
   // list cross-reference (ASP Inv# column).
-  const invoiceState = cfg.business_state || auction.state || '';
+  const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
   // Idempotent (re)generation — clear any prior matching row(s) first.
   clearPriorSalesInvoice(db, req.params.auctionId, buyerCode, invoiceState, invoice.saleType);
   db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
@@ -5644,7 +5660,7 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
       const s = invoice.summary;
       const invoNo = String(nextNo);
       // Store BUSINESS context state — see single-invoice handler for rationale
-      const invoiceState = cfg.business_state || auction.state || '';
+      const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
       // Idempotent (re)generation — clear any prior matching row(s) first.
       clearPriorSalesInvoice(db, req.params.auctionId, row.buyer, invoiceState, invoice.saleType);
       db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
@@ -6280,7 +6296,7 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
   const s = invoice.summary;
   db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,auction.state||'','',invoice.seller.name,invoice.seller.address||'',
+    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',invoice.seller.name,invoice.seller.address||'',
      invoice.seller.place||'',invoice.seller.cr||'',String(invoiceNo),s.totalQty,s.totalPuramt,
      s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
   res.json({ success: true, invoice: s });
@@ -6338,7 +6354,7 @@ app.post('/api/purchases/generate-all/:auctionId', requireInvoiceWrite, (req, re
       const invoNo = String(nextNo);
       db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,auction.state||'','',invoice.seller.name,invoice.seller.address||'',
+        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',invoice.seller.name,invoice.seller.address||'',
          invoice.seller.place||'',invoice.seller.cr||'',invoNo,s.totalQty,s.totalPuramt,
          s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
       results.push({ seller: row.name, invoiceNo: invoNo, grandTotal: s.grandTotal });
@@ -6635,7 +6651,7 @@ app.post('/api/bills/generate/:auctionId', requireInvoiceWrite, (req, res) => {
   const s = bill.summary;
   db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,auction.state||'','',auction.crop_type||'ASP',
+    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',auction.crop_type||'ASP',
      parseInt(billNo),bill.seller.name,bill.seller.address||'',bill.seller.place||'',
      bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
      s.totalQty,s.totalPuramt,0,s.netAmount]);
@@ -6681,7 +6697,7 @@ app.post('/api/bills/generate-all/:auctionId', requireInvoiceWrite, (req, res) =
       const s = bill.summary;
       db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,auction.state||'','',auction.crop_type||'ASP',
+        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',auction.crop_type||'ASP',
          nextNo,bill.seller.name,bill.seller.address||'',bill.seller.place||'',
          bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
          s.totalQty,s.totalPuramt,0,s.netAmount]);
@@ -7028,7 +7044,7 @@ app.post('/api/debit-notes/generate', requireInvoiceWrite, (req, res) => {
   db.run(
     `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
      VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [ano, dnDate, purchase.state || '', dealerName,
+    [ano, dnDate, stateForRecord(db, purchase.state || ''), dealerName,
      noteNo, discountAmt, cgst, sgst, igst, total]
   );
 
@@ -7192,7 +7208,7 @@ app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
     db.run(
       `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [ano, dnDate, p.state || '', dealerName,
+      [ano, dnDate, stateForRecord(db, p.state || ''), dealerName,
        String(nextNoteNo), discountAmt, cgst, sgst, igst, total]
     );
     generated.push({ note_no: nextNoteNo, purchno: p.invo, dealer: dealerName, total });
@@ -9481,10 +9497,12 @@ const IMPORT_MODULES = {
     // `state` is never mapped from the source (no alias), so the field is
     // always blank-from-source and this value always wins. Independent of
     // the current business state.
-    rowDefaults: (row, mapping) => {
+    rowDefaults: (row, mapping, db) => {
       const placeSrc = mapping.place;
       const place = placeSrc ? String(row[placeSrc] || '').trim().toUpperCase() : '';
-      return { state: place.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
+      // e-Trade derives state from the PLACE prefix (ASP → KERALA); e-Auction
+      // takes it straight from the business_state setting (stateForRecord).
+      return { state: stateForRecord(db, place.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU') };
     },
   },
   purchase: {
@@ -9517,10 +9535,12 @@ const IMPORT_MODULES = {
     //   • BR prefixed "ASP" (e.g. ASPNEDUMKANDAM) → KERALA
     //   • everything else                          → TAMIL NADU
     // Mirrors the sales-invoice PLACE rule, but purchases key off branch.
-    rowDefaults: (row, mapping) => {
+    rowDefaults: (row, mapping, db) => {
       const brSrc = mapping.br;
       const br = brSrc ? String(row[brSrc] || '').trim().toUpperCase() : '';
-      return { state: br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
+      // e-Trade derives state from the BR prefix (ASP → KERALA); e-Auction
+      // takes it straight from the business_state setting (stateForRecord).
+      return { state: stateForRecord(db, br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU') };
     },
   },
   bills: {
@@ -9548,10 +9568,12 @@ const IMPORT_MODULES = {
     //   • BR prefixed "ASP" (e.g. ASPNEDUMKANDAM) → KERALA
     //   • everything else                          → TAMIL NADU
     // Mirrors the Purchases BR rule — Bills of Supply key off branch too.
-    rowDefaults: (row, mapping) => {
+    rowDefaults: (row, mapping, db) => {
       const brSrc = mapping.br;
       const br = brSrc ? String(row[brSrc] || '').trim().toUpperCase() : '';
-      return { state: br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU' };
+      // e-Trade derives state from the BR prefix (ASP → KERALA); e-Auction
+      // takes it straight from the business_state setting (stateForRecord).
+      return { state: stateForRecord(db, br.startsWith('ASP') ? 'KERALA' : 'TAMIL NADU') };
     },
   },
   debit_notes: {
