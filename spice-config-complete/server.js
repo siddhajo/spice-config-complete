@@ -3857,6 +3857,24 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
   // pager. Legacy callers (no paginated flag) still get the flat array
   // sorted by lot_no ASC.
   const db = getDb();
+  // Summary mode: caller passed summary=1. Returns lightweight aggregates
+  // — { n, bags, qty, priced } — for the SAME filter set (branch / name /
+  // buyer / search) applied above. Used by Lot Entry's status bar and the
+  // recent-entries totals row (which honour the seller filter) and by the
+  // Exports screen's price-import gate (priced = lots with a price/amount
+  // /buyer code, i.e. post-trade data has landed).
+  if (req.query.summary === '1' || req.query.summary === 'true') {
+    const sumQ = q.replace(
+      /^SELECT[\s\S]*?FROM lots\s+WHERE/,
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(bags),0) AS bags,
+              COALESCE(SUM(qty),0)  AS qty,
+              SUM(CASE WHEN price>0 OR amount>0 OR (code IS NOT NULL AND TRIM(code)<>'') THEN 1 ELSE 0 END) AS priced
+       FROM lots WHERE`
+    );
+    const s = db.get(sumQ, p) || {};
+    return res.json({ n: s.n || 0, bags: s.bags || 0, qty: s.qty || 0, priced: s.priced || 0 });
+  }
   // Attach the ISP-view discount per lot (isp_refund) so the Payments
   // "Lots for seller" modal can show the same discount as the screen and
   // the printed statement. Derived from isp_puramt via the shared helper.
@@ -7684,8 +7702,11 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
       const cfg = getSettingsFlat(db);
       const buffer = await exportAnyPdf(db, type, auctionId, cfg, { state: req.query.state });
       const niceName = (EXPORT_TYPES[type] && EXPORT_TYPES[type].name) || type;
+      // inline=1 lets the browser render the PDF in a tab (for the Exports
+      // screen's Print button) instead of force-downloading it.
+      const disp = (req.query.inline === '1' || req.query.inline === 'true') ? 'inline' : 'attachment';
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${niceName}_${anoForFilename(db, auctionId)}.pdf"`);
+      res.setHeader('Content-Disposition', `${disp}; filename="${niceName}_${anoForFilename(db, auctionId)}.pdf"`);
       return res.send(buffer);
     } catch (e) {
       return res.status(500).json({ error: e.message });
@@ -7694,6 +7715,39 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
 
   const exportDef = EXPORT_TYPES[type];
   if (!exportDef) return res.status(400).json({ error: 'Unknown export type', available: Object.keys(EXPORT_TYPES) });
+
+  // Preview mode — build the REAL export buffer, then read it back into a
+  // row matrix (array-of-arrays) for an on-screen HTML table on the
+  // Exports screen. Parsing the same bytes the download produces keeps the
+  // preview faithful to the file. Capped so a large trade doesn't ship a
+  // huge JSON payload to the browser.
+  if (format === 'preview') {
+    try {
+      const db = getDb();
+      let buffer;
+      if (exportDef.needsCfg) {
+        const cfg = getSettingsFlat(db);
+        buffer = await exportDef.fn(db, auctionId, cfg, req.query.state, undefined);
+      } else {
+        buffer = await exportDef.fn(db, auctionId, req.query.state, undefined);
+      }
+      const isCsv = (exportDef.ext || 'xlsx') === 'csv';
+      const wb = isCsv
+        ? XLSX.read(Buffer.from(buffer).toString('utf8'), { type: 'string' })
+        : XLSX.read(Buffer.from(buffer), { type: 'buffer' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const allRows = ws ? XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false }) : [];
+      const CAP = 500;
+      return res.json({
+        name: exportDef.name || type,
+        rows: allRows.slice(0, CAP),
+        total: allRows.length,
+        truncated: allRows.length > CAP,
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
 
   try {
     const db = getDb();

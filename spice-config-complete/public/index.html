@@ -3420,11 +3420,33 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div class="tally-section" id="exp-sec-center" style="margin:0">
           <h3 class="tally-section-head" onclick="toggleTallySection('exp-sec-center')">
             <span class="tally-section-chev">▼</span>
-            <span>Export Center — XLSX</span>
+            <span>Export Center</span>
           </h3>
           <div class="tally-section-body">
-            <div class="fg" style="max-width:300px;margin-top:12px"><label>Select <span data-term-auction="singular">Auction</span></label><select id="exp-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select></div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:12px" id="export-btns"></div>
+            <!-- Report + auction pickers (spice-board style). The auction
+                 selector also drives the price-import gate below. -->
+            <div class="sgrid" style="margin-top:12px;margin-bottom:6px">
+              <div class="fg" style="margin:0"><label>Select <span data-term-auction="singular">Auction</span></label>
+                <select id="exp-auction" onchange="expOnAuctionChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+              </div>
+              <div class="fg" style="margin:0"><label>Report</label>
+                <select id="exp-type" onchange="expOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+              </div>
+            </div>
+            <!-- Gate notice — shown until prices are imported for the selected trade. -->
+            <div id="exp-gate-notice" style="display:none;margin:12px 0 0;padding:12px 14px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:8px;font-size:13px;color:var(--text2);line-height:1.5"></div>
+            <!-- Action bar + preview — visible only once price import is done. -->
+            <div id="exp-center-body" style="display:none">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0">
+                <button class="btn btn-g" onclick="expLoadPreview()">Preview</button>
+                <button class="btn btn-a" onclick="expDownloadCurrent('xlsx')" id="exp-btn-xlsx">XLSX</button>
+                <button class="btn btn-orange" onclick="expDownloadCurrent('pdf')" id="exp-btn-pdf">PDF</button>
+                <button class="btn btn-o" onclick="expPrintCurrent()" id="exp-btn-print">Print</button>
+                <button class="btn btn-a" onclick="expDownloadCurrent('csv')" id="exp-btn-csv" style="display:none">CSV</button>
+              </div>
+              <div id="exp-meta" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+              <div id="exp-preview" style="overflow:auto;max-height:600px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -7779,25 +7801,25 @@ async function renderDashHeadlineTiles(auctionId){
       tile('🌾', 'Lots',        fmtI(t.lots, 0),      '', [
         ['Bags',     fmtI(t.bags, 0)],
         ['Qty (kg)', fmtI(t.qty, 2)],
-        ['Amount',   '₹' + fmtI(t.value, 2)],
+        ['Amount',   '₹ ' + fmtI(t.value, 2)],
       ]) +
       tile('✅', 'Sold',        fmtI(t.sold, 0),      'cardamom', [
         ['Bags',     fmtI(t.sold_bags, 0)],
         ['Qty (kg)', fmtI(t.sold_qty, 2)],
-        ['Amount',   '₹' + fmtI(t.sold_value, 2)],
+        ['Amount',   '₹ ' + fmtI(t.sold_value, 2)],
       ]) +
       tile('↩️', 'Withdrawn',   fmtI(t.withdrawn, 0), 'turmeric', [
         ['Bags',     fmtI(t.wd_bags, 0)],
         ['Qty (kg)', fmtI(t.wd_qty, 2)],
-        ['Amount',   '₹' + fmtI(t.wd_value, 2)],
+        ['Amount',   '₹ ' + fmtI(t.wd_value, 2)],
       ]) +
-      tile('💰', 'Value',       '₹' + fmtI(t.value, 2), 'cardamom', [
+      tile('💰', 'Value',       '₹ ' + fmtI(t.value, 2), 'cardamom', [
         ['Min ₹', price(t.min_price)],
         ['Max ₹', price(t.max_price)],
         ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
       ]) +
-      tile('💸', 'Payable',     '₹' + fmtI(t.payable_to_sellers, 2),    'chili') +
-      tile('⏳', 'Outstanding', '₹' + fmtI(t.outstanding_by_buyers, 2), 'chili');
+      tile('💸', 'Payable',     '₹ ' + fmtI(t.payable_to_sellers, 2),    'chili') +
+      tile('⏳', 'Outstanding', '₹ ' + fmtI(t.outstanding_by_buyers, 2), 'chili');
     // Shrink-to-fit once layout is committed so scrollWidth/clientWidth
     // reflect the real tile widths.
     requestAnimationFrame(() => fitDashHeadlineValues(grid));
@@ -16365,25 +16387,25 @@ async function _renderInsights(){
           ${kpi('🌾', 'Lots',        fmtI(t.lots, 0),      'indigo', [
             ['Bags',     fmtI(t.bags, 0)],
             ['Qty (kg)', fmtI(t.qty, 2)],
-            ['Amount',   '₹' + fmtI(t.value, 2)],
+            ['Amount',   '₹ ' + fmtI(t.value, 2)],
           ])}
           ${kpi('✅', 'Sold',        fmtI(t.sold, 0),      'teal', [
             ['Bags',     fmtI(t.sold_bags, 0)],
             ['Qty (kg)', fmtI(t.sold_qty, 2)],
-            ['Amount',   '₹' + fmtI(t.sold_value, 2)],
+            ['Amount',   '₹ ' + fmtI(t.sold_value, 2)],
           ])}
           ${kpi('↩️', 'Withdrawn',   fmtI(t.withdrawn, 0), 'amber', [
             ['Bags',     fmtI(t.wd_bags, 0)],
             ['Qty (kg)', fmtI(t.wd_qty, 2)],
-            ['Amount',   '₹' + fmtI(t.wd_value, 2)],
+            ['Amount',   '₹ ' + fmtI(t.wd_value, 2)],
           ])}
-          ${kpi('💰', 'Value',       '₹' + fmtI(t.value, 2), 'emerald', [
+          ${kpi('💰', 'Value',       '₹ ' + fmtI(t.value, 2), 'emerald', [
             ['Min ₹', t.min_price != null && t.min_price > 0 ? fmtI(t.min_price, 0) : '—'],
             ['Max ₹', t.max_price != null && t.max_price > 0 ? fmtI(t.max_price, 0) : '—'],
             ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
           ])}
-          ${kpi('💸', 'Payable',     '₹' + fmtI(t.payable_to_sellers, 2),    'orange')}
-          ${kpi('⏳', 'Outstanding', '₹' + fmtI(t.outstanding_by_buyers, 2), 'rose')}
+          ${kpi('💸', 'Payable',     '₹ ' + fmtI(t.payable_to_sellers, 2),    'orange')}
+          ${kpi('⏳', 'Outstanding', '₹ ' + fmtI(t.outstanding_by_buyers, 2), 'rose')}
         </div>
       </div>
     </div>
@@ -16611,9 +16633,129 @@ function _exportBtnCard(k, v){
   </div>`;
 }
 function renderExportBtns(){
-  document.getElementById('export-btns').innerHTML=Object.entries(EXP_LABELS).map(([k,v])=>_exportBtnCard(k,v)).join('');
+  // Export Center is now a spice-board-style panel: report dropdown +
+  // Preview/XLSX/PDF/Print + a live HTML-table preview. Pre-Trade Exports
+  // keeps its card grid (those are the before-import snapshots).
+  expPopulateTypes();
   const pt=document.getElementById('pretrade-export-btns');
   if(pt) pt.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>_exportBtnCard(k,v)).join('');
+  expOnAuctionChange(); // refresh the price-import gate for the current trade
+}
+
+// ── Export Center (spice-board-style preview/print/xlsx/pdf) ──────
+function expCurrentType(){ return document.getElementById('exp-type')?.value || Object.keys(EXP_LABELS)[0]; }
+function expCurrentAid(){ return document.getElementById('exp-auction')?.value || ''; }
+
+// Fill the report-type dropdown from EXP_LABELS, preserving the current
+// pick across re-renders, then sync the format buttons.
+function expPopulateTypes(){
+  const sel=document.getElementById('exp-type');
+  if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML=Object.entries(EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && EXP_LABELS[cur]) sel.value=cur;
+  expOnTypeChange();
+}
+
+// Toggle format buttons by the selected report's format rules (mirrors the
+// per-card rules: CSV-only types get CSV; XLSX-only types lose PDF/Print).
+function expOnTypeChange(){
+  const t=expCurrentType();
+  const isCsv=EXP_CSV_ONLY.has(t), isXlsx=EXP_XLSX_ONLY.has(t);
+  const show=(id,v)=>{const el=document.getElementById(id);if(el)el.style.display=v?'':'none';};
+  show('exp-btn-xlsx', !isCsv);
+  show('exp-btn-pdf',  !isCsv && !isXlsx);
+  show('exp-btn-print',!isCsv && !isXlsx);
+  show('exp-btn-csv',  isCsv);
+  const prev=document.getElementById('exp-preview'); if(prev) prev.innerHTML='';
+  const meta=document.getElementById('exp-meta'); if(meta) meta.textContent='';
+}
+
+// Price-import gate (Task 4): the Export Center's options surface only once
+// the SELECTED trade has prices imported. Detected via the lots summary's
+// `priced` count (lots carrying a price / amount / buyer code, i.e.
+// post-trade data has landed). Fails open on error so a transient glitch
+// never blocks exporting.
+async function expOnAuctionChange(){
+  const notice=document.getElementById('exp-gate-notice');
+  const body=document.getElementById('exp-center-body');
+  if(!notice||!body) return;
+  const prev=document.getElementById('exp-preview'); if(prev) prev.innerHTML='';
+  const meta=document.getElementById('exp-meta'); if(meta) meta.textContent='';
+  const aid=expCurrentAid();
+  if(!aid){ notice.style.display='none'; body.style.display='none'; return; }
+  notice.style.display='block'; notice.textContent='Checking price-import status…';
+  try{
+    const s=await j(`/api/lots/${aid}?summary=1`);
+    if(Number(s&&s.priced)>0){
+      notice.style.display='none'; body.style.display='block';
+    }else{
+      body.style.display='none'; notice.style.display='block';
+      notice.innerHTML='⚠ <strong>Prices not yet imported for this '+esc(termAuction(false))+'.</strong> '+
+        'The Export Center unlocks once you run <strong>Price Import</strong> on the Lots screen. '+
+        'Until then, use <strong>Pre-Trade Exports</strong> below for the before-trade snapshots.';
+    }
+  }catch(e){
+    notice.style.display='none'; body.style.display='block';
+  }
+}
+
+async function expLoadPreview(){
+  const aid=expCurrentAid();
+  if(!aid){alert('Select '+termAuction(false,true)+' first');return}
+  const t=expCurrentType();
+  const meta=document.getElementById('exp-meta');
+  const root=document.getElementById('exp-preview');
+  await withOverlay('Loading preview…', async()=>{
+    try{
+      const r=await fetch(B+`/api/exports/${t}/${aid}?format=preview`,{headers:{'Authorization':'Bearer '+T}});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||`HTTP ${r.status}`);}
+      expRenderPreview(await r.json());
+    }catch(e){
+      if(meta) meta.textContent='';
+      if(root) root.innerHTML=`<div style="padding:14px;color:#7F1D1D">Preview failed: ${esc(e.message||String(e))}</div>`;
+    }
+  });
+}
+
+// Render the export's row matrix (array-of-arrays; first row = headers)
+// into a sticky-header HTML table.
+function expRenderPreview(data){
+  const meta=document.getElementById('exp-meta');
+  const root=document.getElementById('exp-preview');
+  const rows=Array.isArray(data.rows)?data.rows:[];
+  if(meta) meta.textContent=`${data.name||EXP_LABELS[expCurrentType()]||''} — ${data.total||rows.length} row(s)`+(data.truncated?` · showing first ${rows.length}`:'');
+  if(!rows.length){ root.innerHTML='<div style="padding:14px;color:var(--text3)">No data to preview for this report.</div>'; return; }
+  const header=rows[0]||[];
+  const body=rows.slice(1);
+  const ncol=rows.reduce((m,r)=>Math.max(m,(r||[]).length),0);
+  const noWrap='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;';
+  let html='<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr>';
+  for(let i=0;i<ncol;i++){const h=esc(String(header[i]??''));html+=`<th style="text-align:left;padding:6px 8px;border-bottom:2px solid var(--spice-line);background:var(--spice-cream);position:sticky;top:0;${noWrap}" title="${h}">${h}</th>`;}
+  html+='</tr></thead><tbody>';
+  body.forEach(r=>{
+    html+='<tr>';
+    for(let i=0;i<ncol;i++){const out=esc(String((r||[])[i]??''));html+=`<td style="padding:5px 8px;border-bottom:1px solid #eee;${noWrap}" title="${out}">${out}</td>`;}
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  root.innerHTML=html;
+}
+
+function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
+
+async function expPrintCurrent(){
+  const aid=expCurrentAid();
+  if(!aid){alert('Select '+termAuction(false,true)+' first');return}
+  const t=expCurrentType();
+  await withOverlay('Preparing print…', async()=>{
+    const r=await fetch(B+`/api/exports/${t}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+    if(!r.ok){const e=await r.json().catch(()=>({}));alert('Print failed: '+(e.error||`HTTP ${r.status}`));return;}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const w=window.open(url);
+    if(w) w.addEventListener('load',()=>{try{w.focus();w.print();}catch(_){}});
+  });
 }
 async function exportType(type,format,aidArg){format=format||'xlsx';
   // aidArg lets callers (e.g. the Price Import snapshot banner via
@@ -18803,6 +18945,7 @@ const _le = {
   searchTimer: null,       // debounce timer for seller search
   recentLots: [],          // currently-loaded page of lots (server-paginated, lot_no DESC)
   recentTotal: 0,          // total rows matching current filter (from server)
+  recentSummary: null,     // { n, bags, qty } for the WHOLE filtered set (totals row)
   recentPage: 1,           // 1-based current page in the recent-entries panel
   recentPageSize: 50,      // rows per page (one of _PAGE_SIZE_OPTIONS)
   recentSearch: '',        // active seller filter (LIKE on lots.name via API)
@@ -19801,6 +19944,14 @@ async function loadLeRecent(){
       _le.recentPage = lastPage;
       return loadLeRecent(); // re-fetch at the clamped page
     }
+    // Totals row — aggregates for the WHOLE filtered set (not just this
+    // page). Honours the active seller filter so the count/bags/qty match
+    // the seller currently typed into the filter box. Fetched alongside
+    // the page; failures leave the prior totals (or a page-only fallback).
+    try {
+      const sumQs = 'summary=1' + (search ? `&name=${encodeURIComponent(search)}` : '');
+      _le.recentSummary = await j(`/api/lots/${aid}?${sumQs}`);
+    } catch (_) { _le.recentSummary = null; }
     renderLeRecent();
     leUpdateStats();
     leRefreshSellerSuggestions();
@@ -20082,6 +20233,15 @@ function renderLeRecent(){
     for (const id of [..._le.selectedForPrint]) if (!live.has(id)) _le.selectedForPrint.delete(id);
   }
   const COLS = 'grid-template-columns:32px 80px 1fr 90px 70px 70px 80px 88px';
+  // Totals row — count(lots) / sum(bags) / sum(qty) across the WHOLE
+  // filtered set (server summary), so it reflects the seller currently in
+  // the filter box rather than just the visible page. Falls back to the
+  // loaded window if the summary fetch failed.
+  const _sum    = _le.recentSummary || {};
+  const totLots = _sum.n    != null ? Number(_sum.n)    : total;
+  const totBags = _sum.bags != null ? Number(_sum.bags) : visible.reduce((s, l) => s + (parseInt(l.bags, 10) || 0), 0);
+  const totQty  = _sum.qty  != null ? Number(_sum.qty)  : visible.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const totFiltered = !!String(_le.recentSearch || '').trim();
   host.innerHTML = `
     <div style="display:grid;${COLS};gap:0;font-size:11px;font-weight:700;color:var(--spice-cardamom-dk);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:2px solid var(--spice-cardamom);background:var(--spice-cardamom-lt);position:sticky;top:0;z-index:1">
       <div style="text-align:center"><input type="checkbox" id="le-recent-select-all" onchange="leToggleSelectAll(this.checked)" title="Select all visible" style="cursor:pointer"></div>
@@ -20112,6 +20272,16 @@ function renderLeRecent(){
           </div>
         </div>`;
       }).join('')}
+    </div>
+    <div style="display:grid;${COLS};gap:0;padding:9px 12px;border-top:2px solid var(--spice-cardamom);background:var(--spice-cardamom-lt);font-size:12.5px;font-weight:700;color:var(--spice-cardamom-dk)">
+      <div></div>
+      <div style="font-family:monospace">${totLots} lot${totLots === 1 ? '' : 's'}</div>
+      <div style="font-weight:600;color:var(--text2)">${totFiltered ? 'Filtered total' : 'Total'}</div>
+      <div></div>
+      <div style="text-align:right">${fmtI(totBags, 0)}</div>
+      <div></div>
+      <div style="text-align:right">${fmtI(totQty, 3)}</div>
+      <div></div>
     </div>
   `;
   // Pager footer (Prev / page indicator / Next). Hidden when only one
