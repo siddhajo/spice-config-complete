@@ -1456,6 +1456,25 @@ app.get('/api/admin/audit-log', requireView, (req, res) => {
     if (req.query.entity) { where.push('entity = ?'); params.push(String(req.query.entity)); }
     if (req.query.action) { where.push('action = ?'); params.push(String(req.query.action)); }
     if (req.query.user)   { where.push('user_id = ?'); params.push(String(req.query.user)); }
+    // Business-mode scoping (Lot Activity Log): show only lot records whose
+    // auction was created in the current mode — "trades" in e-Trade,
+    // "auctions" in e-Auction. The auction id is read from the audit
+    // details (create/edit/delete stamp it) and, as a fallback, by joining
+    // the lot row that still exists. Records we can't classify (legacy rows,
+    // bulk deletes, edits whose lot was later removed) carry a NULL/empty
+    // mode and stay visible in both modes — matching modeWhereClause()'s
+    // legacy-tolerant behaviour elsewhere. Only lot-entity rows are scoped;
+    // any other entity passes through untouched.
+    const _mode = currentBusinessMode(db);
+    if (_mode) {
+      const resolved =
+        `COALESCE(
+           (SELECT a.mode FROM auctions a WHERE a.id = json_extract(audit_log.details, '$.auction_id')),
+           (SELECT a2.mode FROM auctions a2 JOIN lots l ON l.auction_id = a2.id WHERE l.id = audit_log.entity_id)
+         )`;
+      where.push(`(entity != 'lot' OR ${resolved} = ? OR ${resolved} IS NULL OR ${resolved} = '')`);
+      params.push(_mode);
+    }
     const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
     const total = (db.get(`SELECT COUNT(*) AS c FROM audit_log ${whereSql}`, params) || { c: 0 }).c || 0;
     const rows = db.all(
@@ -4004,6 +4023,7 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   auditLog(req, 'edit', 'lot', parseInt(req.params.id, 10), {
     lot_no: _after ? _after.lot_no : (_before ? _before.lot_no : ''),
     branch: _after ? _after.branch : '',
+    auction_id: (_after && _after.auction_id) || (_before && _before.auction_id) || null,
     changes: lotChangeDiff(_before, _after),
   });
   // Re-run the booking-limit check — an edit that raises qty can cross a
