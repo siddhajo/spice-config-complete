@@ -51,17 +51,15 @@ function formatINR(n, decimals = 2) {
 }
 
 // ── Effective company details based on business_state ────────────
-// ── Effective company details based on mode + state ─────────────
-// e-Trade + KL   → use sister.* (ASP)
-// e-Trade + TN   → use company.* / address_tn.* (ISP)
-// e-Auction      → always use company.* / address based on state (ISP fields)
+// ── Effective company details based on state ────────────────────
+// KL (e-Trade or e-Auction) → use sister.* (ASP)
+// TN (e-Trade or e-Auction) → use company.* / address_tn.* (ISP)
 //
-// Sister Company is an e-Trade-only concept. In e-Auction mode the user
-// picks one state and stays there — the Company section alone is used.
+// Kerala resolves to the Sister Company (ASP) in BOTH modes — so the
+// Sister Company section must be configured for Kerala installs.
 function effectiveCompany(cfg) {
   const state = (cfg.business_state || '').toUpperCase();
-  const mode  = (cfg.business_mode  || '').toLowerCase();
-  const useASP = (mode === 'e-trade' && state === 'KERALA');
+  const useASP = (state === 'KERALA');
 
   // Partnership Firm toggle → the letterhead identity line shows
   // "Partnership: <name>" instead of "CIN: <cin>". cinLabel/cinValue

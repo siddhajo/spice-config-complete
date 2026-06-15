@@ -1384,8 +1384,8 @@ const DELETE_ALL_MAP = {
 // Transactional tables whose rows belong to one business mode (via their
 // auction's `mode`). A Delete All in e-Auction must touch only e-Auction
 // rows and vice versa, mirroring exactly what the operator can see on each
-// tab (the same legacy-tolerant rule as modeWhereClause: NULL/empty mode
-// matches either side, so pre-cutover data stays deletable in both modes).
+// tab (the same STRICT rule as modeWhereClause: a row belongs to exactly
+// one mode, so a per-mode Delete All never touches the other mode's data).
 const MODE_SCOPED_TABLES = new Set(['auctions', 'lots', 'invoices', 'purchases', 'bills', 'debit_notes']);
 // Master data shared across BOTH modes — never mode-scoped. Wiping these
 // affects e-Trade and e-Auction alike, which the UI warns about.
@@ -3130,14 +3130,36 @@ app.get('/api/buyers/template', requireExport, async (req, res) => {
 //   currentBusinessMode(db) — reads the active mode setting.
 //   modeWhere(prefix)       — returns a SQL fragment + params suitable
 //                             for AND-ing into a query that joins or
-//                             filters by an auctions row. NULL/empty
-//                             mode columns always match (legacy data
-//                             stays visible during the soft cutover).
+//                             filters by an auctions row. STRICT: a row
+//                             matches only its own mode, so e-Trade and
+//                             e-Auction data never bleed into each other.
 function currentBusinessMode(db) {
   try {
     const row = db.get("SELECT value FROM company_settings WHERE key = 'business_mode'");
     return row && row.value ? String(row.value) : '';
   } catch (_) { return ''; }
+}
+// An import "needs a mode" when its rows carry a business mode: the auction
+// itself, or any child that inherits mode via auction_id (sales invoices,
+// purchases, bills, debit notes). Sellers and buyers are mode-agnostic
+// master data shared across both modes, so they never need one.
+function importModuleNeedsMode(moduleKey, def) {
+  return moduleKey === 'auctions' || !!(def && def.autoFillAuctionId);
+}
+// Guard for the import routes. Returns the active business mode, or null
+// after sending a 400 — callers must clean up the upload and return when it
+// returns null. Refusing the import when no mode is selected is what keeps
+// new rows from being tagged blank and leaking into BOTH views.
+function importModeOrReject(res, db) {
+  const mode = currentBusinessMode(db);
+  if (!mode) {
+    res.status(400).json({
+      error: 'Select a business mode (e-Trade or e-Auction) in Settings before importing. '
+           + 'Imported records are tagged with the mode that is active at import time.',
+    });
+    return null;
+  }
+  return mode;
 }
 // User-facing noun for the active business mode.
 // e-Trade → "Trade" / "Trades"; e-Auction → "Auction" / "Auctions".
@@ -3178,8 +3200,14 @@ function anoForFilename(db, auctionId) {
 function modeWhereClause(db, prefix) {
   const mode = currentBusinessMode(db);
   if (!mode) return { sql: '', params: [] };       // no filter when mode unset
+  // STRICT separation: a row matches ONLY its own mode. e-Trade rows show
+  // up in e-Trade, e-Auction rows in e-Auction, and nothing leaks across.
+  // (Imports are guarded so every new auction gets a definite mode — see
+  // importModuleNeedsMode / the /import guards — so no row should ever be
+  // left blank. A stray blank-mode row would be invisible in both views,
+  // which is the correct fail-safe for "clear separation".)
   return {
-    sql: ` AND (${prefix} = ? OR ${prefix} IS NULL OR ${prefix} = '')`,
+    sql: ` AND ${prefix} = ?`,
     params: [mode],
   };
 }
@@ -3203,9 +3231,11 @@ function stateForRecord(cfgOrDb, derived) {
 // Resolve a human auction number (ANO/TNO) to its auctions.id WITHIN the
 // current business mode — so importing e-Trade invoices never attaches
 // them to an e-Auction trade that happens to share the same number (and
-// vice versa). Preference order: an exact current-mode match first, then
-// legacy rows with no mode stamped (pre-cutover data stays importable),
-// and finally — only when no mode is configured at all — any match.
+// vice versa). STRICT: when a business mode is set, ONLY an auction of that
+// exact mode matches. A transaction whose trade isn't in the current mode
+// fails to resolve (the importer reports "No trade found") rather than
+// silently attaching to a blank/other-mode auction and disappearing from
+// both views. When no mode is configured at all, any match is allowed.
 // Returns the id or null. Used by the "Import Old Data" auction_id backfill.
 function resolveAuctionIdForMode(db, ano) {
   const key = String(ano == null ? '' : ano).trim();
@@ -3213,9 +3243,7 @@ function resolveAuctionIdForMode(db, ano) {
   const mode = currentBusinessMode(db);
   if (mode) {
     const exact = db.get('SELECT id FROM auctions WHERE ano = ? AND mode = ? ORDER BY date DESC, id DESC LIMIT 1', [key, mode]);
-    if (exact) return exact.id;
-    const legacy = db.get("SELECT id FROM auctions WHERE ano = ? AND (mode IS NULL OR mode = '') ORDER BY date DESC, id DESC LIMIT 1", [key]);
-    return legacy ? legacy.id : null;   // never fall through to the other mode's row
+    return exact ? exact.id : null;   // strict: only the current mode's trade
   }
   const any = db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC, id DESC LIMIT 1', [key]);
   return any ? any.id : null;
@@ -3268,6 +3296,28 @@ app.delete('/api/auctions/:id', requireDelete, (req, res) => {
   db.run('DELETE FROM lot_allocations WHERE auction_id = ?', [req.params.id]);
   db.run('DELETE FROM auctions WHERE id = ?', [req.params.id]);
   res.json({ success: true });
+});
+// Reassign the business mode of one or more auctions. Mode is normally
+// LOCKED at creation (PUT /api/auctions refuses it) so it can't be flipped
+// by accident — but a deliberate admin needs an escape hatch for the case
+// where a whole batch was imported under the wrong mode (e.g. e-Auction
+// data imported while e-Trade was active). Every child row — lots,
+// invoices, purchases, bills, debit notes — inherits mode via auction_id,
+// so flipping the auction moves all of its transactions with it; nothing
+// else to touch. Accepts { ids: [..], mode: 'e-Trade' | 'e-Auction' }.
+app.post('/api/auctions/reassign-mode', requireAdmin, (req, res) => {
+  const target = String((req.body && req.body.mode) || '').trim();
+  if (target !== 'e-Trade' && target !== 'e-Auction') {
+    return res.status(400).json({ error: "mode must be 'e-Trade' or 'e-Auction'" });
+  }
+  const idList = Array.isArray(req.body && req.body.ids)
+    ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (!idList.length) return res.status(400).json({ error: 'No auction ids provided' });
+  const db = getDb();
+  const placeholders = idList.map(() => '?').join(',');
+  const info = db.run(`UPDATE auctions SET mode = ? WHERE id IN (${placeholders})`,
+    [target, ...idList]);
+  res.json({ success: true, mode: target, updated: (info && info.changes) || idList.length });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -3702,6 +3752,14 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), asy
     if (!rows.length) throw new Error('File is empty');
 
     const db = getDb();
+    // This import always creates/attaches auctions, so it must run under a
+    // definite business mode — otherwise the new auctions are tagged blank
+    // and leak into BOTH e-Trade and e-Auction views. (The catch below
+    // unlinks the upload and returns this message as a 400.)
+    if (!currentBusinessMode(db)) {
+      throw new Error('Select a business mode (e-Trade or e-Auction) in Settings before importing. '
+        + 'Imported auctions and lots are tagged with the mode that is active at import time.');
+    }
     const mode = req.body.mode || 'full'; // 'full' = new lots, 'price' = update price/buyer only
 
     const mapCol = (row, ...names) => {
@@ -9432,11 +9490,18 @@ const IMPORT_MODULES = {
       date: ['date', 'auction_date', 'trade_date', 'tdate'],
       crop_type: ['crop_type', 'crpt', 'crop', 'type'],
       state: ['state', 'auction_state'],
-      mode: ['mode', 'business_mode'],
+      // NOTE: no `mode` alias — mode is ALWAYS the business mode selected at
+      // import time (see derivedFields + defaults), never read from a source
+      // column. Importing while e-Trade is active tags every row e-Trade;
+      // switch to e-Auction and the next import is tagged e-Auction.
     },
-    // Server-computed defaults applied when the field is unmapped OR
-    // its source value is blank. Keeps imported rows from leaking
-    // across e-Auction/e-Trade views when the source file omits mode.
+    // `mode` is computed server-side, never read from the source — drop any
+    // mapping so a stray "mode"/"business_mode" column can't override the
+    // operator's selected business mode.
+    derivedFields: ['mode'],
+    // Server-computed default: the current business mode. The import is
+    // guarded (importModuleNeedsMode) so this is never blank — every
+    // imported auction gets a definite mode and nothing leaks across views.
     defaults: (db) => ({
       mode: currentBusinessMode(db),
     }),
@@ -9580,8 +9645,15 @@ const IMPORT_MODULES = {
     label: 'Debit Notes',
     table: 'debit_notes',
     keyCols: ['note_no','ano'],
-    fields: ['ano','date','state','name','note_no','amount','cgst','sgst','igst','total'],
+    // auction_id is derived from `ano` at import time so debit notes inherit
+    // their auction's business mode (via auctions.mode). Without this the
+    // auction_id stayed NULL and every imported debit note leaked into BOTH
+    // e-Trade and e-Auction views — this links them like the other three
+    // transactional modules (sales_invoice, purchase, bills).
+    autoFillAuctionId: true,
+    fields: ['auction_id','ano','date','state','name','note_no','amount','cgst','sgst','igst','total'],
     aliases: {
+      ano: ['ano','auction_no','trade','trade_no','tno'],
       note_no: ['note_no','note','dn_no'],
       name: ['name','dealer','buyer'],
     },
@@ -9712,6 +9784,12 @@ app.post('/api/import-old-data/verify', requireAdmin, upload.single('file'), (re
   }
   const PER_BUCKET_LIMIT = 50;
   const db = getDb();
+  // Surface the missing-mode error at verify time too, so the operator
+  // catches it before /run (matches what /run will enforce).
+  if (importModuleNeedsMode(moduleKey, def) && !importModeOrReject(res, db)) {
+    fs.unlink(req.file.path, () => {});
+    return;
+  }
   try {
     const wb = XLSX.readFile(req.file.path);
     const ws = wb.Sheets[wb.SheetNames[0]];
@@ -9941,6 +10019,12 @@ app.post('/api/import-old-data/run', requireAdmin, upload.single('file'), (req, 
   }
 
   const db = getDb();
+  // Mode-bearing imports require a definite business mode so the new rows
+  // are tagged e-Trade or e-Auction (never blank → never leaking into both).
+  if (importModuleNeedsMode(moduleKey, def) && !importModeOrReject(res, db)) {
+    fs.unlink(req.file.path, () => {});
+    return;
+  }
   let imported = 0, skipped = 0, failed = 0;
   const errors = [];
   // Per-row detail of duplicate-skipped rows so the UI can show WHICH

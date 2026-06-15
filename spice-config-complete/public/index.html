@@ -8820,12 +8820,12 @@ function getCurrentBusinessState(){
 
 // Returns the logo/company code ("ISP" or "ASP") that represents which
 // company is ACTIVELY issuing invoices/doing calculations.
-// Mirrors server-side effectiveCompany(): Kerala + e-Trade → sister company
-// (ASP); otherwise use primary (ISP). Falls back to configured codes.
+// Mirrors server-side effectiveCompany(): Kerala → sister company (ASP) in
+// BOTH e-Trade and e-Auction; otherwise use primary (ISP). Falls back to
+// configured codes.
 function getCurrentLogoCode(){
-  const mode  = getCurrentBusinessMode();
   const state = (getCurrentBusinessState() || '').toUpperCase();
-  const useSister = (mode === 'e-Trade' && state === 'KERALA');
+  const useSister = (state === 'KERALA');
   const findVal = (cat, key, fallback) => {
     const arr = _sdata[cat] || [];
     const f = arr.find(x => x.key === key);
@@ -14240,64 +14240,29 @@ async function revertAllInvoices(){
 // or PDF-type frames), fall back to opening the PDF in a new tab and ask
 // the user to press Ctrl+P.
 async function triggerBrowserPrint(blob, fallbackName) {
-  // ── DIAGNOSTIC MODE ────────────────────────────────────────────────
-  let diagPanel = document.getElementById('print-diag-panel');
-  if (!diagPanel) {
-    diagPanel = document.createElement('div');
-    diagPanel.id = 'print-diag-panel';
-    diagPanel.style.cssText = 'position:fixed;top:80px;right:20px;width:320px;max-height:60vh;overflow-y:auto;background:#1a1a1a;color:#0f0;font-family:monospace;font-size:11px;padding:12px;border-radius:6px;z-index:10000;box-shadow:0 4px 16px rgba(0,0,0,0.4)';
-    diagPanel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #444;padding-bottom:6px;margin-bottom:6px">
-        <strong style="color:#fff">Print Diagnostics</strong>
-        <span onclick="document.getElementById('print-diag-panel').remove()" style="cursor:pointer;color:#888;font-weight:bold">×</span>
-      </div>
-      <button onclick="document.querySelectorAll('#busy-overlay, .busy-overlay').forEach(n=>n.remove())" style="margin-bottom:8px;padding:4px 8px;background:#cc4444;color:#fff;border:0;border-radius:3px;cursor:pointer;font-size:11px;width:100%">Force-clear stuck overlay</button>
-      <div id="print-diag-log"></div>`;
-    document.body.appendChild(diagPanel);
-    setTimeout(() => { if (diagPanel.parentNode) diagPanel.remove(); }, 60000);
-  }
-  const diagLog = diagPanel.querySelector('#print-diag-log');
-  const diag = (msg, level = 'info') => {
-    const ts = new Date().toLocaleTimeString('en-GB');
-    const color = level === 'err' ? '#f66' : level === 'warn' ? '#ffaa00' : '#0f0';
-    const line = document.createElement('div');
-    line.style.cssText = `color:${color};margin:2px 0`;
-    line.textContent = `[${ts}] ${msg}`;
-    diagLog.appendChild(line);
-    diagLog.scrollTop = diagLog.scrollHeight;
-    console.log('[print-diag]', msg);
-  };
-
-  diag(`Step 1: blob received (${Math.round(blob.size / 1024)} KB)`);
-
-  // Strategy: open the PDF blob URL DIRECTLY in a new tab.
-  // Chrome/Edge load it in their built-in PDF viewer which has a Print
-  // button in the toolbar (top-right corner). User clicks it OR Ctrl+P.
+  // Strategy: open the PDF blob URL DIRECTLY in a new tab. Chrome/Edge load
+  // it in their built-in PDF viewer, which has a Print button in the toolbar
+  // (user clicks it OR presses Ctrl+P).
   //
-  // We previously tried (a) hidden iframe + parent window.print() —
-  // blocked by cross-origin policy through ngrok HTTPS proxy, and
-  // (b) wrapper HTML page with embedded PDF — Chrome refused to render
-  // a blob PDF inside a blob HTML page. Direct blob navigation is the
-  // only approach that works reliably across ngrok tunnels.
+  // We previously tried (a) hidden iframe + parent window.print() — blocked
+  // by cross-origin policy through HTTPS proxies, and (b) a wrapper HTML page
+  // with embedded PDF — Chrome refused to render a blob PDF inside a blob
+  // HTML page. Direct blob navigation is the only approach that works
+  // reliably across proxy tunnels.
   const url = URL.createObjectURL(blob);
-  diag('Step 2: blob URL created');
 
   const w = window.open(url, '_blank');
   if (!w || w.closed) {
-    diag('Popup blocked — falling back to download', 'err');
+    // Popup blocked — fall back to a download the user can open + Ctrl+P.
     const a = document.createElement('a');
     a.href = url;
     a.download = fallbackName || 'document.pdf';
     a.click();
-    diag('PDF downloaded — open from Downloads, press Ctrl+P', 'warn');
-  } else {
-    diag('Step 3: PDF opened in new tab', 'info');
-    diag('Click Print icon in PDF viewer toolbar OR press Ctrl+P', 'warn');
   }
 
   // Defensive: ensure no stuck overlay survives this print step. If an
   // upstream caller forgot to hide its overlay (or hit a race condition),
-  // we guarantee a clean state here so dad never sees "Building merged
+  // we guarantee a clean state here so the user never sees "Building merged
   // PDF…" frozen on screen after the PDF has already opened.
   document.querySelectorAll('#busy-overlay, .busy-overlay').forEach(n => n.remove());
 
