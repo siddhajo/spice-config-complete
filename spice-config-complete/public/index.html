@@ -14,29 +14,45 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  /* ═══ DEFAULT (Emerald) — overridden by body[data-theme] rules below ═══ */
-  --spice-saffron: #10B981;
-  --spice-saffron-lt: #ECFDF5;
-  --spice-saffron-md: #6EE7B7;
-  --spice-saffron-dk: #047857;
-  --spice-turmeric: #F59E0B;
+  /* ═══ DEFAULT (Saffron Luxe) — warm spice palette: burnt saffron
+     primary, turmeric-gold accent, warm cream surfaces, espresso ink.
+     Overridden by body[data-theme] rules below. ═══ */
+  --spice-saffron: #C2410C;      /* burnt saffron — primary */
+  --spice-saffron-lt: #FDF1E7;   /* warm tint for soft fills */
+  --spice-saffron-md: #FDBA74;   /* mid ember — borders/hairlines */
+  --spice-saffron-dk: #9A3412;   /* deep ember — hovers/active */
+  --spice-turmeric: #F59E0B;     /* turmeric gold — accent */
   --spice-turmeric-lt: #FEF3C7;
-  --spice-cardamom: #166534;
-  --spice-cardamom-lt: #DCFCE7;
-  --spice-cardamom-dk: #14532D;
+  --spice-cardamom: #B45309;     /* warm amber-brown — secondary brand */
+  --spice-cardamom-lt: #FEF0DC;
+  --spice-cardamom-dk: #7C2D12;  /* roasted brown — deep accents */
   --spice-pepper: var(--spice-text-main);
-  --spice-clove: #047857;
+  --spice-clove: #9A3412;
   --spice-chili: #DC2626;
   --spice-chili-lt: #FEE2E2;
   --spice-chili-dk: #991B1B;
-  --spice-cumin: #64748B;
-  --spice-cream: #F8FAFC;
+  --spice-cumin: #8A7A6D;        /* warm taupe-grey */
+  --spice-cream: #FBF7F0;        /* warm cream — app background */
   --spice-paper: #FFFFFF;
-  --spice-line: #E2E8F0;
-  --spice-line-strong: #CBD5E1;
-  --spice-text-main: #0F172A;
-  --spice-text-mute: #475569;
-  --spice-text-hint: #94A3B8;
+  --spice-line: #EDE6DB;         /* warm hairline */
+  --spice-line-strong: #DDD2C3;  /* warm stronger border */
+  --spice-text-main: #1C1410;    /* espresso ink */
+  --spice-text-mute: #6B5D52;    /* warm taupe text */
+  --spice-text-hint: #A89B8D;    /* muted sand */
+
+  /* Refined-depth shadow tokens — warm-tinted, layered */
+  --shadow-sm: 0 1px 2px rgba(60,36,18,.06);
+  --shadow-md: 0 1px 2px rgba(60,36,18,.05), 0 8px 24px rgba(60,36,18,.07);
+  --shadow-lg: 0 4px 12px rgba(60,36,18,.10), 0 18px 40px rgba(60,36,18,.12);
+  --shadow-primary: 0 4px 14px -2px rgba(194,65,12,.40);
+  --ring-focus: 0 0 0 3px rgba(194,65,12,.18);
+
+  /* ── Success / positive green — kept as a real emerald so "good"
+     states stay instantly readable in the warm palette. ──── */
+  --ok:            #047857;
+  --ok-dk:         #065F46;
+  --ok-lt:         #D1FAE5;
+  --ok-border:     #A7F3D0;
 
   /* ── Legacy aliases (keep old class names working) ──── */
   --bg:            var(--spice-cream);
@@ -46,16 +62,16 @@
   --text:          var(--spice-text-main);
   --text2:         var(--spice-text-mute);
   --text3:         var(--spice-text-hint);
-  --green:         var(--spice-cardamom);
-  --green-dk:      var(--spice-cardamom-dk);
-  --green-bg:      var(--spice-cardamom-lt);
-  --green-border:  #BBF7D0;
+  --green:         var(--ok);
+  --green-dk:      var(--ok-dk);
+  --green-bg:      var(--ok-lt);
+  --green-border:  var(--ok-border);
   --orange:        var(--spice-turmeric);
   --orange-bg:     var(--spice-turmeric-lt);
   --red:           var(--spice-chili);
   --red-bg:        var(--spice-chili-lt);
   --blue:          var(--spice-saffron);
-  --tab-bg:        #E2E8F0;
+  --tab-bg:        #EFE7DA;
   --spice:         var(--spice-saffron);
   --spice-lt:      var(--spice-saffron-lt);
   --amber:         var(--spice-turmeric);
@@ -63,6 +79,35 @@
 
   font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
   letter-spacing:-.01em;
+}
+
+/* ═══ Default install (no data-theme) gets the deep espresso sidebar.
+   Scoped with :not([data-theme]) so the other themes keep their own
+   per-theme dark sidebar via the fallback chain. ═══ */
+body:not([data-theme]),
+body[data-theme="saffron"]{
+  --sidebar-bg-top: #3B2415;   /* roasted espresso */
+  --sidebar-bg-bot: #1F140C;   /* near-black cacao */
+}
+
+/* ═══ THEME: Saffron Luxe — the new default, also selectable by name so
+   installs can pin it explicitly. Mirrors :root's warm spice palette. ═══ */
+body[data-theme="saffron"]{
+  --spice-saffron:    #C2410C;
+  --spice-saffron-lt: #FDF1E7;
+  --spice-saffron-md: #FDBA74;
+  --spice-saffron-dk: #9A3412;
+  --spice-turmeric:   #F59E0B;
+  --spice-turmeric-lt:#FEF3C7;
+  --spice-cardamom:   #B45309;
+  --spice-cardamom-lt:#FEF0DC;
+  --spice-cardamom-dk:#7C2D12;
+  --spice-cream:      #FBF7F0;
+  --spice-line:       #EDE6DB;
+  --spice-line-strong:#DDD2C3;
+  --spice-text-main:  #1C1410;
+  --spice-text-mute:  #6B5D52;
+  --spice-text-hint:  #A89B8D;
 }
 
 /* ═══ THEME: Coral sunset — warm pink/coral primary, peach accents ═══ */
@@ -440,13 +485,13 @@ body[data-preset="ocean"] .kpi{border-left:3px solid var(--spice-saffron);box-sh
 }
 .theme-chip-large:hover{background:var(--spice-cream)}
 .theme-chip-large:hover::before{box-shadow:0 0 0 2px var(--spice-cardamom),0 6px 14px rgba(0,0,0,.12)}
-.theme-chip-large.active::before{box-shadow:0 0 0 3px var(--spice-cardamom),0 4px 10px rgba(22,101,52,.18)}
+.theme-chip-large.active::before{box-shadow:0 0 0 3px var(--spice-cardamom),0 4px 10px rgba(124,45,18,.18)}
 .theme-chip-large.active::after{
   content:'\2713';position:absolute;top:6px;left:50%;transform:translateX(-50%);
   width:24px;height:24px;border-radius:50%;background:var(--spice-cardamom);
   color:#fff;font-size:14px;font-weight:700;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 2px 6px rgba(22,101,52,.4);
+  box-shadow:0 2px 6px rgba(124,45,18,.4);
   margin-top:8px
 }
 .theme-chip-large .chip-label{
@@ -459,6 +504,7 @@ body[data-preset="ocean"] .kpi{border-left:3px solid var(--spice-saffron);box-sh
    override via body[data-theme="X"] selectors elsewhere — but
    for the swatch preview we want each chip to show ITS OWN color
    regardless of currently-active theme, so we hardcode here. */
+.theme-chip-large[data-t="saffron"]::before{background:linear-gradient(135deg,#F59E0B 0%,#C2410C 100%)}
 .theme-chip-large[data-t="emerald"]::before{background:#10B981}
 .theme-chip-large[data-t="coral"]::before{background:#F97066}
 .theme-chip-large[data-t="violet"]::before{background:#8B5CF6}
@@ -486,22 +532,23 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 #login{
   position:relative;display:flex;align-items:center;justify-content:center;
   min-height:100vh;padding:32px;overflow:hidden;
-  /* Layered colour wash — cardamom / saffron / chili / teal mesh. */
+  /* Layered colour wash — warm spice mesh: turmeric / saffron / ember
+     / clove over a cream-to-peach base. */
   background:
-    radial-gradient(900px 600px at  8% 18%,#86EFAC 0%,transparent 55%),
-    radial-gradient(720px 520px at 92% 12%,#FCD34D 0%,transparent 58%),
-    radial-gradient(800px 600px at 14% 92%,#5EEAD4 0%,transparent 55%),
-    radial-gradient(700px 540px at 88% 88%,#FB923C 0%,transparent 58%),
-    linear-gradient(135deg,#FFFBEB 0%,#ECFDF5 50%,#F0F9FF 100%)
+    radial-gradient(900px 600px at  8% 18%,#FCD34D 0%,transparent 55%),
+    radial-gradient(720px 520px at 92% 12%,#FDBA74 0%,transparent 58%),
+    radial-gradient(800px 600px at 14% 92%,#FB923C 0%,transparent 55%),
+    radial-gradient(700px 540px at 88% 88%,#F97316 0%,transparent 58%),
+    linear-gradient(135deg,#FFFBEB 0%,#FEF3E2 50%,#FFF7ED 100%)
 }
 /* Decorative blobs — bolder, with mix-blend so the mesh stays bright. */
 .login-bg{position:absolute;inset:0;pointer-events:none;z-index:0;overflow:hidden}
 .login-blob{position:absolute;display:block;border-radius:50%;filter:blur(70px);opacity:.55;mix-blend-mode:multiply}
-.login-blob.blob-1{width:460px;height:460px;background:#16A34A;top:-130px;left:-120px;opacity:.30}
+.login-blob.blob-1{width:460px;height:460px;background:#C2410C;top:-130px;left:-120px;opacity:.26}
 .login-blob.blob-2{width:380px;height:380px;background:#F59E0B;top:-80px;right:-110px;opacity:.32}
-.login-blob.blob-3{width:340px;height:340px;background:#06B6D4;bottom:-110px;left:18%;opacity:.28}
-.login-blob.blob-4{width:300px;height:300px;background:#EF4444;bottom:-90px;right:-60px;opacity:.22;mix-blend-mode:screen}
-.login-blob.blob-5{width:220px;height:220px;background:#A78BFA;top:48%;left:38%;opacity:.20}
+.login-blob.blob-3{width:340px;height:340px;background:#FB923C;bottom:-110px;left:18%;opacity:.28}
+.login-blob.blob-4{width:300px;height:300px;background:#FCD34D;bottom:-90px;right:-60px;opacity:.30;mix-blend-mode:screen}
+.login-blob.blob-5{width:220px;height:220px;background:#9A3412;top:48%;left:38%;opacity:.18}
 
 /* Brand on the left (wider, hero-style), form anchored to the right
    edge. Collapses to a single column below 820px (see media query). */
@@ -520,7 +567,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-saffron) 100%);
   color:#fff;font-weight:800;font-size:24px;letter-spacing:.5px;
-  box-shadow:0 14px 32px rgba(22,101,52,.32),0 0 0 6px rgba(22,101,52,.06);
+  box-shadow:0 14px 32px rgba(124,45,18,.32),0 0 0 6px rgba(124,45,18,.06);
   margin-bottom:22px;
   animation:loginPop .6s cubic-bezier(.16,1,.3,1) both
 }
@@ -544,11 +591,11 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
   color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);
   padding:5px 10px;border-radius:999px;margin-bottom:14px;
-  border:1px solid rgba(22,101,52,.18)
+  border:1px solid rgba(124,45,18,.18)
 }
 .login-brand-chip .dot{
   width:6px;height:6px;border-radius:50%;background:var(--spice-cardamom);
-  box-shadow:0 0 0 3px rgba(22,101,52,.14);animation:pulseDot 2.4s ease-in-out infinite
+  box-shadow:0 0 0 3px rgba(124,45,18,.14);animation:pulseDot 2.4s ease-in-out infinite
 }
 .login-brand h1{
   font-size:24px;font-weight:800;letter-spacing:-.3px;
@@ -560,8 +607,8 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   100%{opacity:1;transform:scale(1) translateY(0)}
 }
 @keyframes pulseDot{
-  0%,100%{box-shadow:0 0 0 3px rgba(22,101,52,.14)}
-  50%{box-shadow:0 0 0 6px rgba(22,101,52,.05)}
+  0%,100%{box-shadow:0 0 0 3px rgba(124,45,18,.14)}
+  50%{box-shadow:0 0 0 6px rgba(124,45,18,.05)}
 }
 @keyframes loginFadeUp{
   0%{opacity:0;transform:translateY(12px)}
@@ -579,7 +626,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .lf-bullet{
   width:8px;height:8px;border-radius:50%;flex-shrink:0;
   background:linear-gradient(135deg,var(--spice-cardamom),var(--spice-saffron));
-  box-shadow:0 0 0 4px rgba(22,101,52,.08)
+  box-shadow:0 0 0 4px rgba(124,45,18,.08)
 }
 
 /* Form card */
@@ -633,7 +680,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 .login-iwrap:hover{border-color:#CBD5E1}
 .login-iwrap:focus-within{
   border-color:var(--spice-cardamom);
-  box-shadow:0 0 0 4px rgba(22,101,52,.10);background:#FEFEFE
+  box-shadow:0 0 0 4px rgba(124,45,18,.10);background:#FEFEFE
 }
 .login-icon{color:#94A3B8;margin:0 10px 0 14px;flex-shrink:0}
 .login-iwrap:focus-within .login-icon{color:var(--spice-cardamom)}
@@ -659,10 +706,10 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-cardamom-dk) 100%);
   color:#fff;font-size:15px;font-weight:700;letter-spacing:.2px;
   display:inline-flex;align-items:center;justify-content:center;gap:10px;
-  box-shadow:0 10px 24px -8px rgba(22,101,52,.45);
+  box-shadow:0 10px 24px -8px rgba(124,45,18,.45);
   transition:transform .12s,box-shadow .15s,filter .15s
 }
-.login-submit:hover{transform:translateY(-1px);box-shadow:0 14px 28px -8px rgba(22,101,52,.55);filter:brightness(1.04)}
+.login-submit:hover{transform:translateY(-1px);box-shadow:0 14px 28px -8px rgba(124,45,18,.55);filter:brightness(1.04)}
 .login-submit:active{transform:translateY(0)}
 .login-submit svg{transition:transform .15s}
 .login-submit:hover svg{transform:translateX(2px)}
@@ -709,16 +756,17 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:8px;
   letter-spacing:-.1px
 }
-.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(31,25,21,.08)}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(60,36,18,.10)}
 .btn:active{transform:translateY(0)}
+.btn:focus-visible{outline:none;box-shadow:var(--ring-focus)}
 .btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
-.btn-g{background:var(--spice-cardamom);color:#fff;box-shadow:0 2px 6px rgba(22,101,52,.22)}
-.btn-g:hover{background:var(--spice-cardamom-dk)}
-.btn-a{background:var(--spice-saffron);color:#fff;box-shadow:0 2px 6px rgba(16,185,129,.28)}
-.btn-a:hover{background:var(--spice-saffron-dk)}
+.btn-g{background:linear-gradient(135deg,var(--spice-cardamom) 0%,var(--spice-cardamom-dk) 100%);color:#fff;box-shadow:0 3px 10px rgba(124,45,18,.26)}
+.btn-g:hover{filter:brightness(1.05);box-shadow:0 6px 16px rgba(124,45,18,.32)}
+.btn-a{background:linear-gradient(135deg,var(--spice-saffron) 0%,var(--spice-saffron-dk) 100%);color:#fff;box-shadow:var(--shadow-primary)}
+.btn-a:hover{filter:brightness(1.05);box-shadow:0 6px 18px -2px rgba(194,65,12,.50)}
 .btn-r{background:var(--spice-chili);color:#fff;box-shadow:0 2px 6px rgba(220,38,38,.22)}
 .btn-o{background:var(--spice-saffron-lt);border:1.5px solid var(--spice-saffron);color:var(--spice-saffron-dk);font-weight:600}
-.btn-o:hover{background:#D1FAE5;border-color:var(--spice-saffron-dk);color:var(--spice-saffron-dk)}
+.btn-o:hover{background:var(--spice-cardamom-lt);border-color:var(--spice-saffron-dk);color:var(--spice-saffron-dk)}
 .btn-orange{background:var(--spice-turmeric);color:#fff;box-shadow:0 2px 6px rgba(245,158,11,.25)}
 .btn-orange:hover{background:#D97706}
 .btn-blue{background:var(--blue);color:#fff}
@@ -745,9 +793,9 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 }
 .topbar h1 .dot{
   width:36px;height:36px;border-radius:10px;
-  background:linear-gradient(135deg,var(--spice-saffron) 0%,#84CC16 100%);
+  background:linear-gradient(135deg,var(--spice-turmeric) 0%,var(--spice-saffron) 55%,var(--spice-saffron-dk) 100%);
   display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:800;
-  animation:none;box-shadow:0 3px 10px rgba(16,185,129,.22);
+  animation:none;box-shadow:0 3px 10px rgba(194,65,12,.30);
   overflow:hidden;
   position:relative;
 }
@@ -776,7 +824,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   display:inline-flex;align-items:center;gap:4px;
   transition:background .2s,color .2s;cursor:default;user-select:none
 }
-.sync-pill.sync-ok{background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk)}
+.sync-pill.sync-ok{background:var(--ok-lt);color:var(--ok-dk)}
 .sync-pill.sync-err{background:var(--spice-chili-lt);color:var(--spice-chili-dk)}
 .sync-pill.sync-off{background:var(--spice-turmeric-lt);color:#B45309}
 @media (max-width: 640px){ .sync-pill{font-size:11px;padding:4px 8px} }
@@ -975,15 +1023,15 @@ body[data-perm-lot-entry-view="1"] .side-item.needs-lot-entry-view{display:flex 
 .card{
   background:var(--card);border:1px solid var(--border);border-radius:16px;
   padding:22px;margin-bottom:18px;
-  box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.06);
-  transition:box-shadow .2s
+  box-shadow:var(--shadow-md);
+  transition:box-shadow .2s,transform .2s
 }
-.card:hover{box-shadow:0 2px 4px rgba(15,23,42,.05),0 12px 32px rgba(15,23,42,.08)}
+.card:hover{box-shadow:var(--shadow-lg)}
 .card h2{
   font-size:17px;font-weight:700;margin-bottom:14px;color:var(--text);
   display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap
 }
-.card h3{font-size:14px;font-weight:700;margin:16px 0 10px;color:var(--green)}
+.card h3{font-size:14px;font-weight:700;margin:16px 0 10px;color:var(--spice-cardamom-dk)}
 
 /* ── Tables ──────────────────────────────────────────────── */
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -1001,7 +1049,7 @@ tr:hover td{background:var(--spice-cream)}
 /* ── Dashboard: KPI tiles + hero + quick actions ──────── */
 .greeting{margin-bottom:28px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
 .greeting h1{
-  font-size:30px;font-weight:700;margin:0 0 6px;letter-spacing:-.6px;
+  font-size:30px;font-weight:800;margin:0 0 6px;letter-spacing:-.7px;
   color:var(--spice-text-main);display:flex;align-items:center;gap:10px
 }
 .greeting p{font-size:15px;color:var(--spice-text-mute);margin:0}
@@ -1014,7 +1062,7 @@ tr:hover td{background:var(--spice-cream)}
   background:#fff;border-radius:16px;padding:20px 22px;position:relative;
   overflow:hidden;border:1px solid var(--spice-line);transition:all .2s
 }
-.kpi:hover{box-shadow:0 6px 18px rgba(31,25,21,.08);transform:translateY(-2px)}
+.kpi:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
 .kpi::before{
   content:'';position:absolute;top:0;left:0;width:4px;height:100%;
   background:var(--spice-saffron)
@@ -1027,8 +1075,8 @@ tr:hover td{background:var(--spice-cream)}
   text-transform:uppercase;letter-spacing:1px;margin-bottom:8px
 }
 .kpi-value{
-  font-size:32px;font-weight:700;letter-spacing:-.8px;color:var(--spice-text-main);
-  line-height:1
+  font-size:32px;font-weight:800;letter-spacing:-.8px;color:var(--spice-text-main);
+  line-height:1;font-variant-numeric:tabular-nums
 }
 .kpi-unit{
   font-size:15px;font-weight:500;color:var(--spice-text-mute);margin-left:4px
@@ -1036,7 +1084,7 @@ tr:hover td{background:var(--spice-cream)}
 .kpi-delta{
   display:inline-flex;align-items:center;gap:4px;margin-top:12px;
   font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;
-  background:var(--spice-cardamom-lt);color:var(--spice-cardamom)
+  background:var(--ok-lt);color:var(--ok-dk)
 }
 .kpi-delta.down{background:var(--spice-chili-lt);color:var(--spice-chili)}
 .kpi-delta.neutral{background:var(--tab-bg);color:var(--spice-text-mute)}
@@ -2058,7 +2106,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   border-radius:8px;font-size:12px;font-weight:600;color:var(--spice-saffron-dk);
   cursor:pointer;font-family:inherit;transition:all .15s
 }
-.dt-loadmore button:hover{background:#D1FAE5;border-color:var(--spice-saffron-dk)}
+.dt-loadmore button:hover{background:var(--spice-cardamom-lt);border-color:var(--spice-saffron-dk)}
 
 /* Undo any legacy overflow styles on the tab-content wrapper so
    we don't get a double scrollbar (one outer, one from .dt-scroll). */
@@ -2138,8 +2186,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
    Summary card (with a sticky filter row), then the lifetime
    Branch Comparison card with chart + optional data table. */
 .reports-hub{
-  background:linear-gradient(135deg,#F0FDF4 0%,#FFFBEB 100%);
-  border:1px solid #BBF7D0;border-radius:16px;
+  background:linear-gradient(135deg,#FEF0DC 0%,#FFFBEB 100%);
+  border:1px solid var(--spice-line-strong);border-radius:16px;
   padding:24px 26px;margin-bottom:20px;
 }
 .reports-hub-head{margin-bottom:18px}
@@ -2198,7 +2246,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   border-bottom-color:var(--spice-line);
   background:linear-gradient(180deg,#F0FDF4 0%,#ECFCCB 100%);
 }
-.rep-section-head:hover{background:linear-gradient(180deg,#F0FDF4 0%,#ECFDF5 100%)}
+.rep-section-head:hover{background:linear-gradient(180deg,#FEF7EC 0%,#FEF0DC 100%)}
 .rep-section-head h3{
   margin:0;font-size:14px;font-weight:700;color:var(--spice-text-main);
   letter-spacing:-.2px;flex:0 0 auto;
@@ -2578,8 +2626,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <!-- Theme chips -->
           <div style="flex:1;min-width:280px">
             <div style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Color theme</div>
-            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Auto-set by active company — ISP uses Emerald, ASP uses Ocean. Picking a theme here is a temporary override until the company changes.</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Auto-set by active company — ISP uses Saffron Luxe, ASP uses Ocean. Picking a theme here is a temporary override until the company changes.</div>
             <div id="settings-theme-chips" style="display:flex;flex-wrap:wrap;gap:10px">
+              <span class="theme-chip-large" data-t="saffron"  title="Saffron Luxe (warm spice)" onclick="setTheme('saffron')"><span class="chip-label">Saffron Luxe</span></span>
               <span class="theme-chip-large" data-t="emerald"  title="Emerald (fresh)"   onclick="setTheme('emerald')"><span class="chip-label">Emerald</span></span>
               <span class="theme-chip-large" data-t="coral"    title="Coral sunset"      onclick="setTheme('coral')"><span class="chip-label">Coral</span></span>
               <span class="theme-chip-large" data-t="violet"   title="Violet (premium)"  onclick="setTheme('violet')"><span class="chip-label">Violet</span></span>
@@ -3095,7 +3144,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="btn" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedInvoices()" title="Print all ticked invoices">🖨 Print Selected</button>
             <!-- ASP-only: Print Selected Purchase. Hidden outside ASP context.
                  Visibility toggled by applyAspContextVisibility() at load + state switch. -->
-            <button id="btn-print-asp-purchase" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="printSelectedPurchaseFromInvoices()" title="Print purchase-side mirror PDF for all ticked invoices (ASP context only)">🖨 Print Selected Purchase</button>
+            <button id="btn-print-asp-purchase" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(124,45,18,.22)" onclick="printSelectedPurchaseFromInvoices()" title="Print purchase-side mirror PDF for all ticked invoices (ASP context only)">🖨 Print Selected Purchase</button>
           </div>
 
           <!-- Bulk actions group — Delete Selected + Set Lorry No. Both
@@ -3104,7 +3153,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                on each individual checkbox change. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button id="inv-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedInvoices()" title="Delete all ticked invoices">🗑 Delete Selected <span id="inv-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
-            <button id="inv-bulk-lorry" class="needs-invoice-write btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="setLorryNoForSelected()" title="Set the lorry / vehicle number on ticked invoices (used by Tally sales voucher e-way bill)">🚚 Set Lorry No</button>
+            <button id="inv-bulk-lorry" class="needs-invoice-write btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(124,45,18,.22)" onclick="setLorryNoForSelected()" title="Set the lorry / vehicle number on ticked invoices (used by Tally sales voucher e-way bill)">🚚 Set Lorry No</button>
           </div>
 
           <!-- Destructive group — pushed right. Delete All removed in
@@ -3299,7 +3348,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                the Actions → Pick lots modal) to /api/exports so the generated
                file honours the same filters as the on-screen selection. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button id="pay-bulk-export-bank" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedBankPayment()" title="Bank-import RTGS/NEFT file for just the ticked sellers (honours per-seller lot picks)">📥 Bank Pay (Selected) <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="pay-bulk-export-bank" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(124,45,18,.22)" onclick="exportSelectedBankPayment()" title="Bank-import RTGS/NEFT file for just the ticked sellers (honours per-seller lot picks)">📥 Bank Pay (Selected) <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="pay-bulk-export" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="exportSelectedPaymentXlsx()" title="Detailed Payment XLSX for just the ticked sellers (honours per-seller lot picks)">📊 Payment XLSX (Selected)</button>
             <button id="pay-bulk-print" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="printSelectedPayments()" title="One merged PDF payment statement, a page per ticked seller">🖨 Print Selected</button>
             <button id="pay-bulk-wa" class="btn feat-whatsapp" style="display:none;height:38px;padding:0 16px;background:#25D366;color:#fff;font-weight:600" onclick="whatsappSelectedPayments()" title="WhatsApp a payment-credited message to each ticked seller, one at a time">💬 WhatsApp Selected</button>
@@ -4348,7 +4397,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
               </div>
               <button class="btn btn-o" onclick="leClearSeller()" style="padding:4px 10px;font-size:12px;height:32px">Change</button>
             </div>
-            <div id="le-bank-row" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed rgba(22,101,52,.25)">
+            <div id="le-bank-row" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed rgba(124,45,18,.25)">
               <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Bank Account</div>
               <select id="le-bank-select" style="width:100%;height:34px;padding:0 10px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;background:#fff;font-family:monospace"></select>
             </div>
@@ -7225,7 +7274,7 @@ async function loadStats(auctionId){
       const sel = (!isAllMode && a.id === _dashSelectedAuctionId) ? ' selected' : '';
       return `<option value="${a.id}"${sel}>Trade #${esc(a.ano)} — ${fmtD(a.date)}</option>`;
     }).join('');
-  const picker = `<select onchange="loadStats(this.value === 'all' ? null : parseInt(this.value))" style="background:rgba(255,255,255,.85);border:1px solid rgba(22,101,52,.25);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--spice-cardamom-dk);cursor:pointer;font-family:inherit">${pickerOptions}</select>`;
+  const picker = `<select onchange="loadStats(this.value === 'all' ? null : parseInt(this.value))" style="background:rgba(255,255,255,.85);border:1px solid rgba(124,45,18,.25);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--spice-cardamom-dk);cursor:pointer;font-family:inherit">${pickerOptions}</select>`;
 
   // Hero card: "All Trades" cumulative view in default/cumulative mode,
   // otherwise the drilled-in current-auction view.
@@ -7243,7 +7292,7 @@ async function loadStats(auctionId){
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${inrL(CUM.amount)}</strong>Total Volume</div>
         <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${CUM.auctions?inrL((CUM.amount||0)/CUM.auctions).replace('₹','₹'):'—'}</strong>Avg / Trade</div>
       </div>
-      <div style="font-size:12px;color:var(--spice-text-mute);opacity:.9;border-top:1px solid rgba(22,101,52,.15);padding-top:10px;margin-top:4px">
+      <div style="font-size:12px;color:var(--spice-text-mute);opacity:.9;border-top:1px solid rgba(124,45,18,.15);padding-top:10px;margin-top:4px">
         💡 Select a specific trade above to drill into its details
       </div>
     </div>
@@ -7278,7 +7327,7 @@ async function loadStats(auctionId){
                 <span>${label}</span>
                 <span>${has ? `<strong style="color:var(--spice-cardamom-dk)">${pct}%</strong>` : '<span style="color:var(--spice-text-hint)">n/a</span>'}</span>
               </div>
-              <div style="height:6px;background:#ffffff;border:1px solid rgba(22,101,52,.18);border-radius:999px;overflow:hidden" title="${done} of ${total}">
+              <div style="height:6px;background:#ffffff;border:1px solid rgba(124,45,18,.18);border-radius:999px;overflow:hidden" title="${done} of ${total}">
                 <div style="height:100%;background:${color};width:${pct}%;border-radius:999px;transition:width .6s ease-out"></div>
               </div>
             </div>`;
@@ -16121,7 +16170,7 @@ async function _renderInsights(){
     .ins-kpi-meta .val { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; overflow-wrap:anywhere }
 
     /* ── Filter strip ────────────────────────────────────── */
-    .ins-filter { padding:14px 18px; margin-bottom:16px; border-radius:14px; background:linear-gradient(135deg, #ECFDF5 0%, #F0F9FF 100%); border:1px solid #BBF7D0 }
+    .ins-filter { padding:14px 18px; margin-bottom:16px; border-radius:14px; background:linear-gradient(135deg, #FEF7EC 0%, #FFFBEB 100%); border:1px solid var(--spice-line-strong) }
     .ins-filter-row { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap }
     .ins-filter-row label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--text2); display:block; margin-bottom:4px }
     .ins-filter-row input[type=date] { height:36px; padding:0 10px; border:1.5px solid var(--border); border-radius:8px; font-size:13px; background:#fff; color:var(--text) }
@@ -20571,7 +20620,7 @@ async function leLoadAllocBar() {
     const isMe = sameBranch(s.branch, myBr);
     const barColor = pct >= 90 ? '#C62828' : pct >= 70 ? '#E67E22' : 'var(--green)';
     const rangeStr = s.ranges.map(r => `${r.start}-${r.end}`).join(', ');
-    return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;${isMe ? 'background:var(--green-bg);padding:4px 8px;border-radius:6px;border:1px solid rgba(22,101,52,.2)' : 'opacity:.75;padding:4px 8px'}">
+    return `<div style="display:flex;align-items:center;gap:8px;font-size:11px;${isMe ? 'background:var(--green-bg);padding:4px 8px;border-radius:6px;border:1px solid rgba(124,45,18,.2)' : 'opacity:.75;padding:4px 8px'}">
       <span style="width:90px;font-weight:${isMe ? 700 : 600};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${isMe ? 'var(--green)' : 'var(--text2)'}">${esc(s.branch)}${isMe ? ' ●' : ''}</span>
       <span style="font-family:monospace;color:var(--text3);width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(rangeStr)}">${esc(rangeStr)}</span>
       <div style="flex:1;height:6px;background:#e8e8e8;border-radius:3px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:3px"></div></div>
@@ -21677,7 +21726,7 @@ function renderPreview(inv,type){
 }
 
 // ── Theme switcher ─────────────────────────────────────────
-const _THEMES = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom'];
+const _THEMES = ['saffron','emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom'];
 // Set true once a white-label tenant preset has been applied at boot.
 // When active, the preset's theme is locked: applyCompanyTheme() and the
 // per-user theme switcher stop overriding it (the whole point of a
@@ -21712,7 +21761,7 @@ function setTheme(t){
 // Defaults below are used until the admin configures per-company themes
 // on /admin/branding (ISP theme + ASP theme), at which point the boot
 // branding fetch overwrites this map and sets _companyThemesConfigured.
-let _COMPANY_THEME = { ISP: 'emerald', ASP: 'ocean' };
+let _COMPANY_THEME = { ISP: 'saffron', ASP: 'ocean' };
 // True once the admin has set explicit per-company themes. When set, the
 // per-company colour applies even under a white-label preset, and users
 // can't override it (Appearance card hidden + setTheme() no-op).
@@ -21758,8 +21807,8 @@ function applyCompanyTheme(){
 
 // Apply saved theme on load
 (function(){
-  let saved = 'emerald';
-  try { saved = localStorage.getItem('theme') || 'emerald'; } catch(e){}
+  let saved = 'saffron';
+  try { saved = localStorage.getItem('theme') || 'saffron'; } catch(e){}
   document.body.setAttribute('data-theme', saved);
 
   // Async: pull server-side branding and, if the install's admin has set
