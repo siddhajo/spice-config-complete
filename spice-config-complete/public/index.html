@@ -2123,13 +2123,59 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 }
 
 
+/* ── Toast — card surface with a coloured status bar + icon. Shown by
+   toast(msg, type?) which sets display:flex and a toast-<type> class. */
 .toast{
   display:none;position:fixed;top:80px;right:24px;
-  padding:14px 22px;background:var(--green);color:#fff;
-  border-radius:10px;font-weight:700;font-size:14px;z-index:99;
-  box-shadow:0 4px 16px rgba(13,124,95,.25);animation:slideIn .2s
+  align-items:center;gap:11px;
+  padding:13px 18px 13px 15px;background:var(--card);color:var(--text);
+  border:1px solid var(--spice-line);border-radius:12px;
+  font-weight:600;font-size:14px;z-index:99;max-width:380px;
+  box-shadow:0 12px 30px rgba(15,23,42,.16),0 2px 6px rgba(15,23,42,.07);
+  animation:toastIn .26s cubic-bezier(.16,1,.3,1)
 }
+.toast::before{
+  content:'';align-self:stretch;width:5px;flex-shrink:0;border-radius:6px;
+  margin:-13px 2px -13px -15px;background:var(--ok)
+}
+.toast .toast-ico{flex-shrink:0;width:20px;height:20px;color:var(--ok);display:flex}
+.toast .toast-ico svg{width:20px;height:20px;stroke-width:2.2;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+.toast.toast-err::before{background:var(--spice-chili)}
+.toast.toast-err .toast-ico{color:var(--spice-chili)}
+.toast.toast-info::before{background:var(--spice-saffron)}
+.toast.toast-info .toast-ico{color:var(--spice-saffron)}
+@keyframes toastIn{from{transform:translateY(-8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+/* slideIn kept for any legacy reference */
 @keyframes slideIn{from{transform:translateX(30px);opacity:0}to{transform:none;opacity:1}}
+
+/* ── Skeleton loaders ─────────────────────────────────────
+   Shimmering placeholders that mimic content shape while data
+   loads — calmer than spinners and avoid layout shift. */
+.skel{position:relative;overflow:hidden;background:var(--spice-line);border-radius:8px;display:block}
+.skel::after{
+  content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.62),transparent);
+  animation:skelShimmer 1.45s ease-in-out infinite
+}
+@keyframes skelShimmer{100%{transform:translateX(100%)}}
+.skel-line{height:12px;margin:0 0 9px;border-radius:6px}
+.skel-line.sk-40{width:40%}.skel-line.sk-55{width:55%}.skel-line.sk-70{width:70%}.skel-line.sk-85{width:85%}
+.skel-kpi{height:104px;border-radius:16px}
+.skel-table{display:flex;flex-direction:column}
+.skel-trow{display:flex;gap:18px;padding:13px 14px;border-bottom:1px solid var(--spice-line)}
+.skel-trow .skel{height:14px;align-self:center}
+
+/* ── KPI sparkline — tiny real-data trend tucked into a tile corner ── */
+.kpi-spark{position:absolute;right:14px;bottom:14px;width:78px;height:30px;opacity:.92;pointer-events:none}
+.kpi-spark svg{width:100%;height:100%;display:block;overflow:visible}
+
+/* Button press feedback — subtle squash on click for tactile feel */
+.btn:active{transform:translateY(0) scale(.972)}
+
+@media (prefers-reduced-motion: reduce){
+  .skel::after{animation:none}
+  .toast{animation:none}
+}
 
 /* ── Modal ───────────────────────────────────────────────── */
 .modal-bg{
@@ -2597,7 +2643,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
          from a single /api/insights fetch. -->
     <div class="tc" id="tc-insights">
       <div id="insights-host">
-        <div style="padding:32px;text-align:center;color:var(--text3)">Loading insights…</div>
+        <div class="card" style="padding:20px">
+          <span class="skel skel-line sk-40" style="height:16px;margin-bottom:16px"></span>
+          <div class="kpi-grid" style="margin-bottom:0">
+            <div class="skel skel-kpi"></div><div class="skel skel-kpi"></div>
+            <div class="skel skel-kpi"></div><div class="skel skel-kpi"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -5248,51 +5300,21 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       Once you import prices the lots table is overwritten with the auctioneer's data. These reports are your record of the pre-trade state.
       <span style="display:block;margin-top:4px">Snapshots use the trade picked in the topbar.</span>
     </div>
-    <!-- Per report: label on the left, XLSX + PDF buttons on the right.
-         Praman stays CSV-only since the export pipeline doesn't render it
-         in either spreadsheet form. -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Slip</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_slip','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_slip','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
-        </span>
+    <!-- Pick a report from the dropdown, then download it in the format you
+         need — mirrors the Pre-Trade Exports section on the Exports page.
+         The format buttons adapt to the selected report (Praman is CSV-only;
+         XLSX-only reports hide the PDF button). piPopulateTypes() fills the
+         dropdown each time the modal opens. -->
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;margin-bottom:2px">
+      <div style="flex:1;min-width:200px">
+        <label style="display:block;font-size:11px;font-weight:600;color:#7C2D12;margin-bottom:3px">Report</label>
+        <select id="pi-type" onchange="piOnTypeChange()" style="width:100%;padding:7px 8px;border:1px solid #FDE68A;border-radius:6px;background:#FFFBEB;color:#7C2D12;font-size:12px;font-weight:600"></select>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Buyer</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_buyer','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_buyer','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
-        </span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Lot Name</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_name','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
-          <button class="btn btn-o" type="button" onclick="piQuickExport('lot_name','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
-        </span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Praman</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('praman_csv','csv')" title="Download as CSV" style="padding:3px 8px;font-size:11px;font-weight:600">📄 CSV</button>
-        </span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Price List (Before)</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('price_list_before','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
-          <button class="btn btn-o" type="button" onclick="piQuickExport('price_list_before','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
-        </span>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:4px 8px">
-        <span style="font-size:12px;font-weight:600;color:#7C2D12">Dealer List</span>
-        <span style="display:flex;gap:4px">
-          <button class="btn btn-o" type="button" onclick="piQuickExport('dealer_list','xlsx')" title="Download as Excel" style="padding:3px 8px;font-size:11px;font-weight:600">📊 XLSX</button>
-          <button class="btn btn-o" type="button" onclick="piQuickExport('dealer_list','pdf')"  title="Download as PDF"   style="padding:3px 8px;font-size:11px;font-weight:600">📄 PDF</button>
-        </span>
-      </div>
+      <span style="display:flex;gap:4px">
+        <button class="btn btn-o" type="button" id="pi-btn-xlsx" onclick="piQuickExport(piCurrentType(),'xlsx')" title="Download as Excel" style="padding:6px 10px;font-size:11px;font-weight:600">📊 XLSX</button>
+        <button class="btn btn-o" type="button" id="pi-btn-pdf"  onclick="piQuickExport(piCurrentType(),'pdf')"  title="Download as PDF"   style="padding:6px 10px;font-size:11px;font-weight:600">📄 PDF</button>
+        <button class="btn btn-o" type="button" id="pi-btn-csv"  onclick="piQuickExport(piCurrentType(),'csv')"  title="Download as CSV"   style="padding:6px 10px;font-size:11px;font-weight:600;display:none">📄 CSV</button>
+      </span>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#7C2D12;margin-top:10px;cursor:pointer;font-weight:600">
       <input type="checkbox" id="pi-ack" onchange="piAckChanged()">
@@ -5558,7 +5580,23 @@ function updateSyncIndicator(){
 }
 // Refresh the indicator's "Xs ago" text every 10s
 setInterval(updateSyncIndicator, 10000);
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
+// toast(message, type?) — type is 'error' | 'info' | undefined (success).
+// Backward compatible: existing toast('msg') calls render as success.
+function toast(m, type){
+  const t=document.getElementById('toast');
+  if(!t) return;
+  const ico = type==='error'
+    ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>'
+    : type==='info'
+    ? '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-5M12 8h.01"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>';
+  t.className='toast'+(type==='error'?' toast-err':type==='info'?' toast-info':'');
+  t.innerHTML='<span class="toast-ico">'+ico+'</span><span class="toast-msg"></span>';
+  t.querySelector('.toast-msg').textContent=m;
+  t.style.display='flex';
+  clearTimeout(t._t);
+  t._t=setTimeout(()=>{ t.style.display='none'; },3200);
+}
 
 // Show a user-friendly error. Uses the friendlyErr() mapping for HTTP/network
 // errors; falls back to the message string. Non-blocking — shows a red toast.
@@ -5624,6 +5662,77 @@ async function withOverlay(message, fn){
 
 // ── Empty-state helper ────────────────────────────────
 // Returns HTML for an empty list. Pass {icon, title, body, actionLabel, onAction}.
+// ── Skeleton loaders ───────────────────────────────────────
+// skeletonRows(n, cols) → table-shaped placeholder rows.
+// skeletonKpis(n)       → KPI-tile-shaped placeholders.
+// Widths vary per cell so the shimmer reads as "content", not bars.
+function skeletonRows(n, cols){
+  n = n || 6; cols = cols || 4;
+  const widths = ['70%','45%','60%','40%','55%','50%'];
+  let out = '<div class="skel-table">';
+  for (let r=0; r<n; r++){
+    out += '<div class="skel-trow">';
+    for (let c=0; c<cols; c++){
+      out += `<span class="skel" style="flex:${c===0?2:1};width:${widths[(r+c)%widths.length]}"></span>`;
+    }
+    out += '</div>';
+  }
+  return out + '</div>';
+}
+function skeletonKpis(n){
+  n = n || 4;
+  return Array.from({length:n}, () => '<div class="skel skel-kpi"></div>').join('');
+}
+
+// ── Sparkline ───────────────────────────────────────────────
+// sparklineSVG(values, color) → inline SVG mini trend line with a
+// soft area fill and an end dot. Pure presentation of REAL values;
+// returns '' for empty/flat-empty input so callers can skip it.
+function sparklineSVG(values, color){
+  const v = (values||[]).map(Number).filter(x => !isNaN(x));
+  if (v.length < 2) return '';
+  const W = 78, H = 30, P = 3;
+  const min = Math.min(...v), max = Math.max(...v);
+  const span = (max - min) || 1;
+  const stepX = (W - P*2) / (v.length - 1);
+  const pts = v.map((y,i) => {
+    const px = P + i*stepX;
+    const py = P + (H - P*2) * (1 - (y - min)/span);
+    return [px, py];
+  });
+  const line = pts.map((p,i)=> (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const area = `M${pts[0][0].toFixed(1)} ${(H-P).toFixed(1)} `
+    + pts.map(p=>'L'+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')
+    + ` L${pts[pts.length-1][0].toFixed(1)} ${(H-P).toFixed(1)} Z`;
+  const c = color || 'var(--spice-saffron)';
+  const end = pts[pts.length-1];
+  const gid = 'spk'+Math.round(pts[0][1]*100)+pts.length;
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${c}" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="${c}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#${gid})"/>
+    <path d="${line}" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${end[0].toFixed(1)}" cy="${end[1].toFixed(1)}" r="2.4" fill="${c}"/>
+  </svg>`;
+}
+
+// Fetches the real revenue-trend series and draws a sparkline into the
+// "Revenue this month" KPI tile (#rev-spark). Best-effort: silently
+// no-ops on any failure so the dashboard never breaks over a decoration.
+async function drawRevenueSparkline(){
+  const host = document.getElementById('rev-spark');
+  if (!host) return;
+  try {
+    const d = await j('/api/stats/revenue-trend?days=14');
+    const series = (d && (d.series || d.data || d)) || [];
+    const vals = (Array.isArray(series) ? series : []).map(p => Number(p.total ?? p.value ?? p) || 0);
+    if (vals.filter(x=>x>0).length < 2) return;
+    host.innerHTML = sparklineSVG(vals, 'var(--spice-chili)');
+  } catch(_) { /* decoration only */ }
+}
+
 function emptyStateHTML(opts){
   const icons = {
     lots:     '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M7 11h10M7 15h6"/></svg>',
@@ -6548,7 +6657,7 @@ window._currentTab = 'dash';
 async function loadFormulas(){
   const host = document.getElementById('tc-formulas');
   if (!host) return;
-  host.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:var(--text3)">Loading formulas…</div>';
+  host.innerHTML = '<div class="card" style="padding:14px">' + skeletonRows(5, 3) + '</div>';
   let cfg = {};
   try {
     cfg = await j('/api/company-settings/flat') || {};
@@ -7544,7 +7653,7 @@ async function loadStats(auctionId){
       <div class="leader-bar"><div class="leader-fill" style="width:${pct}%"></div></div>
       <div class="leader-value">${inrL(s.amount)}</div>
     </div>`;
-  }).join('') : '<div style="text-align:center;color:var(--spice-text-hint);padding:24px 0;font-size:13px">No seller data this week</div>';
+  }).join('') : emptyStateHTML({icon:'traders', title:'No seller data this week', body:'Once trades are recorded, your top sellers will appear here.'});
 
   const saleMap = {L:['pill-local','Local'], I:['pill-inter','Inter-state'], E:['pill-export','Export'], W:['pill-wd','Withdrawn'], N:['pill-na','N/A']};
   const avatarColors = ['','c2','c3','c4'];
@@ -7569,7 +7678,7 @@ async function loadStats(auctionId){
         </tr>`;
       }).join('')}</tbody>
     </table>
-  ` : '<div style="text-align:center;color:var(--spice-text-hint);padding:24px 0;font-size:13px">No invoices yet — <a href="#" onclick="go(\'invoices\');return false" style="color:var(--spice-saffron)">generate your first</a></div>';
+  ` : emptyStateHTML({icon:'invoices', title:'No invoices yet', body:'Generate an invoice from a completed trade and it will show up here.', actionLabel:'Create your first invoice', onAction:"go('invoices')"});
 
   const uname = document.getElementById('user-lbl')?.textContent || 'there';
 
@@ -7619,6 +7728,7 @@ async function loadStats(auctionId){
         <div class="kpi-label">Revenue this month</div>
         <div class="kpi-value">${inrL(K.monthRevenue).replace('₹','').replace('L','')}<span class="kpi-unit">${(K.monthRevenue||0)>=100000?'L':''}</span></div>
         ${revPill}
+        <span class="kpi-spark" id="rev-spark"></span>
       </div>
     </div>
 
@@ -7632,7 +7742,7 @@ async function loadStats(auctionId){
       </div>
       <div style="padding:14px 22px 18px" id="dash-headline-body">
         <div class="kpi-grid" id="dash-headline-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:0">
-          <div style="grid-column:1/-1;padding:18px 8px;text-align:center;color:var(--spice-text-hint);font-size:13px">Loading…</div>
+          ${skeletonKpis(4)}
         </div>
       </div>
     </div>
@@ -7777,6 +7887,8 @@ async function loadStats(auctionId){
   // synchronously above with a "Loading…" placeholder; this call fills
   // it in asynchronously so the dashboard paint is never blocked.
   renderDashHeadlineTiles(_dashSelectedAuctionId);
+  // Real-data sparkline in the Revenue KPI — async, best-effort.
+  drawRevenueSparkline();
 }
 
 // Keep every headline value on ONE line with decimals visible. Money
@@ -12030,7 +12142,32 @@ function openPriceImport(){
   if(ack) ack.checked=false;
   const submit=document.getElementById('pi-submit');
   if(submit) submit.disabled=true;
+  piPopulateTypes();   // fill the snapshot report dropdown
   showModal('price-import-modal');
+}
+// Selected snapshot report in the Price Import reminder's dropdown.
+function piCurrentType(){ return document.getElementById('pi-type')?.value || Object.keys(PRETRADE_EXP_LABELS)[0]; }
+// Fill the dropdown from PRETRADE_EXP_LABELS (the same pre-trade set as the
+// Exports page), preserving the current pick across re-opens, then sync the
+// format buttons.
+function piPopulateTypes(){
+  const sel=document.getElementById('pi-type');
+  if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && PRETRADE_EXP_LABELS[cur]) sel.value=cur;
+  piOnTypeChange();
+}
+// Toggle the format buttons by the selected report's rules — identical to
+// the Export Center / Pre-Trade section: CSV-only types show only CSV;
+// XLSX-only types drop PDF.
+function piOnTypeChange(){
+  const t=piCurrentType();
+  const isCsv=EXP_CSV_ONLY.has(t), isXlsx=EXP_XLSX_ONLY.has(t);
+  const show=(id,v)=>{const el=document.getElementById(id);if(el)el.style.display=v?'':'none';};
+  show('pi-btn-xlsx', !isCsv);
+  show('pi-btn-pdf',  !isCsv && !isXlsx);
+  show('pi-btn-csv',  isCsv);
 }
 function piAckChanged(){
   const ack=document.getElementById('pi-ack');

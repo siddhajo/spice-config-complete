@@ -739,7 +739,7 @@ app.get('/api/branding', (req, res) => {
       gstin,
       logoUrl: '/logo-ispl.png',
       // Per-install branding choices — empty when the admin hasn't picked
-      // one yet (frontend then falls back to localStorage / 'emerald').
+      // one yet (frontend then falls back to localStorage / 'luxe').
       theme: cfg.theme || '',
       themeCustomColor: cfg.theme_custom_color || '',
       // Preset bundle. preset is the named slug (e.g. 'bluehill');
@@ -750,7 +750,7 @@ app.get('/api/branding', (req, res) => {
       // Per-company colour themes. When set, the frontend applies each
       // company's own colour (ISP active → ispTheme, ASP active → aspTheme)
       // even under a preset, and locks the Appearance card. Empty = use
-      // the built-in ISP→emerald / ASP→ocean defaults.
+      // the built-in ISP→Emerald Luxe / ASP→ocean defaults.
       ispTheme: cfg.isp_theme || '',
       aspTheme: cfg.asp_theme || '',
       // e-Auction colour themes per business state. e-Auction always runs
@@ -780,8 +780,8 @@ app.get('/api/branding', (req, res) => {
 // /api/branding and applies it at boot.
 const TENANT_PRESETS = {
   cardamom: {
-    label: 'Cardamom (default — premium spacious)',
-    theme: 'emerald',
+    label: 'Cardamom (default — Emerald Luxe, premium spacious)',
+    theme: 'luxe',
     customColor: '',
     density: 'roomy',
     font: 'jakarta',
@@ -841,7 +841,7 @@ const TENANT_DENSITIES = ['compact', 'roomy', 'spacious'];
 // Used both to populate the per-company theme dropdowns on /admin/branding
 // and to validate the saved isp_theme / asp_theme values. Mirrors _THEMES
 // in index.html (minus 'custom', which needs a hex and isn't per-company).
-const THEME_SLUGS = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate'];
+const THEME_SLUGS = ['luxe','emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate'];
 
 // Gatekeeper. Compares against ADMIN_BRANDING_KEY env var, falling back
 // to 'change-me' so an unsecured deploy is loud — running ?key=change-me
@@ -878,19 +878,19 @@ app.get('/admin/branding', (req, res) => {
   // Custom-preset form field defaults — populated from current config
   // if the active preset IS 'custom', otherwise blank.
   const c = (currentPreset === 'custom' && currentConfig) ? currentConfig : {};
-  const cTheme    = c.theme || 'emerald';
+  const cTheme    = c.theme || 'luxe';
   const cColor    = c.customColor || '';
   const cDensity  = c.density || 'roomy';
   const cFont     = c.font || 'jakarta';
   const cHide     = c.hideAppearance !== false; // default true
 
-  const themeOpts = ['emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom']
-    .map(t => `<option value="${t}" ${t === cTheme ? 'selected' : ''}>${t}</option>`).join('');
+  const themeOpts = ['luxe','emerald','coral','violet','sunshine','electric','ocean','tech','minimal','trust','rose','indigo','teal','slate','custom']
+    .map(t => `<option value="${t}" ${t === cTheme ? 'selected' : ''}>${t === 'luxe' ? 'luxe (Emerald Luxe — default)' : t}</option>`).join('');
   const densityOpts = TENANT_DENSITIES.map(d => `<option value="${d}" ${d === cDensity ? 'selected' : ''}>${d}</option>`).join('');
   const fontOpts = TENANT_FONTS.map(f => `<option value="${f}" ${f === cFont ? 'selected' : ''}>${f}</option>`).join('');
 
   // Per-company colour themes (ISP / ASP). Empty = use the built-in
-  // ISP→emerald / ASP→ocean defaults.
+  // ISP→Emerald Luxe / ASP→ocean defaults.
   const curIspTheme = cfg.isp_theme || '';
   const curAspTheme = cfg.asp_theme || '';
   // e-Auction colour themes per state (Tamil Nadu / Kerala). Empty = fall
@@ -898,7 +898,7 @@ app.get('/admin/branding', (req, res) => {
   const curEaTnTheme = cfg.eauction_tn_theme || '';
   const curEaKlTheme = cfg.eauction_kl_theme || '';
   const perCoThemeOpts = (cur) => ['', ...THEME_SLUGS]
-    .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (ISP→emerald / ASP→ocean) —'}</option>`)
+    .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (ISP→Emerald Luxe / ASP→Ocean) —'}</option>`)
     .join('');
   const eaThemeOpts = (cur) => ['', ...THEME_SLUGS]
     .map(t => `<option value="${t}" ${t === cur ? 'selected' : ''}>${t || '— default (use company theme) —'}</option>`)
@@ -982,7 +982,7 @@ app.get('/admin/branding', (req, res) => {
     <p style="font-size: 12px; color: #6b7280; margin: 0 0 6px">
       Give each company its own colour. The app applies <strong>ISP theme</strong> when ISP is the active company and
       <strong>ASP theme</strong> when ASP is active — even with a preset set — and locks the Appearance card so users can't override it.
-      Leave both on “default” to use the built-in ISP→emerald / ASP→ocean. Saved together with <em>Apply preset</em> below.
+      Leave both on “default” to use the built-in ISP→Emerald Luxe / ASP→Ocean. Saved together with <em>Apply preset</em> below.
     </p>
     <div class="row">
       <div>
@@ -1097,7 +1097,7 @@ app.post('/api/admin/preset', (req, res) => {
     }
     // Whitelist fields so an attacker can't shove arbitrary JSON.
     finalConfig = {
-      theme: String(config.theme || 'emerald'),
+      theme: String(config.theme || 'luxe'),
       customColor: /^#[0-9a-fA-F]{6}$/.test(config.customColor || '') ? config.customColor : '',
       density: TENANT_DENSITIES.includes(config.density) ? config.density : 'roomy',
       font: TENANT_FONTS.includes(config.font) ? config.font : 'jakarta',
