@@ -14,31 +14,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  /* ═══ DEFAULT (Saffron Luxe) — warm spice palette: burnt saffron
-     primary, turmeric-gold accent, warm cream surfaces, espresso ink.
-     Overridden by body[data-theme] rules below. ═══ */
-  --spice-saffron: #C2410C;      /* burnt saffron — primary */
-  --spice-saffron-lt: #FDF1E7;   /* warm tint for soft fills */
-  --spice-saffron-md: #FDBA74;   /* mid ember — borders/hairlines */
-  --spice-saffron-dk: #9A3412;   /* deep ember — hovers/active */
-  --spice-turmeric: #F59E0B;     /* turmeric gold — accent */
+  /* ═══ SHARED BASE (Emerald defaults) — every body[data-theme] block
+     below overrides the accent colours and inherits everything else
+     from here. The actual default look is "Saffron Luxe", applied via
+     the body:not([data-theme]) / [data-theme="saffron"] block further
+     down so it stays a complete, self-contained theme. ═══ */
+  --spice-saffron: #10B981;
+  --spice-saffron-lt: #ECFDF5;
+  --spice-saffron-md: #6EE7B7;
+  --spice-saffron-dk: #047857;
+  --spice-turmeric: #F59E0B;
   --spice-turmeric-lt: #FEF3C7;
-  --spice-cardamom: #B45309;     /* warm amber-brown — secondary brand */
-  --spice-cardamom-lt: #FEF0DC;
-  --spice-cardamom-dk: #7C2D12;  /* roasted brown — deep accents */
+  --spice-cardamom: #166534;
+  --spice-cardamom-lt: #DCFCE7;
+  --spice-cardamom-dk: #14532D;
   --spice-pepper: var(--spice-text-main);
-  --spice-clove: #9A3412;
+  --spice-clove: #047857;
   --spice-chili: #DC2626;
   --spice-chili-lt: #FEE2E2;
   --spice-chili-dk: #991B1B;
-  --spice-cumin: #8A7A6D;        /* warm taupe-grey */
-  --spice-cream: #FBF7F0;        /* warm cream — app background */
+  --spice-cumin: #64748B;
+  --spice-cream: #F8FAFC;
   --spice-paper: #FFFFFF;
-  --spice-line: #EDE6DB;         /* warm hairline */
-  --spice-line-strong: #DDD2C3;  /* warm stronger border */
-  --spice-text-main: #1C1410;    /* espresso ink */
-  --spice-text-mute: #6B5D52;    /* warm taupe text */
-  --spice-text-hint: #A89B8D;    /* muted sand */
+  --spice-line: #E2E8F0;
+  --spice-line-strong: #CBD5E1;
+  --spice-text-main: #0F172A;
+  --spice-text-mute: #475569;
+  --spice-text-hint: #94A3B8;
 
   /* Refined-depth shadow tokens — warm-tinted, layered */
   --shadow-sm: 0 1px 2px rgba(60,36,18,.06);
@@ -71,7 +73,7 @@
   --red:           var(--spice-chili);
   --red-bg:        var(--spice-chili-lt);
   --blue:          var(--spice-saffron);
-  --tab-bg:        #EFE7DA;
+  --tab-bg:        #E2E8F0;
   --spice:         var(--spice-saffron);
   --spice-lt:      var(--spice-saffron-lt);
   --amber:         var(--spice-turmeric);
@@ -81,33 +83,34 @@
   letter-spacing:-.01em;
 }
 
-/* ═══ Default install (no data-theme) gets the deep espresso sidebar.
-   Scoped with :not([data-theme]) so the other themes keep their own
-   per-theme dark sidebar via the fallback chain. ═══ */
+/* ═══ THEME: Saffron Luxe — the new DEFAULT. Warm spice palette: burnt
+   saffron primary, turmeric-gold accent, warm cream surfaces, espresso
+   ink, deep espresso sidebar. A complete, self-contained theme — every
+   token it changes is set HERE (not in :root) so the other themes are
+   untouched. Applied to the bare default (no data-theme, e.g. first
+   paint before JS) AND the named "saffron" theme. ═══ */
 body:not([data-theme]),
 body[data-theme="saffron"]{
-  --sidebar-bg-top: #3B2415;   /* roasted espresso */
-  --sidebar-bg-bot: #1F140C;   /* near-black cacao */
-}
-
-/* ═══ THEME: Saffron Luxe — the new default, also selectable by name so
-   installs can pin it explicitly. Mirrors :root's warm spice palette. ═══ */
-body[data-theme="saffron"]{
-  --spice-saffron:    #C2410C;
-  --spice-saffron-lt: #FDF1E7;
-  --spice-saffron-md: #FDBA74;
-  --spice-saffron-dk: #9A3412;
-  --spice-turmeric:   #F59E0B;
+  --spice-saffron:    #C2410C;   /* burnt saffron — primary */
+  --spice-saffron-lt: #FDF1E7;   /* warm tint for soft fills */
+  --spice-saffron-md: #FDBA74;   /* mid ember — borders/hairlines */
+  --spice-saffron-dk: #9A3412;   /* deep ember — hovers/active */
+  --spice-turmeric:   #F59E0B;   /* turmeric gold — accent */
   --spice-turmeric-lt:#FEF3C7;
-  --spice-cardamom:   #B45309;
+  --spice-cardamom:   #B45309;   /* warm amber-brown — secondary brand */
   --spice-cardamom-lt:#FEF0DC;
-  --spice-cardamom-dk:#7C2D12;
-  --spice-cream:      #FBF7F0;
-  --spice-line:       #EDE6DB;
-  --spice-line-strong:#DDD2C3;
-  --spice-text-main:  #1C1410;
-  --spice-text-mute:  #6B5D52;
-  --spice-text-hint:  #A89B8D;
+  --spice-cardamom-dk:#7C2D12;   /* roasted brown — deep accents */
+  --spice-clove:      #9A3412;
+  --spice-cumin:      #8A7A6D;   /* warm taupe-grey */
+  --spice-cream:      #FBF7F0;   /* warm cream — app background */
+  --spice-line:       #EDE6DB;   /* warm hairline */
+  --spice-line-strong:#DDD2C3;   /* warm stronger border */
+  --spice-text-main:  #1C1410;   /* espresso ink */
+  --spice-text-mute:  #6B5D52;   /* warm taupe text */
+  --spice-text-hint:  #A89B8D;   /* muted sand */
+  /* Deep espresso → cacao sidebar — the app's warm mood anchor */
+  --sidebar-bg-top:   #3B2415;
+  --sidebar-bg-bot:   #1F140C;
 }
 
 /* ═══ THEME: Coral sunset — warm pink/coral primary, peach accents ═══ */
