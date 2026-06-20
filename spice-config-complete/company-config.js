@@ -19,6 +19,7 @@ const DEFAULTS = [
   { key: 'partnership_name', value: '',              category: 'company',   label: 'Partnership Name / No.',  type: 'text' },
   { key: 'fssai',           value: '',               category: 'company',   label: 'FSSAI No.',               type: 'text' },
   { key: 'sbl',             value: '',               category: 'company',   label: 'SBL No.',                 type: 'text' },
+  { key: 'msme_no',         value: '',               category: 'company',   label: 'MSME No.',                type: 'text' },
 
   // ── ADDRESS (Kerala) ───────────────────────────────────────
   { key: 'kl_address1',     value: 'FLAT No.42,V.O.C.1ST STREET,MELACHOKKANATHAPURAM', category: 'address_kl', label: 'Address Line 1', type: 'text' },
@@ -55,6 +56,7 @@ const DEFAULTS = [
   { key: 's_pan',           value: 'ABDCA2636B',    category: 'sister',    label: 'PAN',                      type: 'text' },
   { key: 's_fssai',         value: '',               category: 'sister',    label: 'FSSAI No.',                type: 'text' },
   { key: 's_sbl',           value: 'CS/55884/950/2026-27', category: 'sister', label: 'SBL No.',               type: 'text' },
+  { key: 's_msme',          value: '',               category: 'sister',    label: 'MSME No.',                 type: 'text' },
 
   // ── BRANCHES ───────────────────────────────────────────────
   { key: 'br1',             value: 'NEDUMKANDAM',    category: 'branches',  label: 'Branch 1',                type: 'text' },
@@ -98,11 +100,11 @@ const DEFAULTS = [
   { key: 'flag_inter_transport', value: 'true',      category: 'rates',     label: 'Inter-State Transport (use inter-state transport rate)', type: 'boolean' },
   { key: 'transport',       value: '2.5',            category: 'rates',     label: 'Transport (₹/kg)',         type: 'number' },
   { key: 'flag_inter_insurance', value: 'true',      category: 'rates',     label: 'Inter-State Insurance (use inter-state insurance rate)', type: 'boolean' },
-  { key: 'insurance',       value: '0.75',           category: 'rates',     label: 'Insurance (₹/kg)',         type: 'number' },
+  { key: 'insurance',       value: '0.75',           category: 'rates',     label: 'Insurance (₹/₹1000)',      type: 'number' },
   { key: 'flag_local_transport', value: 'true',      category: 'rates',     label: 'Local Transport (use local transport rate)', type: 'boolean' },
   { key: 'local_transport', value: '2.5',            category: 'rates',     label: 'Local Transport (₹/kg)',   type: 'number' },
   { key: 'flag_local_insurance', value: 'true',      category: 'rates',     label: 'Local Insurance (use local insurance rate)', type: 'boolean' },
-  { key: 'local_insurance', value: '0.75',           category: 'rates',     label: 'Local Insurance (₹/kg)',   type: 'number' },
+  { key: 'local_insurance', value: '0.75',           category: 'rates',     label: 'Local Insurance (₹/₹1000)', type: 'number' },
   { key: 'discount_pct',    value: '0',              category: 'rates',     label: 'Discount %',               type: 'number' },
   { key: 'discount_days',   value: '0',              category: 'rates',     label: 'No. of Days for Discount', type: 'number' },
   { key: 'dealer_days',     value: '0',              category: 'rates',     label: 'No. of Days for Dealer',   type: 'number' },
@@ -232,7 +234,9 @@ const DEFAULTS = [
 
   // ── INTEGRATIONS ───────────────────────────────────────────
   { key: 'gst_api_key',     value: '',               category: 'integrations', label: 'GST Lookup API Key (gstincheck.co.in)', type: 'text' },
-  { key: 'seller_youtube_url', value: '',            category: 'integrations', label: 'Seller YouTube Link (shared in WhatsApp notices)', type: 'text' },
+
+  // ── NOTIFICATIONS ──────────────────────────────────────────
+  { key: 'seller_youtube_url', value: '',            category: 'notifications', label: 'Seller YouTube Link (shared in WhatsApp notices)', type: 'text' },
 
   // ── TALLY EXPORT ──────────────────────────────────────────
   // Settings here mirror the macro's Configration form (UserForm1) field-for-field.
@@ -406,12 +410,26 @@ const DEFAULTS = [
   { key: 'date_format', value: 'dd/mm/yyyy', category: 'display',
     label: 'Date format (used across the app)',
     type: 'select' },
+  // ── SENSITIVE-FIELD MASKING (Display) ──────────────────────
+  // Mask bank account no., IFSC and phone wherever they're shown on
+  // screen and on receipt/slip PDFs. Functional outputs — the bank
+  // payment file, DBF, Tally XML and WhatsApp send targets — are NEVER
+  // masked (they need the real values). Modes: none / last4 / last6 /
+  // first4 / first6 / full (phone also offers first2last2).
+  // mask_acct defaults to 'last4' because the lot-receipt renderer
+  // already masked the seller account to last-4 unconditionally before
+  // this setting existed; defaulting to 'none' would silently expose
+  // full account numbers on upgrade. IFSC and phone were never masked,
+  // so they default to 'none' (no change on upgrade — operator opts in).
+  { key: 'mask_acct',  value: 'last4', category: 'display', label: 'Mask Bank Account No.', type: 'select' },
+  { key: 'mask_ifsc',  value: 'none',  category: 'display', label: 'Mask IFSC Code',        type: 'select' },
+  { key: 'mask_phone', value: 'none',  category: 'display', label: 'Mask Phone Number',     type: 'select' },
 ];
 
 const CATEGORIES = {
   mode:       { order: 0, title: 'Business Mode',        icon: '⚙' },
   company:    { order: 1, title: 'Company Details',       icon: '🏢' },
-  display:    { order: 1.5, title: 'Display',             icon: '🗓', description: 'App-wide display preferences. The date format chosen here is used consistently across the screens, exports, and printed reports.' },
+  display:    { order: 1.5, title: 'Display',             icon: '🗓', description: 'App-wide display preferences. The date format chosen here is used consistently across the screens, exports, and printed reports. Masking hides bank account no., IFSC and phone on receipts and on-screen lists/panels (pick how many digits stay visible); the bank payment file, DBF, Tally and WhatsApp targets always keep the real numbers.' },
   address_kl: { order: 2, title: 'Address (Kerala)',      icon: '📍' },
   address_tn: { order: 3, title: 'Address (Tamil Nadu)',  icon: '📍' },
   sister:     { order: 4, title: 'Sister Company (ASP)',  icon: '🤝' },
@@ -424,6 +442,7 @@ const CATEGORIES = {
   flags:      { order: 11, title: 'Feature Flags',        icon: '🔧' },
   booking:    { order: 11.55, title: 'Booking Limits & Alerts', icon: '🚦', description: 'Soft/escalation alerts when a single seller’s booked weight in a trade crosses a share of the planned weight. The limit is a percentage of the per-seller planned weight (MT). At the soft threshold the depot manager is alerted on WhatsApp; if booking continues past the escalation threshold the immediate superior is alerted. Per-branch manager/superior numbers can be set via the Booking Contacts API; the numbers here are fallbacks.' },
   lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, and receipt format.' },
+  notifications: { order: 11.9, title: 'Notifications',   icon: '🔔', description: 'Seller-facing notification settings. The YouTube link below is appended to the WhatsApp notices sent to sellers (lot-sold alerts and invoice details) when configured.' },
   integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },
   spice_board:{ order: 14, title: 'Spice Board Reports',   icon: '🌶', description: 'Statutory cardamom-auction reports. Place values entered below populate the Place of Auction dropdown on the FORM-D report.' },
@@ -488,6 +507,25 @@ function initCompanySettings(db) {
   } else {
     db.prepare('DELETE FROM company_settings WHERE key = ?').run('dispatched_through');
   }
+
+  // Migration: keep stored labels in sync with the current DEFAULTS for a
+  // few keys whose label text changed after first install (seeding uses
+  // INSERT OR IGNORE, so existing rows keep their old label otherwise).
+  //   • Insurance / Local Insurance: "(₹/kg)" → "(₹/₹1000)" — the rate has
+  //     always been applied per ₹1000 of goods value, so the old "/kg"
+  //     label was simply wrong.
+  try {
+    const relabel = db.prepare('UPDATE company_settings SET label = ? WHERE key = ? AND label != ?');
+    relabel.run('Insurance (₹/₹1000)',       'insurance',       'Insurance (₹/₹1000)');
+    relabel.run('Local Insurance (₹/₹1000)', 'local_insurance', 'Local Insurance (₹/₹1000)');
+  } catch (e) { /* non-fatal */ }
+
+  // Migration: the Seller YouTube Link moved out of "Integrations" into its
+  // own "Notifications" settings section. Re-home the existing row (seeding
+  // uses INSERT OR IGNORE, so an installed row keeps its old category).
+  try {
+    db.prepare("UPDATE company_settings SET category = 'notifications' WHERE key = 'seller_youtube_url' AND category != 'notifications'").run();
+  } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs
   // default to 'e-Trade' (see DEFAULTS); operators can switch to

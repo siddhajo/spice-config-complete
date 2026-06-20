@@ -2177,6 +2177,21 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   .toast{animation:none}
 }
 
+/* ── Styled alert / confirm dialog ─────────────────────────── */
+.app-dialog-bg{z-index:200}
+.app-dialog{max-width:440px}
+.app-dialog .ad-row{display:flex;gap:14px;align-items:flex-start}
+.app-dialog .ad-ico{flex-shrink:0;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+.app-dialog .ad-ico svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.app-dialog-info    .ad-ico{background:var(--spice-saffron-lt);color:var(--spice-saffron-dk)}
+.app-dialog-success .ad-ico{background:var(--ok-lt);color:var(--ok-dk)}
+.app-dialog-warn    .ad-ico{background:var(--spice-turmeric-lt);color:#B45309}
+.app-dialog-error   .ad-ico{background:var(--spice-chili-lt);color:var(--spice-chili-dk)}
+.app-dialog .ad-body{flex:1;min-width:0}
+.app-dialog h2{font-size:17px;font-weight:700;margin:3px 0 6px;color:var(--text)}
+.app-dialog .ad-msg{font-size:14px;line-height:1.55;color:var(--spice-text-mute);white-space:pre-wrap;margin:0;overflow-wrap:anywhere}
+.app-dialog .actions{margin-top:22px}
+
 /* ── Modal ───────────────────────────────────────────────── */
 .modal-bg{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
@@ -5662,6 +5677,73 @@ async function withOverlay(message, fn){
 
 // ── Empty-state helper ────────────────────────────────
 // Returns HTML for an empty list. Pass {icon, title, body, actionLabel, onAction}.
+// ── Styled dialogs (alert / confirm) ───────────────────────
+// Replaces the native browser alert()/confirm() chrome with on-brand
+// modals that match the app. _appDialog returns a Promise resolving to
+// the clicked button's value; appAlert/appConfirm wrap it.
+function _appDialog(o){
+  return new Promise(resolve => {
+    const icons = {
+      info:    '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-5M12 8h.01"/></svg>',
+      success: '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>',
+      warn:    '<svg viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+      error:   '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>'
+    };
+    const bg = document.createElement('div');
+    bg.className = 'modal-bg show app-dialog-bg';
+    bg.innerHTML =
+      '<div class="modal app-dialog app-dialog-' + (o.icon||'info') + '" role="alertdialog" aria-modal="true">' +
+        '<div class="ad-row"><span class="ad-ico">' + (icons[o.icon]||icons.info) + '</span>' +
+        '<div class="ad-body"><h2>' + esc(o.title||'') + '</h2>' +
+        '<p class="ad-msg"></p></div></div>' +
+        '<div class="actions"></div>' +
+      '</div>';
+    bg.querySelector('.ad-msg').textContent = String(o.message==null?'':o.message);
+    if (!o.title) { const h=bg.querySelector('h2'); if(h) h.remove(); }
+    const close = (val) => { if (bg.parentNode){ bg.parentNode.removeChild(bg);} document.removeEventListener('keydown', onKey); resolve(val); };
+    const acts = bg.querySelector('.actions');
+    (o.buttons||[]).forEach(b => {
+      const btn = document.createElement('button');
+      btn.className = 'btn ' + (b.cls||'btn-o');
+      btn.textContent = b.label;
+      btn.onclick = () => close(b.value);
+      acts.appendChild(btn);
+    });
+    const cancelVal = (o.buttons||[]).reduce((a,b)=> b.cancel ? b.value : a, undefined);
+    function onKey(e){ if(e.key==='Escape'){ close(cancelVal); } else if(e.key==='Enter'){ const p=(o.buttons||[]).find(b=>b.primary); if(p) close(p.value); } }
+    document.addEventListener('keydown', onKey);
+    bg.addEventListener('mousedown', e => { if (e.target===bg) close(cancelVal); });
+    document.body.appendChild(bg);
+    const focusBtn = acts.querySelector('.btn-r,.btn-a,.btn-g') || acts.querySelector('.btn');
+    if (focusBtn) focusBtn.focus();
+  });
+}
+function appAlert(message, title){
+  const isErr = /\b(fail|failed|error|cannot|could not|couldn'?t|invalid|denied|not allowed|unable|wrong|missing|required)\b/i.test(String(message||''));
+  return _appDialog({
+    title: title || (isErr ? 'Something went wrong' : 'Notice'),
+    message, icon: isErr ? 'error' : 'info',
+    buttons: [{ label: 'OK', cls: 'btn-a', value: true, cancel: true, primary: true }]
+  });
+}
+function appConfirm(message, opts){
+  opts = opts || {};
+  const danger = opts.danger != null ? opts.danger
+    : /\b(delete|remove|wipe|clear all|cannot be undone|permanently|discard)\b/i.test(String(message||''));
+  return _appDialog({
+    title: opts.title || (danger ? 'Please confirm' : 'Confirm'),
+    message, icon: opts.icon || (danger ? 'warn' : 'info'),
+    buttons: [
+      { label: opts.cancelLabel || 'Cancel', cls: 'btn-o', value: false, cancel: true },
+      { label: opts.okLabel || 'Confirm', cls: danger ? 'btn-r' : 'btn-a', value: true, primary: true }
+    ]
+  });
+}
+// Route native alert() through the styled modal. Safe: alert() returns
+// void and is never followed by navigation in this app, so a non-blocking
+// modal preserves behaviour while upgrading the look.
+try { window.alert = function(m){ appAlert(m); }; } catch(_){}
+
 // ── Skeleton loaders ───────────────────────────────────────
 // skeletonRows(n, cols) → table-shaped placeholder rows.
 // skeletonKpis(n)       → KPI-tile-shaped placeholders.
@@ -7103,7 +7185,7 @@ function fdAddRecord(){
 }
 
 // Custom confirm dialog → resolves true/false. Lets us show a formatted
-// before→after instead of a plain browser confirm().
+// before→after instead of a plain browser await appConfirm().
 function fdConfirm(opts){
   return new Promise(resolve=>{
     const bg = document.createElement('div'); bg.className='fd-modal-bg';
@@ -8236,7 +8318,7 @@ async function loadTradeSummary(){
     body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Pick a trade above to see its breakdown.</div>';
     return;
   }
-  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>';
+  body.innerHTML = '<div style="padding:6px 4px">' + skeletonRows(6, 5) + '</div>';
   try {
     const qs = branch ? `?branch=${encodeURIComponent(branch)}` : '';
     const d = await j('/api/reports/trade-summary/' + aid + qs);
@@ -8422,7 +8504,7 @@ function bcToggleData(btn, panelId){
 
 async function loadBranchComparison(){
   const body = document.getElementById('rep-branch-body');
-  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--spice-text-hint)">Loading…</div>';
+  body.innerHTML = '<div style="padding:6px 4px">' + skeletonRows(6, 5) + '</div>';
   try {
     const d = await j('/api/reports/branch-comparison');
     const overall = d.overall || [];
@@ -8747,7 +8829,7 @@ async function doChangeRole(){
   }catch(e){showError(e)}
 }
 async function deleteUser(id,username){
-  if(!confirm(`Delete user "${username}"?\n\nThey will be immediately signed out from all devices and their login will stop working.\n\nContinue?`))return;
+  if(!await appConfirm(`Delete user "${username}"?\n\nThey will be immediately signed out from all devices and their login will stop working.\n\nContinue?`))return;
   try{
     await j(`/api/users/${id}`,{method:'DELETE'});
     toast(`User "${username}" deleted`);
@@ -8755,7 +8837,7 @@ async function deleteUser(id,username){
   }catch(e){showError(e)}
 }
 async function revokeSession(tokenSuffix){
-  if(!confirm('Revoke this session? The device will be signed out on its next request.'))return;
+  if(!await appConfirm('Revoke this session? The device will be signed out on its next request.'))return;
   try{
     await j(`/api/me/sessions/${tokenSuffix}`,{method:'DELETE'});
     toast('Session revoked');
@@ -9791,7 +9873,7 @@ async function uploadLogo(which, inputEl) {
 }
 
 async function deleteLogo(which) {
-  if (!confirm('Remove this logo?')) return;
+  if (!await appConfirm('Remove this logo?')) return;
   try {
     await j(`/api/company-settings/logo/${which}`, { method: 'DELETE' });
     toast('Logo removed');
@@ -10054,6 +10136,28 @@ function fld(f){
       + opts.map(([v, lbl]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('')
       + `</select></div>`;
   }
+  // Sensitive-field masking (Display) → fixed dropdown of masking modes.
+  // mask_acct / mask_ifsc share the same set; mask_phone adds a
+  // first-2-and-last-2 option (e.g. 98******10). Options aren't stored in
+  // the DB — the masking logic lives in maskField().
+  if (f.key === 'mask_acct' || f.key === 'mask_ifsc' || f.key === 'mask_phone') {
+    const tip = FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : '';
+    const cur = String(f.value || 'none');
+    const base = [
+      ['none',   'Show full (no masking)'],
+      ['last4',  'Show last 4 digits'],
+      ['last6',  'Show last 6 digits'],
+      ['first4', 'Show first 4 digits'],
+      ['first6', 'Show first 6 digits'],
+    ];
+    const opts = f.key === 'mask_phone'
+      ? [...base, ['first2last2', 'Show first 2 and last 2 digits'], ['full', 'Hide all (full mask)']]
+      : [...base, ['full', 'Hide all (full mask)']];
+    return `<div class="fg"><label>${esc(f.label)}${tip}</label>`
+      + `<select data-key="${f.key}">`
+      + opts.map(([v, lbl]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('')
+      + `</select></div>`;
+  }
   // Boolean → toggle switch. Emits data-type="boolean" so captureCurrentPanel()
   // reads it as 'true'/'false' on save. Used by is_partnership (Company)
   // and s_is_partnership (Sister).
@@ -10260,10 +10364,11 @@ async function onLogoCodeChanged(fieldKey, newCode){
   // If there are unsaved edits, ask what to do with them
   const currentCode = _presets.active;
   if (_companyDirty && currentCode) {
-    const choice = confirm(
+    const choice = await appConfirm(
       `You have unsaved changes to the ${currentCode} preset.\n\n` +
-      `Click OK to SAVE changes to ${currentCode}, then switch to ${newCode}.\n` +
-      `Click Cancel to DISCARD your ${currentCode} edits and switch to ${newCode}.`
+      `Save your changes to ${currentCode} before switching to ${newCode}, or discard them?`,
+      { title: 'Unsaved changes', icon: 'warn',
+        okLabel: `Save & switch`, cancelLabel: `Discard & switch` }
     );
     if (choice) {
       try {
@@ -10827,11 +10932,11 @@ async function saveTrader(){
     searchTraders('');
   }catch(e){showError(e)}
 }
-async function delTrader(id){if(!confirm('Delete?'))return;await j(`/api/traders/${id}`,{method:'DELETE'});searchTraders('')}
+async function delTrader(id){if(!await appConfirm('Delete?'))return;await j(`/api/traders/${id}`,{method:'DELETE'});searchTraders('')}
 
 async function importTraders(e){
   const file=e.target.files[0];if(!file)return;e.target.value='';
-  const mode=confirm('Replace ALL existing sellers?\n\nOK = Replace all\nCancel = Append (skip duplicates)')?'replace':'append';
+  const mode=await appConfirm('How should this import be applied to your existing sellers?', {title:'Import sellers', okLabel:'Replace all', cancelLabel:'Append (skip duplicates)', icon:'warn'})?'replace':'append';
   const status=document.getElementById('trader-import-status');
   status.style.display='block';status.style.background='var(--amber-bg)';status.style.color='var(--amber)';
   status.textContent='Importing... please wait';
@@ -10856,7 +10961,7 @@ async function downloadTemplate(type){
 // again" label and starts a 3-second timer. A second click on the same
 // button within the window confirms; expiry reverts the button.
 // Works identically in browser and Electron — no focus games. Falls
-// back to native confirm() when no button is supplied so programmatic
+// back to native await appConfirm() when no button is supplied so programmatic
 // callers still get a gate.
 //
 // Usage:
@@ -10910,7 +11015,7 @@ function confirmTwoClick(key, btn, opts){
 //      confirm prompt shows "1,247 invoices" not a generic warning.
 //   2. TWO-CLICK CONFIRM — first click arms the triggering button with
 //      a red "click again to DELETE" label; second click within 3s
-//      commits. Falls back to native confirm() when no button supplied.
+//      commits. Falls back to native await appConfirm() when no button supplied.
 //   3. SERVER — snapshots the DB to data/backups/ before the wipe and
 //      records the action in delete_log.
 async function deleteAll(resource, label, ev){
@@ -11032,9 +11137,9 @@ async function restoreDbBackup(ev){
   ev.target.value = ''; // reset so the same file can be picked again later
   if (!f) return;
   if (!/\.(db|sqlite3?)$/i.test(f.name)) {
-    if (!confirm(`"${f.name}" doesn't look like a SQLite database file (.db / .sqlite). Upload it anyway?`)) return;
+    if (!await appConfirm(`"${f.name}" doesn't look like a SQLite database file (.db / .sqlite). Upload it anyway?`)) return;
   }
-  if (!confirm(`Restore from "${f.name}" (${(f.size/1024/1024).toFixed(2)} MB)?\n\nThis REPLACES all current data with the contents of the uploaded file.\nDownload a backup of the current DB first if you want to keep it.\n\nContinue?`)) return;
+  if (!await appConfirm(`Restore from "${f.name}" (${(f.size/1024/1024).toFixed(2)} MB)?\n\nThis REPLACES all current data with the contents of the uploaded file.\nDownload a backup of the current DB first if you want to keep it.\n\nContinue?`)) return;
   const fd = new FormData();
   fd.append('file', f);
   try {
@@ -11202,7 +11307,7 @@ async function loadAuditLog(){
   }
 }
 async function clearAuditLog(){
-  if (!confirm('Clear the entire lot activity log?\n\nThe lots themselves are NOT affected — only the audit history is removed. This cannot be undone.')) return;
+  if (!await appConfirm('Clear the entire lot activity log?\n\nThe lots themselves are NOT affected — only the audit history is removed. This cannot be undone.')) return;
   try {
     const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
@@ -11265,7 +11370,7 @@ async function gstLookup(prefix){
         ? 'PAN, State, and State Code'
         : 'PAN, State, and State Code';
       const msg = `✓ GSTIN structure is valid\n\n${filled} have been filled from the GSTIN itself.\n\n• PAN: ${d.pan}\n• State: ${d.state} (${d.st_code})\n\nTo ALSO auto-fill trade name and address, add a GST API key in Settings. Open it now?`;
-      if(confirm(msg)){
+      if(await appConfirm(msg)){
         hideModal(prefix==='t'?'trader-modal':'buyer-modal');
         go('settings');
         setTimeout(()=>{
@@ -11460,11 +11565,11 @@ async function saveBuyer(){
     searchBuyers('');
   }catch(e){showError(e)}
 }
-async function delBuyer(id){if(!confirm('Delete?'))return;await j(`/api/buyers/${id}`,{method:'DELETE'});searchBuyers('')}
+async function delBuyer(id){if(!await appConfirm('Delete?'))return;await j(`/api/buyers/${id}`,{method:'DELETE'});searchBuyers('')}
 
 async function importBuyers(e){
   const file=e.target.files[0];if(!file)return;e.target.value='';
-  const mode=confirm('Replace ALL existing buyers?\n\nOK = Replace all\nCancel = Append (skip duplicates)')?'replace':'append';
+  const mode=await appConfirm('How should this import be applied to your existing buyers?', {title:'Import buyers', okLabel:'Replace all', cancelLabel:'Append (skip duplicates)', icon:'warn'})?'replace':'append';
   const status=document.getElementById('buyer-import-status');
   status.style.display='block';status.style.background='var(--amber-bg)';status.style.color='var(--amber)';
   status.textContent='Importing... please wait';
@@ -11558,7 +11663,7 @@ async function saveAuction(){
     hideModal('auction-modal');toast(termAuction() + (id?' updated':' created'));loadAuctions();
   }catch(e){showError(e)}
 }
-async function delAuction(id){if(!confirm('Delete ' + termAuction(false,true) + ' and ALL its lots?'))return;await j(`/api/auctions/${id}`,{method:'DELETE'});loadAuctions()}
+async function delAuction(id){if(!await appConfirm('Delete ' + termAuction(false,true) + ' and ALL its lots?'))return;await j(`/api/auctions/${id}`,{method:'DELETE'});loadAuctions()}
 
 // ══════════════════════════════════════════════════════════════
 // LOT ALLOCATIONS — modal + tab logic + chip + tile flows
@@ -11988,7 +12093,7 @@ async function executeReassign(){
   if (!to)    return showErr('Select TO branch');
   if (from === to) return showErr('FROM and TO must be different');
   if (!start || !end) return showErr('Enter start and end lot numbers');
-  if (!confirm(`Reassign lots ${start}-${end} from ${from} to ${to}?`)) return;
+  if (!await appConfirm(`Reassign lots ${start}-${end} from ${from} to ${to}?`)) return;
 
   try {
     const d = await j(`/api/auctions/${_allocEditAuctionId}/reassign-lots`, {
@@ -12059,7 +12164,7 @@ async function saveAllocations(){
     return;
   }
   const droppedCt = _allocMarked.size;
-  if (droppedCt && !confirm(`Delete ${droppedCt} marked lot${droppedCt === 1 ? '' : 's'} from the allocations?`)) return;
+  if (droppedCt && !await appConfirm(`Delete ${droppedCt} marked lot${droppedCt === 1 ? '' : 's'} from the allocations?`)) return;
   try {
     await j(`/api/auctions/${_allocEditAuctionId}/allocations`, {
       method: 'POST',
@@ -13651,7 +13756,7 @@ async function lotBulkUnlock(){
 // stay consistent).
 async function lotLockOne(id){
   if (!Number.isFinite(Number(id))) return;
-  if (!confirm('Lock this lot? Only an admin will be able to edit it afterwards.')) return;
+  if (!await appConfirm('Lock this lot? Only an admin will be able to edit it afterwards.')) return;
   try {
     await j('/api/lots/lock', { method: 'POST', body: JSON.stringify({ ids: [Number(id)] }) });
     toast('Lot locked');
@@ -13660,7 +13765,7 @@ async function lotLockOne(id){
 }
 async function lotUnlockOne(id){
   if (!Number.isFinite(Number(id))) return;
-  if (!confirm('Unlock this lot? It will become editable again.')) return;
+  if (!await appConfirm('Unlock this lot? It will become editable again.')) return;
   try {
     await j('/api/lots/unlock', { method: 'POST', body: JSON.stringify({ ids: [Number(id)] }) });
     toast('Lot unlocked');
@@ -13975,7 +14080,7 @@ async function saveLot(){
     openLotEdit({ id, ...pendingValues });
   }
 }
-async function delLot(id){if(!confirm('Delete this lot?'))return;
+async function delLot(id){if(!await appConfirm('Delete this lot?'))return;
   try{await j(`/api/lots/${id}`,{method:'DELETE'});loadLots();toast('Lot deleted')}
   catch(e){showError(e)}
 }
@@ -14121,7 +14226,7 @@ async function generateInvoice(){
   }
 
   // Multiple buyers: loop + auto-increment invoice number per iteration
-  if(!confirm(`Generate ${buyers.length} invoices starting at #${startInvNo}?\n\nEach buyer gets sequential numbers (${startInvNo}, ${startInvNo+1}, …, ${startInvNo+buyers.length-1}).`))return;
+  if(!await appConfirm(`Generate ${buyers.length} invoices starting at #${startInvNo}?\n\nEach buyer gets sequential numbers (${startInvNo}, ${startInvNo+1}, …, ${startInvNo+buyers.length-1}).`))return;
   const results={success:[],failed:[]};
   try{
     await withOverlay(`Generating ${buyers.length} invoices…`, async () => {
@@ -14237,7 +14342,7 @@ async function adminAllowRegeneration(docType) {
   }
   if (!auctionId) { toast('Pick a trade first'); return; }
   const label = ({invoices:'invoices', purchases:'purchase invoices', bills:'bills', debit_notes:'debit notes'})[docType] || docType;
-  if (!confirm(`Allow operator to regenerate ${label} for this trade?\n\nThis is a ONE-SHOT unlock — the gate re-engages automatically after the next successful generate.`)) return;
+  if (!await appConfirm(`Allow operator to regenerate ${label} for this trade?\n\nThis is a ONE-SHOT unlock — the gate re-engages automatically after the next successful generate.`)) return;
   try {
     await j(`/api/auctions/${encodeURIComponent(auctionId)}/generation-override`, {
       method: 'POST',
@@ -14392,7 +14497,7 @@ async function loadInvoices(opts){
 }
 
 async function revertInvoice(id, buyerName, invLabel){
-  if(!confirm(`Revert invoice ${invLabel} for ${buyerName}?\n\nThis will DELETE this invoice and re-enable its lots so you can re-generate.\n\nContinue?`))return;
+  if(!await appConfirm(`Revert invoice ${invLabel} for ${buyerName}?\n\nThis will DELETE this invoice and re-enable its lots so you can re-generate.\n\nContinue?`))return;
   try{
     const r=await fetch(B+`/api/invoices/${id}/revert`,{method:'POST',headers:{'Authorization':'Bearer '+T}});
     const d=await r.json();
@@ -14406,7 +14511,7 @@ async function revertInvoice(id, buyerName, invLabel){
 async function revertAllInvoices(){
   const aid=document.getElementById('inv-auction').value;
   if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
-  if(!confirm('Revert ALL invoices for this ' + termAuction(false, true) + '?\n\nEvery invoice in this ' + termAuction(false, true) + ' will be deleted, and every lot will become eligible for re-invoicing. This cannot be undone.\n\nContinue?'))return;
+  if(!await appConfirm('Revert ALL invoices for this ' + termAuction(false, true) + '?\n\nEvery invoice in this ' + termAuction(false, true) + ' will be deleted, and every lot will become eligible for re-invoicing. This cannot be undone.\n\nContinue?'))return;
   const typed=prompt('To confirm, type REVERT in capitals:');
   if(typed!=='REVERT'){alert('Cancelled.');return}
   try{
@@ -14649,7 +14754,7 @@ function searchInvoicesDebounced(_q){
 
 // Delete Selected — bulk-delete ticked invoices via the bulk endpoint
 // (frees their lots so they can be re-invoiced). Two-click confirm via
-// confirmTwoClick when available, plain confirm() otherwise so the
+// confirmTwoClick when available, plain await appConfirm() otherwise so the
 // flow works on builds without the helper.
 async function deleteSelectedInvoices(){
   const body = document.getElementById('invoices-list');
@@ -14663,7 +14768,7 @@ async function deleteSelectedInvoices(){
         confirmLabel: `⚠ Click again to DELETE ${ids.length} invoice${ids.length === 1 ? '' : 's'}`,
         fallbackMessage: `Delete ${ids.length} invoice${ids.length === 1 ? '' : 's'}? Lots will be freed for re-invoicing. This cannot be undone.`,
       })
-    : confirm(`Delete ${ids.length} invoice${ids.length === 1 ? '' : 's'}? Lots will be freed for re-invoicing. This cannot be undone.`);
+    : await appConfirm(`Delete ${ids.length} invoice${ids.length === 1 ? '' : 's'}? Lots will be freed for re-invoicing. This cannot be undone.`);
   if (!proceed) return;
   try {
     const r = await j('/api/invoices/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
@@ -14812,7 +14917,7 @@ function searchPurchasesDebounced(_q){
 }
 
 // Delete Selected — bulk-delete ticked purchases via the bulk endpoint.
-// Two-click confirm via confirmTwoClick when available, plain confirm()
+// Two-click confirm via confirmTwoClick when available, plain await appConfirm()
 // otherwise so the flow works on builds without the helper.
 async function deleteSelectedPurchases(){
   const body = document.getElementById('purchases-list');
@@ -14826,7 +14931,7 @@ async function deleteSelectedPurchases(){
         confirmLabel: `⚠ Click again to DELETE ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}`,
         fallbackMessage: `Delete ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
       })
-    : confirm(`Delete ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
+    : await appConfirm(`Delete ${ids.length} purchase invoice${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
   if (!proceed) return;
   try {
     const r = await j('/api/purchases/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
@@ -14904,7 +15009,7 @@ function searchBillsDebounced(_q){
 }
 
 // Bulk-delete ticked bills. Two-click confirm via confirmTwoClick when
-// available; plain confirm() otherwise so the flow works on builds
+// available; plain await appConfirm() otherwise so the flow works on builds
 // without the helper.
 async function deleteSelectedBills(){
   const body = document.getElementById('bills-list');
@@ -14918,7 +15023,7 @@ async function deleteSelectedBills(){
         confirmLabel: `⚠ Click again to DELETE ${ids.length} bill${ids.length === 1 ? '' : 's'}`,
         fallbackMessage: `Delete ${ids.length} bill${ids.length === 1 ? '' : 's'} of supply? This cannot be undone.`,
       })
-    : confirm(`Delete ${ids.length} bill${ids.length === 1 ? '' : 's'} of supply? This cannot be undone.`);
+    : await appConfirm(`Delete ${ids.length} bill${ids.length === 1 ? '' : 's'} of supply? This cannot be undone.`);
   if (!proceed) return;
   try {
     const r = await j('/api/bills/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
@@ -14972,7 +15077,7 @@ async function saveInvoiceEdit(){
     if(!r.ok){const d=await r.json();throw new Error(d.error||'Save failed')}
     hideModal('inv-edit-modal');toast('Invoice updated');loadInvoices();
   }catch(e){showError(e)}}
-async function delInvoice(id){if(!confirm('Delete this invoice? Related lots will be unlinked.'))return;
+async function delInvoice(id){if(!await appConfirm('Delete this invoice? Related lots will be unlinked.'))return;
   try{await j(`/api/invoices/${id}`,{method:'DELETE'});loadInvoices();toast('Invoice deleted')}
   catch(e){showError(e)}}
 
@@ -15092,7 +15197,7 @@ async function savePurchaseEdit(){
     if(!r.ok){const d=await r.json();throw new Error(d.error||'Save failed')}
     hideModal('pur-edit-modal');toast('Purchase updated');loadPurchases();
   }catch(e){showError(e)}}
-async function delPurchase(id){if(!confirm('Delete this purchase invoice?'))return;
+async function delPurchase(id){if(!await appConfirm('Delete this purchase invoice?'))return;
   try{await j(`/api/purchases/${id}`,{method:'DELETE'});loadPurchases();toast('Purchase deleted')}
   catch(e){showError(e)}}
 
@@ -17245,7 +17350,7 @@ async function viewBillPDF(auctionId,sellerName,billNo){
     `BillOfSupply_${decodeURIComponent(sellerName)}_${billNo}.pdf`
   );
 }
-async function delBill(id){if(!confirm('Delete bill?'))return;await j(`/api/bills/${id}`,{method:'DELETE'});loadBills()}
+async function delBill(id){if(!await appConfirm('Delete bill?'))return;await j(`/api/bills/${id}`,{method:'DELETE'});loadBills()}
 
 // ── Debit Notes ────────────────────────────────────────────
 // Populate the trade filter dropdown for the Debit Notes tab. Pulls
@@ -17536,7 +17641,7 @@ async function generateAllDebitNotesForTrade(){
 async function viewDebitNotePDF(id){
   return fetchAndPrint(`/api/debit-notes/${id}/pdf`, `DebitNote_${id}.pdf`);
 }
-async function delDebitNote(id){if(!confirm('Delete debit note?'))return;await j(`/api/debit-notes/${id}`,{method:'DELETE'});loadDebitNotes()}
+async function delDebitNote(id){if(!await appConfirm('Delete debit note?'))return;await j(`/api/debit-notes/${id}`,{method:'DELETE'});loadDebitNotes()}
 
 // ── Debit note bulk selection + cross-trade search ──────────
 // Master "select all visible" — mirrors the pattern used by Sales
@@ -17600,7 +17705,7 @@ function searchDebitNotesDebounced(_q){
 }
 
 // Bulk-delete ticked debit notes. Two-click confirm via confirmTwoClick
-// when available, plain confirm() otherwise. Server endpoint frees no
+// when available, plain await appConfirm() otherwise. Server endpoint frees no
 // dependent rows (unlike sales invoices) since debit notes are pure
 // adjustment records.
 async function deleteSelectedDebitNotes(){
@@ -17615,7 +17720,7 @@ async function deleteSelectedDebitNotes(){
         confirmLabel: `⚠ Click again to DELETE ${ids.length} debit note${ids.length === 1 ? '' : 's'}`,
         fallbackMessage: `Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
       })
-    : confirm(`Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
+    : await appConfirm(`Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
   if (!proceed) return;
   try {
     const r = await j('/api/debit-notes/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
@@ -18181,7 +18286,7 @@ async function saveRouteDistance(fromPin, toPin, invoiceId){
 // saved for its PIN pair. Confirmed before firing because the action
 // touches potentially every ISP invoice in the system.
 async function clearAllDistanceOverrides(){
-  if(!confirm('Wipe ALL per-invoice distance overrides?\n\nEvery ISP invoice will revert to its route value (or blank if no route is saved for its buyer PIN).\n\nThis cannot be undone.'))return;
+  if(!await appConfirm('Wipe ALL per-invoice distance overrides?\n\nEvery ISP invoice will revert to its route value (or blank if no route is saved for its buyer PIN).\n\nThis cannot be undone.'))return;
   try{
     const r=await fetch(B+'/api/distance-overrides',{
       method:'DELETE',
@@ -18948,9 +19053,9 @@ function pcKeepAll(){
   _pcRenderPreview(_pcLastReport);
   toast(n+' row'+(n===1?'':'s')+' marked as Keep DB');
 }
-function pcUndoAllKept(){
+async function pcUndoAllKept(){
   if(_pcKept.size===0)return;
-  if(!confirm('Clear KEPT flag on '+_pcKept.size+' row'+(_pcKept.size===1?'':'s')+'? Their price diffs will go back to red.')) return;
+  if(!await appConfirm('Clear KEPT flag on '+_pcKept.size+' row'+(_pcKept.size===1?'':'s')+'? Their price diffs will go back to red.')) return;
   _pcKept.clear();
   if(_pcLastReport) _pcRenderPreview(_pcLastReport);
 }
@@ -18981,7 +19086,7 @@ async function pcApplyAll(){
   if(keptInQueue>0){
     msg+='\n\nNote: '+keptInQueue+' kept row'+(keptInQueue===1?'':'s')+' will only get code updates — DB price stays as-is.';
   }
-  if(!confirm(msg))return;
+  if(!await appConfirm(msg))return;
   let ok=0, fail=0, locked=0;
   for(const item of queue){
     const body={lot_id:item.lot_id};
@@ -20100,7 +20205,7 @@ function leExitEditMode(){
 // confirm prompt is intentional — single-click delete is too easy to
 // trigger accidentally during fast entry.
 async function leDeleteLot(lotId, lotNo){
-  if (!confirm(`Delete lot #${lotNo}? This cannot be undone.`)) return;
+  if (!await appConfirm(`Delete lot #${lotNo}? This cannot be undone.`)) return;
   try {
     await j(`/api/lots/${lotId}`, { method: 'DELETE' });
     toast(`Lot ${lotNo} deleted`);
@@ -20816,7 +20921,7 @@ async function leLoadAllocBar() {
 // Click handler for lot chips. Writes the lot number into the entry
 // form's le-lotno field and re-highlights chips so the visual state
 // matches. Called from chip onclick attributes inserted by leLoadAllocBar.
-function lePickLot(lotNo) {
+async function lePickLot(lotNo) {
   const input = document.getElementById('le-lotno');
   if (!input) return;
   // If the user has typed weight/bag data into the form, swapping the
@@ -20827,7 +20932,7 @@ function lePickLot(lotNo) {
   const hasData = (bagsEl && bagsEl.value) || (qtyEl && qtyEl.value);
   const currentLot = (input.value || '').trim();
   if (hasData && currentLot && currentLot !== lotNo) {
-    if (!confirm('Changing lot will clear bags and weight fields.\nProceed?')) return;
+    if (!await appConfirm('Changing lot will clear bags and weight fields.\nProceed?')) return;
     bagsEl.value = '';
     document.getElementById('le-litre').value = _le.defaultLitre || '';
     qtyEl.value = '';
@@ -21318,7 +21423,7 @@ async function leConfirmPrint() {
 
   // Gather context: company settings, current auction, branches.
   let cfg = {};
-  try { cfg = await j('/api/company-settings/flat'); }
+  try { cfg = await j('/api/company-settings/flat'); refreshMaskCfg(cfg); }
   catch (e) { /* fall back to empty cfg — receipt still renders */ }
 
   // Look up the selected auction's metadata so the receipt header has
@@ -21447,7 +21552,7 @@ async function leWhatsappReceipt() {
   errEl.style.display = 'none'; errEl.textContent = '';
 
   let cfg = {};
-  try { cfg = await j('/api/company-settings/flat'); } catch (_) {}
+  try { cfg = await j('/api/company-settings/flat'); refreshMaskCfg(cfg); } catch (_) {}
   const aid = document.getElementById('le-auction').value;
   let auction = null;
   try {
@@ -21667,7 +21772,7 @@ function leBuildDetailedHtml(p) {
     const ti = (g.trader_id != null ? traderInfo[g.trader_id] : null) || {};
     const bank = ti.defaultBank || {};
     const acctMasked = bank.acctnum ? maskAcct(bank.acctnum) : '';
-    const ifsc = bank.ifsc || '';
+    const ifsc = bank.ifsc ? maskIfsc(bank.ifsc) : '';
     const place = [g.ppla, g.ppin].filter(Boolean).join(', ');
     const cr = g.cr || '';
     const lotRows = g.lots.map(l => {
@@ -21756,11 +21861,41 @@ function leBuildDetailedHtml(p) {
 </style></head><body>${sections}</body></html>`;
 }
 
-function maskAcct(acct) {
-  const s = String(acct || '');
-  if (s.length <= 4) return s;
-  return '*'.repeat(s.length - 4) + s.slice(-4);
+// ── Sensitive-field masking ──────────────────────────────────────
+// Bank account no., IFSC and phone are masked on-screen and on receipt
+// previews per the policy set in Settings → Display. Modes:
+// none | last4 | last6 | first4 | first6 | first2last2 | full.
+// Policy is cached in _maskCfg, refreshed whenever the flat company
+// settings are (re)loaded. Functional outputs (bank file, DBF, Tally,
+// WhatsApp targets) are produced server-side and are never masked.
+let _maskCfg = { acct: 'last4', ifsc: 'none', phone: 'none' }; // defaults match company-config seed
+function refreshMaskCfg(cfg) {
+  if (!cfg) return;
+  _maskCfg = {
+    acct:  cfg.mask_acct  || 'none',
+    ifsc:  cfg.mask_ifsc  || 'none',
+    phone: cfg.mask_phone || 'none',
+  };
 }
+function maskField(value, mode) {
+  const s = value == null ? '' : String(value);
+  if (!s || !mode || mode === 'none') return s;
+  if (mode === 'full') return '*'.repeat(s.length);
+  if (mode === 'first2last2') {
+    if (s.length <= 4) return s; // nothing left to hide between first/last 2
+    return s.slice(0, 2) + '*'.repeat(s.length - 4) + s.slice(-2);
+  }
+  const show = (mode === 'last4' || mode === 'first4') ? 4
+             : (mode === 'last6' || mode === 'first6') ? 6 : 0;
+  if (!show || s.length <= show) return s;
+  const stars = '*'.repeat(s.length - show);
+  return (mode === 'last4' || mode === 'last6')
+    ? stars + s.slice(-show)
+    : s.slice(0, show) + stars;
+}
+function maskAcct(v)  { return maskField(v, _maskCfg.acct); }
+function maskIfsc(v)  { return maskField(v, _maskCfg.ifsc); }
+function maskPhone(v) { return maskField(v, _maskCfg.phone); }
 
 // Press Enter in the lot-form fields to save (skip from textareas/selects).
 // Listener attached at module level so dynamically-rendered inputs still
@@ -21786,7 +21921,7 @@ async function previewInvoice(type){
     const checked=list?list.querySelectorAll('.gi-cb:checked'):[];
     if(!checked||checked.length===0){alert('Tick at least one buyer to preview');return}
     if(checked.length>1){
-      if(!confirm(`Preview shows ONE buyer at a time. Showing "${checked[0].value}".\n\nContinue?`))return;
+      if(!await appConfirm(`Preview shows ONE buyer at a time. Showing "${checked[0].value}".\n\nContinue?`))return;
     }
     body={saleType:document.getElementById('gi-sale').value,buyerCode:checked[0].value,type:'sales'};
   }else if(type==='purchase'){
@@ -22617,7 +22752,7 @@ async function impRun(){
     } else {
       msg = 'You have not run "Verify Against Database" yet.\n\nWithout verification you can\'t see how the file will land in the DB. Continue anyway?';
     }
-    if (!confirm(msg)) return;
+    if (!await appConfirm(msg)) return;
   }
   result.innerHTML = (dryRun?'Validating…':'Importing…');
   const fd = new FormData();
@@ -22748,7 +22883,7 @@ async function impUndo(logId, filename, moduleKey, insertedCount){
     insertedCount + ' row(s) inserted by this run from the target table of "' + moduleKey + '".\n\n' +
     'Rows inserted by OTHER imports stay untouched. The snapshot lets you Restore if needed.\n\n' +
     'Continue?';
-  if (!confirm(msg)) return;
+  if (!await appConfirm(msg)) return;
   const typed = prompt('Type DELETE (in capitals) to confirm:');
   if (typed !== 'DELETE') { alert('Cancelled.'); return; }
   try {

@@ -80,6 +80,7 @@ function effectiveCompany(cfg) {
       cinValue: isPartner ? (cfg.s_partnership_name || '') : (cfg.s_cin || ''),
       fssai:   cfg.s_fssai    || '',
       sbl:     cfg.s_sbl      || '',
+      msme:    cfg.s_msme     || '',
       address1: cfg.s_address1 || '',
       address2: cfg.s_address2 || '',
       place:   cfg.s_place    || '',
@@ -106,6 +107,7 @@ function effectiveCompany(cfg) {
     cinValue: ispPartner ? (cfg.partnership_name || '') : (cfg.cin || ''),
     fssai:   cfg.fssai       || '',
     sbl:     cfg.sbl         || '',
+    msme:    cfg.msme_no     || '',
     address1: isStateKL ? (cfg.kl_address1 || cfg.tn_address1 || '') : (cfg.tn_address1 || ''),
     address2: isStateKL ? (cfg.kl_address2 || cfg.tn_address2 || '') : (cfg.tn_address2 || ''),
     place:   isStateKL ? (cfg.kl_place || cfg.tn_place || '') : (cfg.tn_place || ''),
@@ -927,6 +929,11 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   if (_idValue) { doc.text(`${_idLabel}: ${_idValue}`, textX, ty, { width: textW }); ty += 10; }
   if (co.fssai) { doc.text(`FSSAI No.: ${co.fssai}`, textX, ty, { width: textW }); ty += 10; }
   if (co.sbl)   { doc.text(`SBL No.: ${co.sbl}`,     textX, ty, { width: textW }); ty += 10; }
+  // MSME / Udyam registration — shown only when configured. Sits inside the
+  // fixed 100pt header box (topHeaderH): name(12) + 1-line addr(~10) + GSTIN
+  // + State + CIN + FSSAI + SBL + MSME ≈ 92pt, so it fits without overlapping
+  // the middle (Consignee/Buyer) block that starts at topY + topHeaderH.
+  if (co.msme)  { doc.text(`MSME No.: ${co.msme}`,   textX, ty, { width: textW }); ty += 10; }
 
   // ── RIGHT BLOCK: 2-row metadata grid ────────────────────────
   // Row 1: Invoice No | e-Way Bill No | Dated
@@ -938,8 +945,12 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   // Row 1
   // Invoice No: primary prefix flips to ASP when this is an ASP-issued invoice.
   // Other Refs is always the OTHER company (ISP vs ASP are mirrors).
-  const primaryPrefix = isASP ? (cfg.inv_prefix_sister || 'ASP') : (cfg.inv_prefix || 'ISP');
-  const otherPrefix   = isASP ? (cfg.inv_prefix || 'ISP')         : (cfg.inv_prefix_sister || 'ASP');
+  // The prefix is driven SOLELY by the "Invoice Prefix" / "Sister Invoice
+  // Prefix" settings. When the user clears one, NO prefix is emitted — the
+  // number renders prefix-less (e.g. "L-9/26-27"). There is deliberately NO
+  // fallback to the Logo Code or company short name.
+  const primaryPrefix = isASP ? (cfg.inv_prefix_sister || '') : (cfg.inv_prefix || '');
+  const otherPrefix   = isASP ? (cfg.inv_prefix || '')         : (cfg.inv_prefix_sister || '');
   const primaryCfg    = { ...cfg, inv_prefix: primaryPrefix };
   // ASP invoices always use the "I" segment irrespective of local/interstate
   // sale type (format: ASP/I-{invno}/{season_short}).
