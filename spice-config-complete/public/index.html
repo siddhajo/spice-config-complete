@@ -1021,6 +1021,12 @@ body[data-perm-lot-entry-view="1"] .side-item.needs-lot-entry-view{display:flex 
 .icon-btn.i-purchase:hover{background:var(--spice-saffron);color:#fff}
 .icon-btn.i-alloc{color:var(--spice-cardamom);border-color:var(--green-border)}
 .icon-btn.i-alloc:hover{background:var(--spice-cardamom);color:#fff;border-color:var(--spice-cardamom)}
+/* Favourite (mobile-default) star. Outline + amber by default; filled gold
+   when this trade is the one the mobile lot-entry app defaults to. */
+.icon-btn.i-fav{color:#b8860b;border-color:var(--spice-turmeric)}
+.icon-btn.i-fav:hover{color:#f59e0b;border-color:#f59e0b}
+.icon-btn.i-fav.is-fav{background:#fef3c7;color:#d97706;border-color:#f59e0b}
+.icon-btn.i-fav.is-fav svg{fill:#f59e0b;stroke:#d97706}
 
 /* ── Cards ───────────────────────────────────────────────── */
 .card{
@@ -2775,6 +2781,73 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
               <span style="font-size:15px;line-height:1">⬇</span><span>Download Backup</span>
             </button>
           </div>
+        </div>
+
+        <!-- ── Auto Backup Schedule ────────────────────────── -->
+        <div style="padding:18px;border:1px solid var(--border);border-radius:12px;background:#fff;margin-bottom:12px">
+          <div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap">
+            <div style="flex:1;min-width:260px">
+              <div style="font-weight:700;color:var(--text);font-size:14px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+                <span style="font-size:15px">⏰</span><span>Auto Backup Schedule</span>
+                <span id="bk-sched-status" style="font-weight:600;font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg);color:var(--text3)">Off</span>
+              </div>
+              <div style="font-size:12.5px;color:var(--text3);line-height:1.55">
+                Automatically saves a snapshot to <code style="background:var(--bg);padding:1px 4px;border-radius:3px">data/backups/auto-backup-…db</code> on the server, on the cadence you choose. Old auto backups beyond the retention count are removed. Run while the app is running.
+              </div>
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;font-size:13px;color:var(--text);flex:0 0 auto">
+              <input type="checkbox" id="bk-auto-enabled" onchange="onBackupScheduleToggle()" style="width:18px;height:18px;cursor:pointer">
+              <span>Enabled</span>
+            </label>
+          </div>
+
+          <div id="bk-sched-fields" style="display:none;margin-top:16px">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+              <div>
+                <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text3);margin-bottom:4px">Frequency</label>
+                <select id="bk-freq" onchange="onBackupFreqChange()" style="height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:130px">
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </div>
+              <div id="bk-weekday-wrap" style="display:none">
+                <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text3);margin-bottom:4px">Day of week</label>
+                <select id="bk-weekday" style="height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:130px">
+                  <option value="1">Monday</option>
+                  <option value="2">Tuesday</option>
+                  <option value="3">Wednesday</option>
+                  <option value="4">Thursday</option>
+                  <option value="5">Friday</option>
+                  <option value="6">Saturday</option>
+                  <option value="0">Sunday</option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text3);margin-bottom:4px">Time (server time)</label>
+                <input type="time" id="bk-time" value="02:00" style="height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px">
+              </div>
+              <div>
+                <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text3);margin-bottom:4px">Keep last</label>
+                <div style="display:flex;align-items:center;gap:6px">
+                  <input type="number" id="bk-retention" value="14" min="1" max="365" style="height:38px;width:80px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px">
+                  <span style="font-size:12.5px;color:var(--text3)">backups</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap">
+            <button class="btn btn-g" onclick="saveBackupSchedule()" style="height:38px;padding:0 18px;font-weight:600">Save Schedule</button>
+            <button class="btn btn-o" onclick="backupNow()" style="height:38px;padding:0 16px;font-weight:600">Back up now</button>
+            <span id="bk-sched-msg" style="font-size:12px;color:var(--text3)"></span>
+          </div>
+
+          <details style="margin-top:16px">
+            <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--text2);padding:6px 0">📁 Recent auto backups</summary>
+            <div id="bk-backup-list" style="margin-top:8px;overflow:auto;max-height:240px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:12.5px">
+              <div style="padding:12px;color:var(--text3);font-style:italic">No auto backups yet.</div>
+            </div>
+          </details>
         </div>
 
         <!-- ── Restore ─────────────────────────────────────── -->
@@ -6076,6 +6149,8 @@ const ICONS={
   // the per-trade lot allocation modal (Edit + Reassign tabs) from
   // the Auctions tab Actions column.
   alloc:'<svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2" ry="2"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>',
+  // Favourite star — marks the trade the mobile lot-entry app defaults to.
+  star:'<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   // WhatsApp glyph — filled (overridden in CSS to fill:currentColor) since
   // the brand mark reads poorly as a stroke-only outline.
   whatsapp:'<svg viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>'
@@ -7293,7 +7368,7 @@ function go(tab){
     // Lazy-load the Delete All audit log when Backup opens so the
     // <details> drawer shows fresh data on first expand. loadDeleteLog
     // is idempotent — re-running just re-renders the table.
-    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); },
+    backup: () => { if (typeof loadDeleteLog === 'function') loadDeleteLog(); if (typeof loadBackupSchedule === 'function') loadBackupSchedule(); },
     // Import Old Data — pre-loads recent imports so the History panel
     // is populated on first open without a separate click. Preview /
     // verify / run remain user-triggered.
@@ -8028,7 +8103,7 @@ async function renderDashHeadlineTiles(auctionId){
     <div class="kpi-value">${value}</div>
     ${meta && meta.length ? `<div class="kpi-meta">${meta.map(([l, v]) => `<span class="lbl">${esc(l)}</span><span class="val">${v}</span>`).join('')}</div>` : ''}
   </div>`;
-  const price = n => (n != null && Number(n) > 0) ? fmtI(n, 0) : '—';
+  const price = n => (n != null && Number(n) > 0) ? fmtI(n, 2) : '—';
   try {
     const url = auctionId
       ? `/api/insights?auction_id=${auctionId}&_=${Date.now()}`
@@ -11106,6 +11181,108 @@ async function deleteAll(resource, label, ev){
 // downloadDbBackup hits a streaming GET endpoint — we go through fetch
 // (rather than a plain <a download>) because the auth bearer token has
 // to be set on the request header.
+// ── Auto backup schedule (Backup tab) ──────────────────────────────
+function _bkApplyScheduleFieldVisibility(){
+  const on = document.getElementById('bk-auto-enabled')?.checked;
+  const fields = document.getElementById('bk-sched-fields');
+  if (fields) fields.style.display = on ? 'block' : 'none';
+  const freq = document.getElementById('bk-freq')?.value;
+  const wd = document.getElementById('bk-weekday-wrap');
+  if (wd) wd.style.display = (on && freq === 'weekly') ? 'block' : 'none';
+}
+function onBackupScheduleToggle(){ _bkApplyScheduleFieldVisibility(); }
+function onBackupFreqChange(){ _bkApplyScheduleFieldVisibility(); }
+
+async function loadBackupSchedule(){
+  try {
+    const d = await j('/api/system/backup-schedule');
+    const s = d.schedule || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    const en = document.getElementById('bk-auto-enabled'); if (en) en.checked = !!s.enabled;
+    set('bk-freq', s.freq || 'daily');
+    set('bk-time', s.time || '02:00');
+    set('bk-weekday', String(s.weekday == null ? 1 : s.weekday));
+    set('bk-retention', String(s.retention || 14));
+    const status = document.getElementById('bk-sched-status');
+    if (status) {
+      if (s.enabled) {
+        const when = (s.freq === 'weekly')
+          ? `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][s.weekday] || 'Mon'} ${s.time}`
+          : `daily ${s.time}`;
+        status.textContent = `On · ${when}`;
+        status.style.background = 'var(--spice-cardamom-lt)';
+        status.style.color = 'var(--spice-cardamom-dk)';
+      } else {
+        status.textContent = 'Off';
+        status.style.background = 'var(--bg)';
+        status.style.color = 'var(--text3)';
+      }
+    }
+    _bkApplyScheduleFieldVisibility();
+    _renderBackupList(d.backups || []);
+  } catch (e) { /* tab may open before auth in edge cases — silent */ }
+}
+
+function _renderBackupList(backups){
+  const host = document.getElementById('bk-backup-list');
+  if (!host) return;
+  if (!backups.length) {
+    host.innerHTML = '<div style="padding:12px;color:var(--text3);font-style:italic">No auto backups yet.</div>';
+    return;
+  }
+  host.innerHTML = backups.map(b => {
+    const kb = (b.size / 1024).toFixed(0);
+    const when = b.mtime ? new Date(b.mtime).toLocaleString() : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border)">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(b.name)}">${esc(b.name)}</span>
+      <span style="color:var(--text3);font-size:11.5px;white-space:nowrap">${esc(when)}</span>
+      <span style="color:var(--text3);font-size:11.5px;white-space:nowrap">${kb} KB</span>
+      <button class="btn btn-o" style="height:26px;padding:0 10px;font-size:11.5px" onclick="downloadAutoBackup('${esc(b.name)}')">Download</button>
+    </div>`;
+  }).join('');
+}
+
+async function saveBackupSchedule(){
+  const body = {
+    enabled:   document.getElementById('bk-auto-enabled')?.checked || false,
+    freq:      document.getElementById('bk-freq')?.value || 'daily',
+    time:      document.getElementById('bk-time')?.value || '02:00',
+    weekday:   parseInt(document.getElementById('bk-weekday')?.value, 10) || 0,
+    retention: parseInt(document.getElementById('bk-retention')?.value, 10) || 14,
+  };
+  const msg = document.getElementById('bk-sched-msg');
+  try {
+    await j('/api/system/backup-schedule', { method: 'PUT', body: JSON.stringify(body) });
+    if (msg) { msg.textContent = 'Saved ✓'; setTimeout(() => { if (msg) msg.textContent = ''; }, 2500); }
+    toast('Backup schedule saved');
+    loadBackupSchedule();
+  } catch (e) { showError(e); }
+}
+
+async function backupNow(){
+  const msg = document.getElementById('bk-sched-msg');
+  if (msg) msg.textContent = 'Backing up…';
+  try {
+    const d = await j('/api/system/backup-now', { method: 'POST', body: '{}' });
+    if (msg) { msg.textContent = `Backed up: ${d.file || 'done'} ✓`; setTimeout(() => { if (msg) msg.textContent = ''; }, 3000); }
+    toast('Server backup created');
+    loadBackupSchedule();
+  } catch (e) { if (msg) msg.textContent = ''; showError(e); }
+}
+
+async function downloadAutoBackup(name){
+  try {
+    const r = await fetch(B + '/api/system/backups/' + encodeURIComponent(name) + '/download', { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { let err = 'Download failed'; try { const jj = await r.json(); err = jj.error || err; } catch (_) {} toast(err); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`Downloaded ${name}`);
+  } catch (e) { toast('Download failed: ' + e.message); }
+}
+
 async function downloadDbBackup(){
   try {
     const r = await fetch(B + '/api/system/backup', { headers: { 'Authorization': 'Bearer ' + T } });
@@ -11597,28 +11774,54 @@ function modeBadge(mode){
   return `<span style="display:inline-block;padding:2px 7px;border-radius:8px;background:${cfg.bg};color:${cfg.fg};font-size:10.5px;font-weight:700;letter-spacing:.3px;margin-left:6px">${esc(m)}</span>`;
 }
 
+// The trade the mobile lot-entry app defaults to (its "favourite"). This is
+// stored server-side, independent of the desktop global trade selector, so
+// switching the global picker never changes what the mobile app shows.
+let _FAV_AID = null;
 async function loadAuctions(){const d=await j('/api/auctions');
   // Keep the topbar global picker in step with the auctions table. A
   // create / delete / edit on this screen would otherwise leave the
   // global picker showing stale options.
   if (typeof refreshGlobalAidList === 'function') refreshGlobalAidList();
+  // Load the current mobile favourite so the star renders in the right state.
+  try { const f = await j('/api/favourite-trade'); _FAV_AID = (f && f.auctionId) ? Number(f.auctionId) : null; }
+  catch(_) { _FAV_AID = null; }
   const tA = termAuction(), tALower = termAuction(false, true), tAPlLower = termAuction(true, true);
   DataTable.mount('auctions-list', d, {
     emptyState: { icon: 'auctions', title: 'No ' + tAPlLower + ' yet', body: 'Create your first ' + tALower + ' from the Add ' + tA + ' button to start entering lots.' },
     columns: [
-      { key:'ano', label:tA+' No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>${modeBadge(a.mode)}` },
+      { key:'ano', label:tA+' No', sort:'text', render:(a)=>`<b>${esc(a.ano)}</b>${modeBadge(a.mode)}${Number(a.id)===_FAV_AID?' <span title="Mobile default" style="color:#d97706;font-size:11px;font-weight:700;margin-left:4px">★ mobile</span>':''}` },
       { key:'date', label:'Date', sort:'date', render:(a)=>fmtD(a.date) },
       { key:'crop_type', label:'Type', sort:'text' },
       { key:'lot_count', label:'Lots', sort:'number', numeric:true, render:(a)=>String(a.lot_count||0) },
-      { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(a)=>
+      { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(a)=> {
+          const isFav = Number(a.id)===_FAV_AID;
+          // Favourite (mobile-default) toggle. Only one trade can be the
+          // mobile favourite at a time; starring another moves it.
+          const favTitle = isFav ? 'Mobile default — click to clear' : 'Set as the mobile app default trade';
+          const favBtn = `<button class="icon-btn i-fav needs-auction-write${isFav?' is-fav':''}" title="${favTitle}" onclick="toggleTradeFavourite(${a.id})">${ICONS.star}</button>`;
           // Embed ano as a single-quoted JS string inside the double-quoted
           // HTML onclick. Escape single quotes in ano so a value with a
           // quote can't break the onclick attribute.
-          iconBtn('alloc','Manage lot allocations & reassign',`openAllocModal(${a.id},'${String(a.ano||'?').replace(/'/g,"\\'")}')`)
+          return favBtn
+          + iconBtn('alloc','Manage lot allocations & reassign',`openAllocModal(${a.id},'${String(a.ano||'?').replace(/'/g,"\\'")}')`)
           + iconBtn('edit','Edit '+tALower,`openAuctionEdit(${JSON.stringify(a).replace(/"/g,'&quot;')})`)
-          + iconBtn('del','Delete '+tALower,`delAuction(${a.id})`) }
+          + iconBtn('del','Delete '+tALower,`delAuction(${a.id})`);
+        } }
     ]
   });
+}
+// Toggle which trade the mobile lot-entry app defaults to. Single-select:
+// starring a trade makes it the mobile default; starring the current
+// favourite again clears it (mobile falls back to its own picker).
+async function toggleTradeFavourite(aid){
+  const next = (Number(aid)===_FAV_AID) ? null : Number(aid);
+  try{
+    await j('/api/favourite-trade',{method:'POST',body:JSON.stringify({auctionId:next})});
+    _FAV_AID = next;
+    toast(next ? 'Set as mobile default trade ★' : 'Cleared mobile default trade');
+    loadAuctions();
+  }catch(e){ showError(e); }
 }
 
 function openAuctionAdd(){
@@ -13358,13 +13561,13 @@ async function loadLots(opts){
 
       const $ = (id) => document.getElementById(id);
       if ($('lot-kpi-count'))  $('lot-kpi-count').textContent  = arr.length;
-      if ($('lot-kpi-qty'))    $('lot-kpi-qty').innerHTML      = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
-      if ($('lot-kpi-amount')) $('lot-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
+      if ($('lot-kpi-qty'))    $('lot-kpi-qty').innerHTML      = `${fmtI(totalQty, 2)}<span class="kpi-unit">kg</span>`;
+      if ($('lot-kpi-amount')) $('lot-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 2)}`;
       if ($('lot-kpi-calc'))   $('lot-kpi-calc').innerHTML     = `${pct}%<span class="kpi-unit"> done</span>`;
 
       // Helper: label/value mini-grid rows for the kpi-meta containers.
       const metaRow = (lbl, val) => `<span class="lbl">${lbl}</span><span class="val">${val}</span>`;
-      const ccy = (n) => `<span class="ccy">₹</span>${fmtI(n, 0)}`;
+      const ccy = (n) => `<span class="ccy">₹</span>${fmtI(n, 2)}`;
 
       if ($('lot-kpi-amount-meta')) $('lot-kpi-amount-meta').innerHTML = hasSold
         ? metaRow('Min', ccy(priceMin)) + metaRow('Max', ccy(priceMax)) + metaRow('Avg', ccy(priceAvg))
@@ -13373,19 +13576,19 @@ async function loadLots(opts){
       if ($('lot-kpi-sold-count')) $('lot-kpi-sold-count').textContent = agg.sold.n;
       if ($('lot-kpi-sold-meta'))  $('lot-kpi-sold-meta').innerHTML =
         metaRow('Bags', fmtI(agg.sold.bags, 0))
-        + metaRow('Qty', `${fmtI(agg.sold.qty, 0)} kg`)
+        + metaRow('Qty', `${fmtI(agg.sold.qty, 2)} kg`)
         + metaRow('Amount', ccy(agg.sold.amt));
 
       if ($('lot-kpi-wd-count')) $('lot-kpi-wd-count').textContent = agg.wd.n;
       if ($('lot-kpi-wd-meta'))  $('lot-kpi-wd-meta').innerHTML =
         metaRow('Bags', fmtI(agg.wd.bags, 0))
-        + metaRow('Qty', `${fmtI(agg.wd.qty, 0)} kg`)
+        + metaRow('Qty', `${fmtI(agg.wd.qty, 2)} kg`)
         + metaRow('Amount', ccy(agg.wd.amt));
 
       updateSummaryStats('lots',
         `<strong>${arr.length}</strong> lot${arr.length===1?'':'s'} · `
-        + `<strong>${fmtI(totalQty,0)} kg</strong> · `
-        + `<strong>₹${fmtI(totalAmount,0)}</strong> · `
+        + `<strong>${fmtI(totalQty,2)} kg</strong> · `
+        + `<strong>₹${fmtI(totalAmount,2)}</strong> · `
         + `<strong>${pct}%</strong> calculated · `
         + `<strong>${agg.sold.n}</strong> sold · `
         + `<strong>${agg.wd.n}</strong> WD`);
@@ -13823,10 +14026,12 @@ function openLotEdit(l){
       // NA = not applicable. Each stamps the buyer block + sale type and
       // zeroes price/amount so figures read 0 before save (the server
       // re-runs calculateLot on save, recomputing prate/GST/balance to 0).
-      // Sale codes match this build's sale-type values (WD / NA).
+      // Sale codes MUST match the Sale Type <select> option values
+      // (W = Withdrawn, N = N/A) — otherwise the select silently rejects
+      // the value and the sale type is left blank.
       const SPECIAL = {
-        WD: { buyer: 'WD', buyer1: 'Withdrawn', sale: 'WD', toast: 'Marked as Withdrawn — buyer WD, sale WD, price zeroed' },
-        NA: { buyer: 'NA', buyer1: 'N/A',       sale: 'NA', toast: 'Marked as N/A — buyer NA, sale NA, price zeroed' },
+        WD: { buyer: 'WD', buyer1: 'Withdrawn', sale: 'W', toast: 'Marked as Withdrawn — buyer WD, sale W, price zeroed' },
+        NA: { buyer: 'NA', buyer1: 'N/A',       sale: 'N', toast: 'Marked as N/A — buyer NA, sale N, price zeroed' },
       };
       if (SPECIAL[code]) {
         const sp = SPECIAL[code];
@@ -13862,7 +14067,10 @@ function openLotEdit(l){
         // not the buyer's. Picking a buyer must never overwrite the
         // seller's CR. (The buyer's GSTIN lives in the buyer master and
         // flows onto the sales invoice separately.)
-        setIf('l-sale',   match.sale   || '');
+        // Update the sale type from the buyer master. Only overwrite when
+        // the buyer actually carries a sale type, so re-picking a buyer
+        // whose master has a blank sale doesn't wipe the lot's existing one.
+        if (match.sale) setIf('l-sale', match.sale);
         codeEl.value = match.code || code;
         if (typeof toast === 'function') toast(`Filled buyer: ${match.buyer1 || match.buyer}`);
       } catch (e) {
@@ -14405,14 +14613,14 @@ async function loadInvoices(opts){
       const grandTotal  = arr.reduce((a,i) => a + (Number(i.tot)    || 0), 0);
       const $ = (id) => document.getElementById(id);
       if ($('inv-kpi-count'))  $('inv-kpi-count').textContent  = arr.length;
-      if ($('inv-kpi-qty'))    $('inv-kpi-qty').innerHTML      = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
-      if ($('inv-kpi-amount')) $('inv-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
-      if ($('inv-kpi-total'))  $('inv-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 0)}`;
+      if ($('inv-kpi-qty'))    $('inv-kpi-qty').innerHTML      = `${fmtI(totalQty, 2)}<span class="kpi-unit">kg</span>`;
+      if ($('inv-kpi-amount')) $('inv-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 2)}`;
+      if ($('inv-kpi-total'))  $('inv-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 2)}`;
       // Compact summary line shown when collapsed
       updateSummaryStats('invoices',
         `<strong>${arr.length}</strong> invoice${arr.length===1?'':'s'} · `
-        + `<strong>${fmtI(totalQty,0)} kg</strong> · `
-        + `<strong>₹${fmtI(grandTotal,0)}</strong> total`);
+        + `<strong>${fmtI(totalQty,2)} kg</strong> · `
+        + `<strong>₹${fmtI(grandTotal,2)}</strong> total`);
     }
   }
 
@@ -15138,13 +15346,13 @@ async function loadPurchases(opts){
       const grandTotal  = arr.reduce((a,i) => a + (Number(i.total)  || 0), 0);
       const $ = (id) => document.getElementById(id);
       if ($('pur-kpi-count'))  $('pur-kpi-count').textContent  = arr.length;
-      if ($('pur-kpi-qty'))    $('pur-kpi-qty').innerHTML      = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
-      if ($('pur-kpi-amount')) $('pur-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
-      if ($('pur-kpi-total'))  $('pur-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 0)}`;
+      if ($('pur-kpi-qty'))    $('pur-kpi-qty').innerHTML      = `${fmtI(totalQty, 2)}<span class="kpi-unit">kg</span>`;
+      if ($('pur-kpi-amount')) $('pur-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 2)}`;
+      if ($('pur-kpi-total'))  $('pur-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 2)}`;
       updateSummaryStats('purchases',
         `<strong>${arr.length}</strong> invoice${arr.length===1?'':'s'} · `
-        + `<strong>${fmtI(totalQty,0)} kg</strong> · `
-        + `<strong>₹${fmtI(grandTotal,0)}</strong> total`);
+        + `<strong>${fmtI(totalQty,2)} kg</strong> · `
+        + `<strong>₹${fmtI(grandTotal,2)}</strong> total`);
     }
   }
 
@@ -15323,13 +15531,13 @@ async function loadPayments(opts){
           : '';
         const $ = (id) => document.getElementById(id);
         if ($('pay-kpi-sellers'))  $('pay-kpi-sellers').innerHTML     = arr.length + filterTail;
-        if ($('pay-kpi-qty'))      $('pay-kpi-qty').innerHTML        = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
-        if ($('pay-kpi-discount')) $('pay-kpi-discount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalDiscount, 0)}`;
-        if ($('pay-kpi-payable'))  $('pay-kpi-payable').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalPayable, 0)}`;
+        if ($('pay-kpi-qty'))      $('pay-kpi-qty').innerHTML        = `${fmtI(totalQty, 2)}<span class="kpi-unit">kg</span>`;
+        if ($('pay-kpi-discount')) $('pay-kpi-discount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalDiscount, 2)}`;
+        if ($('pay-kpi-payable'))  $('pay-kpi-payable').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalPayable, 2)}`;
         updateSummaryStats('payments',
           `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status||stype)?` (of ${rows.length})`:''} · `
-          + `<strong>${fmtI(totalQty,0)} kg</strong> · `
-          + `<strong>₹${fmtI(totalPayable,0)}</strong> payable`);
+          + `<strong>${fmtI(totalQty,2)} kg</strong> · `
+          + `<strong>₹${fmtI(totalPayable,2)}</strong> payable`);
       }
     }
 
@@ -16684,8 +16892,8 @@ async function _renderInsights(){
             ['Amount',   '₹ ' + fmtI(t.wd_value, 2)],
           ])}
           ${kpi('💰', 'Value',       '₹ ' + fmtI(t.value, 2), 'emerald', [
-            ['Min ₹', t.min_price != null && t.min_price > 0 ? fmtI(t.min_price, 0) : '—'],
-            ['Max ₹', t.max_price != null && t.max_price > 0 ? fmtI(t.max_price, 0) : '—'],
+            ['Min ₹', t.min_price != null && t.min_price > 0 ? fmtI(t.min_price, 2) : '—'],
+            ['Max ₹', t.max_price != null && t.max_price > 0 ? fmtI(t.max_price, 2) : '—'],
             ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
           ])}
           ${kpi('💸', 'Payable',     '₹ ' + fmtI(t.payable_to_sellers, 2),    'orange')}
@@ -17273,12 +17481,12 @@ async function loadBills(){
       const totalNet = arr.reduce((a,i) => a + (Number(i.net) || 0), 0);
       const $ = (id) => document.getElementById(id);
       if ($('bill-kpi-count')) $('bill-kpi-count').textContent = arr.length;
-      if ($('bill-kpi-qty'))   $('bill-kpi-qty').innerHTML     = `${fmtI(totalQty, 0)}<span class="kpi-unit">kg</span>`;
-      if ($('bill-kpi-net'))   $('bill-kpi-net').innerHTML     = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalNet, 0)}`;
+      if ($('bill-kpi-qty'))   $('bill-kpi-qty').innerHTML     = `${fmtI(totalQty, 2)}<span class="kpi-unit">kg</span>`;
+      if ($('bill-kpi-net'))   $('bill-kpi-net').innerHTML     = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalNet, 2)}`;
       updateSummaryStats('bills',
         `<strong>${arr.length}</strong> bill${arr.length===1?'':'s'} · `
-        + `<strong>${fmtI(totalQty,0)} kg</strong> · `
-        + `<strong>₹${fmtI(totalNet,0)}</strong> net`);
+        + `<strong>${fmtI(totalQty,2)} kg</strong> · `
+        + `<strong>₹${fmtI(totalNet,2)}</strong> net`);
     }
   }
 
@@ -17412,13 +17620,13 @@ async function loadDebitNotes(opts){
       const grandTotal  = arr.reduce((a,n) => a + (Number(n.total) || 0), 0);
       const $ = (id) => document.getElementById(id);
       if ($('dn-kpi-count'))  $('dn-kpi-count').textContent  = arr.length;
-      if ($('dn-kpi-amount')) $('dn-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 0)}`;
-      if ($('dn-kpi-tax'))    $('dn-kpi-tax').innerHTML      = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalTax, 0)}`;
-      if ($('dn-kpi-total'))  $('dn-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 0)}`;
+      if ($('dn-kpi-amount')) $('dn-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 2)}`;
+      if ($('dn-kpi-tax'))    $('dn-kpi-tax').innerHTML      = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalTax, 2)}`;
+      if ($('dn-kpi-total'))  $('dn-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 2)}`;
       if (typeof updateSummaryStats === 'function') {
         updateSummaryStats('debit',
           `<strong>${arr.length}</strong> debit note${arr.length === 1 ? '' : 's'} · `
-          + `<strong>₹${fmtI(grandTotal, 0)}</strong> total`);
+          + `<strong>₹${fmtI(grandTotal, 2)}</strong> total`);
       }
     }
   }

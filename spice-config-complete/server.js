@@ -709,6 +709,32 @@ app.post('/api/active-auction', requireView, (req, res) => {
   res.json({ success: true, auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
 });
 
+// ── Favourite trade (mobile default) ──────────────────────────────
+// A single "favourite" trade, stored separately from active_auction_id so
+// it is fully decoupled from the desktop global trade selector. The mobile
+// lot-entry app defaults to THIS trade (see mobile-bridge.js
+// /api/mobile/favourite-trade), so switching the desktop global picker
+// never changes what the mobile app shows.
+app.get('/api/favourite-trade', requireView, (req, res) => {
+  const db = getDb();
+  db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+  const row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+  const aid = row && row.value ? parseInt(row.value, 10) : null;
+  res.json({ auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
+});
+app.post('/api/favourite-trade', requireAuctionWrite, (req, res) => {
+  const raw = req.body && req.body.auctionId;
+  const aid = parseInt(raw, 10);
+  const db = getDb();
+  db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+  // null / 0 / missing clears the favourite (mobile falls back to its picker).
+  db.run(
+    `INSERT OR REPLACE INTO app_state (key, value) VALUES ('favourite_auction_id', ?)`,
+    [Number.isFinite(aid) && aid > 0 ? String(aid) : '']
+  );
+  res.json({ success: true, auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
+});
+
 // ══════════════════════════════════════════════════════════════════
 // BRANDING — public read + white-label tenant preset (developer only)
 // ══════════════════════════════════════════════════════════════════
@@ -1343,6 +1369,157 @@ app.post('/api/system/restore', requireUserManage, upload.single('file'), (req, 
     });
   } catch (e) {
     res.status(500).json({ error: 'Restore failed: ' + e.message });
+  }
+});
+
+// ── AUTO BACKUP SCHEDULE ──────────────────────────────────────────
+// An unattended, recurring DB snapshot. The schedule is stored in the
+// app_state key/value table (INSERT OR REPLACE, no migration needed) and
+// a 60-second ticker writes a snapshot to data/backups/auto-backup-*.db
+// when the wall-clock matches. Old auto backups are pruned to the
+// configured retention so the folder doesn't grow without bound.
+
+// Read the schedule out of app_state, falling back to sensible defaults.
+function readBackupSchedule(db) {
+  let map = {};
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+    const rows = db.all(
+      `SELECT key, value FROM app_state WHERE key IN
+        ('backup_auto_enabled','backup_freq','backup_time','backup_weekday','backup_retention','backup_last_run')`
+    );
+    for (const r of (rows || [])) map[r.key] = r.value;
+  } catch (_) {}
+  const num = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : def; };
+  return {
+    enabled:   map.backup_auto_enabled === '1',
+    freq:      (map.backup_freq === 'weekly') ? 'weekly' : 'daily',
+    time:      /^\d{2}:\d{2}$/.test(map.backup_time || '') ? map.backup_time : '02:00',
+    weekday:   Math.min(6, Math.max(0, num(map.backup_weekday, 1))), // 0=Sun .. 6=Sat
+    retention: Math.min(365, Math.max(1, num(map.backup_retention, 14))),
+    lastRun:   map.backup_last_run || '',
+  };
+}
+
+// Keep only the newest `keep` auto-backup files; delete the rest.
+function pruneAutoBackups(keep) {
+  try {
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith('auto-backup-') && f.endsWith('.db'))
+      .map(f => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t);
+    for (const x of files.slice(keep)) {
+      try { fs.unlinkSync(path.join(BACKUP_DIR, x.f)); } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+// The recurring tick. Runs every minute; creates at most one snapshot per
+// scheduled occurrence (guarded by a per-minute stamp in backup_last_run).
+function backupScheduleTick() {
+  let db;
+  try { db = getDb(); } catch (_) { return; } // DB not ready yet
+  try {
+    const s = readBackupSchedule(db);
+    if (!s.enabled) return;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const hhmm = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    if (hhmm !== s.time) return;
+    if (s.freq === 'weekly' && now.getDay() !== s.weekday) return;
+    // One snapshot per scheduled minute — survives multiple ticks in the
+    // same minute and a restart within that minute.
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${hhmm}`;
+    if (s.lastRun === stamp) return;
+    db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+    db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('backup_last_run', ?)`, [stamp]);
+    const out = snapshotDbToFile('auto-backup');
+    if (out) {
+      pruneAutoBackups(s.retention);
+      console.log('[backup] auto backup created:', out);
+    } else {
+      console.error('[backup] auto backup failed to write a snapshot');
+    }
+  } catch (e) {
+    console.error('[backup] schedule tick failed:', e.message);
+  }
+}
+// Fire on the minute boundary-ish; 60s cadence is plenty for an HH:MM match.
+const _backupTimer = setInterval(backupScheduleTick, 60 * 1000);
+if (_backupTimer && typeof _backupTimer.unref === 'function') _backupTimer.unref();
+
+// GET /api/system/backup-schedule — current schedule + recent auto backups.
+app.get('/api/system/backup-schedule', requireUserManage, (req, res) => {
+  try {
+    const s = readBackupSchedule(getDb());
+    let backups = [];
+    try {
+      backups = fs.readdirSync(BACKUP_DIR)
+        .filter(f => f.startsWith('auto-backup-') && f.endsWith('.db'))
+        .map(f => {
+          const st = fs.statSync(path.join(BACKUP_DIR, f));
+          return { name: f, size: st.size, mtime: st.mtime.toISOString() };
+        })
+        .sort((a, b) => b.mtime.localeCompare(a.mtime))
+        .slice(0, 30);
+    } catch (_) {}
+    res.json({ schedule: s, backups });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/system/backup-schedule — save the schedule.
+app.put('/api/system/backup-schedule', requireUserManage, (req, res) => {
+  try {
+    const b = req.body || {};
+    const num = (v, def) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : def; };
+    const enabled   = (b.enabled === true || b.enabled === '1' || b.enabled === 1) ? '1' : '0';
+    const freq      = (b.freq === 'weekly') ? 'weekly' : 'daily';
+    const time      = /^\d{2}:\d{2}$/.test(b.time || '') ? b.time : '02:00';
+    const weekday   = String(Math.min(6, Math.max(0, num(b.weekday, 1))));
+    const retention = String(Math.min(365, Math.max(1, num(b.retention, 14))));
+    const db = getDb();
+    db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+    const set = (k, v) => db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)`, [k, v]);
+    set('backup_auto_enabled', enabled);
+    set('backup_freq', freq);
+    set('backup_time', time);
+    set('backup_weekday', weekday);
+    set('backup_retention', retention);
+    res.json({ success: true, schedule: readBackupSchedule(db) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/system/backup-now — create a server-side snapshot immediately.
+app.post('/api/system/backup-now', requireUserManage, (req, res) => {
+  try {
+    const out = snapshotDbToFile('auto-backup');
+    if (!out) return res.status(500).json({ error: 'Snapshot failed' });
+    pruneAutoBackups(readBackupSchedule(getDb()).retention);
+    res.json({ success: true, file: path.basename(out) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/system/backups/:name/download — download a stored auto backup.
+// `name` is validated against the backups folder to prevent path traversal.
+app.get('/api/system/backups/:name/download', requireUserManage, (req, res) => {
+  try {
+    const name = path.basename(String(req.params.name || ''));
+    if (!/^auto-backup-[\w.\-:T]+\.db$/.test(name)) {
+      return res.status(400).json({ error: 'Invalid backup name' });
+    }
+    const full = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(full)) return res.status(404).json({ error: 'Backup not found' });
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    fs.createReadStream(full).pipe(res);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

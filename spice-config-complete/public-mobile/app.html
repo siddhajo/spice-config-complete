@@ -804,12 +804,14 @@ async function loadAvailableTrades(){
     }
     if(!trades.length) info.textContent='No trades available - ask admin to create one';
     sel.onchange=function(){var o=sel.options[sel.selectedIndex];info.textContent=o&&o.value&&o.getAttribute('data-end')?'Ends at '+o.getAttribute('data-end'):''};
-    // Default to the trade selected in the admin app (shared via
-    // /api/active-auction). When set and available to this user, lock it
-    // in and hide the picker — the mobile app follows the admin's choice.
-    // Falls back to the manual selector when nothing is set.
+    // Default to the admin's FAVOURITE trade (the star on the desktop
+    // Trades screen, shared via /api/mobile/favourite-trade). When set and
+    // available to this user, lock it in and hide the picker — the mobile
+    // app follows the favourite, NOT the desktop global trade selector, so
+    // switching the global picker never changes what mobile shows. Falls
+    // back to the manual selector when no favourite is set.
     try{
-      var ar=await fetch(B+'/api/active-auction',{headers:{'Authorization':'Bearer '+token}});
+      var ar=await fetch(B+'/api/mobile/favourite-trade',{headers:{'Authorization':'Bearer '+token}});
       if(ar.ok){
         var ad=await ar.json();
         if(ad&&ad.auctionId&&Array.from(sel.options).some(function(o){return o.value===String(ad.auctionId)})){
@@ -824,7 +826,7 @@ async function loadAvailableTrades(){
           info.innerHTML='<div class="ts-label">Current trade</div>'
             +'<div class="ts-no">Trade #'+tradeNo+'</div>'
             +(tradeMeta?'<div class="ts-meta">'+tradeMeta+'</div>':'')
-            +'<div class="ts-tag">Set in admin app</div>';
+            +'<div class="ts-tag">★ Favourite — set in admin app</div>';
         }
       }
     }catch(_){}

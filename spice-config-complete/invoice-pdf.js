@@ -14,6 +14,33 @@ function readFlag(val, defaultOn) {
   return String(val).toLowerCase() === 'true';
 }
 
+// ── Aligned label/colon/value row ────────────────────────────────
+// Draws "Label : value" with the COLON pinned to a fixed x, so every row
+// in a block lines up vertically (labels are left-aligned, colons column-
+// aligned, values start at the same x). Proportional fonts make padded-
+// string alignment ("GSTIN    : x") drift, so we draw the three pieces
+// separately. Pass `labelColW` = the widest label width in the block
+// (measure with doc.widthOfString under the active font). `blockX` is the
+// row's left edge and `blockW` its full width so the value wraps in place.
+// Caller controls the y-cursor and font.
+function drawKVRow(doc, label, value, blockX, y, labelColW, blockW, opts = {}) {
+  const colonGap = opts.colonGap != null ? opts.colonGap : 3; // label → colon
+  const valueGap = opts.valueGap != null ? opts.valueGap : 4; // colon → value
+  const colonX = blockX + labelColW + colonGap;
+  const valueX = colonX + doc.widthOfString(':') + valueGap;
+  doc.text(String(label == null ? '' : label), blockX, y, { width: labelColW });
+  doc.text(':', colonX, y);
+  const valueW = Math.max(10, (blockX + blockW) - valueX);
+  doc.text(String(value == null ? '' : value), valueX, y, { width: valueW });
+  return valueW;
+}
+// Widest label width (current font) across a list of label strings.
+function widestLabel(doc, labels) {
+  let w = 0;
+  for (const l of labels) { const x = doc.widthOfString(String(l)); if (x > w) w = x; }
+  return w;
+}
+
 // ── Invoice number formatter ──────────────────────────────────────
 // Format: {inv_prefix}/{saleType}-{invoiceNo}/{season_short}
 // Examples:
@@ -211,13 +238,15 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
     ['PLACE OF SUPPLY', (cfg.s_place || '').toUpperCase() + (cfg.s_state ? '  [' + (cfg.s_state || '').toUpperCase() + ']' : '')],
     ['REVERSE CHARGE', ''],
   ];
+  // Align the colons within each column (labels left, colons in one column).
+  const gridLeftLabelW  = widestLabel(doc, leftPairs.map(p => p[0]));
+  const gridRightLabelW = widestLabel(doc, rightPairs.map(p => p[0]));
   for (let i = 0; i < gridRows; i++) {
     const rowY = y + i * gridRowH + 2;
     const [lL, lV] = leftPairs[i];
     const [rL, rV] = rightPairs[i];
-    // Left: label left, value after colon
-    doc.text(`${lL} : ${lV || ''}`, x0 + 6, rowY, { width: gridLeftW - 12 });
-    doc.text(`${rL} : ${rV || ''}`, gridSplitX + 6, rowY, { width: gridRightW - 12 });
+    drawKVRow(doc, lL, lV || '', x0 + 6, rowY, gridLeftLabelW, gridLeftW - 12);
+    drawKVRow(doc, rL, rV || '', gridSplitX + 6, rowY, gridRightLabelW, gridRightW - 12);
   }
   y += gridH;
 
@@ -252,12 +281,14 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
     gstin: cfg.s_gstin || '',
     pan: cfg.s_pan || cfg.pan || '',
   };
-  buyerLines.push((buyer.name || '').toUpperCase());
+  // Each entry is either a plain line ({ t:'text' }) or an aligned
+  // label/colon/value row ({ t:'kv' }) so GSTIN/PAN/STATE colons line up.
+  buyerLines.push({ t: 'text', s: (buyer.name || '').toUpperCase() });
   const buyerAddr = [buyer.address, buyer.place ? 'DOOR No.650, ' + buyer.place : ''].filter(Boolean).join(', ').toUpperCase();
-  if (buyerAddr) buyerLines.push(buyerAddr);
-  if (buyer.gstin) buyerLines.push('GSTIN    : ' + buyer.gstin);
-  if (buyer.pan) buyerLines.push('PAN      : ' + buyer.pan);
-  if (buyer.state) buyerLines.push('STATE    : ' + (buyer.state || '').toUpperCase() + '     CODE:' + (buyer.st_code || ''));
+  if (buyerAddr) buyerLines.push({ t: 'text', s: buyerAddr });
+  if (buyer.gstin) buyerLines.push({ t: 'kv', l: 'GSTIN', v: buyer.gstin });
+  if (buyer.pan)   buyerLines.push({ t: 'kv', l: 'PAN',   v: buyer.pan });
+  if (buyer.state) buyerLines.push({ t: 'kv', l: 'STATE', v: (buyer.state || '').toUpperCase() + '     CODE: ' + (buyer.st_code || '') });
 
   const bodyLineH = 10;
   const buyerBodyH = Math.max(6, buyerLines.length + 1) * bodyLineH;
@@ -266,10 +297,16 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
   doc.moveTo(x1, y).lineTo(x1, y + buyerBodyH).stroke();
   doc.moveTo(x0, y + buyerBodyH).lineTo(x1, y + buyerBodyH).stroke();
   doc.font('Helvetica').fontSize(8);
+  const buyerLabelW = widestLabel(doc, buyerLines.filter(it => it.t === 'kv').map(it => it.l));
   let ly = y + 3;
-  for (const line of buyerLines) {
-    doc.text(line, x0 + 6, ly, { width: gridLeftW - 12 });
-    doc.text(line, gridSplitX + 6, ly, { width: gridRightW - 12 });
+  for (const item of buyerLines) {
+    if (item.t === 'kv') {
+      drawKVRow(doc, item.l, item.v, x0 + 6, ly, buyerLabelW, gridLeftW - 12);
+      drawKVRow(doc, item.l, item.v, gridSplitX + 6, ly, buyerLabelW, gridRightW - 12);
+    } else {
+      doc.text(item.s, x0 + 6, ly, { width: gridLeftW - 12 });
+      doc.text(item.s, gridSplitX + 6, ly, { width: gridRightW - 12 });
+    }
     ly += bodyLineH;
   }
   y += buyerBodyH;
@@ -919,21 +956,28 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   const addrLine = [co.address1, co.address2, co.place, co.stateName, co.pin].filter(Boolean).join(', ');
   doc.text(addrLine, textX, ty, { width: textW });
   ty += doc.heightOfString(addrLine, { width: textW });
-  if (co.gstin) { doc.text(`GSTIN/UIN: ${co.gstin}`, textX, ty, { width: textW }); ty += 10; }
-  if (co.stateName) { doc.text(`State Name : ${co.stateName}, Code : ${co.stateCode}`, textX, ty, { width: textW }); ty += 10; }
   // Identity line: "Partnership: <name>" when the partnership toggle is
   // on for the active company, else "CIN: <cin>". Falls back to the raw
   // CIN if cinLabel/cinValue aren't resolved (older cfg shapes).
   const _idLabel = co.cinLabel || 'CIN';
   const _idValue = (co.cinValue !== undefined ? co.cinValue : co.cin) || '';
-  if (_idValue) { doc.text(`${_idLabel}: ${_idValue}`, textX, ty, { width: textW }); ty += 10; }
-  if (co.fssai) { doc.text(`FSSAI No.: ${co.fssai}`, textX, ty, { width: textW }); ty += 10; }
-  if (co.sbl)   { doc.text(`SBL No.: ${co.sbl}`,     textX, ty, { width: textW }); ty += 10; }
-  // MSME / Udyam registration — shown only when configured. Sits inside the
-  // fixed 100pt header box (topHeaderH): name(12) + 1-line addr(~10) + GSTIN
-  // + State + CIN + FSSAI + SBL + MSME ≈ 92pt, so it fits without overlapping
-  // the middle (Consignee/Buyer) block that starts at topY + topHeaderH.
-  if (co.msme)  { doc.text(`MSME No.: ${co.msme}`,   textX, ty, { width: textW }); ty += 10; }
+  // Build the label/value rows present, then draw them with a single
+  // colon column so every ":" lines up. (MSME / SBL / FSSAI fit inside the
+  // fixed 100pt header box alongside name + address + GSTIN + State + CIN.)
+  const coRows = [];
+  if (co.gstin)     coRows.push(['GSTIN/UIN', co.gstin]);
+  if (co.stateName) coRows.push(['State Name', `${co.stateName}, Code : ${co.stateCode}`]);
+  if (_idValue)     coRows.push([_idLabel, _idValue]);
+  if (co.fssai)     coRows.push(['FSSAI No.', co.fssai]);
+  if (co.sbl)       coRows.push(['SBL No.', co.sbl]);
+  if (co.msme)      coRows.push(['MSME No.', co.msme]);
+  if (coRows.length) {
+    const coLabelW = widestLabel(doc, coRows.map(r => r[0]));
+    for (const [lab, val] of coRows) {
+      drawKVRow(doc, lab, val, textX, ty, coLabelW, textW);
+      ty += 10;
+    }
+  }
 
   // ── RIGHT BLOCK: 2-row metadata grid ────────────────────────
   // Row 1: Invoice No | e-Way Bill No | Dated
@@ -1027,6 +1071,14 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     doc.text(txt, leftX + 3, anchor.v, { width: lW });
     anchor.v += doc.heightOfString(txt, { width: lW }) + 1;
   };
+  // Aligned label/colon/value variant — GSTIN/UIN and State Name share one
+  // colon column so they line up. labelColW is the widest of the two labels
+  // (both blocks use the same pair). Measured lazily under the active font.
+  const kvLabelW = () => widestLabel(doc, ['GSTIN/UIN', 'State Name']);
+  const writeLeftKV = (label, value, anchor) => {
+    const vw = drawKVRow(doc, label, value, leftX + 3, anchor.v, kvLabelW(), lW);
+    anchor.v += doc.heightOfString(String(value == null ? '' : value), { width: vw }) + 1;
+  };
 
   // Draw Consignee cell (skip when flag_ship is OFF — item 1)
   if (showShipTo) {
@@ -1040,8 +1092,8 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     const cAnchor = { v: cy };
     writeLeft(ship.addr, cAnchor);
     writeLeft(ship.pla,  cAnchor);
-    if (ship.gstin) writeLeft(`GSTIN/UIN      : ${ship.gstin}`, cAnchor);
-    if (ship.state) writeLeft(`State Name     : ${ship.state}, Code : ${ship.stCode || ''}`, cAnchor);
+    if (ship.gstin) writeLeftKV('GSTIN/UIN', ship.gstin, cAnchor);
+    if (ship.state) writeLeftKV('State Name', `${ship.state}, Code : ${ship.stCode || ''}`, cAnchor);
   }
 
   // Draw Buyer (Bill to) / Seller (Bill from) cell
@@ -1098,8 +1150,8 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   const bAnchor = { v: by };
   writeLeft(bAddr, bAnchor);
   writeLeft(billTo.pla, bAnchor);
-  if (billTo.gstin) writeLeft(`GSTIN/UIN      : ${billTo.gstin}`, bAnchor);
-  if (billTo.state) writeLeft(`State Name     : ${billTo.state}, Code : ${billTo.stCode || ''}`, bAnchor);
+  if (billTo.gstin) writeLeftKV('GSTIN/UIN', billTo.gstin, bAnchor);
+  if (billTo.state) writeLeftKV('State Name', `${billTo.state}, Code : ${billTo.stCode || ''}`, bAnchor);
 
   // Right column: 2 rows now (Dispatched through | Destination, Dispatch From)
   const rSmall = 28;

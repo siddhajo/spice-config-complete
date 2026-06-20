@@ -675,6 +675,24 @@ function mountMobile(app, deps) {
     }
   });
 
+  // ── 3c. FAVOURITE TRADE (mobile default) ────────────────────────
+  // The mobile lot-entry app defaults to the admin's "favourite" trade,
+  // set via the star on the desktop Trades screen (POST /api/favourite-trade).
+  // This is stored under app_state.favourite_auction_id — SEPARATE from
+  // active_auction_id — so changing the desktop global trade selector does
+  // NOT change the trade the mobile app shows. Returns null when no
+  // favourite is set, so the mobile app falls back to its own picker.
+  app.get('/api/mobile/favourite-trade', requireAuth, (_req, res) => {
+    try {
+      const db = getDb();
+      const row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+      const aid = row && row.value ? parseInt(row.value, 10) : null;
+      res.json({ auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
+    } catch (e) {
+      res.json({ auctionId: null });
+    }
+  });
+
   // ── 4. STATUS ALIAS ─────────────────────────────────────────────
   // PWA's app.html pings /api/status on boot to detect "logged out vs
   // server unreachable". spice-config has /api/health; alias it.
