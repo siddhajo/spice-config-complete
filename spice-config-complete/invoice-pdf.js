@@ -5,6 +5,9 @@
 
 const PDFDocument = require('pdfkit');
 const { amountToWords } = require('./amount-words');
+// Sensitive-field masking (bank account / IFSC) per the company's display
+// policy — applied to client-facing invoices so a configured mask is honoured.
+const { makeMaskers } = require('./mask-fields');
 
 // Shared flag-reader: cfg flags can be `true|false` (booleans), `'true'|'false'`
 // (strings, from JSON storage), or `undefined`/empty (treat as defaultOn).
@@ -1758,8 +1761,12 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     //   ISP invoices          → TN bank
     const useKLBank = isASP; // same for both sales AND purchase view when isASP
     const bankName = useKLBank ? (cfg.bank_kl_name || '') : (cfg.bank_tn_name || '');
-    const bankAcct = useKLBank ? (cfg.bank_kl_acct || '') : (cfg.bank_tn_acct || '');
-    const bankIfsc = useKLBank ? (cfg.bank_kl_ifsc || '') : (cfg.bank_tn_ifsc || '');
+    // Account no. + IFSC honour the display masking policy (mask_acct /
+    // mask_ifsc). Defaults: acct → last4, ifsc → none, so by default only the
+    // account is partially masked and the IFSC prints in full.
+    const { maskAcct, maskIfsc } = makeMaskers(cfg);
+    const bankAcct = maskAcct(useKLBank ? (cfg.bank_kl_acct || '') : (cfg.bank_tn_acct || ''));
+    const bankIfsc = maskIfsc(useKLBank ? (cfg.bank_kl_ifsc || '') : (cfg.bank_tn_ifsc || ''));
     // Align values at a fixed x so all three rows start at the same column
     const labelW = 90;
     const valX = bkX + labelW;

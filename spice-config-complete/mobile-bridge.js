@@ -48,21 +48,10 @@ function getLogoPath() {
   return _rlpMb('logo-asp.png');
 }
 
-// Mask an account number for the receipt according to admin-set policy.
-// Mirrors the PWA's privacy switch verbatim.
-function maskAcctForReceipt(acctnum, maskType) {
-  if (!acctnum || !maskType || maskType === 'none') return acctnum;
-  const a = String(acctnum);
-  if (maskType === 'show_last4' || maskType === 'show_last4_star') {
-    if (a.length <= 4) return a;
-    return '*'.repeat(a.length - 4) + a.slice(-4);
-  }
-  if (maskType === 'show_first4_last4') {
-    if (a.length <= 8) return a;
-    return a.slice(0, 4) + '*'.repeat(a.length - 8) + a.slice(-4);
-  }
-  return acctnum;
-}
+// Sensitive-field masking — shared with the rest of the app (screen +
+// invoices + reports). Uses the real mask_acct / mask_ifsc / mask_phone
+// policy (modes: none/last4/last6/first4/first6/first2last2/full).
+const { makeMaskers } = require('./mask-fields');
 
 // Pull the receipt-relevant settings from spice-config's company_settings.
 // Field names match what the PWA renderer reads off cfg.
@@ -79,7 +68,12 @@ function getReceiptConfig(db) {
   return {
     appTitle:     get('trade_name', 'Spice Auction'),
     showUser:     getBool('show_username', false),
-    acctMask:     get('acct_mask', 'none'),
+    // Real masking policy keys (the old code read a non-existent 'acct_mask'
+    // with the wrong mode vocabulary, so masking never applied). Defaults
+    // match the company-config seed: acct → last4, ifsc/phone → none.
+    acctMask:     get('mask_acct',  'last4'),
+    ifscMask:     get('mask_ifsc',  'none'),
+    phoneMask:    get('mask_phone', 'none'),
     showMoisture: getBool('show_moisture', false),
     sampleWeight: parseFloat(get('sample_weight', '0')) || 0,
     labels:       {},  // spice-config doesn't customize labels; defaults fine
@@ -146,13 +140,15 @@ function renderSellerReceipt(doc, sellerLots, cfg) {
   addReceiptHeader(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano);
 
   const lw = 70;
-  const maskedAcct = maskAcctForReceipt(lot.acctnum, cfg.acctMask);
+  const { maskAcct, maskIfsc } = makeMaskers({ mask_acct: cfg.acctMask, mask_ifsc: cfg.ifscMask });
+  const maskedAcct = lot.acctnum ? maskAcct(lot.acctnum) : '';
+  const maskedIfsc = lot.ifsc ? maskIfsc(lot.ifsc) : '';
   const sellerFields = [
     [lb('seller', 'Seller'), lot.trader_name],
     [lb('place',  'Place'),  [lot.ppla, lot.pin].filter(Boolean).join(', ')],
     [lb('gstin',  'GSTIN'),  lot.cr],
     [lb('acct_no','A/C No'), maskedAcct || '--NIL--'],
-    [lb('ifsc',   'IFSC'),   lot.ifsc || '--NIL--'],
+    [lb('ifsc',   'IFSC'),   maskedIfsc || '--NIL--'],
   ];
   doc.fontSize(9);
   sellerFields.forEach(([label, value]) => {
@@ -230,12 +226,14 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
   addReceiptHeaderCompact(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano);
 
   const lw = 32;
-  const maskedAcct = maskAcctForReceipt(lot.acctnum, cfg.acctMask);
+  const { maskAcct, maskIfsc } = makeMaskers({ mask_acct: cfg.acctMask, mask_ifsc: cfg.ifscMask });
+  const maskedAcct = lot.acctnum ? maskAcct(lot.acctnum) : '';
+  const maskedIfsc = lot.ifsc ? maskIfsc(lot.ifsc) : '';
   const sellerFields = [
     [lb('seller','Seller'), lot.trader_name],
     [lb('place', 'Place'),  [lot.ppla, lot.pin].filter(Boolean).join(', ')],
     [lb('acct_no','A/C'),   maskedAcct || '--NIL--'],
-    [lb('ifsc',  'IFSC'),   lot.ifsc || '--NIL--'],
+    [lb('ifsc',  'IFSC'),   maskedIfsc || '--NIL--'],
   ];
   doc.fontSize(7);
   sellerFields.forEach(([label, value]) => {

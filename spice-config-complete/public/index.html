@@ -2631,6 +2631,10 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           Journals
         </button>
+        <button class="side-item" data-tab="registers" onclick="go('registers')">
+          <svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z"/></svg>
+          Registers
+        </button>
         <button class="side-item" data-tab="tally" onclick="go('tally')">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
           To Tally
@@ -3475,6 +3479,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="pooler">All Poolers</option>
           </select>
 
+          <!-- Paid / to-be-paid filter. "Paid" = the seller has been fully
+               exported (their Selected export shipped, so they're settled);
+               "To be paid" = not yet fully exported (still owe). Export status
+               lives in localStorage (_payExportStatus), so this is pure
+               client-side over the cached rows. -->
+          <select id="pay-export-filter" onchange="loadPayments({ keepPage: true })" title="Filter by paid (exported) vs to-be-paid (not yet exported)" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:150px">
+            <option value="">Paid &amp; unpaid</option>
+            <option value="unpaid">⏳ To be paid</option>
+            <option value="paid">✅ Paid (exported)</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="loadPayments()">↻ Reload</button>
           </div>
@@ -3518,7 +3533,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div style="height:280px;position:relative"><canvas id="pay-top-sellers-chart"></canvas></div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Discount</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="payments-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Seller</th><th>Lots</th><th>Qty</th><th>Amount</th><th>Discount</th><th>Total</th><th>TDS</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="payments-list"></tbody></table></div>
         <div id="payments-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -3719,6 +3734,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
         <div id="lorry-type-desc" style="font-size:11.5px;color:var(--text3);margin:4px 0 0"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0">
+          <button class="btn btn-a" onclick="previewLorry(lorryCurrentType())">Preview</button>
           <button class="btn btn-a" onclick="downloadLorry(lorryCurrentType(),'xlsx')">XLSX</button>
           <button class="btn btn-orange" onclick="downloadLorry(lorryCurrentType(),'pdf')">PDF</button>
         </div>
@@ -4037,6 +4053,42 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
         </div><!-- /tally-sec-single-voucher -->
 
+        <!-- Single Invoice Voucher picker -->
+        <div class="tally-section" id="tally-sec-single-invoice">
+        <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-single-invoice')">
+          <span class="tally-section-chev">▼</span>
+          <span>🧾 Single Invoice Voucher</span>
+        </h3>
+        <div class="tally-section-body">
+        <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate a Tally voucher XML for just one invoice. Useful when a single invoice was missed or corrected and needs re-importing on its own. Pick a voucher type, load its invoices, then download the one you need.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div style="flex:1;min-width:170px"><label style="font-size:11px;color:var(--text2);font-weight:600">Voucher type</label>
+              <select id="tally-inv-type" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                <option value="sales_isp" data-tally-co="isp">Sales — ISP</option>
+                <option value="sales_asp" data-tally-co="asp">Sales — ASP</option>
+                <option value="isp_purchase" data-tally-co="isp">ISP Purchase</option>
+                <option value="rd_purchase" data-tally-co="asp">RD Purchase</option>
+                <option value="urd_purchase" data-tally-co="asp">URD Purchase</option>
+                <option value="debit_note" data-tally-co="isp">Debit Note</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:220px"><label style="font-size:11px;color:var(--text2);font-weight:600">Search</label>
+              <div class="tally-search" id="tally-inv-search-wrap">
+                <span class="tally-search-icon">🔍</span>
+                <input type="text" id="tally-inv-search" placeholder="Type to filter by party or invoice no…" oninput="onTallySearchInput('tally-inv-search', renderTallyInvoiceList)">
+                <button type="button" class="tally-search-clear" onclick="clearTallySearch('tally-inv-search', renderTallyInvoiceList)" title="Clear">✕</button>
+              </div>
+            </div>
+            <button class="btn btn-a" onclick="loadTallyInvoices()" style="padding:7px 14px;font-size:12px">Load Invoices</button>
+          </div>
+          <div id="tally-inv-list" style="margin-top:10px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+            <div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Pick an auction + voucher type and click <strong>Load Invoices</strong>.</div>
+          </div>
+        </div>
+        </div>
+        </div><!-- /tally-sec-single-invoice -->
+
         <div class="tally-section" id="tally-sec-vouchers">
         <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-vouchers')">
           <span class="tally-section-chev">▼</span>
@@ -4202,6 +4254,39 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-a" onclick="exportJournal()">Export XLSX</button>
         </div>
         <div style="overflow-x:auto;max-height:500px"><table id="jr-table"><thead id="jr-head"></thead><tbody id="jr-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="tc" id="tc-registers">
+      <div class="card">
+        <h2>Registers <span style="font-weight:400;font-size:12px;color:var(--text3)">Lot-wise Purchase &amp; invoice-wise Sales — by trade or date range</span></h2>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:end">
+          <div class="fg" style="margin:0"><label>Register Type</label>
+            <select id="reg-type" onchange="onRegTypeChange()">
+              <option value="purchase">Purchase (lot-wise)</option>
+              <option value="sales">Sales (invoice-wise)</option>
+              <option value="pooler">Pooler Register (per pooler)</option>
+              <option value="seller">Sellers Individual (per seller)</option>
+              <option value="merchant">Merchants Individual (per merchant)</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0;min-width:220px" id="reg-auction-wrap"><label>Trade</label>
+            <select id="reg-auction" style="width:100%;padding:6px"></select>
+          </div>
+          <div class="fg" style="margin:0"><label>From</label><input type="date" id="reg-from" onchange="if(isIndividualReg(document.getElementById('reg-type').value))populateRegParties()"></div>
+          <div class="fg" style="margin:0"><label>To</label><input type="date" id="reg-to" onchange="if(isIndividualReg(document.getElementById('reg-type').value))populateRegParties()"></div>
+          <div class="fg" style="margin:0;min-width:220px;display:none" id="reg-party-wrap"><label>Party</label>
+            <select id="reg-party" style="width:100%;padding:6px"><option value="">— All parties —</option></select>
+          </div>
+          <div class="fg" style="margin:0;display:none" id="reg-sale-wrap"><label>Sale Type</label>
+            <select id="reg-sale"><option value="">All</option><option value="L">Local (L)</option><option value="I">Inter-state (I)</option><option value="E">Export (E)</option><option value="W">Withdrawn (W)</option><option value="N">N/A (N)</option></select>
+          </div>
+          <button class="btn btn-g" onclick="loadRegister()">Load</button>
+          <button class="btn btn-a" onclick="exportRegister('xlsx')">Export XLSX</button>
+          <button class="btn btn-orange" onclick="exportRegister('pdf')">Export PDF</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Pick a Trade for a single trade, or leave it on “All trades” and set a From/To date range. The date range is ignored when a specific trade is selected.</div>
+        <div style="overflow-x:auto;max-height:520px"><table id="reg-table"><thead id="reg-head"></thead><tbody id="reg-body"></tbody></table></div>
       </div>
     </div>
 
@@ -7320,7 +7405,7 @@ function go(tab){
   const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,formulas:loadFormulas,fixdata:loadFixData,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
-    bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,tally:loadTallyAuctions,
+    bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,registers:loadRegisterDefault,tally:loadTallyAuctions,
     spicesboard:loadSpiceBoard,
     // Price Check — populate the auction picker (mode-filtered server-side)
     // on tab open. File picker + buttons remain idle until the user picks
@@ -12918,6 +13003,31 @@ function lorryOnTypeChange(){
   const d=document.getElementById('lorry-type-desc');
   if(d) d.textContent=LORRY_DESCS[lorryCurrentType()]||'';
 }
+// Preview a lorry report inline — fetches the PDF and opens it in a new
+// browser tab (mirrors the invoice/print preview pattern). Falls back to a
+// download if the popup is blocked.
+async function previewLorry(type){
+  const aid=document.getElementById('lorry-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  const label=LORRY_LABELS[type]||type;
+  await withOverlay(`Generating ${label} preview…`, async () => {
+    const r=await fetch(B+`/api/lorry-reports/${type}/${aid}?format=pdf`,{headers:{'Authorization':'Bearer '+T}});
+    if(!r.ok){
+      let msg='Lorry report failed';
+      try{const e=await r.json();if(e.error)msg=e.error}catch(x){}
+      toast(msg);return;
+    }
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const w=window.open(url,'_blank');
+    if(!w||w.closed){
+      // Popup blocked — fall back to a download the user can open.
+      const a=document.createElement('a');a.href=url;a.download=`${type}_${aid}.pdf`;a.click();
+    }
+    // Give the new tab time to load the blob before revoking the URL.
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  });
+}
 async function downloadLorry(type,format){
   format=format||'xlsx';
   const aid=document.getElementById('lorry-auction')?.value;
@@ -15466,7 +15576,7 @@ async function loadPayments(opts){
   if (!opts || !opts.keepPage) _paymentsPager.page = 1;
   const aid=document.getElementById('pay-auction').value;
   const body=document.getElementById('payments-list');
-  if(!aid){body.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
+  if(!aid){body.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
   try{
     let rows;
     if (opts && opts.useCache && _paymentsAll.length) {
@@ -15493,6 +15603,7 @@ async function loadPayments(opts){
     const search   = (document.getElementById('pay-search')?.value || '').trim().toLowerCase();
     const status   = (document.getElementById('pay-status-filter')?.value || '').trim();
     const stype    = (document.getElementById('pay-type-filter')?.value || '').trim();
+    const expFilter= (document.getElementById('pay-export-filter')?.value || '').trim();
     const arr = rows.filter(p => {
       if (search) {
         const n = String(p.name || '').toLowerCase();
@@ -15506,6 +15617,13 @@ async function loadPayments(opts){
       if (status === 'payable' && payable <= 0) return false;
       if (status === 'settled' && payable !== 0) return false;
       if (status === 'discount' && discount <= 0) return false;
+      // Paid (exported) vs to-be-paid (not fully exported). "Paid" = fully
+      // exported; "unpaid" = anything still owed (none or partial export).
+      if (expFilter) {
+        const exported = _payExportStatus(aid, p.name, p.lot_count) === 'full';
+        if (expFilter === 'paid'   && !exported) return false;
+        if (expFilter === 'unpaid' &&  exported) return false;
+      }
       return true;
     });
 
@@ -15524,7 +15642,7 @@ async function loadPayments(opts){
         const totalQty      = arr.reduce((a,i) => a + (Number(i.total_qty)      || 0), 0);
         const totalDiscount = arr.reduce((a,i) => a + (Number(i.total_discount) || 0), 0);
         const totalPayable  = arr.reduce((a,i) => a + (Number(i.total_payable)  || 0), 0);
-        const filterTail    = (search || status || stype)
+        const filterTail    = (search || status || stype || expFilter)
           ? ` <span style="color:var(--text3);font-weight:400;font-size:11px">(of ${rows.length})</span>`
           : '';
         const $ = (id) => document.getElementById(id);
@@ -15533,7 +15651,7 @@ async function loadPayments(opts){
         if ($('pay-kpi-discount')) $('pay-kpi-discount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalDiscount, 2)}`;
         if ($('pay-kpi-payable'))  $('pay-kpi-payable').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalPayable, 2)}`;
         updateSummaryStats('payments',
-          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status||stype)?` (of ${rows.length})`:''} · `
+          `<strong>${arr.length}</strong> seller${arr.length===1?'':'s'}${(search||status||stype||expFilter)?` (of ${rows.length})`:''} · `
           + `<strong>${fmtI(totalQty,2)} kg</strong> · `
           + `<strong>₹${fmtI(totalPayable,2)}</strong> payable`);
       }
@@ -15594,9 +15712,25 @@ async function loadPayments(opts){
               ? `<span style="color:#B45309;font-weight:600">${fmtI(v,2)}</span>`
               : `<span style="color:var(--text3)">0.00</span>`;
           } },
+        // Total = pre-TDS net (PurAmt − Discount − GST). Sits before TDS so
+        // the reader follows Total → minus TDS → Payable left-to-right.
+        { key:'total_total', label:'Total', sort:'number', numeric:true,
+          fmt:(n)=>fmtI(n,2),
+          render:(p)=>`<span style="font-weight:600;color:var(--spice-text-main)">${fmtI(p.total_total||0,2)}</span>` },
+        // TDS = the seller's Section-194Q purchase TDS (0 for poolers /
+        // dealers below the threshold). Shown in chili so a withholding is
+        // visible at a glance; zeros are muted.
+        { key:'total_tds', label:'TDS', sort:'number', numeric:true,
+          fmt:(n)=>fmtI(n,2),
+          render:(p)=>{
+            const v = Number(p.total_tds)||0;
+            return v>0
+              ? `<span style="color:#B91C1C;font-weight:600">${fmtI(v,2)}</span>`
+              : `<span style="color:var(--text3)">0.00</span>`;
+          } },
         { key:'total_payable', label:'Payable', sort:'number', numeric:true,
           fmt:(n)=>fmtI(n,2),
-          // Payable as the "answer" — bigger, darker, cardamom
+          // Payable = Total − TDS — the "answer", bigger/darker/cardamom.
           render:(p)=>`<span style="font-weight:700;color:var(--spice-cardamom-dk);font-size:14px">${fmtI(p.total_payable||0,2)}</span>` },
         // Actions — per-seller lot picker. The "Pick lots" button opens
         // a modal to narrow this seller's next Selected export to a lot
@@ -15960,7 +16094,13 @@ function undoLastPaymentExport(){
 // discount/GST/payable per lot + a live totals strip. Drives both the
 // export filter (Save/Clear Lot Selection) and the partial-payment PDF
 // (Print Payment for Selected). Already-exported lots are locked + 🚫.
-const _payLotsState = { aid: 0, seller: '', lots: [], bankLabels: {}, defaultBankId: null };
+const _payLotsState = { aid: 0, seller: '', lots: [], bankLabels: {}, defaultBankId: null, tdsRate: 0, hasTds: false };
+// Per-lot TDS share = lot puramt × the seller's TDS rate (sellerTds ÷ Σ
+// puramt), so the modal's TDS column sums to the seller's purchase TDS and
+// Payable (= balance − this) foots to the main-list Payable.
+function _payLotTds(l){
+  return Math.round((Number(l.isp_puramt || l.puramt || l.amount) || 0) * (_payLotsState.tdsRate || 0) * 100) / 100;
+}
 async function openPayLotsModal(auctionId, sellerName){
   _payLotsState.aid = Number(auctionId) || 0;
   _payLotsState.seller = String(sellerName || '');
@@ -15993,6 +16133,16 @@ async function openPayLotsModal(auctionId, sellerName){
       return String(a.lot_no || '').localeCompare(String(b.lot_no || ''));
     });
     _payLotsState.lots = filtered;
+    // TDS rate for this seller — sourced from the cached payments rollup row
+    // (total_tds), spread ∝ each lot's puramt. 0 for poolers / dealers below
+    // the threshold, in which case the Total + TDS columns are hidden.
+    {
+      const sumRow = (_paymentsAll || []).find(r => String(r.name || '').trim().toLowerCase() === target);
+      const sellerTds = sumRow ? (Number(sumRow.total_tds) || 0) : 0;
+      const sumPuramt = filtered.reduce((a, l) => a + (Number(l.isp_puramt || l.puramt || l.amount) || 0), 0);
+      _payLotsState.tdsRate = (sellerTds > 0 && sumPuramt > 0) ? sellerTds / sumPuramt : 0;
+      _payLotsState.hasTds  = sellerTds > 0;
+    }
     // bank_id → "AcctNo · Bank · IFSC" map so each lot row shows which
     // account its payment routes to. Banks come from the seller's trader
     // record (trader_id denormalised onto every lot).
@@ -16047,6 +16197,7 @@ function _renderPayLotsTable(){
   const exportedSet = Array.isArray(exportedLotsRaw)
     ? new Set(exportedLotsRaw.map(String))
     : (exportedAll ? null : new Set());
+  const hasTds = _payLotsState.hasTds;
   const rows = _payLotsState.lots.map(l => {
     const tax = (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
     const lotKey = String(l.lot_no || '');
@@ -16073,7 +16224,9 @@ function _renderPayLotsTable(){
       <td style="text-align:right">${fmtI(Number(l.isp_puramt || l.puramt || l.amount)||0, 2)}</td>
       <td style="text-align:right;color:#B45309">${fmtI(Number(l.isp_refund != null ? l.isp_refund : l.refund)||0, 2)}</td>
       <td style="text-align:right;color:#0891B2">${fmtI(tax, 2)}</td>
-      <td style="text-align:right;font-weight:700;color:var(--spice-cardamom-dk)">${fmtI(Number(l.balance)||0, 2)}</td>
+      ${hasTds ? `<td style="text-align:right">${fmtI(Number(l.balance)||0, 2)}</td>
+      <td style="text-align:right;color:#B91C1C">${fmtI(_payLotTds(l), 2)}</td>` : ''}
+      <td style="text-align:right;font-weight:700;color:var(--spice-cardamom-dk)">${fmtI((Number(l.balance)||0) - (hasTds ? _payLotTds(l) : 0), 2)}</td>
     </tr>`;
   }).join('');
   body.innerHTML = `
@@ -16089,6 +16242,7 @@ function _renderPayLotsTable(){
           <th style="text-align:right">Amount</th>
           <th style="text-align:right">Discount</th>
           <th style="text-align:right">GST</th>
+          ${hasTds ? '<th style="text-align:right">Total</th><th style="text-align:right">TDS</th>' : ''}
           <th style="text-align:right">Payable</th>
         </tr>
       </thead>
@@ -16110,7 +16264,8 @@ function updatePayLotsTotals(){
   const selectedIds = new Set(
     Array.from(document.querySelectorAll('.pay-lot-cb:not([disabled]):checked')).map(cb => Number(cb.dataset.id))
   );
-  let qty = 0, amt = 0, disc = 0, tax = 0, payable = 0;
+  const hasTds = _payLotsState.hasTds;
+  let qty = 0, amt = 0, disc = 0, tax = 0, total = 0, tds = 0, payable = 0;
   for (const l of _payLotsState.lots) {
     if (!selectedIds.has(l.id)) continue;
     // Qty + Amount follow the table columns: ISP P_Qty / PurAmt.
@@ -16118,7 +16273,11 @@ function updatePayLotsTotals(){
     amt     += Number(l.isp_puramt || l.puramt || l.amount) || 0;
     disc    += Number(l.isp_refund != null ? l.isp_refund : l.refund)  || 0;
     tax     += (Number(l.cgst)||0) + (Number(l.sgst)||0) + (Number(l.igst)||0);
-    payable += Number(l.balance) || 0;
+    const bal = Number(l.balance) || 0;     // pre-TDS payable ("Total")
+    const lotTds = hasTds ? _payLotTds(l) : 0;
+    total   += bal;
+    tds     += lotTds;
+    payable += bal - lotTds;
   }
   const n = selectedIds.size;
   const totalN = document.querySelectorAll('.pay-lot-cb:not([disabled])').length;
@@ -16130,6 +16289,8 @@ function updatePayLotsTotals(){
       <div>Amount: <strong>₹${fmtI(amt, 2)}</strong></div>
       <div>Discount: <strong style="color:#B45309">₹${fmtI(disc, 2)}</strong></div>
       <div>GST: <strong style="color:#0891B2">₹${fmtI(tax, 2)}</strong></div>
+      ${hasTds ? `<div>Total: <strong>₹${fmtI(total, 2)}</strong></div>
+      <div>TDS: <strong style="color:#B91C1C">₹${fmtI(tds, 2)}</strong></div>` : ''}
       <div style="margin-left:auto;font-size:14px">Payable now: <strong style="color:var(--spice-cardamom-dk)">₹${fmtI(payable, 2)}</strong></div>
     </div>`;
   const printBtn = document.getElementById('pay-lots-print-btn');
@@ -18304,6 +18465,92 @@ async function tallyDownloadPartyVoucher(type,partyName){
   });
 }
 
+// ── Single Invoice Voucher picker ───────────────────────────────
+// Lists each invoice of the chosen voucher type so the operator can
+// download exactly one invoice's XML (re-import a missed/corrected one).
+let _tallyInvoices=null;     // last loaded list
+let _tallyInvType='';        // the voucher type those invoices belong to
+async function loadTallyInvoices(){
+  const aid=document.getElementById('tally-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  const type=document.getElementById('tally-inv-type')?.value||'sales_isp';
+  const list=document.getElementById('tally-inv-list');
+  if(list)list.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Loading invoices…</div>';
+  try{
+    const r=await fetch(B+`/api/tally/invoice-list/${type}/${aid}`,{headers:{'Authorization':'Bearer '+T}});
+    if(!r.ok){
+      let msg='Failed to load invoices';
+      try{const e=await r.json();if(e.error)msg=e.error}catch(x){}
+      if(list)list.innerHTML=`<div style="padding:14px;color:#C62828;font-size:12px;text-align:center">${esc(msg)}</div>`;
+      return;
+    }
+    const data=await r.json();
+    _tallyInvoices=data.invoices||[];
+    _tallyInvType=type;
+    renderTallyInvoiceList();
+  }catch(e){
+    if(list)list.innerHTML=`<div style="padding:14px;color:#C62828;font-size:12px;text-align:center">Error: ${esc(e.message)}</div>`;
+  }
+}
+function renderTallyInvoiceList(){
+  const list=document.getElementById('tally-inv-list');
+  if(!list)return;
+  if(!_tallyInvoices){
+    list.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Click <strong>Load Invoices</strong> to list them.</div>';
+    return;
+  }
+  if(_tallyInvoices.length===0){
+    list.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">No invoices of this type in this ' + termAuction(false, true) + '.</div>';
+    return;
+  }
+  const q=(document.getElementById('tally-inv-search')?.value||'').toLowerCase().trim();
+  const filtered=_tallyInvoices.filter(inv=>{
+    if(!q)return true;
+    const hay=`${inv.party} ${inv.voucher} ${inv.sale||''}`.toLowerCase();
+    return hay.includes(q);
+  });
+  if(filtered.length===0){
+    list.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">No invoices match.</div>';
+    return;
+  }
+  const typeLabel=TALLY_LABELS[_tallyInvType]||_tallyInvType;
+  let html=`<div style="padding:6px 12px;background:var(--bg);font-size:11px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.5px">${esc(typeLabel)} · ${filtered.length} invoice${filtered.length===1?'':'s'}</div>`;
+  for(const inv of filtered){
+    const safeParty=String(inv.party||'').replace(/"/g,'&quot;');
+    const safeVno=String(inv.voucher||'').replace(/"/g,'&quot;');
+    const safeSale=String(inv.sale||'').replace(/"/g,'&quot;');
+    html+=`<div style="padding:8px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;align-items:center;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Inv ${esc(inv.voucher||'—')}${inv.sale?` · <span style="color:var(--text3)">${esc(inv.sale)}</span>`:''} · ${esc(inv.party||'')}</div>
+        <div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${inv.date?esc(inv.date)+' · ':''}${inv.lotCount||0} lot${(inv.lotCount===1)?'':'s'} · ₹${fmtI(Number(inv.amount)||0,2)}</div>
+      </div>
+      <button class="btn btn-g" onclick="tallyDownloadInvoice('${_tallyInvType}','${safeParty}','${safeVno}','${safeSale}')" style="padding:5px 10px;font-size:11px;flex:0 0 auto">Download</button>
+    </div>`;
+  }
+  list.innerHTML=html;
+}
+async function tallyDownloadInvoice(type,partyName,invoice,sale){
+  const aid=document.getElementById('tally-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  await withOverlay(`Generating voucher for invoice ${invoice}…`, async () => {
+    const qs=`?invoice=${encodeURIComponent(invoice)}&name=${encodeURIComponent(partyName)}`+(sale?`&sale=${encodeURIComponent(sale)}`:'');
+    const url=B+`/api/tally/invoice-voucher/${type}/${aid}${qs}`;
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+T}});
+    if(!r.ok){
+      let msg='Single-invoice export failed';
+      try{const e=await r.json();if(e.error)msg=e.error}catch(x){}
+      toast(msg);return;
+    }
+    const blob=await r.blob();
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    const safeName=String(partyName).replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
+    const safeVno=String(invoice).replace(/[^a-zA-Z0-9]/g,'_').slice(0,20);
+    a.download=`Tally_${type}_Inv${safeVno}_${safeName}_${aid}.xml`;a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+    toast(`Downloaded voucher for invoice ${invoice}`);
+  });
+}
+
 // ── E-way bill DISTANCE — Per-invoice override UI ──────────────
 // One pane: list ISP invoices, edit invoices.distance_km inline. Each
 // row gets quick-link buttons to look up the actual distance:
@@ -18551,6 +18798,209 @@ async function exportJournal(){
   }
   const r=await fetch(B+url,{headers:{'Authorization':'Bearer '+T}});
   const blob=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click()}
+
+// ══ REGISTERS — lot-wise Purchase / invoice-wise Sales + per-party
+// "individual" (Pooler / Sellers / Merchants) registers. Trade-scoped or
+// date-range. Mirrors the Journals tab wiring.
+async function loadRegisterDefault(){
+  const sel = document.getElementById('reg-auction');
+  if (sel && !sel.options.length) {
+    const auctions = await j('/api/auctions');
+    const opts = (auctions||[]).map(a =>
+      `<option value="${a.id}">${esc(a.ano || ('#'+a.id))} — ${esc(a.date || '')}</option>`);
+    sel.innerHTML = '<option value="">— All trades —</option>' + opts.join('');
+  }
+  // Default date range = current month (used when "All trades" is picked).
+  const today = new Date().toISOString().slice(0,10);
+  const first = today.slice(0,8) + '01';
+  const f = document.getElementById('reg-from'), t = document.getElementById('reg-to');
+  if (f && !f.value) f.value = first;
+  if (t && !t.value) t.value = today;
+  onRegTypeChange();
+}
+// The three per-party "individual" registers (Pooler / Sellers / Merchants)
+// are date-range + optional-party, not trade-scoped.
+const REG_INDIVIDUAL = { pooler:1, seller:1, merchant:1 };
+function isIndividualReg(type){ return !!REG_INDIVIDUAL[type]; }
+function onRegTypeChange(){
+  const type = document.getElementById('reg-type').value;
+  const indiv = isIndividualReg(type);
+  const saleWrap = document.getElementById('reg-sale-wrap');
+  const auctionWrap = document.getElementById('reg-auction-wrap');
+  const partyWrap = document.getElementById('reg-party-wrap');
+  if (saleWrap) saleWrap.style.display = (type === 'sales') ? '' : 'none';
+  if (auctionWrap) auctionWrap.style.display = indiv ? 'none' : '';
+  if (partyWrap) partyWrap.style.display = indiv ? '' : 'none';
+  if (indiv) populateRegParties();
+}
+// Fill the Party dropdown for the active individual register + date range.
+async function populateRegParties(){
+  const type = document.getElementById('reg-type').value;
+  if (!isIndividualReg(type)) return;
+  const sel = document.getElementById('reg-party');
+  if (!sel) return;
+  const keep = sel.value;
+  const from = document.getElementById('reg-from').value;
+  const to = document.getElementById('reg-to').value;
+  const p = new URLSearchParams({ kind: type });
+  if (from && to) { p.set('from', from); p.set('to', to); }
+  let names = [];
+  try { names = await j('/api/registers/individual-parties?' + p.toString()); }
+  catch(e){ names = []; }
+  sel.innerHTML = '<option value="">— All parties —</option>' +
+    (names||[]).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if (keep && (names||[]).includes(keep)) sel.value = keep;
+}
+// Build the trade/date/sale query params shared by load + export.
+function regParams(){
+  const aid = document.getElementById('reg-auction').value;
+  const from = document.getElementById('reg-from').value;
+  const to = document.getElementById('reg-to').value;
+  const type = document.getElementById('reg-type').value;
+  const saleType = document.getElementById('reg-sale') ? document.getElementById('reg-sale').value : '';
+  const p = new URLSearchParams();
+  if (aid) p.set('auctionId', aid);
+  else if (from && to) { p.set('from', from); p.set('to', to); }
+  if (type === 'sales' && saleType) p.set('saleType', saleType);
+  return p;
+}
+// Indian-format number renderer for register columns (the Journal's
+// fmtNumWithDecimals is local to loadJournal, so registers carry their own).
+const fmtNumWithDecimals = (decimals) => (v) => {
+  const n = Number(v) || 0;
+  if (decimals === 0) return Math.round(n).toLocaleString('en-IN');
+  return n.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+function regColumns(type){
+  if (type === 'pooler') return [
+    { key:'party', label:'Pooler', sort:'text' },
+    { key:'tno', label:'TNo', sort:'text' },
+    { key:'date', label:'Date', sort:'text' },
+    { key:'lot', label:'Lot', sort:'text' },
+    { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'rate', label:'Rate', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'value', label:'Value', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+  ];
+  if (type === 'seller') return [
+    { key:'party', label:'Seller', sort:'text' },
+    { key:'date', label:'Date', sort:'text' },
+    { key:'ano', label:'ANO', sort:'text' },
+    { key:'invo', label:'Invo', sort:'number', numeric:true, fmt:fmtNumWithDecimals(0) },
+    { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'invoice', label:'Invoice', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+  ];
+  if (type === 'merchant') return [
+    { key:'party', label:'Merchant', sort:'text' },
+    { key:'date', label:'Date', sort:'text' },
+    { key:'tno', label:'TNo', sort:'text' },
+    { key:'invo', label:'Invo', sort:'text' },
+    { key:'recp', label:'Recp', sort:'text' },
+    { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'invoice', label:'Invoice', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'receipt', label:'Receipt', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+  ];
+  if (type === 'sales') return [
+    { key:'state', label:'State', sort:'text' },
+    { key:'tno', label:'TNO', sort:'text' },
+    { key:'date', label:'Date', sort:'text' },
+    { key:'sale', label:'Sale', sort:'text' },
+    { key:'invo', label:'Invo', sort:'text' },
+    { key:'tradername', label:'Trader Name', sort:'text' },
+    { key:'bidder', label:'Bidder', sort:'text' },
+    { key:'bag', label:'Bag', sort:'number', numeric:true, fmt:fmtNumWithDecimals(0) },
+    { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'lorry', label:'Lorry', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'gunny', label:'Gunny', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'igst', label:'IGST', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'cgst', label:'CGST', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'sgst', label:'SGST', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'ins', label:'Ins', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'invamt', label:'Inv Amt', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+  ];
+  return [
+    { key:'state', label:'State', sort:'text' },
+    { key:'tno', label:'TNO', sort:'text' },
+    { key:'date', label:'Date', sort:'text' },
+    { key:'lot', label:'Lot', sort:'text' },
+    { key:'branch', label:'Branch', sort:'text' },
+    { key:'name', label:'Name', sort:'text' },
+    { key:'place', label:'Place', sort:'text' },
+    { key:'gstin', label:'GSTIN', sort:'text' },
+    { key:'bag', label:'Bag', sort:'number', numeric:true, fmt:fmtNumWithDecimals(0) },
+    { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'price', label:'Price', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'pqty', label:'PQty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'prate', label:'PRate', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'puramt', label:'PurAmt', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'discount', label:'Discount', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'gst5', label:'GST5', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'payable', label:'Payable', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+  ];
+}
+// Build query params for the individual (per-party) registers.
+function indivRegParams(){
+  const type = document.getElementById('reg-type').value;
+  const from = document.getElementById('reg-from').value;
+  const to = document.getElementById('reg-to').value;
+  const party = document.getElementById('reg-party') ? document.getElementById('reg-party').value : '';
+  const p = new URLSearchParams({ kind: type });
+  if (from && to) { p.set('from', from); p.set('to', to); }
+  if (party) p.set('party', party);
+  return p;
+}
+async function loadRegister(){
+  const type = document.getElementById('reg-type').value;
+  if (isIndividualReg(type)) {
+    let data = null;
+    try { data = await j('/api/registers/individual?' + indivRegParams().toString()); }
+    catch(e){ toast('Load failed: ' + (e.message || e)); return; }
+    // Flatten the per-party structure into a preview table (one row per
+    // record, prefixed with the party name).
+    const rows = [];
+    (data && data.parties || []).forEach(p => {
+      (p.rows || []).forEach(r => rows.push(Object.assign({ party: p.name }, r)));
+    });
+    DataTable.mount('reg-body', rows, {
+      columns: regColumns(type),
+      emptyState: { icon:'document', title:'No records', body:'No register entries for this selection.' }
+    });
+    return;
+  }
+  const ep = (type === 'sales') ? 'sales' : 'purchase';
+  const url = `/api/registers/${ep}?` + regParams().toString();
+  let d = [];
+  try { d = await j(url); }
+  catch(e){ toast('Load failed: ' + (e.message || e)); return; }
+  DataTable.mount('reg-body', Array.isArray(d) ? d : [], {
+    columns: regColumns(type),
+    emptyState: { icon:'document', title:'No records', body:'No register entries for this selection.' }
+  });
+}
+async function exportRegister(format){
+  const type = document.getElementById('reg-type').value;
+  let ep, p, base;
+  if (isIndividualReg(type)) {
+    ep = 'individual-register';
+    p = indivRegParams();
+    base = { pooler:'PoolerRegister', seller:'SellerRegister', merchant:'MerchantRegister' }[type];
+  } else {
+    ep = (type === 'sales') ? 'sales-register' : 'purchase-register';
+    p = regParams();
+    base = (type === 'sales') ? 'SalesRegister' : 'PurchaseRegister';
+  }
+  if (format) p.set('format', format);
+  const name = base + '.' + (format === 'pdf' ? 'pdf' : 'xlsx');
+  await withOverlay(`Exporting ${base} (${(format||'xlsx').toUpperCase()})…`, async () => {
+    const r = await fetch(B + `/api/exports/${ep}?` + p.toString(), { headers:{'Authorization':'Bearer '+T} });
+    if (!r.ok) { let m='Export failed'; try { const e=await r.json(); if(e.error) m=e.error; } catch(x){} toast(m); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  });
+}
 
 // ── Price-check gate (per-auction stale banner) ────────────
 // Tri-state probe of /api/auctions/:id/price-check-status. When the

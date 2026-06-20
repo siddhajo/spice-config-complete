@@ -172,7 +172,7 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
 
   function isNumericCol(col) {
     const h = (col.header || '').toUpperCase();
-    return /^(QTY|BAG|BAGS|PRICE|RATE|AMOUNT|PQTY|PRATE|PURAMT|CGST|SGST|IGST|TCS|TOTAL|DISCOUNT|PAYABLE|ADVANCE|BALANCE|LITRE|LOTS|TDS|ASSESS_VALUE|COST|NET|GUNNY|TRANSPORT|INSURANCE|CARDAMOM|CARDAMOM_COST|GUNNY_COST|ROUND|BILAMT|COM)$/.test(h);
+    return /^(QTY|BAG|BAGS|PRICE|RATE|AMOUNT|PQTY|PRATE|PURAMT|CGST|SGST|IGST|TCS|TOTAL|DISCOUNT|PAYABLE|ADVANCE|BALANCE|LITRE|LOTS|TDS|ASSESS_VALUE|COST|NET|GUNNY|TRANSPORT|INSURANCE|CARDAMOM|CARDAMOM_COST|GUNNY_COST|ROUND|BILAMT|COM|GST5|VALUE|RECEIPT|INVAMT|LORRY|INS)$/.test(h);
   }
 
   function fmtCell(val, col) {
@@ -291,6 +291,18 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
   }
 
   function drawRow(row, i, rowH, wrapped) {
+    if (row._isSection) {
+      // Section banner — full-width light-green strip carrying a party's
+      // name (+ GSTIN). Used by the per-party "Individual" registers so each
+      // party's block is clearly headed before its rows.
+      doc.rect(m, y, usableW, rowH).fillAndStroke('#E8F4E8', '#7BA77B');
+      const label = (row.label || '') + (row.gstin ? `      GSTIN: ${row.gstin}` : '');
+      doc.fillColor('#000').font('Helvetica-Bold').fontSize(8.5);
+      doc.text(label, m + 4, y + 3, { width: usableW - 8, align: 'left', lineBreak: false });
+      doc.moveTo(m, y + rowH).lineTo(m + usableW, y + rowH).lineWidth(0.5).strokeColor('#7BA77B').stroke();
+      y += rowH;
+      return;
+    }
     if (row._isSubtotal) {
       // Subtotal row — full-width yellow strip styled like the grand total.
       doc.rect(m, y, usableW, rowH).fillAndStroke('#FFF3CD', '#E0B020');
@@ -358,6 +370,8 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
     const LINE_H = 10;
     const PAD_TOP = 3, PAD_BOT = 3;
     const MIN_ROW = 14;
+    // Section banners are single-line, full-width; no per-column wrapping.
+    if (row._isSection) return { rowH: MIN_ROW, wrapped: columns.map(() => ['']) };
     const wrapped = columns.map((c, ci) => {
       const cellW = colWidths[ci] - 6;
       const text = fmtCell(row[c.key], c);
@@ -607,6 +621,73 @@ const COLS = {
     { header: 'ASSESS_VALUE', key: 'assess_value', width: 14 },
     { header: 'TDS', key: 'tds', width: 12 },
   ],
+  // Purchase Register — lot-wise seller-side ledger (landscape).
+  purchase_register: [
+    { header: 'STATE',  key: 'state',  width: 12 },
+    { header: 'TNO',    key: 'tno',    width: 5  },
+    { header: 'DATE',   key: 'date',   width: 11 },
+    { header: 'LOT',    key: 'lot',    width: 6  },
+    { header: 'BRANCH', key: 'branch', width: 9  },
+    { header: 'NAME',   key: 'name',   width: 22 },
+    { header: 'PLACE',  key: 'place',  width: 12 },
+    { header: 'GSTIN',  key: 'gstin',  width: 16 },
+    { header: 'BAG',    key: 'bag',    width: 5  },
+    { header: 'QTY',    key: 'qty',    width: 10 },
+    { header: 'PRICE',  key: 'price',  width: 9  },
+    { header: 'AMOUNT', key: 'amount', width: 13 },
+    { header: 'PQTY',   key: 'pqty',   width: 10 },
+    { header: 'PRATE',  key: 'prate',  width: 9  },
+    { header: 'PURAMT', key: 'puramt', width: 13 },
+    { header: 'DISCOUNT', key: 'discount', width: 11 },
+    { header: 'GST5',   key: 'gst5',   width: 10 },
+    { header: 'PAYABLE', key: 'payable', width: 13 },
+  ],
+  // Sales Register — invoice-wise (landscape).
+  sales_register: [
+    { header: 'STATE',  key: 'state',  width: 12 },
+    { header: 'TNO',    key: 'tno',    width: 5  },
+    { header: 'DATE',   key: 'date',   width: 11 },
+    { header: 'SALE',   key: 'sale',   width: 5  },
+    { header: 'INVO',   key: 'invo',   width: 7  },
+    { header: 'TRADERNAME', key: 'tradername', width: 24 },
+    { header: 'BIDDER', key: 'bidder', width: 9  },
+    { header: 'BAG',    key: 'bag',    width: 5  },
+    { header: 'QTY',    key: 'qty',    width: 10 },
+    { header: 'AMOUNT', key: 'amount', width: 13 },
+    { header: 'LORRY',  key: 'lorry',  width: 10 },
+    { header: 'GUNNY',  key: 'gunny',  width: 10 },
+    { header: 'IGST',   key: 'igst',   width: 10 },
+    { header: 'CGST',   key: 'cgst',   width: 10 },
+    { header: 'SGST',   key: 'sgst',   width: 10 },
+    { header: 'INS',    key: 'ins',    width: 10 },
+    { header: 'INVAMT', key: 'invamt', width: 13 },
+  ],
+  // Per-party "Individual" registers — rendered as sectioned tables (one
+  // banner + rows + subtotal per party). See renderIndividualRegisterPdf.
+  pooler_individual: [
+    { header: 'TNO',   key: 'tno',   width: 8  },
+    { header: 'DATE',  key: 'date',  width: 12 },
+    { header: 'LOT',   key: 'lot',   width: 8  },
+    { header: 'QTY',   key: 'qty',   width: 12 },
+    { header: 'RATE',  key: 'rate',  width: 11 },
+    { header: 'VALUE', key: 'value', width: 16 },
+  ],
+  seller_individual: [
+    { header: 'DATE',    key: 'date',    width: 12 },
+    { header: 'ANO',     key: 'ano',     width: 8  },
+    { header: 'INVO',    key: 'invo',    width: 8  },
+    { header: 'QTY',     key: 'qty',     width: 12 },
+    { header: 'INVOICE', key: 'invoice', width: 16 },
+  ],
+  merchant_individual: [
+    { header: 'DATE',    key: 'date',    width: 12 },
+    { header: 'TNO',     key: 'tno',     width: 8  },
+    { header: 'INVO',    key: 'invo',    width: 8  },
+    { header: 'RECP',    key: 'recp',    width: 8  },
+    { header: 'QTY',     key: 'qty',     width: 12 },
+    { header: 'INVOICE', key: 'invoice', width: 16 },
+    { header: 'RECEIPT', key: 'receipt', width: 16 },
+  ],
 };
 
 // Column specs for the carbon-copy (two-up) PDF variants of Lot Buyer /
@@ -649,6 +730,8 @@ const TOTAL_KEYS = {
   payment:         ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'],
   tally_purchase:  ['bag', 'qty', 'amount', 'cgst', 'sgst', 'igst', 'discount', 'bilamt'],
   tds_return:      ['assess_value', 'tds'],
+  purchase_register: ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'gst5', 'payable'],
+  sales_register:    ['bag', 'qty', 'amount', 'lorry', 'gunny', 'igst', 'cgst', 'sgst', 'ins', 'invamt'],
 };
 
 const TITLES = {
@@ -667,6 +750,11 @@ const TITLES = {
   payment:         'Payment Summary',
   tally_purchase:  'Tally Purchase',
   tds_return:      'TDS Return',
+  purchase_register: 'Purchase Register',
+  sales_register:  'Sales Register',
+  pooler_individual:   'Pooler Register',
+  seller_individual:   'Sellers Individual',
+  merchant_individual: 'Merchants Individual',
 };
 
 // Per-type page orientation override. Portrait is the default (set in
@@ -678,6 +766,9 @@ const PDF_LAYOUT = {
   // BUYER1, SALE, INVO, PQTY, PRATE, PURAMT, COM, CGST, SGST, IGST,
   // ADVANCE, BALANCE). Portrait is impossible — stays landscape.
   full_file: 'landscape',
+  // 18 / 17 wide registers — portrait can't fit them.
+  purchase_register: 'landscape',
+  sales_register: 'landscape',
 };
 
 // Per-type row preprocessing: add a serial-number column, optionally group
@@ -835,12 +926,96 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       return getTDSReturnData(db, extra.from, extra.to, 'invoice');
     }
 
+    case 'purchase_register': {
+      const { getPurchaseRegister } = require('./calculations');
+      const mode = (cfg && cfg.business_mode) || 'e-Trade';
+      return getPurchaseRegister(db, {
+        auctionId: auctionId || (extra && extra.auctionId) || null,
+        from: extra && extra.from, to: extra && extra.to, mode,
+      });
+    }
+
+    case 'sales_register': {
+      const { getSalesRegister } = require('./calculations');
+      return getSalesRegister(db, {
+        auctionId: auctionId || (extra && extra.auctionId) || null,
+        from: extra && extra.from, to: extra && extra.to,
+        saleType: extra && extra.saleType,
+      });
+    }
+
     default:
       throw new Error(`Unknown export type: ${type}`);
   }
 }
 
+// Summary-row builders for the per-party registers — mirror the XLSX
+// INDIVIDUAL_REG_DEFS so PDF and XLSX show the same TOTAL / Sold / Not Sold /
+// Closing Balance lines. Each returns rows flagged `_isSubtotal` so the
+// generic renderer styles them as yellow strips.
+const INDIVIDUAL_PDF_SUMMARY = {
+  pooler_individual: (s) => ([
+    { _isSubtotal: true, tno: 'Total',    qty: s.qty,        value: s.value },
+    { _isSubtotal: true, tno: 'Sold',     qty: s.soldQty,    value: s.soldValue },
+    { _isSubtotal: true, tno: 'Not Sold', qty: s.notSoldQty },
+  ]),
+  seller_individual: (s) => ([
+    { _isSubtotal: true, date: 'Total',           qty: s.qty, invoice: s.invoice },
+    { _isSubtotal: true, date: 'Closing Balance', invoice: s.closing },
+  ]),
+  merchant_individual: (s) => ([
+    { _isSubtotal: true, date: 'Total',           qty: s.qty, invoice: s.invoice, receipt: s.receipt },
+    { _isSubtotal: true, date: 'Closing Balance', invoice: s.closing },
+  ]),
+};
+const INDIVIDUAL_PDF_GRANDKEYS = {
+  pooler_individual: { keys: ['qty', 'value'], label: 'tno' },
+  seller_individual: { keys: ['qty', 'invoice'], label: 'date' },
+  merchant_individual: { keys: ['qty', 'invoice', 'receipt'], label: 'date' },
+};
+
+async function renderIndividualRegisterPdf(db, type, extra) {
+  const { getPoolerRegister, getSellerRegister, getMerchantRegister } = require('./calculations');
+  const opts = { from: extra.from || null, to: extra.to || null, party: extra.party || null };
+  const data = type === 'seller_individual' ? getSellerRegister(db, opts)
+             : type === 'merchant_individual' ? getMerchantRegister(db, opts)
+             : getPoolerRegister(db, opts);
+  const summaryFn = INDIVIDUAL_PDF_SUMMARY[type];
+  // Flatten parties into one row list: section banner → rows → summary lines.
+  const rows = [];
+  data.parties.forEach((p) => {
+    rows.push({ _isSection: true, label: p.name, gstin: p.gstin });
+    p.rows.forEach(r => rows.push(r));
+    summaryFn(p.summary).forEach(r => rows.push(r));
+  });
+  // Grand total strip across every party.
+  const gk = INDIVIDUAL_PDF_GRANDKEYS[type];
+  let totals = null;
+  if (data.parties.length) {
+    totals = {};
+    gk.keys.forEach(k => {
+      totals[k] = data.parties.reduce((s, p) => s + (Number(p.summary[k]) || 0), 0);
+    });
+    totals[gk.label] = 'GRAND TOTAL';
+  }
+  const subtitle = (opts.from && opts.to) ? `Period: ${opts.from} to ${opts.to}` : 'All dates';
+  return renderTablePdf({
+    title: TITLES[type] || type,
+    subtitle,
+    columns: COLS[type],
+    rows,
+    totals,
+    layout: PDF_LAYOUT[type],
+    companyHeader: getCompanyHeader(db),
+  });
+}
+
 async function exportPdf(db, type, auctionId, cfg, extra = {}) {
+  // Per-party "Individual" registers render as one sectioned table (a banner
+  // + rows + subtotal per party) — handled by a dedicated renderer.
+  if (type === 'pooler_individual' || type === 'seller_individual' || type === 'merchant_individual') {
+    return renderIndividualRegisterPdf(db, type, extra);
+  }
   // Specialized renderers — these don't use the generic table layout.
   if (type === 'lot_slip') {
     return auctionReports.lotSlipPdf(db, auctionId, cfg, extra);
@@ -891,6 +1066,8 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   let subtitle = '';
   if (type === 'tds_return') {
     subtitle = `Period: ${extra.from || ''} to ${extra.to || ''}`;
+  } else if ((type === 'purchase_register' || type === 'sales_register') && !auctionId) {
+    subtitle = (extra.from && extra.to) ? `Period: ${extra.from} to ${extra.to}` : 'All trades';
   } else if (auctionId) {
     const auction = db.get('SELECT ano, date, crop_type, mode FROM auctions WHERE id = ?', [auctionId]);
     if (auction) {

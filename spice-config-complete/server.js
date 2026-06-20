@@ -14,7 +14,7 @@ const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
-const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal } = require('./calculations');
+const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
@@ -4396,6 +4396,28 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   // across reporting and invoice eligibility.
   const codeIsWD = String(l.code || '').trim().toUpperCase() === 'WD';
   if (codeIsWD) { l.code = 'WD'; l.price = 0; l.amount = 0; }
+  // Seller (trader) re-assignment OR a name-blank row → refresh the
+  // denormalised seller fields from the trader master, mirroring the
+  // backfill in POST /api/lots. The mobile edit sends trader_id but no
+  // name; without this, changing the seller would leave the old name (and
+  // a lot that was somehow saved name-less would stay name-less on edit).
+  // Only fields the client left blank are adopted, so an explicit value
+  // from the desktop form always wins.
+  {
+    const _cur = db.get('SELECT trader_id, name FROM lots WHERE id = ?', [req.params.id]);
+    const _traderChanged = l.trader_id && _cur && String(_cur.trader_id || '') !== String(l.trader_id);
+    const _nameBlank = _cur && !String(_cur.name || '').trim();
+    if (l.trader_id && (_traderChanged || _nameBlank)) {
+      const _seller = db.get('SELECT name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code FROM traders WHERE id = ?', [l.trader_id]);
+      if (_seller) {
+        const _isBlank = (v) => v === undefined || v === null || String(v) === '';
+        const _adopt = (lotKey, trKey) => { if (_isBlank(l[lotKey])) l[lotKey] = _seller[trKey] || ''; };
+        _adopt('name', 'name'); _adopt('cr', 'cr'); _adopt('pan', 'pan'); _adopt('tel', 'tel');
+        _adopt('aadhar', 'aadhar'); _adopt('padd', 'padd'); _adopt('ppla', 'ppla');
+        _adopt('ppin', 'pin'); _adopt('pstate', 'pstate'); _adopt('pst_code', 'pst_code');
+      }
+    }
+  }
   for (const [k,v] of Object.entries(l)) {
     // `locked_at` / `locked_by` are managed by the lock/unlock
     // endpoints — never let the generic update slot rewrite them.
@@ -7647,6 +7669,132 @@ app.get('/api/exports/purchase-journal', requireExport, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// REGISTERS — lot-wise Purchase / invoice-wise Sales registers, plus the
+// per-party "Individual" registers (Pooler / Seller / Merchant). Scoped to
+// one trade (auctionId) OR a date range across trades. XLSX + PDF.
+// ══════════════════════════════════════════════════════════════
+function registerOpts(req, cfg) {
+  return {
+    auctionId: req.query.auctionId || null,
+    from: req.query.from || null,
+    to: req.query.to || null,
+    saleType: req.query.saleType || null,
+    mode: (cfg && cfg.business_mode) || 'e-Trade',
+  };
+}
+
+app.get('/api/registers/purchase', requireView, (req, res) => {
+  const { getPurchaseRegister } = require('./calculations');
+  const db = getDb();
+  res.json(getPurchaseRegister(db, registerOpts(req, getSettingsFlat(db))));
+});
+
+app.get('/api/registers/sales', requireView, (req, res) => {
+  const { getSalesRegister } = require('./calculations');
+  res.json(getSalesRegister(getDb(), registerOpts(req, {})));
+});
+
+app.get('/api/exports/purchase-register', requireExport, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const opts = registerOpts(req, cfg);
+    const format = String(req.query.format || 'xlsx').toLowerCase();
+    if (format === 'pdf') {
+      const buffer = await exportAnyPdf(db, 'purchase_register', opts.auctionId, cfg, { from: opts.from, to: opts.to });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="PurchaseRegister.pdf"');
+      return res.send(buffer);
+    }
+    const { exportPurchaseRegister } = require('./exports');
+    const buffer = await exportPurchaseRegister(db, opts);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="PurchaseRegister.xlsx"');
+    res.send(Buffer.from(buffer));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/exports/sales-register', requireExport, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const opts = registerOpts(req, cfg);
+    const format = String(req.query.format || 'xlsx').toLowerCase();
+    if (format === 'pdf') {
+      const buffer = await exportAnyPdf(db, 'sales_register', opts.auctionId, cfg, { from: opts.from, to: opts.to, saleType: opts.saleType });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="SalesRegister.pdf"');
+      return res.send(buffer);
+    }
+    const { exportSalesRegister } = require('./exports');
+    const buffer = await exportSalesRegister(db, opts);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="SalesRegister.xlsx"');
+    res.send(Buffer.from(buffer));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Per-party "Individual" registers (cross-auction, date-range) ──
+// Pooler / Seller / Merchant party statements. Scoped by a From/To date
+// range and an OPTIONAL single party (empty = every party, one section
+// per party in the export).
+const INDIVIDUAL_REG_KINDS = { pooler: 1, seller: 1, merchant: 1 };
+function individualRegOpts(req) {
+  return {
+    from: req.query.from || null,
+    to: req.query.to || null,
+    party: req.query.party || null,
+  };
+}
+
+app.get('/api/registers/individual', requireView, (req, res) => {
+  try {
+    const kind = String(req.query.kind || '').toLowerCase();
+    if (!INDIVIDUAL_REG_KINDS[kind]) return res.status(400).json({ error: 'Unknown register kind' });
+    const db = getDb();
+    const { getPoolerRegister, getSellerRegister, getMerchantRegister } = require('./calculations');
+    const fn = kind === 'seller' ? getSellerRegister
+             : kind === 'merchant' ? getMerchantRegister : getPoolerRegister;
+    res.json(fn(db, individualRegOpts(req)));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/registers/individual-parties', requireView, (req, res) => {
+  try {
+    const db = getDb();
+    const { listRegisterParties } = require('./calculations');
+    res.json(listRegisterParties(db, {
+      kind: String(req.query.kind || '').toLowerCase(),
+      from: req.query.from || null, to: req.query.to || null,
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/exports/individual-register', requireExport, async (req, res) => {
+  try {
+    const kind = String(req.query.kind || '').toLowerCase();
+    if (!INDIVIDUAL_REG_KINDS[kind]) return res.status(400).json({ error: 'Unknown register kind' });
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const opts = individualRegOpts(req);
+    const format = String(req.query.format || 'xlsx').toLowerCase();
+    const fileBase = { pooler: 'PoolerRegister', seller: 'SellerRegister', merchant: 'MerchantRegister' }[kind];
+    if (format === 'pdf') {
+      const pdfType = { pooler: 'pooler_individual', seller: 'seller_individual', merchant: 'merchant_individual' }[kind];
+      const buffer = await exportAnyPdf(db, pdfType, null, cfg, opts);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.pdf"`);
+      return res.send(buffer);
+    }
+    const { exportIndividualRegister } = require('./exports');
+    const buffer = await exportIndividualRegister(db, kind, opts);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileBase}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════
 // INVOICE PREVIEW (PREINVO.PRG) — dry-run, no save
 // ══════════════════════════════════════════════════════════════
 app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
@@ -7753,25 +7901,58 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   doc.text(`Date: ${fmtDate(auction.date)}`, PAGE_L + 280, y);
   y += 18;
 
-  const cols = [
+  // TDS: spread the seller's stamped Section-194Q purchase TDS ∝ each lot's
+  // puramt so a lot-filtered statement nets the proportionate share. The
+  // "Total" column is the pre-TDS payable (balance); "Payable" = Total − TDS.
+  const tdsCtx = paymentTdsContext(db, auctionId);
+  const tdsKey = String(sellerName || '').trim().toUpperCase();
+  const sellerTds  = tdsCtx.tdsByName[tdsKey] || 0;
+  const fullPuramt = tdsCtx.puramtByName[tdsKey] || 0;
+  const tdsRate = fullPuramt > 0 ? sellerTds / fullPuramt : 0;
+  const hasTds = sellerTds > 0;
+  const roundPay = cfg.flag_round === true || String(cfg.flag_round || '').toLowerCase() === 'true';
+  // Per-lot Payable = balance − the lot's TDS share. When invoice rounding is
+  // on, distribute to whole rupees so the lines foot to the rounded total.
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const rawPayables = lots.map(l => (Number(l.balance) || 0) - r2((Number(l.puramt) || 0) * tdsRate));
+  const payables = roundPay ? distributeRoundedPayable(rawPayables) : rawPayables.map(r2);
+
+  // Re-laid out to fit Total + TDS columns between GST and Payable; widths
+  // still sum to PAGE_W so the header rule and right margin line up. TDS is
+  // dropped entirely (column hidden) for sellers without purchase TDS.
+  const cols = hasTds ? [
+    { k: 'lot_no', label: 'Lot#',     x: PAGE_L,        w: 46,  align: 'left' },
+    { k: 'qty',    label: 'Qty',      x: PAGE_L + 46,   w: 58,  align: 'right', fmt: fmtQty },
+    { k: 'rate',   label: 'Rate',     x: PAGE_L + 104,  w: 52,  align: 'right', fmt: fmtAmt },
+    { k: 'amount', label: 'Amount',   x: PAGE_L + 156,  w: 66,  align: 'right', fmt: fmtAmt },
+    { k: 'refund', label: 'Discount', x: PAGE_L + 222,  w: 62,  align: 'right', fmt: fmtAmt },
+    { k: 'tax',    label: 'GST',      x: PAGE_L + 284,  w: 58,  align: 'right', fmt: fmtAmt },
+    { k: 'total',  label: 'Total',    x: PAGE_L + 342,  w: 66,  align: 'right', fmt: fmtAmt },
+    { k: 'tds',    label: 'TDS',      x: PAGE_L + 408,  w: 50,  align: 'right', fmt: fmtAmt },
+    { k: 'payable',label: 'Payable',  x: PAGE_L + 458,  w: 77,  align: 'right', fmt: fmtAmt },
+  ] : [
     { k: 'lot_no', label: 'Lot#',     x: PAGE_L,        w: 60,  align: 'left' },
     { k: 'qty',    label: 'Qty',      x: PAGE_L + 60,   w: 70,  align: 'right', fmt: fmtQty },
     { k: 'rate',   label: 'Rate',     x: PAGE_L + 130,  w: 60,  align: 'right', fmt: fmtAmt },
     { k: 'amount', label: 'Amount',   x: PAGE_L + 190,  w: 80,  align: 'right', fmt: fmtAmt },
     { k: 'refund', label: 'Discount', x: PAGE_L + 270,  w: 75,  align: 'right', fmt: fmtAmt },
     { k: 'tax',    label: 'GST',      x: PAGE_L + 345,  w: 70,  align: 'right', fmt: fmtAmt },
-    { k: 'balance',label: 'Payable',  x: PAGE_L + 415,  w: 120, align: 'right', fmt: fmtAmt },
+    { k: 'payable',label: 'Payable',  x: PAGE_L + 415,  w: 120, align: 'right', fmt: fmtAmt },
   ];
   doc.font('Helvetica-Bold').fontSize(9);
   doc.rect(PAGE_L, y, PAGE_W, 18).fillAndStroke('#f3f4f6', '#999').fillColor('#000');
   for (const c of cols) doc.text(c.label, c.x + 2, y + 5, { width: c.w - 4, align: c.align });
   y += 18;
   doc.font('Helvetica').fontSize(9).fillColor('#000');
-  let tQty=0,tAmt=0,tDisc=0,tTax=0,tPay=0;
-  for (const l of lots) {
+  let tQty=0,tAmt=0,tDisc=0,tTax=0,tTotal=0,tTds=0,tPay=0;
+  lots.forEach((l, i) => {
     const tax = (Number(l.cgst)||0)+(Number(l.sgst)||0)+(Number(l.igst)||0);
-    const row = { ...l, tax };
-    tQty+=Number(l.qty)||0; tAmt+=Number(l.amount)||0; tDisc+=Number(l.refund)||0; tTax+=tax; tPay+=Number(l.balance)||0;
+    const lotTds = r2((Number(l.puramt) || 0) * tdsRate);
+    const total = Number(l.balance) || 0;   // pre-TDS payable
+    const payable = payables[i];
+    const row = { ...l, tax, total, tds: lotTds, payable };
+    tQty+=Number(l.qty)||0; tAmt+=Number(l.amount)||0; tDisc+=Number(l.refund)||0;
+    tTax+=tax; tTotal+=total; tTds+=lotTds; tPay+=payable;
     if (y > 770) { doc.addPage(); y = 40; }
     for (const c of cols) {
       const v = c.fmt ? c.fmt(row[c.k]) : String(row[c.k] ?? '');
@@ -7779,15 +7960,16 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
     }
     y += 14;
     doc.moveTo(PAGE_L, y).lineTo(PAGE_R, y).strokeColor('#e5e7eb').lineWidth(0.5).stroke().strokeColor('#000');
-  }
+  });
   doc.font('Helvetica-Bold').fontSize(10);
   doc.rect(PAGE_L, y, PAGE_W, 20).fillAndStroke('#f3f4f6', '#666').fillColor('#000');
   doc.text('TOTAL', PAGE_L + 2, y + 6);
-  doc.text(fmtQty(tQty), PAGE_L + 62, y + 6, { width: 66, align: 'right' });
-  doc.text(fmtAmt(tAmt), PAGE_L + 192, y + 6, { width: 76, align: 'right' });
-  doc.text(fmtAmt(tDisc),PAGE_L + 272, y + 6, { width: 71, align: 'right' });
-  doc.text(fmtAmt(tTax), PAGE_L + 347, y + 6, { width: 66, align: 'right' });
-  doc.text(fmtAmt(tPay), PAGE_L + 417, y + 6, { width: 116,align: 'right' });
+  // Right-align each total under its column (x..x+w), reusing the cols layout.
+  const totByKey = { qty: fmtQty(tQty), amount: fmtAmt(tAmt), refund: fmtAmt(tDisc), tax: fmtAmt(tTax), total: fmtAmt(tTotal), tds: fmtAmt(tTds), payable: fmtAmt(tPay) };
+  for (const c of cols) {
+    if (totByKey[c.k] == null) continue;
+    doc.text(totByKey[c.k], c.x + 2, y + 6, { width: c.w - 4, align: 'right' });
+  }
   y += 30;
   doc.font('Helvetica').fontSize(9).text(`Generated: ${new Date().toLocaleString('en-IN')}`, PAGE_L, y, { width: PAGE_W, align: 'right' });
   return tPay;
@@ -8978,6 +9160,94 @@ app.get('/api/tally/party-voucher/:type/:auctionId', requireExport, (req, res) =
     res.send(xml);
   } catch (e) {
     console.error('tally party-voucher error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Single Invoice Voucher ───────────────────────────────────
+// Finer-grained than the single-party export: emits the Tally voucher XML
+// for ONE specific invoice (one built row) — useful when a single invoice
+// was missed or corrected and needs re-importing on its own without
+// re-sending the whole party's set. Each builder row already corresponds to
+// exactly one invoice (grouped by buyer + sale + invoice no), so we identify
+// a row by its voucher/invoice number (+ party + sale type to disambiguate).
+const voucherNoOf = (r) => String(r.voucherNum || r.invo || '').trim();
+const saleOf      = (r) => String(r.sale || '').trim();
+
+// List one entry per invoice voucher — powers the Single Invoice picker.
+app.get('/api/tally/invoice-list/:type/:auctionId', requireExport, (req, res) => {
+  const { type, auctionId } = req.params;
+  const def = TALLY_EXPORTS[type];
+  const keyFn = VOUCHER_PARTY_KEY[type];
+  if (!def || !keyFn || def.isLedger) {
+    return res.status(400).json({
+      error: 'Unknown or unsupported voucher type for single-invoice export',
+      supported: Object.keys(VOUCHER_PARTY_KEY),
+    });
+  }
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const rows = def.builder(db, auctionId, cfg);
+    const invoices = rows.map((r, i) => ({
+      idx: i,
+      party: String(keyFn(r) || ''),
+      voucher: voucherNoOf(r),
+      sale: saleOf(r),
+      date: r.date || '',
+      amount: Number(r.total) || 0,
+      lotCount: Array.isArray(r.lots) ? r.lots.length : 0,
+    }));
+    res.json({ type, auctionId, label: def.label, invoices });
+  } catch (e) {
+    console.error('tally invoice-list error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Download the XML for a single invoice. Query: ?invoice=<no>&name=<party>&sale=<saleType>
+app.get('/api/tally/invoice-voucher/:type/:auctionId', requireExport, (req, res) => {
+  const { type, auctionId } = req.params;
+  const { name: partyName, invoice, sale } = req.query;
+  const def = TALLY_EXPORTS[type];
+  const keyFn = VOUCHER_PARTY_KEY[type];
+  if (!def || !keyFn || def.isLedger) {
+    return res.status(400).json({
+      error: 'Unknown or unsupported voucher type for single-invoice export',
+      supported: Object.keys(VOUCHER_PARTY_KEY),
+    });
+  }
+  if (!invoice) return res.status(400).json({ error: 'Missing ?invoice=<invoice/voucher no>' });
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const allRows = def.builder(db, auctionId, cfg);
+    const wantVno   = String(invoice).trim().toUpperCase();
+    const wantParty = partyName ? String(partyName).trim().toUpperCase() : null;
+    const wantSale  = sale ? String(sale).trim().toUpperCase() : null;
+    let rows = allRows.filter(r => {
+      if (voucherNoOf(r).toUpperCase() !== wantVno) return false;
+      if (wantParty && String(keyFn(r) || '').trim().toUpperCase() !== wantParty) return false;
+      if (wantSale && saleOf(r).toUpperCase() !== wantSale) return false;
+      return true;
+    });
+    if (rows.length === 0) {
+      return res.status(404).json({
+        error: `No ${def.label} found for invoice "${invoice}"${partyName ? ` / "${partyName}"` : ''} in auction ${auctionId}`,
+      });
+    }
+    // Keep exactly one invoice even if the loose filter matched siblings
+    // (e.g. the same invoice number reused across parties with no party hint).
+    rows = rows.slice(0, 1);
+    const xml = def.generator(rows, cfg, { companyName: resolveTallyCompanyName(cfg, def.company) });
+    const safeParty = String(partyName || keyFn(rows[0]) || 'party').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+    const safeVno   = String(invoice).replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20);
+    const filename = `${def.name}_Inv${safeVno}_${safeParty}_${anoForFilename(db, auctionId)}.xml`;
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(xml);
+  } catch (e) {
+    console.error('tally invoice-voucher error:', e);
     res.status(500).json({ error: e.message });
   }
 });

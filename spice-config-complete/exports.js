@@ -57,7 +57,7 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
   // Rows flagged `_isSubtotal: true` get distinct styling (bold + light
   // yellow fill + thin top border) so callers can interleave per-group
   // subtotal rows directly in `rows` and have them styled automatically.
-  rows.forEach((rowObj) => {
+  const emitDataRow = (rowObj) => {
     const dataRow = ws.addRow({});
     columns.forEach((c, i) => {
       let v = rowObj[c.key];
@@ -77,7 +77,31 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
         if (fmt) cell.numFmt = fmt;
       });
     }
-  });
+  };
+
+  // ── Section-grouped mode (optional) ──
+  // When `opts.sections` is provided, we ignore `rows` and emit each
+  // section as: section header (merged, light-yellow) → its rows. Reused
+  // by the per-party "Individual" registers (one section per party).
+  if (Array.isArray(opts.sections) && opts.sections.length) {
+    const colLetter = (n) => {
+      let s = '';
+      while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+      return s;
+    };
+    opts.sections.forEach((sec, sIdx) => {
+      const titleRow = ws.addRow([sec.title || '']);
+      ws.mergeCells(`A${titleRow.number}:${colLetter(columns.length)}${titleRow.number}`);
+      titleRow.font = { bold: true, size: 10 };
+      titleRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+      titleRow.alignment = { horizontal: 'left', vertical: 'middle' };
+      (sec.rows || []).forEach(emitDataRow);
+      if (opts.spacerBetween && sIdx < opts.sections.length - 1) ws.addRow([]);
+    });
+  } else {
+    // Flat mode — original behaviour.
+    rows.forEach(emitDataRow);
+  }
 
   // ── Grand total footer (optional) ──
   // Bold 11pt, yellow `#FFF3CD` fill, double bottom border. Pass values
@@ -667,6 +691,11 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   // attribute the FULL manual debit on the FIRST row for each seller; later
   // rows show only the lot policy discount. Avoids per-row arithmetic but
   // still preserves the seller-level total.
+  // TDS: the seller's stamped Section-194Q purchase TDS, spread ∝ each lot's
+  // puramt so a lot-picked subset nets the proportionate share. "Total" is
+  // the pre-TDS payable; "Payable" = Total − TDS (what the seller is paid).
+  const { paymentTdsContext } = require('./calculations');
+  const tdsCtx = paymentTdsContext(db, auctionId);
   const seenSellers = new Set();
   const enrichedFlat = rows.map(r => {
     const lotDisc = Number(r.lot_discount) || 0;
@@ -674,17 +703,21 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
       ? (Number(debitMap[r.poolername]) || 0)
       : 0;
     seenSellers.add(r.poolername);
+    const total = (Number(r.payable) || 0) - manualDisc;   // pre-TDS payable
+    const tds = tdsCtx.share(r.poolername, r.puramt);
     return {
       ...r,
       discount: lotDisc + manualDisc,
-      payable: (Number(r.payable) || 0) - manualDisc,
+      total,
+      tds,
+      payable: total - tds,
     };
   });
 
   // Interleave per-pooler subtotal rows after each name group — mirrors
   // the PDF's groupByKey:'poolername' subtotalKeys behaviour. Rows are
   // already sorted by (state, name) so a single linear pass groups them.
-  const SUB_KEYS = ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'];
+  const SUB_KEYS = ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'total', 'tds', 'payable'];
   const enriched = [];
   let curName = null;
   let acc = null;
@@ -712,6 +745,8 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
     { header: 'AMOUNT', key: 'amount', width: 14 }, { header: 'PQTY', key: 'pqty', width: 12 },
     { header: 'PRATE', key: 'prate', width: 10 }, { header: 'PURAMT', key: 'puramt', width: 14 },
     { header: 'DISCOUNT', key: 'discount', width: 14 },
+    { header: 'TOTAL', key: 'total', width: 14 },
+    { header: 'TDS', key: 'tds', width: 12 },
     { header: 'PAYABLE', key: 'payable', width: 14 },
   ];
   // Footer totals — sum every numeric column. The earlier export had no
@@ -730,6 +765,8 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
       pqty:    sum('pqty'),
       puramt:  sum('puramt'),
       discount:sum('discount'),
+      total:   sum('total'),
+      tds:     sum('tds'),
       payable: sum('payable'),
     },
   };
@@ -993,6 +1030,171 @@ const EXPORT_TYPES = {
   tally_purchase: { fn: exportTallyPurchase, name: 'TallyPurchase',  needsCfg: true },
 };
 
+// Header meta lines for the Registers — trade (when scoped to one) or a
+// date range (when spanning trades), plus an optional sale-type note.
+function registerMeta(db, opts) {
+  const lines = [];
+  if (opts && opts.auctionId) lines.push(...auctionMeta(db, opts.auctionId));
+  else if (opts && opts.from && opts.to) lines.push(`Period: ${opts.from} to ${opts.to}`);
+  else lines.push('All trades');
+  if (opts && opts.saleType) lines.push(`Sale: ${opts.saleType}`);
+  return lines.filter(Boolean);
+}
+
+// ── Export: Purchase Register (lot-wise) ───────────────────
+async function exportPurchaseRegister(db, opts = {}) {
+  const { getPurchaseRegister } = require('./calculations');
+  const rows = getPurchaseRegister(db, opts);
+  const cols = [
+    { header: 'STATE',  key: 'state',  width: 14 },
+    { header: 'TNO',    key: 'tno',    width: 6  },
+    { header: 'DATE',   key: 'date',   width: 12 },
+    { header: 'LOT',    key: 'lot',    width: 8  },
+    { header: 'BRANCH', key: 'branch', width: 10 },
+    { header: 'NAME',   key: 'name',   width: 28 },
+    { header: 'PLACE',  key: 'place',  width: 14 },
+    { header: 'GSTIN',  key: 'gstin',  width: 18 },
+    { header: 'BAG',    key: 'bag',    width: 6  },
+    { header: 'QTY',    key: 'qty',    width: 11, numFmt: '#,##0.000' },
+    { header: 'PRICE',  key: 'price',  width: 10, numFmt: '#,##0.00' },
+    { header: 'AMOUNT', key: 'amount', width: 14, numFmt: '#,##0.00' },
+    { header: 'PQTY',   key: 'pqty',   width: 11, numFmt: '#,##0.000' },
+    { header: 'PRATE',  key: 'prate',  width: 10, numFmt: '#,##0.00' },
+    { header: 'PURAMT', key: 'puramt', width: 14, numFmt: '#,##0.00' },
+    { header: 'DISCOUNT', key: 'discount', width: 12, numFmt: '#,##0.00' },
+    { header: 'GST5',   key: 'gst5',   width: 11, numFmt: '#,##0.00' },
+    { header: 'PAYABLE', key: 'payable', width: 14, numFmt: '#,##0.00' },
+  ];
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = { label: 'TOTAL', values: {
+    bag: sum('bag'), qty: sum('qty'), amount: sum('amount'), pqty: sum('pqty'),
+    puramt: sum('puramt'), discount: sum('discount'), gst5: sum('gst5'), payable: sum('payable'),
+  }};
+  return createExcelBuffer('PurchaseRegister', cols, rows, {
+    db, title: 'Purchase Register', metaLines: registerMeta(db, opts), grandTotal,
+  });
+}
+
+// ── Export: Sales Register (invoice-wise) ──────────────────
+async function exportSalesRegister(db, opts = {}) {
+  const { getSalesRegister } = require('./calculations');
+  const rows = getSalesRegister(db, opts);
+  const cols = [
+    { header: 'STATE',  key: 'state',  width: 14 },
+    { header: 'TNO',    key: 'tno',    width: 6  },
+    { header: 'DATE',   key: 'date',   width: 12 },
+    { header: 'SALE',   key: 'sale',   width: 6  },
+    { header: 'INVO',   key: 'invo',   width: 8  },
+    { header: 'TRADERNAME', key: 'tradername', width: 30 },
+    { header: 'BIDDER', key: 'bidder', width: 10 },
+    { header: 'BAG',    key: 'bag',    width: 6  },
+    { header: 'QTY',    key: 'qty',    width: 11, numFmt: '#,##0.000' },
+    { header: 'AMOUNT', key: 'amount', width: 14, numFmt: '#,##0.00' },
+    { header: 'LORRY',  key: 'lorry',  width: 10, numFmt: '#,##0.00' },
+    { header: 'GUNNY',  key: 'gunny',  width: 10, numFmt: '#,##0.00' },
+    { header: 'IGST',   key: 'igst',   width: 10, numFmt: '#,##0.00' },
+    { header: 'CGST',   key: 'cgst',   width: 10, numFmt: '#,##0.00' },
+    { header: 'SGST',   key: 'sgst',   width: 10, numFmt: '#,##0.00' },
+    { header: 'INS',    key: 'ins',    width: 10, numFmt: '#,##0.00' },
+    { header: 'INVAMT', key: 'invamt', width: 14, numFmt: '#,##0.00' },
+  ];
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = { label: 'TOTAL', values: {
+    bag: sum('bag'), qty: sum('qty'), amount: sum('amount'), lorry: sum('lorry'),
+    gunny: sum('gunny'), igst: sum('igst'), cgst: sum('cgst'), sgst: sum('sgst'),
+    ins: sum('ins'), invamt: sum('invamt'),
+  }};
+  return createExcelBuffer('SalesRegister', cols, rows, {
+    db, title: 'Sales Register', metaLines: registerMeta(db, opts), grandTotal,
+  });
+}
+
+// ── Export: Per-party "Individual" Registers (cross-auction) ───────
+// Pooler / Seller / Merchant statements, one section per party. Shares the
+// createExcelBuffer section-grouped mode: each party becomes a banded
+// section (name + GSTIN) followed by its rows, a bold TOTAL subtotal, and a
+// summary line (Sold/Not Sold for poolers, Closing Balance for the others).
+// `labelKey` is the first column the TOTAL/summary labels land in.
+const INDIVIDUAL_REG_DEFS = {
+  pooler: {
+    sheet: 'PoolerRegister', title: 'Pooler Register', labelKey: 'tno',
+    cols: [
+      { header: 'TNO',   key: 'tno',   width: 8  },
+      { header: 'DATE',  key: 'date',  width: 12 },
+      { header: 'LOT',   key: 'lot',   width: 8  },
+      { header: 'QTY',   key: 'qty',   width: 12, numFmt: '#,##0.000' },
+      { header: 'RATE',  key: 'rate',  width: 11, numFmt: '#,##0.00'  },
+      { header: 'VALUE', key: 'value', width: 16, numFmt: '#,##0.00'  },
+    ],
+    summaryRows: (p) => ([
+      { _isSubtotal: true, tno: 'Total',    qty: p.summary.qty,        value: p.summary.value },
+      { _isSubtotal: true, tno: 'Sold',     qty: p.summary.soldQty,    value: p.summary.soldValue },
+      { _isSubtotal: true, tno: 'Not Sold', qty: p.summary.notSoldQty },
+    ]),
+    grandKeys: ['qty', 'value'],
+  },
+  seller: {
+    sheet: 'SellerRegister', title: 'Sellers Individual', labelKey: 'date',
+    cols: [
+      { header: 'DATE',    key: 'date',    width: 12 },
+      { header: 'ANO',     key: 'ano',     width: 8  },
+      { header: 'INVO',    key: 'invo',    width: 8,  numFmt: '#,##0' },
+      { header: 'QTY',     key: 'qty',     width: 12, numFmt: '#,##0.000' },
+      { header: 'INVOICE', key: 'invoice', width: 16, numFmt: '#,##0.00' },
+    ],
+    summaryRows: (p) => ([
+      { _isSubtotal: true, date: 'Total',           qty: p.summary.qty, invoice: p.summary.invoice },
+      { _isSubtotal: true, date: 'Closing Balance', invoice: p.summary.closing },
+    ]),
+    grandKeys: ['qty', 'invoice'],
+  },
+  merchant: {
+    sheet: 'MerchantRegister', title: 'Merchants Individual', labelKey: 'date',
+    cols: [
+      { header: 'DATE',    key: 'date',    width: 12 },
+      { header: 'TNO',     key: 'tno',     width: 8  },
+      { header: 'INVO',    key: 'invo',    width: 8  },
+      { header: 'RECP',    key: 'recp',    width: 8  },
+      { header: 'QTY',     key: 'qty',     width: 12, numFmt: '#,##0.000' },
+      { header: 'INVOICE', key: 'invoice', width: 16, numFmt: '#,##0.00' },
+      { header: 'RECEIPT', key: 'receipt', width: 16, numFmt: '#,##0.00' },
+    ],
+    summaryRows: (p) => ([
+      { _isSubtotal: true, date: 'Total',           qty: p.summary.qty, invoice: p.summary.invoice, receipt: p.summary.receipt },
+      { _isSubtotal: true, date: 'Closing Balance', invoice: p.summary.closing },
+    ]),
+    grandKeys: ['qty', 'invoice', 'receipt'],
+  },
+};
+
+function individualRegisterData(db, kind, opts) {
+  const { getPoolerRegister, getSellerRegister, getMerchantRegister } = require('./calculations');
+  if (kind === 'seller')   return getSellerRegister(db, opts);
+  if (kind === 'merchant') return getMerchantRegister(db, opts);
+  return getPoolerRegister(db, opts);
+}
+
+async function exportIndividualRegister(db, kind, opts = {}) {
+  const def = INDIVIDUAL_REG_DEFS[kind];
+  if (!def) throw new Error(`Unknown individual register kind: ${kind}`);
+  const data = individualRegisterData(db, kind, opts);
+  const sections = data.parties.map(p => ({
+    title: p.name + (p.gstin ? `      GSTIN: ${p.gstin}` : ''),
+    rows: [...p.rows, ...def.summaryRows(p)],
+  }));
+  // Grand total across every party in the file.
+  const gv = {};
+  def.grandKeys.forEach(k => {
+    gv[k] = data.parties.reduce((s, p) => s + (Number(p.summary[k]) || 0), 0);
+  });
+  gv[def.labelKey] = 'GRAND TOTAL';
+  return createExcelBuffer(def.sheet, def.cols, [], {
+    db, title: def.title, metaLines: registerMeta(db, opts),
+    sections, spacerBetween: true,
+    grandTotal: { values: gv },
+  });
+}
+
 module.exports = {
   EXPORT_TYPES,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
@@ -1000,4 +1202,5 @@ module.exports = {
   exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList,
   exportSalesTaxes, exportPaymentSummary, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
+  exportPurchaseRegister, exportSalesRegister, exportIndividualRegister,
 };
