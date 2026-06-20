@@ -4314,19 +4314,38 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // when the flag is off so 0 is what flows in by default.
   const reservedPrice = Number(l.reserved_price);
   const _db = getDb();
+  // Backfill the denormalised seller fields from the trader record when the
+  // client sent only trader_id. The mobile PWA does exactly that (it posts
+  // trader_id but no name/place/CR), which previously left lots.name empty —
+  // so mobile-entered lots showed up nameless on the desktop Lot Entry screen
+  // and on slips/invoices that read these columns off the lots row. Each
+  // field is filled only when the body left it blank, so an explicit value
+  // from a client (e.g. the desktop form) always wins.
+  let _seller = null;
+  if (l.trader_id) {
+    _seller = _db.get('SELECT name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code FROM traders WHERE id = ?', [l.trader_id]);
+  }
+  const _fill = (bodyVal, key) => {
+    if (bodyVal !== undefined && bodyVal !== null && String(bodyVal) !== '') return bodyVal;
+    return _seller ? (_seller[key] || '') : (bodyVal || '');
+  };
+  const _name   = _fill(l.name,     'name');
+  const _padd   = _fill(l.padd,     'padd');
+  const _ppla   = _fill(l.ppla,     'ppla');
+  const _ppin   = _fill(l.ppin,     'pin');   // trader.pin → lot.ppin (renamed on denormalise)
+  const _pstate = _fill(l.pstate,   'pstate');
+  const _pstcd  = _fill(l.pst_code, 'pst_code');
+  const _cr     = _fill(l.cr,       'cr');
+  const _pan    = _fill(l.pan,      'pan');
+  const _tel    = _fill(l.tel,      'tel');
+  const _aadhar = _fill(l.aadhar,   'aadhar');
   const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,l.name||'',l.padd||'',l.ppla||'',l.ppin||'',l.pstate||'',l.pst_code||'',l.cr||'',l.pan||'',l.tel||'',l.aadhar||'',l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
-  // Audit who entered the lot, from which app. The mobile PWA sends
-  // trader_id but no name, so resolve the seller name for a readable
-  // trail when the body didn't carry it.
-  let _traderName = l.name || '';
-  if (!_traderName && l.trader_id) {
-    const _t = _db.get('SELECT name FROM traders WHERE id = ?', [l.trader_id]);
-    if (_t) _traderName = _t.name;
-  }
+  // Seller name for a readable audit trail (already resolved above).
+  let _traderName = _name || (_seller ? _seller.name : '');
   auditLog(req, 'create', 'lot', _ins && _ins.lastInsertRowid, {
     lot_no: l.lot_no, trader: _traderName, qty: Number(l.qty) || 0, branch: l.branch || '', auction_id: l.auction_id,
   });

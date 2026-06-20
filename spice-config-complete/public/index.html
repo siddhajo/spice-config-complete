@@ -3714,48 +3714,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <select id="lorry-auction" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
         </div>
 
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:14px">
-          <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-              <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">📜</span>
-              <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Lot Slip (Code)</div>
-                <div style="font-size:11px;color:var(--text3)">Per-lot list with bidder code · carbon-copy in PDF</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:10px">
-              <button class="btn btn-a" onclick="downloadLorry('lot_slip_code','xlsx')" style="flex:1;padding:7px;font-size:12px">XLSX</button>
-              <button class="btn btn-orange" onclick="downloadLorry('lot_slip_code','pdf')" style="flex:1;padding:7px;font-size:12px">PDF</button>
-            </div>
-          </div>
-
-          <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-              <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">🚚</span>
-              <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Truck List</div>
-                <div style="font-size:11px;color:var(--text3)">Buyer-code summary with totals</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:10px">
-              <button class="btn btn-a" onclick="downloadLorry('truck_list','xlsx')" style="flex:1;padding:7px;font-size:12px">XLSX</button>
-              <button class="btn btn-orange" onclick="downloadLorry('truck_list','pdf')" style="flex:1;padding:7px;font-size:12px">PDF</button>
-            </div>
-          </div>
-
-          <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-              <span style="width:32px;height:32px;border-radius:8px;background:var(--spice-saffron-lt);display:inline-flex;align-items:center;justify-content:center;font-size:18px">📋</span>
-              <div>
-                <div style="font-weight:700;color:var(--text);font-size:14px">Buyer Lot Lorry</div>
-                <div style="font-size:11px;color:var(--text3)">Inter/Intra-state grouped buyer detail</div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:10px">
-              <button class="btn btn-a" onclick="downloadLorry('buyer_lot_lorry','xlsx')" style="flex:1;padding:7px;font-size:12px">XLSX</button>
-              <button class="btn btn-orange" onclick="downloadLorry('buyer_lot_lorry','pdf')" style="flex:1;padding:7px;font-size:12px">PDF</button>
-            </div>
-          </div>
+        <div class="fg" style="max-width:360px;margin-top:14px"><label>Report</label>
+          <select id="lorry-type" onchange="lorryOnTypeChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+        </div>
+        <div id="lorry-type-desc" style="font-size:11.5px;color:var(--text3);margin:4px 0 0"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0">
+          <button class="btn btn-a" onclick="downloadLorry(lorryCurrentType(),'xlsx')">XLSX</button>
+          <button class="btn btn-orange" onclick="downloadLorry(lorryCurrentType(),'pdf')">PDF</button>
         </div>
 
         <div style="margin-top:14px;padding:10px 12px;background:var(--spice-saffron-lt);border-radius:8px;font-size:12px;color:var(--text2);line-height:1.5">
@@ -6346,9 +6311,14 @@ const DataTable = (function(){
       return `<td class="num"><strong>${fmt}</strong></td>`;
     }).join('');
 
-    // Toolbar: single search box + clear (x) + row count
+    // Toolbar: single search box + clear (x) + row count.
+    // hideSearch: for server-paginated tables (Sellers/Buyers) the mounted
+    // data is only the current page, so a client-side "search all columns"
+    // box would silently search just that page. Those screens have their own
+    // whole-list server search + pager, so we omit the in-table toolbar
+    // entirely to avoid a second, misleading search box.
     const hasSearch = !!s.search;
-    const toolbar = `
+    const toolbar = s.hideSearch ? '' : `
       <div class="dt-toolbar">
         <div class="dt-search-wrap">
           <input type="text" class="dt-search" placeholder="Search all columns…" value="${esc(s.search||'')}" oninput="DataTable._search('${tbodyId}',this.value)">
@@ -6427,6 +6397,7 @@ const DataTable = (function(){
         rowClass: config.rowClass,
         sort: state[tbodyId] && state[tbodyId].sort || (config.defaultSort || null),
         search: state[tbodyId] && state[tbodyId].search || '',
+        hideSearch: !!config.hideSearch,
         visible: PAGE_SIZE
       };
       render(tbodyId);
@@ -10759,6 +10730,9 @@ async function searchTraders(q, opts){
 
   const d = rows;
   DataTable.mount('traders-list', d, {
+    // Server-paginated + server-searched (whole list) via the box above the
+    // table, so suppress DataTable's own page-local search box.
+    hideSearch: true,
     columns: [
       { key:'name', label:'Name', sort:'text', render:(t)=>
           `<a href="#" onclick="viewTraderDetails(${JSON.stringify(t).replace(/"/g,'&quot;')});return false" style="color:var(--green);font-weight:600;text-decoration:none">${esc(t.name)}</a>` },
@@ -11613,7 +11587,10 @@ async function searchBuyers(q, opts){
   const d = rows;
   const saleMap={L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'};
   DataTable.mount('buyers-list', d, {
-    emptyState: { icon: 'buyers', title: "No buyers yet", body: "Register buyers to generate sales invoices. Use Add Buyer above or import from a template." }, 
+    // Server-paginated + server-searched (whole list) via the box above the
+    // table, so suppress DataTable's own page-local search box.
+    hideSearch: true,
+    emptyState: { icon: 'buyers', title: "No buyers yet", body: "Register buyers to generate sales invoices. Use Add Buyer above or import from a template." },
     columns: [
       { key:'buyer', label:'BUYER', sort:'text', render:(b)=>
           `<a href="#" onclick="viewBuyerDetails(${JSON.stringify(b).replace(/"/g,'&quot;')});return false" style="color:var(--green);font-weight:700;text-decoration:none">${esc(b.buyer)}</a>` },
@@ -12918,8 +12895,29 @@ function loadExpAuctions(){
 // ── Lorry Reports ─────────────────────────────────────────
 function loadLorryAuctions(){
   fillAucSelect('lorry-auction');
+  lorryPopulateTypes();
 }
 const LORRY_LABELS={lot_slip_code:'Lot Slip (Code)',truck_list:'Truck List',buyer_lot_lorry:'Buyer Lot Lorry'};
+const LORRY_DESCS={
+  lot_slip_code:'Per-lot list with bidder code · carbon-copy in PDF',
+  truck_list:'Buyer-code summary with totals',
+  buyer_lot_lorry:'Inter/Intra-state grouped buyer detail',
+};
+function lorryCurrentType(){ return document.getElementById('lorry-type')?.value || 'lot_slip_code'; }
+// Populate the report dropdown from LORRY_LABELS (mirrors the Exports
+// Center's expPopulateTypes), preserving the current selection.
+function lorryPopulateTypes(){
+  const sel=document.getElementById('lorry-type');
+  if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML=Object.entries(LORRY_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && LORRY_LABELS[cur]) sel.value=cur;
+  lorryOnTypeChange();
+}
+function lorryOnTypeChange(){
+  const d=document.getElementById('lorry-type-desc');
+  if(d) d.textContent=LORRY_DESCS[lorryCurrentType()]||'';
+}
 async function downloadLorry(type,format){
   format=format||'xlsx';
   const aid=document.getElementById('lorry-auction')?.value;

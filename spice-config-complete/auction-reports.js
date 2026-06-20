@@ -293,6 +293,182 @@ async function lotSlipPdf(db, auctionId, _cfg, extra) {
 }
 
 // ════════════════════════════════════════════════════════════
+// GENERALIZED CARBON-COPY SLIP (PDF)
+// ════════════════════════════════════════════════════════════
+//
+// The same two-identical-halves-per-page tear-off layout as the Lot Slip,
+// but driven by a column spec so other per-lot slips (Lot Buyer, Lot Name)
+// can share it. Long text columns (fit:true) are ellipsized with fitText so
+// a long buyer/seller name can never overlap the adjacent column — and
+// every cell is clipped to its width (lineBreak:false) so nothing bleeds
+// across a column divider.
+//   opts.title      — heading shown under the brand band
+//   opts.columns    — [{ header, key, weight, align, fit, kind, blank }]
+//                     weight = relative share of the half-page width;
+//                     kind 'qty'|'price' formats numbers; blank renders ''.
+//   opts.totalKeys  — numeric keys summed into a Total row on the last page
+//   opts.rows       — data rows
+async function carbonSlipPdf(db, auctionId, _cfg, extra, opts) {
+  const auction = getAuctionHeader(db, auctionId);
+  const cols = opts.columns || [];
+  const rows = opts.rows || [];
+  const title = opts.title || '';
+  const totalKeys = opts.totalKeys || [];
+
+  const fmtCell = (kind, raw) => {
+    if (kind === 'qty')   return fmtQty(raw);
+    if (kind === 'price') return fmtPrice(raw);
+    return raw == null ? '' : String(raw);
+  };
+
+  const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 18 });
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  const m = 18;
+  const gutter = 40;
+  const pageW = doc.page.width;
+  const pageH = doc.page.height;
+  const halfW = (pageW - m * 2 - gutter) / 2;
+
+  // Absolute column widths from weights; the last column absorbs rounding so
+  // the columns always exactly fill halfW (no gap, no overhang).
+  const wsum = cols.reduce((s, c) => s + (c.weight || 1), 0);
+  let acc = 0;
+  const colW = cols.map((c, i) => {
+    if (i === cols.length - 1) return Math.max(8, halfW - acc);
+    const w = Math.max(8, Math.floor(halfW * (c.weight || 1) / wsum));
+    acc += w;
+    return w;
+  });
+
+  const ROW_H = 16, HEAD_H = 18, TOP_H = 50;
+  const BODY_TOP = m + TOP_H;
+  const BODY_MAX_Y = pageH - m - 8;
+  const ROWS_PER_HALF = Math.max(1, Math.floor((BODY_MAX_Y - BODY_TOP - HEAD_H) / ROW_H));
+  const totalPages = Math.max(1, Math.ceil(rows.length / ROWS_PER_HALF));
+  const companyHeader = getCompanyHeader(db);
+
+  // Draw `text` on ONE line, shrinking the font (down to 5.5pt) until it
+  // fits `w`. Used for headers and numeric cells so values like "2,463.00"
+  // and headers like "CONTROL" never wrap to a second line (which would
+  // overlap the row below) in the narrow half-page columns.
+  function drawFit(text, x, y, w, align, baseSize, bold) {
+    const s = String(text == null ? '' : text);
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica');
+    let size = baseSize;
+    doc.fontSize(size);
+    while (size > 5.5 && doc.widthOfString(s) > w) { size -= 0.5; doc.fontSize(size); }
+    doc.text(s, x, y, { width: w, align, lineBreak: false });
+  }
+
+  function drawHalfHeader(xOrigin, page) {
+    const afterY = drawCompanyHeader(doc, companyHeader, {
+      x: xOrigin, y: m, width: halfW, logoH: 22, logoW: 22, showAddress: false,
+    });
+    doc.fillColor('#000').font('Helvetica-Bold').fontSize(8)
+       .text(title, xOrigin, afterY, { width: halfW / 2, align: 'left', lineBreak: false });
+    doc.font('Helvetica').fontSize(8)
+       .text(`Page: ${page}`, xOrigin + halfW / 2, afterY, { width: halfW / 2, align: 'right' });
+    doc.font('Helvetica-Bold').fontSize(9)
+       .text(`${modeHeaderLabel(auction)} No:${auction.ano}`, xOrigin, afterY + 12, { width: halfW / 2, align: 'left' });
+    doc.text(`Date:${fmtDateDMY(auction.date)}`, xOrigin + halfW / 2, afterY + 12, { width: halfW / 2, align: 'right' });
+
+    const hy = BODY_TOP;
+    doc.rect(xOrigin, hy, halfW, HEAD_H).fillAndStroke('#E8E4DD', '#444');
+    doc.fillColor('#000');
+    let cx = xOrigin;
+    cols.forEach((c, i) => {
+      drawFit(c.header, cx + 2, hy + 5, colW[i] - 4, 'center', 8.5, true);
+      cx += colW[i];
+    });
+  }
+
+  function drawHalfRows(xOrigin, sliceRows, isLastPage) {
+    let ry = BODY_TOP + HEAD_H;
+    const tblTop = BODY_TOP;
+
+    sliceRows.forEach((r, i) => {
+      if (i % 2 === 1) doc.rect(xOrigin, ry, halfW, ROW_H).fill('#F7F5F2');
+      doc.fillColor('#000');
+      let cx = xOrigin;
+      cols.forEach((c, ci) => {
+        const align = c.align || 'left';
+        const cellW = colW[ci] - 4;
+        if (c.blank) { cx += colW[ci]; return; }
+        if (c.fit) {
+          // Free-text (buyer / seller name): keep the base size and
+          // ellipsize so a long name never spills into the next column.
+          doc.font('Helvetica').fontSize(8.5);
+          const v = fitText(doc, fmtCell(c.kind, r[c.key]), cellW);
+          doc.text(v, cx + 2, ry + 4, { width: cellW, align, lineBreak: false });
+        } else {
+          // Numeric / short cells: shrink to fit so values never wrap.
+          drawFit(fmtCell(c.kind, r[c.key]), cx + 2, ry + 4, cellW, align, 8.5, false);
+        }
+        cx += colW[ci];
+      });
+      doc.moveTo(xOrigin, ry + ROW_H).lineTo(xOrigin + halfW, ry + ROW_H)
+         .lineWidth(0.25).strokeColor('#999').stroke();
+      ry += ROW_H;
+    });
+
+    let vx = xOrigin;
+    for (let ci = 0; ci < colW.length - 1; ci++) {
+      vx += colW[ci];
+      doc.moveTo(vx, tblTop).lineTo(vx, ry).lineWidth(0.25).strokeColor('#888').stroke();
+    }
+    doc.rect(xOrigin, tblTop, halfW, ry - tblTop).lineWidth(0.5).strokeColor('#444').stroke();
+
+    if (isLastPage && totalKeys.length) {
+      const ty = ry + 2;
+      doc.rect(xOrigin, ty, halfW, ROW_H + 2).fillAndStroke('#FFF3CD', '#E0B020');
+      doc.fillColor('#000');
+      let cx = xOrigin;
+      cols.forEach((c, ci) => {
+        let v = '';
+        if (ci === 0) v = 'Total';
+        else if (totalKeys.includes(c.key)) {
+          const sum = rows.reduce((s, r) => s + (Number(r[c.key]) || 0), 0);
+          v = fmtCell(c.kind, sum);
+        }
+        const align = ci === 0 ? 'center' : (c.align || 'right');
+        drawFit(v, cx + 2, ty + 5, colW[ci] - 4, align, 8.5, true);
+        cx += colW[ci];
+      });
+      let vx2 = xOrigin;
+      for (let ci = 0; ci < colW.length - 1; ci++) {
+        vx2 += colW[ci];
+        doc.moveTo(vx2, ty).lineTo(vx2, ty + ROW_H + 2).lineWidth(0.25).strokeColor('#E0B020').stroke();
+      }
+    }
+  }
+
+  for (let i = 0; i < totalPages; i++) {
+    if (i > 0) doc.addPage();
+    const slice = rows.slice(i * ROWS_PER_HALF, (i + 1) * ROWS_PER_HALF);
+    const isLast = (i === totalPages - 1);
+    drawHalfHeader(m, i + 1);
+    drawHalfRows(m, slice, isLast);
+    drawHalfHeader(m + halfW + gutter, i + 1);
+    drawHalfRows(m + halfW + gutter, slice, isLast);
+
+    const cutX = m + halfW + gutter / 2;
+    doc.save();
+    doc.dash(3, { space: 3 });
+    doc.moveTo(cutX, m).lineTo(cutX, pageH - m).lineWidth(0.5).strokeColor('#888').stroke();
+    doc.undash();
+    doc.restore();
+    doc.font('Helvetica').fontSize(10).fillColor('#888').text('✂', cutX - 4, m - 12, { lineBreak: false });
+  }
+
+  return new Promise(resolve => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+// ════════════════════════════════════════════════════════════
 // REPORT 2 — COLLECTION (XLSX + PDF, invoice register)
 // ════════════════════════════════════════════════════════════
 //
@@ -1231,6 +1407,8 @@ async function tradeReportPdf(db, auctionId) {
 module.exports = {
   // Lot slip — PDF only (XLSX stays in exports.js)
   lotSlipPdf,
+  // Generalized carbon-copy slip (Lot Buyer / Lot Name share this layout)
+  carbonSlipPdf,
   // Collection — both formats
   collectionXlsx,
   collectionPdf,

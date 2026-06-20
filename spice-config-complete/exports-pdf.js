@@ -609,6 +609,30 @@ const COLS = {
   ],
 };
 
+// Column specs for the carbon-copy (two-up) PDF variants of Lot Buyer /
+// Lot Name. `weight` is the column's share of the half-page width; the wide
+// BUYER / NAME column carries fit:true so long names ellipsize cleanly
+// instead of overlapping. kind 'qty'/'price' formats numbers; the blank
+// CONTROL column stays empty for hand-written notes on the printed slip.
+const CARBON_COLS = {
+  lot_buyer: [
+    { header: 'LOT',   key: 'lot',   weight: 0.16, align: 'center' },
+    { header: 'BUYER', key: 'buyer', weight: 0.40, align: 'left', fit: true },
+    { header: 'BR',    key: 'br',    weight: 0.12, align: 'center' },
+    { header: 'BAG',   key: 'bag',   weight: 0.13, align: 'right' },
+    { header: 'QTY',   key: 'qty',   weight: 0.19, align: 'right', kind: 'qty' },
+  ],
+  lot_name: [
+    { header: 'LOT',     key: 'lot',     weight: 0.10, align: 'center' },
+    { header: 'NAME',    key: 'name',    weight: 0.27, align: 'left', fit: true },
+    { header: 'BR',      key: 'br',      weight: 0.08, align: 'center' },
+    { header: 'BAG',     key: 'bag',     weight: 0.09, align: 'right' },
+    { header: 'QTY',     key: 'qty',     weight: 0.16, align: 'right', kind: 'qty' },
+    { header: 'PRICE',   key: 'price',   weight: 0.16, align: 'right', kind: 'price' },
+    { header: 'CONTROL', key: 'control', weight: 0.14, align: 'center', blank: true },
+  ],
+};
+
 const TOTAL_KEYS = {
   lot_slip:        ['bag', 'qty'],
   lot_slip_after:  ['bag', 'qty', 'amount'],
@@ -829,6 +853,18 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   }
   if (type === 'full_file') {
     throw new Error('Full File is XLSX-only — PDF version is not supported (too many columns to fit on a page).');
+  }
+  // Lot Buyer / Lot Name → carbon-copy tear-off slip (two identical halves
+  // per page), matching the Lot Slip. The wide BUYER / NAME column is
+  // ellipsized (fit:true) so long names never overlap the next column.
+  if (type === 'lot_buyer' || type === 'lot_name') {
+    const rows = await getRowsForType(db, type, auctionId, cfg, extra);
+    return auctionReports.carbonSlipPdf(db, auctionId, cfg, extra, {
+      title: TITLES[type] || type,
+      columns: CARBON_COLS[type],
+      totalKeys: TOTAL_KEYS[type] || [],
+      rows,
+    });
   }
 
   const columns = COLS[type];

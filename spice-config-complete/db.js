@@ -918,6 +918,36 @@ async function initDb() {
     }
   } catch (e) { /* ignore — column may not exist on first run */ }
 
+  // Data fix: lots entered from the mobile PWA were saved with only
+  // trader_id — the denormalised seller fields (name/place/CR/PAN…) were
+  // left blank, so those lots appeared nameless on the desktop Lot Entry
+  // screen and on slips/invoices that read these columns off the lots row.
+  // Backfill any blank field from the linked trader. Idempotent — only
+  // touches columns that are still empty on rows that have a trader_id, so
+  // it's a no-op once filled and safe on a fresh DB (no matching rows).
+  // (The POST /api/lots handler now backfills on insert too, for new lots.)
+  try {
+    const seedFix = wrapped.run(
+      `UPDATE lots
+          SET name     = CASE WHEN COALESCE(name,'')     = '' THEN (SELECT t.name     FROM traders t WHERE t.id = lots.trader_id) ELSE name     END,
+              padd     = CASE WHEN COALESCE(padd,'')     = '' THEN (SELECT t.padd     FROM traders t WHERE t.id = lots.trader_id) ELSE padd     END,
+              ppla     = CASE WHEN COALESCE(ppla,'')     = '' THEN (SELECT t.ppla     FROM traders t WHERE t.id = lots.trader_id) ELSE ppla     END,
+              ppin     = CASE WHEN COALESCE(ppin,'')     = '' THEN (SELECT t.pin      FROM traders t WHERE t.id = lots.trader_id) ELSE ppin     END,
+              pstate   = CASE WHEN COALESCE(pstate,'')   = '' THEN (SELECT t.pstate   FROM traders t WHERE t.id = lots.trader_id) ELSE pstate   END,
+              pst_code = CASE WHEN COALESCE(pst_code,'') = '' THEN (SELECT t.pst_code FROM traders t WHERE t.id = lots.trader_id) ELSE pst_code END,
+              cr       = CASE WHEN COALESCE(cr,'')       = '' THEN (SELECT t.cr       FROM traders t WHERE t.id = lots.trader_id) ELSE cr       END,
+              pan      = CASE WHEN COALESCE(pan,'')      = '' THEN (SELECT t.pan      FROM traders t WHERE t.id = lots.trader_id) ELSE pan      END,
+              tel      = CASE WHEN COALESCE(tel,'')      = '' THEN (SELECT t.tel      FROM traders t WHERE t.id = lots.trader_id) ELSE tel      END,
+              aadhar   = CASE WHEN COALESCE(aadhar,'')   = '' THEN (SELECT t.aadhar   FROM traders t WHERE t.id = lots.trader_id) ELSE aadhar   END
+        WHERE trader_id IS NOT NULL
+          AND EXISTS (SELECT 1 FROM traders t WHERE t.id = lots.trader_id)
+          AND (COALESCE(name,'') = '' OR COALESCE(ppla,'') = '' OR COALESCE(cr,'') = '' OR COALESCE(pan,'') = '')`
+    );
+    if (seedFix && seedFix.changes > 0) {
+      console.log(`Migration: backfilled seller fields on ${seedFix.changes} mobile-entered lots from their trader record`);
+    }
+  } catch (_) { /* tables/columns may not exist on a partial schema — ignore */ }
+
   // One-time data fix for the sales-invoice ISP/ASP book split.
   // `invoices.state` records which company book a row belongs to:
   // KERALA = ASP (Amazing Spice Park), TAMIL NADU = ISP (Ideal Spices).
