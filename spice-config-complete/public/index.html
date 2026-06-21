@@ -4064,7 +4064,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <div style="flex:1;min-width:160px"><label style="font-size:11px;color:var(--text2);font-weight:600">Filter by kind</label>
               <select id="tally-pv-kind" onchange="renderTallyPartyVoucherList()" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
                 <option value="">All kinds</option>
-                <option value="sales" data-tally-co="isp">Sales (buyer)</option>
+                <!-- Sales applies to BOTH companies (ISP sale + ASP→ISP transfer),
+                     so it must stay selectable in either mode — no data-tally-co tag. -->
+                <option value="sales">Sales (buyer)</option>
                 <option value="rd_purchase" data-tally-co="asp">RD Purchase (dealer)</option>
                 <option value="urd_purchase" data-tally-co="asp">URD Purchase (agriculturist)</option>
               </select>
