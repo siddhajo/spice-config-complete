@@ -127,7 +127,7 @@ function preprocessRows(rows, opts) {
 }
 
 // ── Generic table-to-PDF renderer ───────────────────────────
-function renderTablePdf({ title, subtitle, columns, rows, totals, layout, companyHeader }) {
+function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTotals, layout, companyHeader }) {
   // layout: 'portrait' (default) or 'landscape'. All exports default to
   // portrait per user preference. Override per-type via PDF_LAYOUT below
   // if a specific report ever needs landscape (e.g. very wide column sets).
@@ -173,6 +173,20 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
   function isNumericCol(col) {
     const h = (col.header || '').toUpperCase();
     return /^(QTY|BAG|BAGS|PRICE|RATE|AMOUNT|PQTY|PRATE|PURAMT|CGST|SGST|IGST|TCS|TOTAL|DISCOUNT|PAYABLE|ADVANCE|BALANCE|LITRE|LOTS|TDS|ASSESS_VALUE|COST|NET|GUNNY|TRANSPORT|INSURANCE|CARDAMOM|CARDAMOM_COST|GUNNY_COST|ROUND|BILAMT|COM|GST5|VALUE|RECEIPT|INVAMT|LORRY|INS)$/.test(h);
+  }
+
+  // Label cells on summary/total rows (e.g. "GRAND TOTAL", "Withdrawn") often
+  // live in a narrow column (TNO width 8). Let such a label spill across the
+  // EMPTY columns that follow it — up to the next populated cell — so it isn't
+  // truncated. `cells` is the row's per-column raw values (aligned to columns).
+  function spanWidth(cells, ci) {
+    let w = colWidths[ci] - 6;
+    for (let k = ci + 1; k < columns.length; k++) {
+      const v = cells[k];
+      if (v !== undefined && v !== null && v !== '') break;
+      w += colWidths[k];
+    }
+    return w;
   }
 
   function fmtCell(val, col) {
@@ -309,6 +323,7 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
       const BASE = 7.5;
       const LINE_H = 10;
       const PAD_TOP = 3;
+      const subCells = columns.map((c) => row[c.key]);
       columns.forEach((c, ci) => {
         const lines = wrapped[ci];
         const cellW = colWidths[ci] - 6;
@@ -319,11 +334,21 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
           doc.text(lines[0], colX[ci] + 3, y + PAD_TOP, {
             width: cellW, align: 'right', lineBreak: false,
           });
+        } else if (!isNumericCol(c)) {
+          // Label cell — spill across following empty columns so labels like
+          // "Withdrawn" / "GRAND TOTAL" aren't truncated in a narrow column.
+          const text = fmtCell(row[c.key], c);
+          if (text === '') return;
+          const w = spanWidth(subCells, ci);
+          doc.fillColor('#000').font('Helvetica-Bold').fontSize(BASE);
+          doc.text(fitText(doc, text, w), colX[ci] + 3, y + PAD_TOP, {
+            width: w, align: 'left', lineBreak: false,
+          });
         } else {
           doc.fillColor('#000').font('Helvetica-Bold').fontSize(BASE);
           lines.forEach((line, li) => {
             doc.text(line, colX[ci] + 3, y + PAD_TOP + li * LINE_H, {
-              width: cellW, align: isNumericCol(c) ? 'right' : 'left', lineBreak: false,
+              width: cellW, align: 'right', lineBreak: false,
             });
           });
         }
@@ -399,12 +424,16 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
   });
 
   if (totals) {
-    if (y + 28 > pageH - m) { closePageBorders(); doc.addPage(); drawHeader(false); }
+    const extraRows = (summaryAfterTotals && summaryAfterTotals.length) || 0;
+    // Reserve room for the totals strip AND any Sold/Withdrawn summary strips so
+    // they never split across a page break.
+    if (y + 28 + extraRows * (ROW_H + 2) > pageH - m) { closePageBorders(); doc.addPage(); drawHeader(false); }
     // Draw verticals through the data-row region only — they must stop before
     // the totals strip so column dividers don't cut through it.
     drawDataVerticals();
     y += 2;
     doc.rect(m, y, usableW, ROW_H + 2).fillAndStroke('#FFF3CD', '#E0B020');
+    const totalCells = columns.map((c) => totals[c.key]);
     columns.forEach((c, ci) => {
       const val = totals[c.key];
       if (val === undefined || val === null || val === '') return;
@@ -420,14 +449,43 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, layout, compan
           width: cellW, align: 'right', lineBreak: false,
         });
       } else {
+        // Label (e.g. "GRAND TOTAL") — spill across following empty columns.
+        const w = spanWidth(totalCells, ci);
         doc.fillColor('#000').font('Helvetica-Bold').fontSize(8);
-        const fitted = fitText(doc, text, cellW);
+        const fitted = fitText(doc, text, w);
         doc.text(fitted, colX[ci] + 3, y + 4, {
-          width: cellW, align: 'left', lineBreak: false,
+          width: w, align: 'left', lineBreak: false,
         });
       }
     });
     y += ROW_H + 2;
+    // Sold / Withdrawn (or similar) summary strips, drawn right below the grand
+    // total in their own tint (green = sold, red = withdrawn) so they read as a
+    // breakdown of the total above them.
+    if (extraRows) {
+      summaryAfterTotals.forEach((sr) => {
+        const bg = sr.kind === 'wd' ? '#FDECEC' : '#EAF7F0';
+        const bd = sr.kind === 'wd' ? '#E0A0A0' : '#8FCAAC';
+        doc.rect(m, y, usableW, ROW_H + 2).fillAndStroke(bg, bd);
+        const srCells = columns.map((c) => sr.cells[c.key]);
+        columns.forEach((c, ci) => {
+          const val = sr.cells[c.key];
+          if (val === undefined || val === null || val === '') return;
+          const cellW = colWidths[ci] - 6;
+          const text = fmtCell(val, c);
+          if (isNumericCol(c)) {
+            const size = fitNumericFontSize(text, cellW, 8, true);
+            doc.fillColor('#000').font('Helvetica-Bold').fontSize(size);
+            doc.text(text, colX[ci] + 3, y + 4, { width: cellW, align: 'right', lineBreak: false });
+          } else {
+            const w = spanWidth(srCells, ci);
+            doc.fillColor('#000').font('Helvetica-Bold').fontSize(8);
+            doc.text(fitText(doc, text, w), colX[ci] + 3, y + 4, { width: w, align: 'left', lineBreak: false });
+          }
+        });
+        y += ROW_H + 2;
+      });
+    }
     // Outer border now encloses data + totals; the verticals were drawn
     // already so closePageBorders should not draw them again. Inline the
     // outer border draw and reset pageTableTop.
@@ -665,12 +723,15 @@ const COLS = {
   // Per-party "Individual" registers — rendered as sectioned tables (one
   // banner + rows + subtotal per party). See renderIndividualRegisterPdf.
   pooler_individual: [
-    { header: 'TNO',   key: 'tno',   width: 8  },
-    { header: 'DATE',  key: 'date',  width: 12 },
-    { header: 'LOT',   key: 'lot',   width: 8  },
-    { header: 'QTY',   key: 'qty',   width: 12 },
-    { header: 'RATE',  key: 'rate',  width: 11 },
-    { header: 'VALUE', key: 'value', width: 16 },
+    { header: 'TNO',    key: 'tno',    width: 8  },
+    { header: 'DATE',   key: 'date',   width: 12 },
+    { header: 'LOT',    key: 'lot',    width: 8  },
+    { header: 'QTY',    key: 'qty',    width: 12 },
+    { header: 'RATE',   key: 'rate',   width: 10 },
+    { header: 'VALUE',  key: 'value',  width: 14 },
+    { header: 'PQTY',   key: 'pqty',   width: 12 },
+    { header: 'PRATE',  key: 'prate',  width: 10 },
+    { header: 'PURAMT', key: 'puramt', width: 14 },
   ],
   seller_individual: [
     { header: 'DATE',    key: 'date',    width: 12 },
@@ -955,9 +1016,10 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
 // generic renderer styles them as yellow strips.
 const INDIVIDUAL_PDF_SUMMARY = {
   pooler_individual: (s) => ([
-    { _isSubtotal: true, tno: 'Total',    qty: s.qty,        value: s.value },
-    { _isSubtotal: true, tno: 'Sold',     qty: s.soldQty,    value: s.soldValue },
-    { _isSubtotal: true, tno: 'Not Sold', qty: s.notSoldQty },
+    { _isSubtotal: true, tno: 'Total',     qty: s.qty,        value: s.value, pqty: s.pqty, puramt: s.puramt },
+    { _isSubtotal: true, tno: 'Sold',      qty: s.soldQty,    value: s.soldValue },
+    { _isSubtotal: true, tno: 'Withdrawn', qty: s.withdrawnQty, value: s.withdrawnValue },
+    { _isSubtotal: true, tno: 'Not Sold',  qty: s.notSoldQty },
   ]),
   seller_individual: (s) => ([
     { _isSubtotal: true, date: 'Total',           qty: s.qty, invoice: s.invoice },
@@ -969,7 +1031,7 @@ const INDIVIDUAL_PDF_SUMMARY = {
   ]),
 };
 const INDIVIDUAL_PDF_GRANDKEYS = {
-  pooler_individual: { keys: ['qty', 'value'], label: 'tno' },
+  pooler_individual: { keys: ['qty', 'value', 'pqty', 'puramt'], label: 'tno' },
   seller_individual: { keys: ['qty', 'invoice'], label: 'date' },
   merchant_individual: { keys: ['qty', 'invoice', 'receipt'], label: 'date' },
 };
@@ -998,6 +1060,19 @@ async function renderIndividualRegisterPdf(db, type, extra) {
     });
     totals[gk.label] = 'GRAND TOTAL';
   }
+  // Pooler register: grand Sold / Withdrawn breakdown drawn right under the
+  // grand total (mirrors the on-screen Sold / Withdrawn summary).
+  let summaryAfterTotals = null;
+  if (type === 'pooler_individual' && data.parties.length) {
+    const n = (x) => Number(x) || 0;
+    const soldQty = data.parties.reduce((s, p) => s + n(p.summary.soldQty), 0);
+    const soldValue = data.parties.reduce((s, p) => s + n(p.summary.soldValue), 0);
+    const wdQty = data.parties.reduce((s, p) => s + n(p.summary.withdrawnQty), 0);
+    summaryAfterTotals = [
+      { kind: 'sold', cells: { tno: 'SOLD', qty: soldQty, value: soldValue } },
+      { kind: 'wd',   cells: { tno: 'WITHDRAWN', qty: wdQty, value: 0 } },
+    ];
+  }
   const subtitle = (opts.from && opts.to) ? `Period: ${opts.from} to ${opts.to}` : 'All dates';
   return renderTablePdf({
     title: TITLES[type] || type,
@@ -1005,6 +1080,7 @@ async function renderIndividualRegisterPdf(db, type, extra) {
     columns: COLS[type],
     rows,
     totals,
+    summaryAfterTotals,
     layout: PDF_LAYOUT[type],
     companyHeader: getCompanyHeader(db),
   });

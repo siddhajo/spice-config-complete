@@ -949,6 +949,15 @@ function renderRecentLots(){
 
 // Open a print URL in a popup that auto-closes after printing.
 function printAndClose(url){
+  // The receipt endpoint returns an inline PDF. iOS Safari renders a PDF
+  // inside an <iframe> and supports iframe.contentWindow.print(), so the
+  // auto-print popup below works there. Android Chrome (and most non-iOS
+  // browsers) will NOT render a PDF inside an iframe — the frame stays blank
+  // and print() does nothing. For those, open the PDF directly so the native
+  // PDF viewer handles print/share (menu -> Print).
+  var isIOS=/iP(hone|ad|od)/.test(navigator.userAgent)
+    ||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  if(!isIOS){window.open(url,'_blank');return}
   var w=window.open('','_blank','width=420,height=620');
   if(!w){window.open(url,'_blank');return}
   var html='<!DOCTYPE html><html><head><title>Print Receipt</title><style>html,body{margin:0;padding:0;height:100%;background:#fff;font-family:system-ui,Arial,sans-serif}.bar{padding:8px 12px;background:#0d7c5f;color:#fff;font-size:12px;display:flex;gap:8px;align-items:center}.bar button{margin-left:auto;background:#fff;color:#0d7c5f;border:0;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}iframe{border:0;width:100%;height:calc(100% - 34px)}<\/style></head><body>'

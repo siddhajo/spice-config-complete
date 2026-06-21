@@ -2108,6 +2108,31 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 }
 .dt-foot td strong{color:#B45309}  /* amber-dark for the sum numbers */
 
+/* Summary bar below the totals row (e.g. Pooler register Sold / Withdrawn).
+   Reflects the records currently shown on the page. */
+.dt-summary-bar{display:flex;flex-wrap:wrap;gap:10px;padding:10px 2px 2px}
+.dt-sm-row{display:flex;align-items:center;gap:16px;padding:8px 16px;border-radius:10px;
+  font-size:12.5px;font-weight:700;border:1px solid}
+.dt-sm-row.sold{background:#EAF7F0;border-color:#9ED9BE;color:#14532D}
+.dt-sm-row.wd{background:#FDECEC;border-color:#F3B4B4;color:#7F1D1D}
+.dt-sm-title{font-size:12px;letter-spacing:.6px;text-transform:uppercase}
+.dt-sm-item{display:flex;gap:6px;align-items:baseline}
+.dt-sm-lbl{font-weight:600;opacity:.65;font-size:11px}
+.dt-sm-val{font-variant-numeric:tabular-nums;font-size:13px}
+
+/* Pager bar for paged tables (Registers / Journals) */
+.dt-pager{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap;padding:10px 2px 2px}
+.dt-pginfo{font-size:12px;color:var(--spice-text-mute)}
+.dt-pgctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dt-pgsize{padding:5px 8px;border:1px solid var(--spice-line);border-radius:6px;
+  font-size:12px;background:#fff;cursor:pointer;font-family:inherit}
+.dt-pgbtn{padding:5px 10px;border:1px solid var(--spice-line);border-radius:6px;background:#fff;
+  font-size:12px;cursor:pointer;font-weight:600;font-family:inherit;transition:background .15s}
+.dt-pgbtn:hover:not(:disabled){background:var(--spice-cardamom-lt)}
+.dt-pgbtn:disabled{opacity:.4;cursor:default}
+.dt-pgnum{font-size:12px;font-weight:700;color:var(--spice-text-main);min-width:84px;text-align:center}
+
 /* Load more */
 .dt-loadmore{margin-top:10px;text-align:center}
 .dt-loadmore button{
@@ -6338,7 +6363,21 @@ const DataTable = (function(){
     if (!table) return;
 
     const filtered = applyFilters(s);
-    const visible = filtered.slice(0, s.visible);
+    // Paged tables (Registers / Journals) show one fixed-size page and expose a
+    // page-size selector + First/Prev/Next/Last controls. Non-paged tables keep
+    // the original "Load more" behaviour.
+    let visible, pageInfo = null;
+    if (s.paged) {
+      const ps = s.pageSize || 50;
+      const totalPages = Math.max(1, Math.ceil(filtered.length / ps));
+      if (s.page > totalPages) s.page = totalPages;
+      if (s.page < 1) s.page = 1;
+      const start = (s.page - 1) * ps;
+      visible = filtered.slice(start, start + ps);
+      pageInfo = { ps, totalPages, start, count: visible.length, total: filtered.length };
+    } else {
+      visible = filtered.slice(0, s.visible);
+    }
 
     // Header row with click-to-sort indicators
     const headCells = s.cols.map(c => {
@@ -6396,6 +6435,17 @@ const DataTable = (function(){
       return `<td class="num"><strong>${fmt}</strong></td>`;
     }).join('');
 
+    // Optional summary block rendered BELOW the totals row (e.g. the Pooler
+    // register's Sold / Withdrawn breakdown). Computed over the rows CURRENTLY
+    // SHOWN (the visible page) so the figures track the records on screen.
+    // Each entry: { label, cls, parts: [{label, val}] } — caller formats values.
+    const summaryDefs = s.summary ? (s.summary(visible, filtered) || []) : [];
+    const summaryBlock = summaryDefs.length ? `<div class="dt-summary-bar">` + summaryDefs.map(sr => {
+      const parts = (sr.parts || []).map(p =>
+        `<span class="dt-sm-item"><span class="dt-sm-lbl">${esc(p.label)}</span><span class="dt-sm-val">${esc(p.val)}</span></span>`).join('');
+      return `<div class="dt-sm-row ${sr.cls || ''}"><span class="dt-sm-title">${esc(sr.label || '')}</span>${parts}</div>`;
+    }).join('') + `</div>` : '';
+
     // Toolbar: single search box + clear (x) + row count.
     // hideSearch: for server-paginated tables (Sellers/Buyers) the mounted
     // data is only the current page, so a client-side "search all columns"
@@ -6412,9 +6462,14 @@ const DataTable = (function(){
         <span class="dt-count">${filtered.length} row${filtered.length===1?'':'s'}${s.data.length!==filtered.length?` (of ${s.data.length})`:''}</span>
       </div>`;
 
-    const loadMore = visible.length < filtered.length
-      ? `<div class="dt-loadmore"><button onclick="DataTable._loadMore('${tbodyId}')">Load ${Math.min(PAGE_SIZE, filtered.length-visible.length)} more (${visible.length} of ${filtered.length} shown)</button></div>`
-      : '';
+    let loadMore = '', pager = '';
+    if (s.paged) {
+      pager = buildPager(tbodyId, s, pageInfo);
+    } else {
+      loadMore = visible.length < filtered.length
+        ? `<div class="dt-loadmore"><button onclick="DataTable._loadMore('${tbodyId}')">Load ${Math.min(PAGE_SIZE, filtered.length-visible.length)} more (${visible.length} of ${filtered.length} shown)</button></div>`
+        : '';
+    }
 
     // Replace table content. Structure:
     //   .dt-wrap
@@ -6447,10 +6502,32 @@ const DataTable = (function(){
       wrap.appendChild(scroll);
       scroll.appendChild(table);
     }
-    // Refresh toolbar + load-more
-    wrap.querySelectorAll(':scope > .dt-toolbar, :scope > .dt-loadmore').forEach(el => el.remove());
+    // Refresh toolbar + summary + load-more / pager
+    wrap.querySelectorAll(':scope > .dt-toolbar, :scope > .dt-loadmore, :scope > .dt-summary-bar, :scope > .dt-pager').forEach(el => el.remove());
     wrap.insertAdjacentHTML('afterbegin', toolbar);
+    if (summaryBlock) wrap.insertAdjacentHTML('beforeend', summaryBlock);
     if (loadMore) wrap.insertAdjacentHTML('beforeend', loadMore);
+    if (pager) wrap.insertAdjacentHTML('beforeend', pager);
+  }
+
+  // Pager bar for paged tables: "a–b of N" + page-size selector + nav buttons.
+  function buildPager(tbodyId, s, info){
+    const opts = [10, 20, 50, 100, 200];
+    const sizeSel = `<select class="dt-pgsize" onchange="DataTable._setPageSize('${tbodyId}',this.value)">`
+      + opts.map(o => `<option value="${o}"${o===info.ps?' selected':''}>${o}/page</option>`).join('')
+      + `</select>`;
+    const from = info.total === 0 ? 0 : info.start + 1;
+    const to = info.start + info.count;
+    const cur = s.page, tp = info.totalPages;
+    const btn = (label, page, disabled) =>
+      `<button class="dt-pgbtn" ${disabled?'disabled':''} onclick="DataTable._goPage('${tbodyId}',${page})">${label}</button>`;
+    return `<div class="dt-pager">`
+      + `<span class="dt-pginfo">${from}–${to} of ${info.total}</span>`
+      + `<div class="dt-pgctl">${sizeSel}`
+      +   btn('« First', 1, cur<=1) + btn('‹ Prev', cur-1, cur<=1)
+      +   `<span class="dt-pgnum">Page ${cur} / ${tp}</span>`
+      +   btn('Next ›', cur+1, cur>=tp) + btn('Last »', tp, cur>=tp)
+      + `</div></div>`;
   }
 
   // Close any open row-actions popover and reset its inline positioning.
@@ -6476,13 +6553,24 @@ const DataTable = (function(){
 
   return {
     mount(tbodyId, data, config){
+      const prev = state[tbodyId];
+      // Page size persists across re-mounts (and reloads) per table.
+      let pageSize = prev && prev.pageSize;
+      if (!pageSize) {
+        const ls = parseInt(localStorage.getItem('dt-pagesize:'+tbodyId)||'', 10);
+        pageSize = (ls > 0) ? ls : (config.pageSize || 50);
+      }
       state[tbodyId] = {
         data: data || [],
         cols: config.columns,
         rowClass: config.rowClass,
-        sort: state[tbodyId] && state[tbodyId].sort || (config.defaultSort || null),
-        search: state[tbodyId] && state[tbodyId].search || '',
+        sort: prev && prev.sort || (config.defaultSort || null),
+        search: prev && prev.search || '',
         hideSearch: !!config.hideSearch,
+        paged: !!config.paged,
+        summary: config.summary || null,
+        pageSize,
+        page: 1,
         visible: PAGE_SIZE
       };
       render(tbodyId);
@@ -6494,9 +6582,20 @@ const DataTable = (function(){
       else                                    s.sort = null;
       render(tbodyId);
     },
+    _setPageSize(tbodyId, size){
+      const s = state[tbodyId]; if (!s) return;
+      s.pageSize = parseInt(size, 10) || 50; s.page = 1;
+      try { localStorage.setItem('dt-pagesize:'+tbodyId, String(s.pageSize)); } catch(e){}
+      render(tbodyId);
+    },
+    _goPage(tbodyId, page){
+      const s = state[tbodyId]; if (!s) return;
+      s.page = Math.max(1, parseInt(page, 10) || 1);
+      render(tbodyId);
+    },
     _search(tbodyId, q){
       const s = state[tbodyId]; if (!s) return;
-      s.search = q; s.visible = PAGE_SIZE;
+      s.search = q; s.visible = PAGE_SIZE; s.page = 1;
       render(tbodyId);
       // Restore focus to the search input (innerHTML replacement loses it)
       const el = document.querySelector(`#${tbodyId}`)?.closest('.dt-wrap')?.querySelector('.dt-search');
@@ -6504,7 +6603,7 @@ const DataTable = (function(){
     },
     _clear(tbodyId){
       const s = state[tbodyId]; if (!s) return;
-      s.search = ''; s.visible = PAGE_SIZE;
+      s.search = ''; s.visible = PAGE_SIZE; s.page = 1;
       render(tbodyId);
       const el = document.querySelector(`#${tbodyId}`)?.closest('.dt-wrap')?.querySelector('.dt-search');
       if (el) el.focus();
@@ -18775,13 +18874,20 @@ async function loadJournal(){
     url=`/api/journals/purchase?from=${from}&to=${to}&type=agri`;
     cols=[['Date','date'],['Bill#','bill_no'],['Name','name'],['Place','place'],['State','state'],['CR','cr'],['PAN','pan'],['Qty','qty',3],['Cost','cost',2],['Net','net',2]];
   }
-  const d=await j(url);
-  document.getElementById('jr-head').innerHTML='<tr>'+cols.map(c=>`<th${c[2]?' class="num"':''}>${c[0]}</th>`).join('')+'</tr>';
-  document.getElementById('jr-body').innerHTML=d.map(r=>'<tr>'+cols.map(c=>{
-    const v=r[c[1]];
-    if(c[2]!==undefined)return`<td class="num">${(v||0).toFixed(c[2])}</td>`;
-    return`<td>${esc(v)}</td>`;
-  }).join('')+'</tr>').join('')||'<tr><td colspan="'+cols.length+'" style="text-align:center;color:var(--text3);padding:20px">No records in this range</td></tr>';
+  let d=[];
+  try { d=await j(url); } catch(e){ toast('Load failed: '+(e.message||e)); return; }
+  // Map the [label, key, decimals?] tuples to DataTable columns so journals get
+  // sorting, search, a totals row and pagination (page-size selector + pager).
+  const dtCols=cols.map(c=>{
+    const numeric=c[2]!==undefined;
+    return { key:c[1], label:c[0], sort:numeric?'number':'text', numeric,
+             fmt:numeric?fmtNumWithDecimals(c[2]):undefined };
+  });
+  DataTable.mount('jr-body', Array.isArray(d)?d:[], {
+    columns: dtCols,
+    paged: true,
+    emptyState: { icon:'document', title:'No records', body:'No journal entries in this range.' }
+  });
 }
 async function exportJournal(){
   const type=document.getElementById('jr-type').value;
@@ -18880,6 +18986,9 @@ function regColumns(type){
     { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
     { key:'rate', label:'Rate', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
     { key:'value', label:'Value', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'pqty', label:'PQty', sort:'number', numeric:true, fmt:fmtNumWithDecimals(3) },
+    { key:'prate', label:'PRate', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
+    { key:'puramt', label:'PurAmt', sort:'number', numeric:true, fmt:fmtNumWithDecimals(2) },
   ];
   if (type === 'seller') return [
     { key:'party', label:'Seller', sort:'text' },
@@ -18964,6 +19073,8 @@ async function loadRegister(){
     });
     DataTable.mount('reg-body', rows, {
       columns: regColumns(type),
+      paged: true,
+      summary: type === 'pooler' ? poolerRegSummary : null,
       emptyState: { icon:'document', title:'No records', body:'No register entries for this selection.' }
     });
     return;
@@ -18975,8 +19086,25 @@ async function loadRegister(){
   catch(e){ toast('Load failed: ' + (e.message || e)); return; }
   DataTable.mount('reg-body', Array.isArray(d) ? d : [], {
     columns: regColumns(type),
+    paged: true,
     emptyState: { icon:'document', title:'No records', body:'No register entries for this selection.' }
   });
+}
+// Pooler register Sold / Withdrawn breakdown, computed over the rows currently
+// shown (the visible page). Withdrawn lots (code 'WD') never sell, so their
+// amount is always 0 — only the quantity is meaningful.
+function poolerRegSummary(rows){
+  const q3 = fmtNumWithDecimals(3), m2 = fmtNumWithDecimals(2);
+  let soldQty = 0, soldAmt = 0, wdQty = 0;
+  rows.forEach(r => {
+    const wd = String(r.code||'').trim().toUpperCase() === 'WD';
+    if (wd) { wdQty += Number(r.qty)||0; }
+    else if ((Number(r.value)||0) > 0) { soldQty += Number(r.qty)||0; soldAmt += Number(r.value)||0; }
+  });
+  return [
+    { label:'Sold', cls:'sold', parts:[{label:'Qty',val:q3(soldQty)},{label:'Amount',val:m2(soldAmt)}] },
+    { label:'Withdrawn', cls:'wd', parts:[{label:'Qty',val:q3(wdQty)},{label:'Amount',val:m2(0)}] },
+  ];
 }
 async function exportRegister(format){
   const type = document.getElementById('reg-type').value;

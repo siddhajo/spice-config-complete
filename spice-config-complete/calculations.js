@@ -1325,24 +1325,41 @@ const _num = (v) => Number(v) || 0;
 const _sum = (rows, k) => rows.reduce((s, r) => s + _num(r[k]), 0);
 
 // Pooler Register — one row per lot the pooler put up, across all trades
-// in range. TNo | Date | Lot | Qty | Rate | Value. Withdrawn lots (code
-// 'WD') are excluded; unsold lots (value 0) are listed and counted under
-// "Not Sold".
+// in range. TNo | Date | Lot | Qty | Rate | Value | PQty | PRate | PurAmt.
+// Withdrawn lots (code 'WD') ARE included now (so the register reconciles to
+// every lot the pooler handled); the per-party summary breaks the totals into
+// Sold (code != WD, value > 0) vs Withdrawn (code = WD; amount is always 0).
 function getPoolerRegister(db, opts = {}) {
   let q = `SELECT a.ano AS tno, a.date AS date, l.lot_no AS lot, l.name AS party,
-      l.cr AS gstin, l.qty AS qty, l.price AS rate, l.amount AS value
+      l.cr AS gstin, l.qty AS qty, l.price AS rate, l.amount AS value,
+      l.pqty AS pqty, l.prate AS prate, l.puramt AS puramt,
+      UPPER(TRIM(COALESCE(l.code,''))) AS code
     FROM lots l JOIN auctions a ON a.id = l.auction_id
-    WHERE UPPER(TRIM(COALESCE(l.code,''))) != 'WD'`;
+    WHERE 1=1`;
   const params = [];
   if (opts.from && opts.to) { q += ' AND a.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
   if (opts.party) { q += ' AND UPPER(TRIM(l.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
   q += ' ORDER BY l.name, a.date, a.ano, CAST(l.lot_no AS INTEGER), l.lot_no';
   const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  const isWd = (r) => String(r.code || '').trim().toUpperCase() === 'WD';
   const parties = _groupRegister(rows, (rs) => {
     const qty = _sum(rs, 'qty');
     const value = _sum(rs, 'value');
-    const soldQty = rs.reduce((s, r) => s + (_num(r.value) > 0 ? _num(r.qty) : 0), 0);
-    return { qty, value, soldQty, soldValue: value, notSoldQty: qty - soldQty };
+    const pqty = _sum(rs, 'pqty');
+    const puramt = _sum(rs, 'puramt');
+    // Sold = not withdrawn and actually fetched a price. Withdrawn = code 'WD'
+    // (amount is 0, so withdrawn VALUE is always 0 — only qty is meaningful).
+    const soldQty = rs.reduce((s, r) => s + (!isWd(r) && _num(r.value) > 0 ? _num(r.qty) : 0), 0);
+    const soldValue = rs.reduce((s, r) => s + (!isWd(r) ? _num(r.value) : 0), 0);
+    const withdrawnQty = rs.reduce((s, r) => s + (isWd(r) ? _num(r.qty) : 0), 0);
+    const withdrawnValue = 0;
+    let notSoldQty = qty - soldQty - withdrawnQty;
+    if (Math.abs(notSoldQty) < 1e-6) notSoldQty = 0;   // kill float residue (-0.000)
+    return {
+      qty, value, pqty, puramt,
+      soldQty, soldValue, withdrawnQty, withdrawnValue,
+      notSoldQty,
+    };
   });
   return { kind: 'pooler', parties };
 }
