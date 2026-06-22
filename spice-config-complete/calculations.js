@@ -351,6 +351,10 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // match the PDF (which already prints 'I' for ASP).
   const isASP = (String(cfg.business_mode || '').toLowerCase() === 'e-trade')
              && (String(cfg.business_state || '').toUpperCase() === 'KERALA');
+  // In e-Auction, inter-state invoices DO bill Transport/Insurance (unlike
+  // ISP e-Trade interstate, where the buyer covers freight). Used below to
+  // skip the hideTI suppression for auction inter-state sales.
+  const isEAuction = (String(cfg.business_mode || '').toLowerCase() === 'e-auction');
 
   // Get all lots for this buyer in this auction that have amounts.
   // Don't filter by sale — we're ASSIGNING the sale type now.
@@ -455,13 +459,20 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
     return 0;
   };
   const isLocal = (effectiveSaleType === 'L');
+  // e-Auction bills Transport/Insurance at the LOCAL rates regardless of
+  // sale type — interstate auction sales should carry the same charges as
+  // local ones (the dedicated interstate rates aren't maintained in auction
+  // mode). So treat e-Auction like local for rate selection.
+  const useLocalRates = isLocal || isEAuction;
   // ASP invoices (Kerala + e-Trade, already computed in `isASP` above) do NOT
   // bill Transport/Insurance as separate line-items — only Cardamom + Gunny.
   // Force both to zero so subtotal, GST, and grand total agree with the PDF.
   // ISP inter-state invoices ('I') don't bill transport/insurance separately
   // (the buyer covers freight). Match the rendering rule that hides these
   // rows from the PDF — see invoice-pdf.js hideTransportInsurance.
-  const hideTI = !isASP && (String(effectiveSaleType || '').toUpperCase() === 'I');
+  // e-Auction interstate keeps Transport/Insurance (only ISP e-Trade
+  // interstate suppresses them).
+  const hideTI = !isASP && !isEAuction && (String(effectiveSaleType || '').toUpperCase() === 'I');
   // Per-component enable flags from Rates & Charges. When the matching flag
   // is OFF the rate is forced to 0, so the component drops out of the taxable
   // value, GST, and PDF entirely. Blank/legacy values default to ON.
@@ -474,10 +485,10 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   const useLocalInsurance = flagOn('flag_local_insurance', true);
   const useInterTransport = flagOn('flag_inter_transport', true);
   const useInterInsurance = flagOn('flag_inter_insurance', true);
-  const transportRate = isASP || hideTI ? 0 : (isLocal
+  const transportRate = isASP || hideTI ? 0 : (useLocalRates
     ? (useLocalTransport ? pickRate(cfg.local_transport, cfg.transport, 2.5) : 0)
     : (useInterTransport ? pickRate(cfg.transport, 2.5) : 0));
-  const insuranceRate = isASP || hideTI ? 0 : (isLocal
+  const insuranceRate = isASP || hideTI ? 0 : (useLocalRates
     ? (useLocalInsurance ? pickRate(cfg.local_insurance, cfg.insurance, 0.75) : 0)
     : (useInterInsurance ? pickRate(cfg.insurance, 0.75) : 0));
 

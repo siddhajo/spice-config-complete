@@ -3356,7 +3356,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Sale</th><th>Inv#</th><th>Lorry</th><th>ASP Inv#</th><th>Buyer</th><th>Qty</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="invoices-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Sale</th><th>Inv#</th><th>Lorry</th><th>Distance</th><th>Code</th><th>Trade Name</th><th>Qty</th><th>Amount</th><th>Gunny</th><th>Transport</th><th>Insurance</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="invoices-list"></tbody></table></div>
         <div id="invoices-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -3445,7 +3445,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
         </div>
 
-        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Inv#</th><th>Name</th><th>Qty</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>TDS</th><th>Total</th><th>Actions</th></tr></thead><tbody id="purchases-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Inv#</th><th>Name</th><th>Qty</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>TDS</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="purchases-list"></tbody></table></div>
         <div id="purchases-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
       </div>
     </div>
@@ -3501,17 +3501,6 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                (the table is a per-seller rollup, not raw rows). Matches
                on `name` substring (case-insensitive). Debounced 150ms. -->
           <input type="search" id="pay-search" placeholder="Search seller…" oninput="searchPaymentsDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
-
-          <!-- Payable-status filter. Pure client-side since the data is
-               already per-seller aggregated. Useful for splitting the
-               "still owe" rows from the "fully settled" ones during a
-               payment run. -->
-          <select id="pay-status-filter" onchange="loadPayments({ keepPage: true })" title="Filter by payable status" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:140px">
-            <option value="">All sellers</option>
-            <option value="payable">Has payable</option>
-            <option value="settled">Settled (₹0)</option>
-            <option value="discount">Has discount</option>
-          </select>
 
           <!-- Seller-type filter. Splits the per-seller rollup into
                registered dealers (GSTIN-bearing `cr`) vs poolers (no
@@ -15364,18 +15353,24 @@ async function loadInvoices(opts){
         render:(i)=> i.lorry_no
           ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.lorry_no)}</span>`
           : '<span style="color:var(--text3)">—</span>' },
-      { key:'asp_invo', label:'ASP Inv#', sort:'text',
-        // Empty string for ASP rows (state=Kerala) so the column shows
-        // only on ISP rows where the ASP→ISP cross-reference is meaningful.
-        // Saffron pill visually distinguishes from primary Inv#.
-        render:(i)=> i.asp_invo
-          ? `<span style="display:inline-block;padding:2px 8px;border-radius:5px;background:var(--spice-saffron-lt);color:var(--spice-saffron-dk);font-weight:600;font-size:12px">${esc(i.asp_invo)}</span>`
+      // Distance (e-Way Bill km) — stored per-invoice as distance_km.
+      { key:'distance_km', label:'Distance', sort:'number', numeric:true,
+        render:(i)=> (i.distance_km != null && i.distance_km !== '' && Number(i.distance_km) > 0)
+          ? `<span style="color:var(--spice-text-main)">${fmtI(Number(i.distance_km),0)} km</span>`
           : '<span style="color:var(--text3)">—</span>' },
-      { key:'_buyer', label:'Buyer', sort:'text',
+      // Buyer code (invoices.buyer) shown before the trade name.
+      { key:'_code', label:'Code', sort:'text',
+        value:(i)=>i.buyer||'',
+        render:(i)=> i.buyer ? esc(i.buyer) : '<span style="color:var(--text3)">—</span>' },
+      { key:'_buyer', label:'Trade Name', sort:'text',
         value:(i)=>i.buyer1||i.buyer,
         render:(i)=>esc(i.buyer1||i.buyer) },
       { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
+      // Charge breakdown — gunny, transport (stored in pava_hc), insurance (ins).
+      { key:'gunny', label:'Gunny', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
+      { key:'pava_hc', label:'Transport', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
+      { key:'ins', label:'Insurance', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'cgst', label:'CGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'sgst', label:'SGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'igst', label:'IGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
@@ -16080,10 +16075,15 @@ async function loadPurchases(opts){
       { key:'cgst', label:'CGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'sgst', label:'SGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'igst', label:'IGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
-      { key:'tds', label:'TDS', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'total', label:'Total', sort:'number', numeric:true,
         fmt:(n)=>fmtI(n,2),
         render:(p)=>`<strong>${fmtI(p.total||0,2)}</strong>` },
+      { key:'tds', label:'TDS', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
+      // Payable = Total − TDS (amount actually paid to the supplier).
+      { key:'_payable', label:'Payable', sort:'number', numeric:true,
+        value:(p)=>(Number(p.total)||0) - (Number(p.tds)||0),
+        fmt:(n)=>fmtI(n,2),
+        render:(p)=>`<strong>${fmtI((Number(p.total)||0) - (Number(p.tds)||0),2)}</strong>` },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(p)=>
           iconBtn('pdf','View PDF',`viewPurchasePDF(${p.auction_id},'${encodeURIComponent(p.name)}','${encodeURIComponent(p.invo)}')`)
           + iconBtn('whatsapp','Send via WhatsApp',`whatsappPurchase(${p.auction_id},'${encodeURIComponent(p.name)}','${encodeURIComponent(p.invo)}',${Number(p.total)||0},'${esc(p.ano||'')}')`)
@@ -16202,7 +16202,6 @@ async function loadPayments(opts){
     // KPI tiles + chart still use the unfiltered set so they show
     // trade-wide totals — only the table visualises the filter.
     const search   = (document.getElementById('pay-search')?.value || '').trim().toLowerCase();
-    const status   = (document.getElementById('pay-status-filter')?.value || '').trim();
     const stype    = (document.getElementById('pay-type-filter')?.value || '').trim();
     const expFilter= (document.getElementById('pay-export-filter')?.value || '').trim();
     const arr = rows.filter(p => {
@@ -16213,11 +16212,6 @@ async function loadPayments(opts){
       // Seller-type filter: dealers carry a GSTIN in `cr`, poolers don't.
       if (stype === 'dealer' && !_payIsDealer(p)) return false;
       if (stype === 'pooler' &&  _payIsDealer(p)) return false;
-      const payable = Number(p.total_payable) || 0;
-      const discount = Number(p.total_discount) || 0;
-      if (status === 'payable' && payable <= 0) return false;
-      if (status === 'settled' && payable !== 0) return false;
-      if (status === 'discount' && discount <= 0) return false;
       // Paid (exported) vs to-be-paid (not fully exported). "Paid" = fully
       // exported; "unpaid" = anything still owed (none or partial export).
       if (expFilter) {
@@ -16243,7 +16237,7 @@ async function loadPayments(opts){
         const totalQty      = arr.reduce((a,i) => a + (Number(i.total_qty)      || 0), 0);
         const totalDiscount = arr.reduce((a,i) => a + (Number(i.total_discount) || 0), 0);
         const totalPayable  = arr.reduce((a,i) => a + (Number(i.total_payable)  || 0), 0);
-        const filterTail    = (search || status || stype || expFilter)
+        const filterTail    = (search || stype || expFilter)
           ? ` <span style="color:var(--text3);font-weight:400;font-size:11px">(of ${rows.length})</span>`
           : '';
         const $ = (id) => document.getElementById(id);
@@ -17868,21 +17862,22 @@ window.addEventListener('resize', () => {
 // ── Exports ───────────────────────────────────────────────
 const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',
   pooler_register:'Pooler Register',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',
-  payment:'Payment Summary'};
+  payment:'Payment Summary',payment_partywise:'Payment Summary (Party-wise)'};
 // Export types that only support a specific format (no XLSX/PDF choice).
 // e.g., Praman (e-Trade) and the e-Auction Spices Board CSV are both
 // CSV-only upload formats for their respective auction platforms.
 const EXP_CSV_ONLY = new Set(['praman_csv','eauction_csv']);
 // Business-mode-aware label maps. In e-Auction mode the Praman (e-Trade)
-// CSV upload is replaced by the e-Auction (Spices Board) CSV, and the
-// "Trade Report" becomes the "Auction Report". e-Trade mode is unchanged.
+// CSV upload doesn't apply, so it's dropped from the Export Center (the
+// dedicated Spice Board reports tab still has its own CSV). The "Trade
+// Report" becomes the "Auction Report". e-Trade mode is unchanged.
 // Returns a fresh object each call so it always reflects the current mode.
 function _modeExportLabels(base){
   const isAuction = (typeof getCurrentBusinessMode==='function') && getCurrentBusinessMode()==='e-Auction';
   if(!isAuction) return {...base};
   const out={};
   for(const [k,v] of Object.entries(base)){
-    if(k==='praman_csv') out.eauction_csv='e-Auction (Spices Board) CSV';
+    if(k==='praman_csv') continue;   // no Praman / Spices Board CSV in Export Center
     else if(k==='trade_report') out[k]='Auction Report';
     else out[k]=v;
   }
@@ -17893,7 +17888,7 @@ function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
-const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before']);
+const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'payment_partywise']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's

@@ -777,6 +777,44 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   });
 }
 
+// ── Export: Payment Summary (Party-wise) ─────────────────────
+// One aggregated row per seller (party) — NO per-lot breakdown. Mirrors the
+// Payments screen rollup: Qty, Purchase Amount, Discount (policy + manual
+// debit notes), Total (pre-TDS), TDS, and Payable (= Total − TDS). Built
+// straight from getPaymentSummary so the figures match the on-screen view
+// and the per-lot Payment Summary export to the rupee.
+async function exportPaymentPartyWise(db, auctionId, cfg, state, _opts) {
+  const { getPaymentSummary } = require('./calculations');
+  const sellers = getPaymentSummary(db, auctionId, state || '', cfg);
+  const cols = [
+    { header: 'SELLER',   key: 'name',           width: 32 },
+    { header: 'LOTS',     key: 'lot_count',      width: 8  },
+    { header: 'QTY',      key: 'total_qty',      width: 12 },
+    { header: 'PUR.AMT',  key: 'total_puramt',   width: 14 },
+    { header: 'DISCOUNT', key: 'total_discount', width: 14 },
+    { header: 'TOTAL',    key: 'total_total',    width: 14 },
+    { header: 'TDS',      key: 'total_tds',      width: 12 },
+    { header: 'PAYABLE',  key: 'total_payable',  width: 14 },
+  ];
+  const sum = (k) => sellers.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = {
+    label: 'GRAND TOTAL',
+    values: {
+      lot_count:      sum('lot_count'),
+      total_qty:      sum('total_qty'),
+      total_puramt:   sum('total_puramt'),
+      total_discount: sum('total_discount'),
+      total_total:    sum('total_total'),
+      total_tds:      sum('total_tds'),
+      total_payable:  sum('total_payable'),
+    },
+  };
+  return createExcelBuffer('PaymentPartyWise', cols, sellers, {
+    db, title: 'Payment Summary (Party-wise)', metaLines: auctionMeta(db, auctionId),
+    grandTotal,
+  });
+}
+
 // ── Export: Lot Payment Summary ──────────────────────────────
 // Fully-populated post-auction payment summary, ordered by branch then
 // seller name so the natural printed layout (branch header followed by
@@ -1039,6 +1077,7 @@ const EXPORT_TYPES = {
   dealer_list:    { fn: exportDealerList,    name: 'DealerList' },
   sales_taxes:    { fn: exportSalesTaxes,    name: 'SalesTaxes' },
   payment:        { fn: exportPaymentSummary,name: 'Payment',        needsCfg: true },
+  payment_partywise: { fn: exportPaymentPartyWise, name: 'PaymentPartyWise', needsCfg: true },
   tally_purchase: { fn: exportTallyPurchase, name: 'TallyPurchase',  needsCfg: true },
 };
 
@@ -1216,7 +1255,7 @@ module.exports = {
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
   exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentBefore,
   exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList,
-  exportSalesTaxes, exportPaymentSummary, exportTDSReturn, exportTallyPurchase,
+  exportSalesTaxes, exportPaymentSummary, exportPaymentPartyWise, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
   exportPurchaseRegister, exportSalesRegister, exportIndividualRegister,
 };

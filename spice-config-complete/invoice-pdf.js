@@ -823,7 +823,9 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   // ISP inter-state invoices should not bill Transport/Insurance separately
   // (item 5: those costs are absorbed in the buyer's freight, not invoiced).
   // Combine with the existing ASP rule: ASP also hides them.
-  const hideTransportInsurance = isASP || (String(saleType || '').toUpperCase() === 'I');
+  // e-Auction interstate is an exception — it DOES bill Transport/Insurance,
+  // so don't suppress them there (mirrors calculations.js hideTI).
+  const hideTransportInsurance = isASP || (!isEAuction && String(saleType || '').toUpperCase() === 'I');
   // Read a boolean-ish flag cfg value, respecting undefined→default semantics.
   // Used for user-facing toggle flags like flag_ship, flag_dispatch.
   function readFlagSafe(val, defaultOn) {
