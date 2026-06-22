@@ -5454,7 +5454,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 </div></div>
 
 <!-- ═══ PRICE IMPORT (post-auction) ═══════════════════════ -->
-<div class="modal-bg" id="price-import-modal"><div class="modal">
+<div class="modal-bg" id="price-import-modal"><div class="modal" style="max-width:960px">
   <h2>Price Import — Post-Auction Data</h2>
 
   <!-- "Before trade" snapshot reminder. Importing prices rewrites the
@@ -5484,6 +5484,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <button class="btn btn-g" type="button" id="pi-btn-preview" onclick="piLoadPreview()" title="Preview the report below" style="padding:6px 10px;font-size:11px;font-weight:600">👁 Preview</button>
         <button class="btn btn-o" type="button" id="pi-btn-xlsx" onclick="piQuickExport(piCurrentType(),'xlsx')" title="Download as Excel" style="padding:6px 10px;font-size:11px;font-weight:600">📊 XLSX</button>
         <button class="btn btn-o" type="button" id="pi-btn-pdf"  onclick="piQuickExport(piCurrentType(),'pdf')"  title="Download as PDF"   style="padding:6px 10px;font-size:11px;font-weight:600">📄 PDF</button>
+        <button class="btn btn-o" type="button" id="pi-btn-newtab" onclick="piOpenInTab()" title="Open the report in a new browser tab (full size)" style="padding:6px 10px;font-size:11px;font-weight:600">↗ New Tab</button>
         <button class="btn btn-o" type="button" id="pi-btn-print" onclick="piPrintCurrent()" title="Open the PDF and print" style="padding:6px 10px;font-size:11px;font-weight:600">🖨 Print</button>
         <button class="btn btn-o" type="button" id="pi-btn-csv"  onclick="piQuickExport(piCurrentType(),'csv')"  title="Download as CSV"   style="padding:6px 10px;font-size:11px;font-weight:600;display:none">📄 CSV</button>
       </span>
@@ -5496,9 +5497,10 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
   <!-- Inline preview of the selected pre-trade report (PDF iframe, or an
        HTML table for CSV/XLSX-only reports). Hidden until Preview is clicked;
-       reuses the shared export-preview helpers. -->
+       reuses the shared export-preview helpers. "New Tab" opens the full-size
+       PDF in its own browser tab for easier reading. -->
   <div id="pi-meta" style="font-size:12px;color:var(--text2);margin-bottom:6px"></div>
-  <div id="pi-preview" style="overflow:auto;max-height:360px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px;display:none"></div>
+  <div id="pi-preview" style="overflow:auto;max-height:74vh;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px;display:none"></div>
 
   <p style="font-size:13px;color:var(--spice-text-mute);margin-bottom:10px">Use this after the auction ends to update prices, buyer codes, and quantities on existing lots.</p>
   <div style="font-size:12px;color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);border:1px solid #C5E3D2;border-radius:8px;padding:10px 12px;margin-bottom:14px">
@@ -12654,6 +12656,7 @@ function piOnTypeChange(){
   show('pi-btn-xlsx', !isCsv);
   show('pi-btn-pdf',  !isCsv && !isXlsx);
   show('pi-btn-print',!isCsv && !isXlsx);
+  show('pi-btn-newtab',!isCsv && !isXlsx);
   show('pi-btn-csv',  isCsv);
   const prev=document.getElementById('pi-preview'); if(prev){ prev.innerHTML=''; prev.style.display='none'; }
   const meta=document.getElementById('pi-meta'); if(meta) meta.textContent='';
@@ -12679,10 +12682,30 @@ function piLoadPreview(){
   if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
     return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pi-meta','pi-preview',PRETRADE_EXP_LABELS[t]);
   }
-  return _renderPdfPreview(t, aid, 'pi-meta', 'pi-preview', PRETRADE_EXP_LABELS[t]);
+  // Taller iframe than the default 600px since the modal is now wide.
+  return _renderPdfPreview(t, aid, 'pi-meta', 'pi-preview', PRETRADE_EXP_LABELS[t], '72vh');
 }
 // Open the selected snapshot's PDF in a new tab and fire the print dialog.
 function piPrintCurrent(){ return _printExportPdf(piCurrentType(), piAid()); }
+// Open the selected snapshot's PDF full-size in a new browser tab — easier to
+// read than the in-modal preview. CSV/XLSX-only reports have no PDF, so the
+// button is hidden for them (see piOnTypeChange).
+async function piOpenInTab(){
+  const aid=piAid();
+  if(!aid){
+    alert('Pick a '+termAuction(false,true)+' in the topbar first — the snapshots need to know which '+termAuction(false,true)+' to open.');
+    return;
+  }
+  const t=piCurrentType();
+  await withOverlay('Opening…', async()=>{
+    const r=await fetch(B+`/api/exports/${t}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+    if(!r.ok){const e=await r.json().catch(()=>({}));alert('Open failed: '+(e.error||`HTTP ${r.status}`));return;}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    window.open(url,'_blank','noopener');
+    setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(_){}},60000);
+  });
+}
 function piAckChanged(){
   const ack=document.getElementById('pi-ack');
   const submit=document.getElementById('pi-submit');
@@ -17554,8 +17577,9 @@ async function _fetchPreview(path, metaId, previewId, fallbackLabel){
 // "Preview" matches the printed output exactly. Tracks the blob URL per
 // container so re-previewing revokes the previous one (no URL leak).
 const _pdfPreviewUrls = {};
-async function _renderPdfPreview(type, aid, metaId, previewId, label){
+async function _renderPdfPreview(type, aid, metaId, previewId, label, height){
   const meta=document.getElementById(metaId), root=document.getElementById(previewId);
+  const ifH=height||'600px';
   await withOverlay('Loading preview…', async()=>{
     try{
       const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
@@ -17565,7 +17589,7 @@ async function _renderPdfPreview(type, aid, metaId, previewId, label){
       const url=URL.createObjectURL(blob);
       _pdfPreviewUrls[previewId]=url;
       if(meta) meta.textContent=label||'';
-      if(root) root.innerHTML=`<iframe src="${url}#toolbar=1&navpanes=0" title="PDF preview" style="width:100%;height:600px;border:0;background:#fff"></iframe>`;
+      if(root) root.innerHTML=`<iframe src="${url}#toolbar=1&navpanes=0" title="PDF preview" style="width:100%;height:${ifH};border:0;background:#fff"></iframe>`;
     }catch(e){
       if(meta) meta.textContent='';
       if(root) root.innerHTML=`<div style="padding:14px;color:#7F1D1D">Preview failed: ${esc(e.message||String(e))}</div>`;
