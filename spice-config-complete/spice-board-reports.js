@@ -183,7 +183,7 @@ function getReportContext(db, opts) {
       ON UPPER(TRIM(b.code))  = UPPER(TRIM(l.code))
       OR UPPER(TRIM(b.buyer)) = UPPER(TRIM(l.buyer))
     WHERE ${where.join(' AND ')}
-      AND l.amount > 0
+      ${opts.allLots ? '' : 'AND l.amount > 0'}
     ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no
   `, params);
 

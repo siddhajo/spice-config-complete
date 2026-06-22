@@ -307,6 +307,9 @@ const DEFAULTS = [
 
   // Other operational ledgers
   { key: 'tally_commission',      value: 'Commission-Planter',         category: 'tally', label: 'Commission-Planter',          type: 'text' },
+  // e-Auction-only commission ledger (point 10). Hidden in e-Trade via the
+  // frontend _MODE_HIDE_KEYS['e-Trade'] list; seeded for all installs.
+  { key: 'tally_commission_auction', value: 'Commission',              category: 'tally', label: 'Commission',                  type: 'text' },
   { key: 'tally_cash_handling',   value: 'Cash Handling Charges',      category: 'tally', label: 'Cash Handling Charges',       type: 'text' },
   { key: 'tally_cash_handling_planter', value: 'Cash Handling Charges-Planter', category: 'tally', label: 'Cash Handling Charges-Planter', type: 'text' },
   { key: 'tally_chc_planter',     value: 'CHC From Planter',           category: 'tally', label: 'CHC From Planter',            type: 'text' },
@@ -810,4 +813,23 @@ function getGSTRates(db) {
   return { cgst: g / 2, sgst: g / 2, igst: g, service: getSettingNum(db, 'gst_service'), tcs: getSettingNum(db, 'tcs_tds') };
 }
 
-module.exports = { DEFAULTS, CATEGORIES, initCompanySettings, getSetting, getSettingBool, getSettingNum, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getActivePresetCode, setActivePresetCode, getPreset, getAllPresets, savePreset };
+// Keep the two derived "sample refund" settings in lockstep with the active
+// business mode's Rates & Charges source field (points 11 & 12):
+//   e-Trade   → refund    (Sample Refund (Kgs))
+//   e-Auction → sb_refund (SB Sample Refund (Kgs))
+// The source value drives BOTH tally_sample_kgs (To Tally → Tax Rates &
+// Charges) and sample_weight (Lot Entry Defaults → Default Sample Weight).
+// Called after every settings write so an edit to the source reflects in the
+// other two places. Returns the propagated value (or null when no source).
+function syncSampleRefund(db) {
+  const mode = getSetting(db, 'business_mode') || 'e-Trade';
+  const srcKey = (mode === 'e-Auction') ? 'sb_refund' : 'refund';
+  const row = db.prepare('SELECT value FROM company_settings WHERE key = ?').get(srcKey);
+  if (!row || row.value == null || row.value === '') return null;
+  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ?');
+  upd.run(String(row.value), 'tally_sample_kgs');
+  upd.run(String(row.value), 'sample_weight');
+  return String(row.value);
+}
+
+module.exports = { DEFAULTS, CATEGORIES, initCompanySettings, getSetting, getSettingBool, getSettingNum, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getActivePresetCode, setActivePresetCode, getPreset, getAllPresets, savePreset, syncSampleRefund };

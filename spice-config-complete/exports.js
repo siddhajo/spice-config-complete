@@ -5,6 +5,7 @@
 
 const ExcelJS = require('exceljs');
 const { collectionXlsx: newCollectionXlsx, tradeReportXlsx } = require('./auction-reports');
+const { REPORTS: SPICE_BOARD_REPORTS } = require('./spice-board-reports');
 const {
   getCompanyHeader, writeXlsxCompanyHeader, xlsxNumFmtForHeader,
 } = require('./report-formatters');
@@ -1005,6 +1006,16 @@ async function exportTradeReport(db, auctionId) {
   return tradeReportXlsx(db, auctionId);
 }
 
+// ── Export: e-Auction (Spices Board) CSV ──────────────────────
+// The e-Auction equivalent of the Praman (e-Trade) CSV upload. Reuses the
+// Spice Board tab's eauction_csv builder, but exports ALL lots in the
+// auction (allLots:true) — like the Praman CSV it replaces, this is a
+// pre-auction lot-catalogue upload, so it must work before prices land.
+// (The Spice Board tab's own copy keeps its sold-only filter unchanged.)
+async function exportEauctionCSV(db, auctionId) {
+  return SPICE_BOARD_REPORTS.eauction_csv.csv(db, { auctionId, allLots: true });
+}
+
 // ── Export router ────────────────────────────────────────────
 const EXPORT_TYPES = {
   lot_slip:       { fn: exportLotSlip,       name: 'LotSlip' },
@@ -1017,6 +1028,7 @@ const EXPORT_TYPES = {
   price_list_before: { fn: exportPriceListBefore, name: 'PriceListBefore' },
   lot_payment:       { fn: exportLotPayment,      name: 'LotPayment' },
   praman_csv:     { fn: exportPramanCSV,     name: 'eTrade_Praman', ext: 'csv', mime: 'text/csv', needsCfg: true },
+  eauction_csv:   { fn: exportEauctionCSV,   name: 'EAuctionCSV',   ext: 'csv', mime: 'text/csv' },
   price_list:     { fn: exportPriceList,     name: 'PriceList' },
   bank_payment_before:{ fn: exportBankPaymentBefore, name: 'BankPaymentBefore', needsCfg: true },
   bank_payment:   { fn: exportBankPayment,   name: 'BankPayment', needsCfg: true },

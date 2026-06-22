@@ -13,7 +13,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
-const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset } = require('./company-config');
+const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
@@ -683,6 +683,10 @@ app.get('/api/company-settings', requireView, (req, res) => {
 });
 app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
   const count = updateSettings(getDb(), req.body.settings || {});
+  // Propagate the active mode's Rates & Charges sample-refund source
+  // (refund in e-Trade, sb_refund in e-Auction) into tally_sample_kgs and
+  // sample_weight so the three stay in lockstep (points 11 & 12).
+  try { syncSampleRefund(getDb()); } catch (_) {}
   // The date-format choice is cached by the formatters; drop the caches so
   // the change takes effect immediately without a restart.
   invalidateDateFmtCache();

@@ -4308,7 +4308,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
               <option value="merchant">Merchants Individual (per merchant)</option>
             </select>
           </div>
-          <div class="fg" style="margin:0;min-width:220px" id="reg-auction-wrap"><label>Trade</label>
+          <div class="fg" style="margin:0;min-width:220px" id="reg-auction-wrap"><label data-term-auction="singular">Trade</label>
             <select id="reg-auction" style="width:100%;padding:6px"></select>
           </div>
           <div class="fg" style="margin:0"><label>From</label><input type="date" id="reg-from" onchange="if(isIndividualReg(document.getElementById('reg-type').value))populateRegParties()"></div>
@@ -4323,7 +4323,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-a" onclick="exportRegister('xlsx')">Export XLSX</button>
           <button class="btn btn-orange" onclick="exportRegister('pdf')">Export PDF</button>
         </div>
-        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Pick a Trade for a single trade, or leave it on “All trades” and set a From/To date range. The date range is ignored when a specific trade is selected.</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Pick a <span data-term-auction="singular">Trade</span> for a single <span data-term-auction="singular-lower">trade</span>, or leave it on “All <span data-term-auction="plural-lower">trades</span>” and set a From/To date range. The date range is ignored when a specific <span data-term-auction="singular-lower">trade</span> is selected.</div>
         <div style="overflow-x:auto;max-height:520px"><table id="reg-table"><thead id="reg-head"></thead><tbody id="reg-body"></tbody></table></div>
       </div>
     </div>
@@ -7033,54 +7033,144 @@ async function loadFormulas(){
       </div>`;
   }
 
-  let html = `
-    <div style="max-width:980px;margin:0 auto">
-      <div style="margin-bottom:18px;padding:14px 18px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:10px;color:var(--spice-saffron-dk);font-size:13px;line-height:1.5">
-        <strong>Read-only reference.</strong> These are every formula the app runs. Values in <span style="background:var(--green-bg);color:var(--green);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">green</span> come from Settings — change them there and they'll update here.
-      </div>`;
+  // The app runs two distinct sets of purchase-side formulas depending on
+  // Settings → Business Mode. e-Trade is deduction + quick-pay-discount
+  // based; e-Auction is commission + handling based. We render ONE mode's
+  // formulas at a time (selected by the toggle, defaulting to the
+  // configured mode) so each page stays clean and unambiguous, then show
+  // the sections that are genuinely identical across both modes below.
+  const configuredMode = String(cfg.business_mode || '').toLowerCase() === 'e-auction'
+    ? 'e-Auction' : 'e-Trade';
 
-  // ── Lot calculation (Pooler/Dealer) ────────────────────────
-  html += card('Lot calculation — Pooler & Dealer rates', [
-    {
-      label: 'Purchase Quantity (P_Qty)',
-      note: 'Sample refund is added back so the seller is paid for it.',
-      formula: `P_Qty = Lot Qty + ${pill('Sample Refund (kg)', num('refund', '0'))}`,
-    },
-    {
-      label: 'Purchase Rate (P_Rate)',
-      note: 'Grade 2 lots use Dealer deduction; everything else (1, 1A, 2A, blank, etc.) uses Pooler deduction.',
-      formula: `P_Rate = round( Lot Price × ( 1 − ${pill('Pooler Deduction (%)', num('deduction1', '0'))} / 100 ) )    ${lit('— for non-grade-2')}<br>
+  // ── Mode-specific purchase-side formulas ───────────────────
+  function modeCards(mode) {
+    if (mode === 'e-Auction') {
+      let h = '';
+      h += card('Lot calculation (e-Auction)', [
+        {
+          label: 'Purchase Quantity (P_Qty)',
+          note: 'Sample refund is added back so the seller is paid for it.',
+          formula: `P_Qty = Lot Qty + ${pill('Sample Refund (kg)', num('refund', '0'))}`,
+        },
+        {
+          label: 'Purchase Rate (P_Rate)',
+          note: 'In e-Auction the auction-winning price is the purchase rate — no deduction is applied.',
+          formula: `P_Rate = Lot Price`,
+        },
+        {
+          label: 'Purchase Amount (PurAmt)',
+          note: 'Auction amount net of the agent\'s commission and handling charge.',
+          formula: `PurAmt = Lot Amount − Commission − Handling`,
+        },
+      ]);
+      h += card('Commission & Handling (e-Auction)', [
+        {
+          label: 'Spice Board sample refund (₹)',
+          note: 'Refund the Spice Board returns on sampled quantity, valued at the lot price. Added to the seller\'s payable.',
+          formula: `SB Refund = round2( Lot Price × ${pill('SB Sample Refund (Kgs)', num('sb_refund', '0'))} )`,
+        },
+        {
+          label: 'Commission',
+          note: 'Charged on the auction amount plus the SB refund.',
+          formula: `Commission = round2( ( Lot Amount + SB Refund ) × ${pill('Commission %', num('commission', '0'))} / 100 )`,
+        },
+        {
+          label: 'Handling charge (HPC)',
+          note: 'A percentage of the commission, not of the amount.',
+          formula: `Handling = round2( Commission × ${pill('Handling %', num('hpc', '0'))} / 100 )`,
+        },
+        {
+          label: 'GST on services (Commission + Handling)',
+          note: 'Commission and handling are taxable services, so they use the Service GST rate. Intra-state if the seller\'s GSTIN state matches the company state; otherwise inter-state.',
+          formula: `Service Base = Commission + Handling<br>
+                Intra-state:  CGST = round2( Service Base × ${pill('Service GST/2', '(' + num('gst_service','18') + '/2)')} / 100 ),    SGST = same as CGST<br>
+                Inter-state:  IGST = round2( Service Base × ${pill('Service GST %', num('gst_service','18'))} / 100 )`,
+        },
+        {
+          label: 'Payable to seller (Balance)',
+          note: 'Advance = Commission + Handling + CGST + SGST + IGST.',
+          formula: `Payable = ( Lot Amount + SB Refund ) − ( Commission + Handling + CGST + SGST + IGST )`,
+        },
+      ]);
+      h += card('Payment summary (e-Auction — per seller, per auction)', [
+        {
+          label: 'Totals across the seller\'s lots',
+          formula: `Total Amount     = Σ ( Lot Amount )<br>
+                Total Commission = Σ ( Commission )<br>
+                Total Handling   = Σ ( Handling )<br>
+                Total GST        = Σ ( CGST + SGST + IGST )`,
+        },
+        {
+          label: 'Payable',
+          formula: `Payable = Σ ( ( Lot Amount + SB Refund ) − Commission − Handling − GST )`,
+        },
+      ]);
+      return h;
+    }
+
+    // ── e-Trade (default) ──────────────────────────────────────
+    let h = '';
+    h += card('Lot calculation — Pooler & Dealer rates (e-Trade)', [
+      {
+        label: 'Purchase Quantity (P_Qty)',
+        note: 'Sample refund is added back so the seller is paid for it.',
+        formula: `P_Qty = Lot Qty + ${pill('Sample Refund (kg)', num('refund', '0'))}`,
+      },
+      {
+        label: 'Purchase Rate (P_Rate)',
+        note: 'Grade 2 lots use Dealer deduction; everything else (1, 1A, 2A, blank, etc.) uses Pooler deduction.',
+        formula: `P_Rate = round( Lot Price × ( 1 − ${pill('Pooler Deduction (%)', num('deduction1', '0'))} / 100 ) )    ${lit('— for non-grade-2')}<br>
                 P_Rate = round( Lot Price × ( 1 − ${pill('Dealer Deduction (%)', num('deduction2', '0'))} / 100 ) )    ${lit('— for grade 2')}`,
-    },
-    {
-      label: 'Purchase Amount (PurAmt)',
-      formula: `PurAmt = P_Qty × P_Rate`,
-    },
-  ]);
-
-  // ── Discount + GST on Discount ─────────────────────────────
-  html += card('Discount on Purchase (e-Trade)', [
-    {
-      label: 'Discount amount',
-      note: 'Quick-pay discount tied to settlement window. Rounded to nearest rupee.',
-      formula: `Discount = round( PurAmt / 1000 × ${pill('Discount Days', num('discount_days', '0'))} × ${pill('Discount %', num('discount_pct', '0'))} )`,
-    },
-    {
-      label: 'GST on Discount (only when "Discount includes GST" flag is ON)',
-      note: 'Discount-on-purchase GST. Configurable separately from goods/service GST — use the Discount GST % setting in Rates.',
-      formula: `Intra-state:  CGST = round( Discount × ${pill('Discount GST/2', '(' + num('discount_gst','5') + '/2)')} / 100 )<br>
+      },
+      {
+        label: 'Purchase Amount (PurAmt)',
+        formula: `PurAmt = P_Qty × P_Rate`,
+      },
+    ]);
+    h += card('Discount on Purchase (e-Trade)', [
+      {
+        label: 'Discount amount',
+        note: 'Quick-pay discount tied to settlement window. Rounded to nearest rupee. Days come from "Days for Dealer" when the seller has a GSTIN, otherwise "Days for Discount".',
+        formula: `Discount = round( PurAmt / 1000 × ${pill('Discount Days', num('discount_days', '0'))} × ${pill('Discount %', num('discount_pct', '0'))} )`,
+      },
+      {
+        label: 'GST on Discount (only when "Discount includes GST" flag is ON)',
+        note: 'The discount is treated as a credit/finance service, so it uses the Service GST rate.',
+        formula: `Intra-state:  CGST = round2( Discount × ${pill('Service GST/2', '(' + num('gst_service','18') + '/2)')} / 100 )<br>
                 Intra-state:  SGST = same as CGST<br>
-                Inter-state:  IGST = round( Discount × ${pill('Discount GST', num('discount_gst','5'))} / 100 )<br>
+                Inter-state:  IGST = round2( Discount × ${pill('Service GST %', num('gst_service','18'))} / 100 )<br>
                 Discount-includes-GST flag: ${pill('flag_disc_gst', v('flag_disc_gst','false'))}`,
-    },
-    {
-      label: 'Payable to seller (Balance)',
-      formula: `Payable = PurAmt − Discount − ( CGST + SGST + IGST )`,
-    },
-  ]);
+      },
+      {
+        label: 'Payable to seller (Balance)',
+        formula: `Payable = PurAmt − Discount − ( CGST + SGST + IGST )`,
+      },
+    ]);
+    h += card('Payment summary (e-Trade — per seller, per auction)', [
+      {
+        label: 'Total Amount, Total Purchase, Total Discount',
+        note: 'Sum across all lots a seller sold in the auction.',
+        formula: `Total Amount   = Σ ( Lot Amount )<br>
+                Total PurAmt   = Σ ( PurAmt )<br>
+                Total Discount = Σ ( Discount )`,
+      },
+      {
+        label: 'GST 5% (column on Payments tab)',
+        note: 'Sum of CGST + SGST + IGST stamped on each lot. Non-zero only when "Discount includes GST" flag is ON.',
+        formula: `GST 5% = Σ ( CGST + SGST + IGST )`,
+      },
+      {
+        label: 'Payable',
+        formula: `Payable = Total PurAmt − Total Discount − GST 5%`,
+      },
+    ]);
+    return h;
+  }
 
-  // ── Sales invoice ───────────────────────────────────────────
-  html += card('Sales invoice — totals', [
+  // ── Sections identical in both modes ───────────────────────
+  function sharedCards() {
+    let h = '';
+    h += card('Sales invoice — totals', [
     {
       label: 'Gunny cost (jute bags charge)',
       formula: `Gunny Cost = Total Bags × ${pill('Gunny rate (₹/bag)', num('gunny_rate','165'))}`,
@@ -7132,64 +7222,83 @@ async function loadFormulas(){
     },
   ]);
 
-  // ── TDS / TCS ───────────────────────────────────────────────
-  html += card('TDS on Purchase (Section 194Q) & TCS on Sale (206C(1H))', [
-    {
-      label: 'TDS / TCS threshold',
-      note: '₹50 lakh per seller (TDS) or buyer (TCS) per financial year. Below the threshold, nothing is deducted; above, only the excess attracts the rate.',
-      formula: `Threshold = ${pill('TDS Threshold (₹)', num('tds_threshold','5000000'))}<br>
+    // ── TDS / TCS ───────────────────────────────────────────────
+    h += card('TDS on Purchase (Section 194Q) & TCS on Sale (206C(1H))', [
+      {
+        label: 'TDS / TCS threshold',
+        note: '₹50 lakh per seller (TDS) or buyer (TCS) per financial year. Below the threshold, nothing is deducted; above, only the excess attracts the rate.',
+        formula: `Threshold = ${pill('TDS Threshold (₹)', num('tds_threshold','5000000'))}<br>
                 If prior year purchases &gt; threshold → deduct on full new amount<br>
                 Else if prior + new &gt; threshold → deduct on (prior + new − threshold)<br>
                 Else → 0`,
-    },
-    {
-      label: 'TDS rate (on purchase)',
-      formula: `TDS = ceil( Excess Amount × ${pill('TDS Rate (%)', num('tds_purchase_rate', num('tcs_tds','0.1')))} / 100 )`,
-    },
-    {
-      label: 'TCS rate (on sale)',
-      formula: `TCS = ceil( Excess Amount × ${pill('TCS Rate (%)', num('tcs_tds','0.1'))} / 100 )`,
-    },
-  ]);
+      },
+      {
+        label: 'TDS rate (on purchase)',
+        formula: `TDS = ceil( Excess Amount × ${pill('TDS Rate (%)', num('tds_purchase_rate', num('tcs_tds','0.1')))} / 100 )`,
+      },
+      {
+        label: 'TCS rate (on sale)',
+        formula: `TCS = ceil( Excess Amount × ${pill('TCS Rate (%)', num('tcs_tds','0.1'))} / 100 )`,
+      },
+    ]);
 
-  // ── Payment summary ─────────────────────────────────────────
-  html += card('Payment summary (per seller, per auction)', [
-    {
-      label: 'Total Amount, Total Purchase, Total Discount',
-      note: 'Sum across all lots a seller sold in the auction.',
-      formula: `Total Amount   = Σ ( Lot Amount )<br>
-                Total PurAmt   = Σ ( PurAmt )<br>
-                Total Discount = Σ ( Discount )`,
-    },
-    {
-      label: 'GST 5% (column on Payments tab)',
-      note: 'Sum of CGST + SGST + IGST stamped on each lot. Non-zero only when "Discount includes GST" flag is ON.',
-      formula: `GST 5% = Σ ( CGST + SGST + IGST )`,
-    },
-    {
-      label: 'Payable',
-      formula: `Payable = Total PurAmt − Total Discount − GST 5%`,
-    },
-  ]);
-
-  // ── E-way bill distance ─────────────────────────────────────
-  html += card('E-way bill distance resolution', [
-    {
-      label: 'Distance source priority',
-      note: 'Used in the Tally sales voucher\'s &lt;DISTANCE&gt; tag. The PIN-to-PIN route table is populated manually from the NIC e-way bill portal.',
-      formula: `1.  Per-invoice override (invoices.distance_km) ─── if set, wins<br>
+    // ── E-way bill distance ─────────────────────────────────────
+    h += card('E-way bill distance resolution', [
+      {
+        label: 'Distance source priority',
+        note: 'Used in the Tally sales voucher\'s &lt;DISTANCE&gt; tag. The PIN-to-PIN route table is populated manually from the NIC e-way bill portal.',
+        formula: `1.  Per-invoice override (invoices.distance_km) ─── if set, wins<br>
                 2.  Saved route (route_distances.km) keyed by (dispatch PIN ↔ buyer PIN) ─── otherwise<br>
                 3.  Blank ─── if neither exists`,
-    },
-    {
-      label: 'Dispatch PIN',
-      note: 'The "from" PIN for every route lookup. Falls through this chain until it finds a value.',
-      formula: `${pill('Dispatch PIN', num('tally_dispatch_pin','—'))} → ${pill('s_pin', num('s_pin','—'))} → ${pill('KL PIN', num('kl_pin','—'))} → ${pill('TN PIN', num('tn_pin','—'))} → 685553`,
-    },
-  ]);
+      },
+      {
+        label: 'Dispatch PIN',
+        note: 'The "from" PIN for every route lookup. Falls through this chain until it finds a value.',
+        formula: `${pill('Dispatch PIN', num('tally_dispatch_pin','—'))} → ${pill('s_pin', num('s_pin','—'))} → ${pill('KL PIN', num('kl_pin','—'))} → ${pill('TN PIN', num('tn_pin','—'))} → 685553`,
+      },
+    ]);
+    return h;
+  }
 
-  html += '</div>';
-  host.innerHTML = html;
+  // ── Render (re-runs when the mode toggle is clicked) ───────
+  // The toggle only changes WHICH formula set is shown — it never writes
+  // any setting, so viewing the other mode here is purely a read.
+  function buildHtml(mode) {
+    const tab = (m, label) => {
+      const on = m === mode;
+      return `<button type="button" class="formula-mode-btn" data-mode="${m}"
+        style="flex:1;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+               border:1px solid ${on ? 'var(--green)' : 'var(--border)'};
+               background:${on ? 'var(--green)' : 'var(--card)'};
+               color:${on ? '#fff' : 'var(--text2)'}">${esc(label)}${m === configuredMode ? ' ·' : ''}</button>`;
+    };
+    return `
+    <div style="max-width:980px;margin:0 auto">
+      <div style="margin-bottom:14px;padding:14px 18px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:10px;color:var(--spice-saffron-dk);font-size:13px;line-height:1.5">
+        <strong>Read-only reference.</strong> These are every formula the app runs. Values in <span style="background:var(--green-bg);color:var(--green);padding:1px 6px;border-radius:4px;font-family:monospace;font-size:12px">green</span> come from Settings — change them there and they'll update here.
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">${tab('e-Trade','e-Trade')}${tab('e-Auction','e-Auction')}</div>
+      <div style="margin-bottom:16px;font-size:12px;color:var(--text3)">
+        Showing <strong style="color:var(--text2)">${esc(mode)}</strong> purchase formulas.
+        ${mode === configuredMode
+          ? 'This is the currently configured Business Mode (·).'
+          : `The configured mode is <strong style="color:var(--text2)">${esc(configuredMode)}</strong> (·) — you're previewing the other set.`}
+      </div>
+      ${modeCards(mode)}
+      <div style="margin:22px 0 12px;display:flex;align-items:center;gap:10px;color:var(--text3);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">
+        <span style="flex:1;height:1px;background:var(--border)"></span>Shared across both modes<span style="flex:1;height:1px;background:var(--border)"></span>
+      </div>
+      ${sharedCards()}
+    </div>`;
+  }
+
+  function render(mode) {
+    host.innerHTML = buildHtml(mode);
+    host.querySelectorAll('.formula-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => render(btn.getAttribute('data-mode')));
+    });
+  }
+  render(configuredMode);
 }
 
 // ── Dev-only sidebar items (Formulas) ──────────────────────────────
@@ -7907,7 +8016,7 @@ async function loadStats(auctionId){
         <table style="width:100%">
           <thead>
             <tr>
-              <th>Trade</th>
+              <th data-term-auction="singular">Trade</th>
               <th>Date</th>
               <th>Crop</th>
               <th class="num">Lots</th>
@@ -9271,6 +9380,19 @@ async function loadSettings(){
     // Company and Sister Company fields are edited INDEPENDENTLY in Settings.
     // No mutation on load — at read time (invoices, exports, PDFs),
     // effectiveCompany() picks the right set based on state + mode.
+    // (2) e-Auction is locked to the Kerala business state. Reconcile a
+    // stale state silently on load (legacy installs that were flipped to
+    // e-Auction before this lock existed) so the UI, DB and effectiveCompany
+    // all agree. applyStateToCompanyProfile persists + realigns ASP preset.
+    try {
+      if (getCurrentBusinessMode() === 'e-Auction') {
+        const _sf = (_sdata.mode||[]).find(x => x.key === 'business_state');
+        if (_sf && String(_sf.value).toUpperCase() !== 'KERALA') {
+          _sf.value = 'KERALA';
+          applyStateToCompanyProfile('KERALA');   // fire-and-forget; self-heals DB
+        }
+      }
+    } catch (_) {}
     applyModeLabels();
     applyLogoBadge();
     applyFeatureFlags();   // flip data-feat-* on body now that _sdata is loaded
@@ -9304,8 +9426,17 @@ const _MODE_HIDE_KEYS = {
   // The 8 e-Trade-only Rates & Charges fields are hidden in e-Auction mode.
   'e-Auction': ['deduction1','deduction2','asp_profit_pooler','asp_profit_dealer','isp_profit_pooler','isp_profit_dealer','refund',
                 'deduction1_inclusive','flag_inter_transport','flag_inter_insurance','flag_local_transport','flag_local_insurance',
-                'dealer_days','addl_charge_name','addl_charge_value'],
-  'e-Trade':   ['commission','hpc','sb_refund']
+                'dealer_days','addl_charge_name','addl_charge_value',
+                // e-Trade/sister-only surfaces hidden in e-Auction:
+                'inv_prefix_sister',                                  // (4) Sister Invoice Prefix (Other Ref.)
+                'flag_sister',                                        // (5) Sister Concern Active
+                'flag_disc_gst','flag_discount_in_prate',             // (6) Discount includes GST + Roll Discount into P_Rate
+                // (8) To Tally → ISP/Home fields that don't apply to e-Auction:
+                'tally_company_name','tally_state_code','tally_home_state','tally_inv_prefix'],
+  // e-Auction-only fields hidden in e-Trade mode:
+  'e-Trade':   ['commission','hpc','sb_refund',
+                'flag_crop_receipt','flag_reserved_price','flag_price_list_mapping', // (7) e-Auction feature flags
+                'tally_commission_auction']                           // (10) e-Auction Commission ledger
 };
 
 // State-based category hiding. TN business hides the Kerala address category
@@ -9515,6 +9646,19 @@ function applyTallyCompanyVisibility(){
 function isFieldHiddenByMode(fieldKey){
   const m = getCurrentBusinessMode();
   return (_MODE_HIDE_KEYS[m] || []).includes(fieldKey);
+}
+
+// Mode-dependent label overrides (point 9). Some fields read differently per
+// business mode: in e-Auction the single Tally company is the "ASP" ledger
+// company, so the ASP-specific label is shown as the generic "Tally Company
+// Name". Returns the override label, or null to keep the stored label.
+const _MODE_LABEL_OVERRIDE = {
+  'e-Auction': { tally_asp_company_name: 'Tally Company Name' }
+};
+function modeLabelFor(fieldKey){
+  const m = getCurrentBusinessMode();
+  const map = _MODE_LABEL_OVERRIDE[m] || {};
+  return Object.prototype.hasOwnProperty.call(map, fieldKey) ? map[fieldKey] : null;
 }
 
 // ── Business state → Logo/Company auto-switch ─────────────
@@ -9857,6 +10001,8 @@ function renderSettingsPanel(){
   let fields=_sdata[ck]||[];
   // Filter out individual fields hidden by current business mode
   fields = fields.filter(f => !isFieldHiddenByMode(f.key));
+  // Apply mode-dependent label overrides (point 9) without mutating _sdata.
+  fields = fields.map(f => { const ml = modeLabelFor(f.key); return ml ? { ...f, label: ml } : f; });
   // For the Company category specifically, overlay the active preset's
   // values onto the displayed fields. Server-side the company_settings
   // table always holds the ISP values (intentional — PDFs read state-aware
@@ -9886,7 +10032,15 @@ function renderSettingsPanel(){
     html+='<div class="sgrid">';
     for(const f of fields){
       if(f.key==='business_mode')html+=`<div class="fg"><label>${f.label}${helpTip(FIELD_HELP.business_mode)}</label><select data-key="${f.key}" onchange="onBusinessModeChanged(this.value)"><option${f.value==='e-Trade'?' selected':''}>e-Trade</option><option${f.value==='e-Auction'?' selected':''}>e-Auction</option></select></div>`;
-      else if(f.key==='business_state')html+=`<div class="fg"><label>${f.label}${helpTip(FIELD_HELP.business_state)}</label><select data-key="${f.key}" onchange="onBusinessStateChanged(this.value)"><option${f.value==='TAMIL NADU'?' selected':''}>TAMIL NADU</option><option${f.value==='KERALA'?' selected':''}>KERALA</option></select></div>`;
+      else if(f.key==='business_state'){
+        // (2) e-Auction locks the business state to Kerala (non-editable):
+        // the auction company is always the Kerala/ASP entity. Render the
+        // select disabled with KERALA forced selected; a hint explains it.
+        const eauc = getCurrentBusinessMode()==='e-Auction';
+        const stVal = eauc ? 'KERALA' : f.value;
+        const dis = eauc ? ' disabled' : '';
+        html+=`<div class="fg"><label>${f.label}${helpTip(FIELD_HELP.business_state)}</label><select data-key="${f.key}" onchange="onBusinessStateChanged(this.value)"${dis}><option${stVal==='TAMIL NADU'?' selected':''}>TAMIL NADU</option><option${stVal==='KERALA'?' selected':''}>KERALA</option></select>${eauc?'<div style="font-size:11px;color:var(--text3);margin-top:4px">Fixed to Kerala in e-Auction mode</div>':''}</div>`;
+      }
       else html+=fld(f);
     }
     html+='</div>';
@@ -10157,6 +10311,18 @@ async function onBusinessModeChanged(newMode){
   // Persist the change into _sdata immediately (so helpers read the new value)
   const f = (_sdata.mode||[]).find(x => x.key === 'business_mode');
   if (f) f.value = newMode;
+  // (2) e-Auction forces the business state to Kerala (the auction company is
+  // always the Kerala/ASP entity). Flip it here — synchronously into _sdata
+  // and live on the server (applyStateToCompanyProfile also realigns the
+  // ASP preset, logo, theme and flags) — before the re-render so the now
+  // disabled state select paints with KERALA selected.
+  if (newMode === 'e-Auction') {
+    const sf = (_sdata.mode||[]).find(x => x.key === 'business_state');
+    if (sf && String(sf.value).toUpperCase() !== 'KERALA') {
+      sf.value = 'KERALA';
+      try { await applyStateToCompanyProfile('KERALA'); } catch (e) { console.error('Failed to force Kerala on e-Auction:', e); }
+    }
+  }
   // Re-render nav + panel: categories/fields appear or disappear based on mode
   renderSettingsNav();
   renderSettingsPanel();
@@ -10485,7 +10651,7 @@ const TALLY_GROUPS = [
     'tally_dn_discount','tally_dn_cgst','tally_dn_sgst','tally_dn_igst','tally_dn_gst_rate',
   ]},
   { id:'tally-misc', title:'Other Ledgers', icon:'📒', keys:[
-    'tally_commission','tally_cash_handling','tally_cash_handling_planter','tally_chc_planter',
+    'tally_commission','tally_commission_auction','tally_cash_handling','tally_cash_handling_planter','tally_chc_planter',
     'tally_sample_planter','tally_sample_dealer','tally_round','tally_transport','tally_insurance',
   ]},
   { id:'tally-rates', title:'Tax Rates & Charges', icon:'📊', keys:[
@@ -10744,6 +10910,19 @@ async function saveSettings(){
   for(const ck of Object.keys(_sdata)){
     if (ck === 'company') continue;
     for(const f of _sdata[ck]||[]){s[f.key]=f.value}
+  }
+  // (11 & 12) The active mode's Rates & Charges sample-refund field
+  // (refund in e-Trade, sb_refund in e-Auction) drives both the To-Tally
+  // Sample Refund (tally_sample_kgs) and the Lot Entry Default Sample
+  // Weight (sample_weight). Mirror it client-side so the panels reflect the
+  // synced value immediately; the server re-applies the same via
+  // syncSampleRefund() so the DB stays consistent on every write path.
+  const _srcKey = (getCurrentBusinessMode()==='e-Auction') ? 'sb_refund' : 'refund';
+  if (s[_srcKey] !== undefined && s[_srcKey] !== '') {
+    s['tally_sample_kgs'] = s[_srcKey];
+    s['sample_weight']    = s[_srcKey];
+    updateSdataField('tally_sample_kgs', s[_srcKey]);
+    updateSdataField('sample_weight',    s[_srcKey]);
   }
   await j('/api/company-settings',{method:'PUT',body:JSON.stringify({settings:s})});
   // If the active preset has unsaved edits in the Company panel, save those
@@ -12656,7 +12835,7 @@ function openPriceImport(){
   showModal('price-import-modal');
 }
 // Selected snapshot report in the Price Import reminder's dropdown.
-function piCurrentType(){ return document.getElementById('pi-type')?.value || Object.keys(PRETRADE_EXP_LABELS)[0]; }
+function piCurrentType(){ return document.getElementById('pi-type')?.value || Object.keys(pretradeLabels())[0]; }
 // Fill the dropdown from PRETRADE_EXP_LABELS (the same pre-trade set as the
 // Exports page), preserving the current pick across re-opens, then sync the
 // format buttons.
@@ -12664,8 +12843,9 @@ function piPopulateTypes(){
   const sel=document.getElementById('pi-type');
   if(!sel) return;
   const cur=sel.value;
-  sel.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
-  if(cur && PRETRADE_EXP_LABELS[cur]) sel.value=cur;
+  const L=pretradeLabels();
+  sel.innerHTML=Object.entries(L).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && L[cur]) sel.value=cur;
   piOnTypeChange();
 }
 // Toggle the format buttons by the selected report's rules — identical to
@@ -12704,10 +12884,10 @@ function piLoadPreview(){
   const root=document.getElementById('pi-preview'); if(root) root.style.display='';
   const t=piCurrentType();
   if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
-    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pi-meta','pi-preview',PRETRADE_EXP_LABELS[t]);
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pi-meta','pi-preview',pretradeLabels()[t]);
   }
   // Taller iframe than the default 600px since the modal is now wide.
-  return _renderPdfPreview(t, aid, 'pi-meta', 'pi-preview', PRETRADE_EXP_LABELS[t], '72vh');
+  return _renderPdfPreview(t, aid, 'pi-meta', 'pi-preview', pretradeLabels()[t], '72vh');
 }
 // Open the selected snapshot's PDF in a new tab and fire the print dialog.
 function piPrintCurrent(){ return _printExportPdf(piCurrentType(), piAid()); }
@@ -12747,7 +12927,7 @@ async function piQuickExport(type, format){
     return;
   }
   let fmt=(format||'').toLowerCase();
-  if(!fmt) fmt=(type==='praman_csv') ? 'csv' : 'pdf';
+  if(!fmt) fmt=EXP_CSV_ONLY.has(type) ? 'csv' : 'pdf';
   await exportType(type, fmt, aid);
 }
 
@@ -16733,7 +16913,7 @@ async function _payDownloadSelected(type, aid, names){
   const reqBody = { names, format: 'xlsx' };
   if (Object.keys(lots).length)        reqBody.lots = lots;
   if (Object.keys(excludeLots).length) reqBody.excludeLots = excludeLots;
-  const label = (typeof EXP_LABELS === 'object' && EXP_LABELS[type]) || type;
+  const label = expLabels()[type] || pretradeLabels()[type] || type;
   const pickCount = Object.keys(lots).length;
   const contCount = Object.keys(excludeLots).length;
   let ok = false;
@@ -17305,7 +17485,7 @@ async function _renderInsights(){
         <div class="ins-table-wrap ins-scroll">
           <table class="ins-table">
             <thead><tr>
-              <th>Trade</th>
+              <th data-term-auction="singular">Trade</th>
               <th>Date</th>
               <th>State</th>
               <th style="text-align:right">Lots</th>
@@ -17436,8 +17616,26 @@ const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_paym
   pooler_register:'Pooler Register',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',
   payment:'Payment Summary'};
 // Export types that only support a specific format (no XLSX/PDF choice).
-// e.g., Praman is a CSV-only upload format for the Praman auction platform.
-const EXP_CSV_ONLY = new Set(['praman_csv']);
+// e.g., Praman (e-Trade) and the e-Auction Spices Board CSV are both
+// CSV-only upload formats for their respective auction platforms.
+const EXP_CSV_ONLY = new Set(['praman_csv','eauction_csv']);
+// Business-mode-aware label maps. In e-Auction mode the Praman (e-Trade)
+// CSV upload is replaced by the e-Auction (Spices Board) CSV, and the
+// "Trade Report" becomes the "Auction Report". e-Trade mode is unchanged.
+// Returns a fresh object each call so it always reflects the current mode.
+function _modeExportLabels(base){
+  const isAuction = (typeof getCurrentBusinessMode==='function') && getCurrentBusinessMode()==='e-Auction';
+  if(!isAuction) return {...base};
+  const out={};
+  for(const [k,v] of Object.entries(base)){
+    if(k==='praman_csv') out.eauction_csv='e-Auction (Spices Board) CSV';
+    else if(k==='trade_report') out[k]='Auction Report';
+    else out[k]=v;
+  }
+  return out;
+}
+function expLabels(){ return _modeExportLabels(EXP_LABELS); }
+function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
@@ -17485,7 +17683,7 @@ function renderExportBtns(){
 }
 
 // ── Export Center (spice-board-style preview/print/xlsx/pdf) ──────
-function expCurrentType(){ return document.getElementById('exp-type')?.value || Object.keys(EXP_LABELS)[0]; }
+function expCurrentType(){ return document.getElementById('exp-type')?.value || Object.keys(expLabels())[0]; }
 function expCurrentAid(){ return document.getElementById('exp-auction')?.value || ''; }
 
 // Fill the report-type dropdown from EXP_LABELS, preserving the current
@@ -17494,8 +17692,9 @@ function expPopulateTypes(){
   const sel=document.getElementById('exp-type');
   if(!sel) return;
   const cur=sel.value;
-  sel.innerHTML=Object.entries(EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
-  if(cur && EXP_LABELS[cur]) sel.value=cur;
+  const L=expLabels();
+  sel.innerHTML=Object.entries(L).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && L[cur]) sel.value=cur;
   expOnTypeChange();
 }
 
@@ -17549,11 +17748,11 @@ function expLoadPreview(){
   // Show the actual inline PDF so the preview matches the printed output.
   // CSV-only / XLSX-only reports have no PDF form, so they keep the table.
   if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
-    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',EXP_LABELS[t]);
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',expLabels()[t]);
   }
-  return _renderPdfPreview(t, aid, 'exp-meta', 'exp-preview', EXP_LABELS[t]);
+  return _renderPdfPreview(t, aid, 'exp-meta', 'exp-preview', expLabels()[t]);
 }
-function expRenderPreview(data){ _renderExportRows('exp-meta','exp-preview',data,EXP_LABELS[expCurrentType()]); }
+function expRenderPreview(data){ _renderExportRows('exp-meta','exp-preview',data,expLabels()[expCurrentType()]); }
 function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
 function expPrintCurrent(){ return _printExportPdf(expCurrentType(), expCurrentAid()); }
 
@@ -17639,13 +17838,14 @@ async function _printExportPdf(type, aid){
 // ── Pre-Trade Exports (spice-board-style; shares #exp-auction) ──────
 // Before-import snapshots — NOT gated on price import (they're meant to be
 // taken before prices land).
-function ptCurrentType(){ return document.getElementById('pretrade-type')?.value || Object.keys(PRETRADE_EXP_LABELS)[0]; }
+function ptCurrentType(){ return document.getElementById('pretrade-type')?.value || Object.keys(pretradeLabels())[0]; }
 function ptPopulateTypes(){
   const sel=document.getElementById('pretrade-type');
   if(!sel) return;
   const cur=sel.value;
-  sel.innerHTML=Object.entries(PRETRADE_EXP_LABELS).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
-  if(cur && PRETRADE_EXP_LABELS[cur]) sel.value=cur;
+  const L=pretradeLabels();
+  sel.innerHTML=Object.entries(L).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('');
+  if(cur && L[cur]) sel.value=cur;
   ptOnTypeChange();
 }
 function ptOnTypeChange(){
@@ -17665,9 +17865,9 @@ function ptLoadPreview(){
   const t=ptCurrentType();
   // Inline PDF preview (matches print); CSV/XLSX-only reports keep the table.
   if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
-    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pretrade-meta','pretrade-preview',PRETRADE_EXP_LABELS[t]);
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pretrade-meta','pretrade-preview',pretradeLabels()[t]);
   }
-  return _renderPdfPreview(t, aid, 'pretrade-meta', 'pretrade-preview', PRETRADE_EXP_LABELS[t]);
+  return _renderPdfPreview(t, aid, 'pretrade-meta', 'pretrade-preview', pretradeLabels()[t]);
 }
 function ptDownloadCurrent(format){ return exportType(ptCurrentType(), format); }
 function ptPrintCurrent(){ return _printExportPdf(ptCurrentType(), document.getElementById('exp-auction')?.value||''); }
@@ -17731,7 +17931,7 @@ async function exportType(type,format,aidArg){format=format||'xlsx';
   // Export Center / Payments tab selectors.
   const aid=aidArg||document.getElementById('exp-auction')?.value||document.getElementById('pay-auction')?.value;
   if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
-  const label = (EXP_LABELS[type]||type);
+  const label = (expLabels()[type]||pretradeLabels()[type]||type);
   await withOverlay(`Exporting ${label} (${format.toUpperCase()})…`, async () => {
     // CSV exports ignore format query param — server picks ext from EXPORT_TYPES.
     // Keep format in URL for consistency but download filename uses actual ext.
@@ -19026,7 +19226,7 @@ async function loadRegisterDefault(){
     const auctions = await j('/api/auctions');
     const opts = (auctions||[]).map(a =>
       `<option value="${a.id}">${esc(a.ano || ('#'+a.id))} — ${esc(a.date || '')}</option>`);
-    sel.innerHTML = '<option value="">— All trades —</option>' + opts.join('');
+    sel.innerHTML = `<option value="">— All ${termAuction(true, true)} —</option>` + opts.join('');
   }
   // Default date range = current month (used when "All trades" is picked).
   const today = new Date().toISOString().slice(0,10);
