@@ -1112,8 +1112,14 @@ tr:hover td{background:var(--spice-cream)}
    towering. Scoped via #lot-kpis so dashboard KPIs are unaffected. */
 #lot-kpis.kpi-grid{gap:10px;margin-bottom:14px}
 #lot-kpis .kpi{padding:10px 14px;border-radius:12px}
-#lot-kpis .kpi-label{font-size:10.5px;letter-spacing:.6px;margin-bottom:4px}
-#lot-kpis .kpi-value{font-size:22px}
+/* margin-bottom drops the value's line below the corner icon so a long
+   amount (e.g. "₹65,39,300.00") uses the FULL tile width on its own line
+   instead of running underneath the icon; padding-right keeps the label
+   itself clear of the icon too. Mirrors the #dash-headline-grid fix. */
+#lot-kpis .kpi-label{font-size:10.5px;letter-spacing:.6px;margin-bottom:16px;padding-right:32px}
+/* nowrap keeps decimals intact on one line; overflow:hidden is a last-resort
+   guard for extreme values. */
+#lot-kpis .kpi-value{font-size:22px;white-space:nowrap;overflow:hidden}
 #lot-kpis .kpi-icon{width:28px;height:28px;right:10px;top:10px;border-radius:8px}
 #lot-kpis .kpi-icon svg{width:14px;height:14px}
 
@@ -8250,6 +8256,24 @@ window.addEventListener('resize', () => {
   });
 });
 
+// Shrink ONLY the Lots-screen "Total amount" value just enough that it fits
+// its tile on one line — crore-scale totals (e.g. "₹1,56,94,320.00") are wide
+// for the compact 6-up strip. Other tiles keep their size. No-ops while the
+// strip is hidden (clientWidth would be 0). Relies on the value being
+// white-space:nowrap; overflow:hidden so scrollWidth reports the true width.
+function fitLotKpiAmount(){
+  const el = document.getElementById('lot-kpi-amount');
+  if (!el || !el.offsetParent) return;
+  let fs = 18;
+  el.style.fontSize = fs + 'px';
+  while (fs > 11 && el.scrollWidth > el.clientWidth + 1) { fs -= 1; el.style.fontSize = fs + 'px'; }
+}
+let _lotKpiFitRaf;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(_lotKpiFitRaf);
+  _lotKpiFitRaf = requestAnimationFrame(fitLotKpiAmount);
+});
+
 // Fills #dash-headline-grid by querying /api/insights. When auctionId
 // is set we ask for that single trade; otherwise we ask for ALL trades
 // (cumulative) — matching the "All Trades · Cumulative" hero/label above.
@@ -13845,6 +13869,10 @@ async function loadLots(opts){
       if ($('lot-kpi-amount-meta')) $('lot-kpi-amount-meta').innerHTML = hasSold
         ? metaRow('Min', ccy(priceMin)) + metaRow('Max', ccy(priceMax)) + metaRow('Avg', ccy(priceAvg))
         : metaRow('Min', '—') + metaRow('Max', '—') + metaRow('Avg', '—');
+
+      // Fit the Total-amount value to its tile once the grid has laid out
+      // (it was just set to display:grid above, so defer a frame).
+      requestAnimationFrame(fitLotKpiAmount);
 
       if ($('lot-kpi-sold-count')) $('lot-kpi-sold-count').textContent = agg.sold.n;
       if ($('lot-kpi-sold-meta'))  $('lot-kpi-sold-meta').innerHTML =
