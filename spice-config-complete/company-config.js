@@ -155,6 +155,8 @@ const DEFAULTS = [
   // is gated.
   { key: 'flag_bills',         value: 'true',        category: 'flags',     label: 'Bills of Supply Module',       type: 'boolean' },
   { key: 'flag_debit_notes',   value: 'true',        category: 'flags',     label: 'Debit Notes Module',           type: 'boolean' },
+  { key: 'flag_bos_purchase_bill', value: 'true',    category: 'flags',     label: 'Bills of Supply: Purchase Bill (off = Commission Bill)', type: 'boolean' },
+  { key: 'flag_debit_note_planter', value: 'true',   category: 'flags',     label: 'Debit Notes — Planter Module', type: 'boolean' },
   { key: 'flag_pooling',    value: 'false',          category: 'flags',     label: 'Pooling (Single State)',    type: 'boolean' },
   { key: 'flag_sister',     value: 'true',           category: 'flags',     label: 'Sister Concern Active',    type: 'boolean' },
   { key: 'flag_tnpa',       value: 'true',           category: 'flags',     label: 'ASP Ship To Address',      type: 'boolean' },
@@ -300,6 +302,7 @@ const DEFAULTS = [
 
   // Tax Ledger Names — Debit Note 18%
   { key: 'tally_dn_discount',     value: 'Discount on Purchase',       category: 'tally', label: 'Discount on Purch (Debit Note ledger)', type: 'text' },
+  { key: 'tally_dnp_discount',    value: 'Commission-Planter',         category: 'tally', label: 'Planter Debit Note Discount Ledger', type: 'text' },
   { key: 'tally_dn_cgst',         value: 'OUTPUT CGST 9%',             category: 'tally', label: 'CGST 9% (Debit Note)',        type: 'text' },
   { key: 'tally_dn_sgst',         value: 'OUTPUT SGST 9%',             category: 'tally', label: 'SGST 9% (Debit Note)',        type: 'text' },
   { key: 'tally_dn_igst',         value: 'OUTPUT IGST 18%',            category: 'tally', label: 'IGST 18% (Debit Note)',       type: 'text' },
@@ -528,6 +531,28 @@ function initCompanySettings(db) {
   // uses INSERT OR IGNORE, so an installed row keeps its old category).
   try {
     db.prepare("UPDATE company_settings SET category = 'notifications' WHERE key = 'seller_youtube_url' AND category != 'notifications'").run();
+  } catch (e) { /* non-fatal */ }
+
+  // Migration: backfill settings keys added after first install. The seed
+  // pass above only fires for fresh DBs (INSERT OR IGNORE against the full
+  // DEFAULTS list); existing installs never get rows for keys introduced
+  // later. Re-INSERT OR IGNORE the new keys here so upgraded DBs pick them
+  // up on next boot (idempotent — IGNORE keeps any user-edited value).
+  //   • flag_debit_note_planter — sidebar toggle for the planter debit-note
+  //     stream (mirrors flag_debit_notes for the dealer stream).
+  //   • tally_dnp_discount — planter-side DN discount/commission ledger;
+  //     falls back to the dealer DN discount ledger (tally_dn_discount)
+  //     when blank.
+  try {
+    const seedNew = db.prepare(
+      'INSERT OR IGNORE INTO company_settings (key, value, category, label, field_type) VALUES (?, ?, ?, ?, ?)'
+    );
+    seedNew.run('flag_debit_note_planter', 'true', 'flags', 'Debit Notes — Planter Module', 'boolean');
+    seedNew.run('tally_dnp_discount', 'Commission-Planter', 'tally', 'Planter Debit Note Discount Ledger', 'text');
+    // flag_bos_purchase_bill — Bills of Supply: Purchase Bill (ON, default)
+    // vs Commission Bill (OFF) mode for the Bills tab. Default ON so
+    // upgraded installs keep the existing purchase-bill surfaces.
+    seedNew.run('flag_bos_purchase_bill', 'true', 'flags', 'Bills of Supply: Purchase Bill (off = Commission Bill)', 'boolean');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs

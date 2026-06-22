@@ -945,6 +945,15 @@ html.sidebar-collapsed .sidebar .sb-collapse-btn svg{transform:rotate(180deg)}
    whole menu surfaces. Default OFF (hidden) until the flag is read. */
 body:not([data-feat-bills="1"]) .feat-bills{display:none !important}
 body:not([data-feat-debit-notes="1"]) .feat-debit-notes{display:none !important}
+body:not([data-feat-debit-note-planter="1"]) .feat-debit-note-planter{display:none !important}
+/* Bills of Supply — Purchase Bill vs Commission Bill (flag_bos_purchase_bill).
+   When ON (Purchase Bill) the "🖨 Print Selected" toolbar button + the
+   per-row PDF icon show, and the commission surfaces hide. When OFF
+   (Commission Bill) it's the reverse: "🧾 Commission Bill Selected" + the
+   per-row Commission-Bill download icon show, and the purchase-bill/PDF
+   surfaces hide. Both driven by the one data-feat-bos-purchase-bill attr. */
+body:not([data-feat-bos-purchase-bill="1"]) .feat-bos-purchase-bill{display:none !important}
+body[data-feat-bos-purchase-bill="1"] .feat-bos-commission{display:none !important}
 body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:none !important}
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
 body:not([data-feat-whatsapp="1"]) .feat-whatsapp,
@@ -2632,6 +2641,10 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes
         </button>
+        <button class="side-item feat-debit-note-planter state-kerala-only" data-tab="debitplanter" onclick="go('debitplanter')">
+          <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
+          Debit Notes - Planter
+        </button>
         <button class="side-item state-kerala-only" data-tab="payments" onclick="go('payments')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
           Payments
@@ -2925,6 +2938,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="btn" onclick="deleteAll('purchases','Purchases',event)"   style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Purchases</button>
             <button class="btn feat-bills" onclick="deleteAll('bills','Bills',event)"           style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Bills</button>
             <button class="btn feat-debit-notes" onclick="deleteAll('debit-notes','Debit Notes',event)" style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Debit Notes</button>
+            <button class="btn feat-debit-note-planter" onclick="deleteAll('debit-notes-planter','Debit Notes - Planter',event)" style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Debit Notes - Planter</button>
             <button class="btn" onclick="deleteAll('buyers','Buyers',event)"         style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Buyers</button>
             <button class="btn" onclick="deleteAll('traders','Sellers',event)"       style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px">🗑 Sellers</button>
             <button class="btn" onclick="deleteAll('auctions','Auctions',event)"     style="height:44px;padding:0 14px;background:#7F1D1D;color:#fff;font-weight:600;border-color:#7F1D1D;display:inline-flex;align-items:center;justify-content:center;gap:6px" title="Wipes the CURRENT mode's trades/auctions AND cascades through their lots, invoices, purchases, bills, debit notes. The other mode's data is left untouched.">🗑 <span data-term-auction="plural">Auctions</span> (full reset)</button>
@@ -3541,6 +3555,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button id="pay-bulk-export" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="exportSelectedPaymentXlsx()" title="Detailed Payment XLSX for just the ticked sellers (honours per-seller lot picks)">📊 Payment XLSX (Selected)</button>
             <button id="pay-bulk-print" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="printSelectedPayments()" title="One merged PDF payment statement, a page per ticked seller">🖨 Print Selected</button>
             <button id="pay-bulk-wa" class="btn feat-whatsapp" style="display:none;height:38px;padding:0 16px;background:#25D366;color:#fff;font-weight:600" onclick="whatsappSelectedPayments()" title="WhatsApp a payment-credited message to each ticked seller, one at a time">💬 WhatsApp Selected</button>
+            <button id="pay-bulk-del" class="btn" style="display:none;height:38px;padding:0 16px;background:#fff;border:1px solid #fca5a5;color:#b91c1c;font-weight:600" onclick="deleteSelectedPayments()" title="Permanently delete the lots (and any debit notes) for the ticked sellers in this auction">🗑 Delete Selected</button>
           </div>
 
           <!-- Undo Last Export — visible only when this trade has an
@@ -3850,10 +3865,12 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="needs-invoice-write btn btn-g" id="btn-gen-bill-one" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
             <button class="needs-invoice-write btn btn-a" id="btn-gen-bill-all" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
             <button class="needs-admin btn" data-gen-admin-unlock="bills" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('bills')" title="Admin: clear the lock so the operator can generate bills again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
+            <button class="btn btn-o" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenCommissionBillModal()" title="Generate Commission Bill (Format 2) — one consolidated seller-wise report for the selected auction">+ Commission Bill (F2)</button>
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button class="btn" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedBills()" title="Print all ticked bills">🖨 Print Selected</button>
+            <button class="btn feat-bos-purchase-bill" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedBills()" title="Print all ticked bills">🖨 Print Selected</button>
+            <button class="btn btn-o feat-bos-commission" style="height:38px;padding:0 16px;font-weight:600" onclick="printSelectedCommissionBoS()" title="Print Commission Bill (Memorandum) for all ticked bills — one A4 page per lot, matches IMCPC reference format">🧾 Commission Bill Selected</button>
           </div>
 
           <!-- Bulk actions group — Delete Selected. Hidden until ≥1 row
@@ -3935,6 +3952,75 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
 
         <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Note#</th><th>Date</th><th><span data-term-auction="singular">Auction</span></th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debit-list"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="tc" id="tc-debitplanter">
+      <div class="card">
+        <h2>Debit Notes - Planter <span style="font-weight:400;font-size:12px;color:var(--text3)">For discounts/adjustments on planter bills of supply</span></h2>
+
+        <!-- KPI strip — hidden until first data load. Wrapped at startup
+             by initSummaryPanels into a collapsible Summary card with a
+             one-line stats summary in the header. -->
+        <div id="debitp-kpis" class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px;display:none">
+          <div class="kpi cardamom">
+            <div class="kpi-label">Debit Notes</div>
+            <div class="kpi-value" id="debitp-kpi-count">0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-label">Taxable Amount</div>
+            <div class="kpi-value" id="debitp-kpi-amount" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+          </div>
+          <div class="kpi turmeric">
+            <div class="kpi-label">Total Tax</div>
+            <div class="kpi-value" id="debitp-kpi-tax" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+          </div>
+          <div class="kpi chili">
+            <div class="kpi-label">Grand Total</div>
+            <div class="kpi-value" id="debitp-kpi-total" style="font-size:24px"><span class="kpi-unit" style="margin-right:4px">₹</span>0</div>
+            <div class="kpi-icon">
+              <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+          <!-- Trade filter — restricts the list to notes for the picked
+               trade. Empty = show all trades (default). Filtering is
+               server-side via /api/debit-notes-planter?ano=. -->
+          <select id="dnp-auction" onchange="loadDebitNotesPlanter()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:180px" title="Filter by trade">
+            <option value="">All <span data-term-auction="plural">auctions</span></option>
+          </select>
+
+          <!-- Cross-trade search across note no, planter name, trade no.
+               When active, the trade filter is bypassed so cross-trade
+               lookups work. Debounced 200ms. -->
+          <input type="search" id="dnp-search" placeholder="Search note no, planter, trade…" data-term-ph="Search note no, planter, {term}…" oninput="searchDebitNotesPlanterDebounced(this.value)" style="padding:0 12px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;min-width:240px;flex:1;max-width:320px">
+
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
+            <button class="needs-invoice-write btn btn-g" id="btn-gen-dnp-one" data-gen-doctype="debit_notes_planter" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitPlanterSingleModal()">+ Generate Debit Note</button>
+            <button class="needs-invoice-write btn btn-a" id="btn-gen-dnp-all" data-gen-doctype="debit_notes_planter" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenDebitPlanterAllModal()">⚡ Generate All</button>
+            <button class="needs-admin btn" data-gen-admin-unlock="debit_notes_planter" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('debit_notes_planter')" title="Admin: clear the lock so the operator can generate debit notes again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
+          </div>
+
+          <!-- Bulk actions group — Delete Selected. Hidden until ≥1 row
+               is ticked; visibility driven by _updateDnpBulkToolbar()
+               called from syncDnpMaster + on each checkbox change. -->
+          <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:auto">
+            <button id="dnp-bulk-del" class="needs-delete btn" style="display:none;height:38px;padding:0 14px;background:var(--spice-chili);color:#fff;font-weight:600" onclick="deleteSelectedDebitNotesPlanter()" title="Delete all ticked debit notes">🗑 Delete Selected <span id="dnp-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+          </div>
+        </div>
+
+        <div style="overflow-x:auto"><table><thead><tr><th style="width:32px"></th><th>Note#</th><th>Date</th><th><span data-term-auction="singular">Auction</span></th><th>Name</th><th>Amount</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Total</th><th>Actions</th></tr></thead><tbody id="debitp-list"></tbody></table></div>
       </div>
     </div>
 
@@ -4131,7 +4217,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-vouchers')">
           <span class="tally-section-chev">▼</span>
           <span>📄 Vouchers</span>
-          <span class="tally-section-count">6</span>
+          <span class="tally-section-count">7</span>
         </h3>
         <div class="tally-section-body">
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
@@ -4223,6 +4309,21 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
               <button class="btn btn-a" onclick="tallyPreview('debit_note')" style="flex:1;min-width:80px;padding:7px;font-size:12px">Preview</button>
               <button class="btn btn-g" onclick="tallyDownload('debit_note')" style="flex:1;min-width:80px;padding:7px;font-size:12px">XML</button>
               <button class="btn btn-g" onclick="downloadDebitNotePDF()" title="Per-buyer printable debit notes — one page per buyer, multi-page when needed" style="flex:1;min-width:80px;padding:7px;font-size:12px;background:#7B1FA2">PDF</button>
+            </div>
+          </div>
+
+          <div data-tally-co="asp" style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+              <span style="width:32px;height:32px;border-radius:8px;background:#EAF7EE;display:inline-flex;align-items:center;justify-content:center;font-size:18px">🌱</span>
+              <div>
+                <div style="font-weight:700;color:var(--text);font-size:14px">Debit Notes - Planter <span class="tally-co-badge tally-co-asp" data-logo-code-badge="asp">ASP</span></div>
+                <div style="font-size:11px;color:var(--text3)">Discount on planter bills of supply — commission/handling, 18% GST credit</div>
+              </div>
+            </div>
+            <div id="tally-preview-debit_note_planter" style="font-size:11px;color:var(--text3);min-height:18px;margin:6px 0"></div>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <button class="btn btn-a" onclick="tallyPreview('debit_note_planter')" style="flex:1;padding:7px;font-size:12px">Preview</button>
+              <button class="btn btn-g" onclick="tallyDownload('debit_note_planter')" style="flex:1;padding:7px;font-size:12px">Download XML</button>
             </div>
           </div>
         </div>
@@ -5331,6 +5432,22 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   </div>
 </div></div>
 
+<div class="modal-bg" id="gen-commission-bill-modal"><div class="modal">
+  <h2>Commission Bill (Format 2)</h2>
+  <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Generates a consolidated Commission Bill (Format 2) for the selected auction — one row per seller listing Amount, Refund, Commission, Handling, GST and net dues.</p>
+  <div class="fg"><label>Optional branch filter</label>
+    <select id="cb2-branch">
+      <option value="">All Branches</option>
+    </select>
+  </div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('gen-commission-bill-modal')">Cancel</button>
+    <button class="btn btn-a" onclick="downloadCommissionBillF2('xlsx')">📊 Excel</button>
+    <button class="btn btn-g" onclick="downloadCommissionBillF2('pdf')">📄 PDF</button>
+    <button class="btn" onclick="downloadCommissionBillF2('print')" style="background:var(--spice-saffron);color:#fff">🖨 Print</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="gen-bill-modal"><div class="modal">
   <h2>Generate Agriculturist Bill of Supply</h2>
   <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Only for sellers <strong>without GSTIN</strong> (farmers, agriculturists). No GST is charged. Sellers with GSTIN should use Generate Purchase Invoice instead.</p>
@@ -5402,6 +5519,61 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('gen-debit-all-modal')">Cancel</button>
     <button class="btn btn-g" id="gda-save" onclick="generateAllDebitNotesForTrade()">Generate</button>
+  </div>
+</div></div>
+
+<!-- Generate Debit Note - Planter (single) — trade-aware. Trade comes
+     from the dnp-auction dropdown; user types the bill of supply number
+     + the DN number to assign. Server validates the bill belongs to the
+     selected trade and that the DN number isn't already used within
+     that trade. -->
+<div class="modal-bg" id="gen-debitp-single-modal"><div class="modal">
+  <h2>Generate Debit Note - Planter</h2>
+  <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+    Generates one debit note for the specified bill of supply.
+    The bill must belong to the selected <span data-term-auction="singular">trade</span>.
+  </p>
+  <div id="gd1p-trade-info" style="padding:8px 12px;background:var(--green-bg);border-radius:6px;font-size:13px;margin-bottom:14px;font-weight:600">—</div>
+  <div class="fg">
+    <label>Bill of Supply #</label>
+    <input id="gd1p-bilno" autocomplete="off" placeholder="e.g. B-100">
+  </div>
+  <div class="fg">
+    <label>Debit Note # <span style="color:var(--text3);font-weight:400">(numeric — auto-filled with next-available for this trade)</span></label>
+    <input id="gd1p-startno" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="e.g. 100">
+  </div>
+  <div id="gd1p-err" style="display:none;padding:8px 12px;background:#FEE2E2;color:#991B1B;border-radius:6px;font-size:13px;margin-bottom:10px"></div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('gen-debitp-single-modal')">Cancel</button>
+    <button class="btn btn-g" id="gd1p-save" onclick="generateDebitNotePlanterSingle()">Generate</button>
+  </div>
+</div></div>
+
+<!-- Generate All Debit Notes - Planter — trade-wide bulk flow. Reads the
+     trade from the dnp-auction dropdown; generates one DN per
+     eligible bill of supply. Eligibility = bill has amount > 0 and
+     no existing DN for the same (ano, planter) pair. Preview pane
+     shows what will be created BEFORE the commit. Numbering starts
+     at the user-supplied Starting Number and increments by 1 per DN. -->
+<div class="modal-bg" id="gen-debitp-all-modal"><div class="modal" style="max-width:560px">
+  <h2>Generate All Debit Notes - Planter</h2>
+  <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+    Generates one debit note per eligible bill of supply in the selected <span data-term-auction="singular">trade</span>.
+    Bills already having a debit note are skipped automatically.
+    <strong>No cross-trade data</strong> — only bills under this <span data-term-auction="singular">trade</span> are touched.
+  </p>
+  <div id="gdap-trade-info" style="padding:8px 12px;background:var(--green-bg);border-radius:6px;font-size:13px;margin-bottom:10px;font-weight:600">—</div>
+  <div class="fg">
+    <label>Starting Debit Note # <span style="color:var(--text3);font-weight:400">(numeric — increments by 1 per DN)</span></label>
+    <input id="gdap-startno" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="e.g. 100">
+  </div>
+  <div id="gdap-preview" style="font-size:12px;color:var(--text2);max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:10px;background:#fafafa">
+    <em>Loading eligible bills of supply…</em>
+  </div>
+  <div id="gdap-err" style="display:none;padding:8px 12px;background:#FEE2E2;color:#991B1B;border-radius:6px;font-size:13px;margin-bottom:10px"></div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('gen-debitp-all-modal')">Cancel</button>
+    <button class="btn btn-g" id="gdap-save" onclick="generateAllDebitNotesPlanterForTrade()">Generate</button>
   </div>
 </div></div>
 
@@ -5634,6 +5806,27 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('dn-edit-modal')">Cancel</button>
     <button class="btn btn-g" onclick="saveDebitEdit()">Save Changes</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="dnp-edit-modal"><div class="modal" style="max-width:540px">
+  <h2>Edit Debit Note - Planter</h2>
+  <input type="hidden" id="dnp-edit-id">
+  <div class="sgrid">
+    <div class="fg"><label><span data-term-auction="singular">Trade</span> No</label><input id="dnpe-ano"></div>
+    <div class="fg"><label>Date</label><input type="date" id="dnpe-date"></div>
+    <div class="fg"><label>State</label><input id="dnpe-state"></div>
+    <div class="fg"><label>Planter Name</label><input id="dnpe-name"></div>
+    <div class="fg"><label>Note No</label><input id="dnpe-note_no"></div>
+    <div class="fg"><label>Amount</label><input type="number" id="dnpe-amount" step="0.01"></div>
+    <div class="fg"><label>CGST</label><input type="number" id="dnpe-cgst" step="0.01"></div>
+    <div class="fg"><label>SGST</label><input type="number" id="dnpe-sgst" step="0.01"></div>
+    <div class="fg"><label>IGST</label><input type="number" id="dnpe-igst" step="0.01"></div>
+    <div class="fg"><label>Total</label><input type="number" id="dnpe-total" step="0.01"></div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('dnp-edit-modal')">Cancel</button>
+    <button class="btn btn-g" onclick="saveDebitPlanterEdit()">Save Changes</button>
   </div>
 </div></div>
 
@@ -6064,6 +6257,7 @@ const SUMMARY_PANELS = [
   { kpiId:'pay-kpis',  chartId:'pay-chart-card',      key:'payments',  label:'Summary' },
   { kpiId:'bill-kpis', chartId:null,                  key:'bills',     label:'Summary' },
   { kpiId:'dn-kpis',   chartId:null,                  key:'debit',     label:'Summary' },
+  { kpiId:'debitp-kpis', chartId:null,                key:'debitplanter', label:'Summary' },
 ];
 
 function summaryStorageKey(key){ return 'summary:' + key; }
@@ -6251,9 +6445,12 @@ const ICONS={
   star:'<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
   // WhatsApp glyph — filled (overridden in CSS to fill:currentColor) since
   // the brand mark reads poorly as a stroke-only outline.
-  whatsapp:'<svg viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>'
+  whatsapp:'<svg viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>',
+  // Commission Bill download — a document with a down-tick, used on the
+  // Bills tab when flag_bos_purchase_bill is OFF (Commission Bill mode).
+  commission:'<svg viewBox="0 0 24 24"><path d="M6 2h12a1 1 0 0 1 1 1v18l-2.5-1.6L14 21l-2-1.6L10 21l-2.5-1.6L5 21V3a1 1 0 0 1 1-1z"/><path d="M12 7v6M9.5 10.5L12 13l2.5-2.5"/></svg>'
 };
-function iconBtn(kind,title,onclick){
+function iconBtn(kind,title,onclick,extraCls){
   // Map icon kinds to permission classes so per-row action buttons are
   // hidden when the user lacks the underlying capability. Server still
   // validates every request — these classes are pure UX.
@@ -6266,7 +6463,9 @@ function iconBtn(kind,title,onclick){
                 // pass the perm class via custom render if needed.
   };
   const permCls = PERM_FOR[kind] || '';
-  return `<button class="icon-btn i-${kind} ${permCls}" title="${title}" onclick="${onclick}">${ICONS[kind]}</button>`;
+  // `extraCls` lets callers tag a button with a feature-flag class (e.g.
+  // feat-bos-purchase-bill / feat-bos-commission) so CSS can show/hide it per flag.
+  return `<button class="icon-btn i-${kind} ${permCls} ${extraCls||''}" title="${title}" onclick="${onclick}">${ICONS[kind]}</button>`;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -7636,7 +7835,7 @@ function go(tab){
   const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,formulas:loadFormulas,fixdata:loadFixData,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
-    bills:loadBillAuctions,debit:loadDebitNotes,journals:loadJournalDefault,registers:loadRegisterDefault,tally:loadTallyAuctions,
+    bills:loadBillAuctions,debit:loadDebitNotes,debitplanter:loadDebitNotesPlanter,journals:loadJournalDefault,registers:loadRegisterDefault,tally:loadTallyAuctions,
     spicesboard:loadSpiceBoard,
     // Price Check — populate the auction picker (mode-filtered server-side)
     // on tab open. File picker + buttons remain idle until the user picks
@@ -9543,6 +9742,15 @@ function applyFeatureFlags(){
   // Sidebar module toggles — independent of business mode.
   setFlag('data-feat-bills',          lookupFlag('flag_bills'));
   setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
+  setFlag('data-feat-debit-note-planter', lookupFlag('flag_debit_note_planter'));
+  // Bills of Supply — Purchase Bill vs Commission Bill. Default ON
+  // (Purchase Bill) when the setting is missing (older installs that
+  // pre-date the flag) so the standard purchase-bill/PDF surfaces show
+  // out of the box; OFF swaps in the "🧾 Commission Bill Selected"
+  // toolbar button + the per-row Commission-Bill download icon.
+  const _bosFlag = flagsArr.find(x => x && x.key === 'flag_bos_purchase_bill');
+  const bosPurchaseBillOn = !_bosFlag || String(_bosFlag.value).toLowerCase() === 'true';
+  setFlag('data-feat-bos-purchase-bill', bosPurchaseBillOn);
   // WhatsApp share buttons + Lots bulk "Set Buyer" — independent of mode.
   setFlag('data-feat-whatsapp',       lookupFlag('flag_whatsapp'));
   // Lots bulk actions, each gated by its own flag:
@@ -9572,15 +9780,25 @@ function applyFeatureFlags(){
 // Called from applyTallyCompanyVisibility (fires on settings save +
 // state/mode flip), so editing the Logo Code in Settings → Company /
 // Sister Company reflects everywhere immediately.
-function applyTallyLogoBadges(){
+// Returns the configured Logo Code for a company side ('isp' | 'asp'),
+// falling back to the literal 'ISP'/'ASP'. Used both by the static-badge
+// painter below and by the dynamically-rendered To Tally lists (Single
+// Party Ledger / Single Voucher) so every badge in the tab shows the
+// user's Logo Code rather than a hardcoded literal.
+function tallyLogoCode(co){
   const findVal = (cat, key, fb) => {
     const arr = (window._sdata && _sdata[cat]) || [];
     const f = arr.find(x => x && x.key === key);
     const v = (f && String(f.value || '').trim()) || '';
     return v || fb;
   };
-  const ispCode = findVal('company', 'logo',   'ISP').toUpperCase();
-  const aspCode = findVal('sister',  's_logo', 'ASP').toUpperCase();
+  return String(co).toLowerCase() === 'asp'
+    ? findVal('sister',  's_logo', 'ASP').toUpperCase()
+    : findVal('company', 'logo',   'ISP').toUpperCase();
+}
+function applyTallyLogoBadges(){
+  const ispCode = tallyLogoCode('isp');
+  const aspCode = tallyLogoCode('asp');
   document.querySelectorAll('[data-logo-code-badge="isp"]').forEach(el => { el.textContent = ispCode; });
   document.querySelectorAll('[data-logo-code-badge="asp"]').forEach(el => { el.textContent = aspCode; });
 }
@@ -10431,7 +10649,7 @@ const FLAG_GROUPS = [
     'flag_disc_gst','flag_debit_note','flag_discount_in_prate'
   ]},
   { id:'modules', title:'Modules & Tools', icon:'🧰', keys:[
-    'flag_bills','flag_debit_notes','flag_price_check','flag_whatsapp',
+    'flag_bills','flag_debit_notes','flag_debit_note_planter','flag_price_check','flag_whatsapp',
     'flag_set_buyer','flag_print_purchase'
   ]},
   { id:'special', title:'Special / Advanced', icon:'⚠', keys:[
@@ -10529,6 +10747,7 @@ const FIELD_HELP = {
   flag_discount_in_prate: 'Grade 1 lots only: rolls the per-lot Discount into P_Rate using the discount-inclusive Pooler deduction (Rates settings). Grade 2 / ungraded lots are unaffected.',
   flag_bills:      'Shows the Bills of Supply module (sidebar tab + related actions).',
   flag_debit_notes:'Shows the Debit Notes module (sidebar tab + related actions).',
+  flag_debit_note_planter:'Shows the Debit Notes - Planter module (sidebar tab + related actions).',
   flag_whatsapp:   'Shows WhatsApp share buttons (e.g. the Lot Entry receipt share).',
   flag_set_buyer:  'Enables the Lots tab bulk "Set Buyer" action on ticked lots.',
   flag_print_purchase: 'Shows the "Print Selected Purchase" button in the Sales tab — only in ASP context (Kerala + e-Trade).',
@@ -11538,6 +11757,7 @@ async function deleteAll(resource, label, ev){
     else if (resource === 'purchases') loadPurchases && loadPurchases();
     else if (resource === 'bills') loadBills && loadBills();
     else if (resource === 'debit-notes') loadDebitNotes && loadDebitNotes();
+    else if (resource === 'debit-notes-planter') loadDebitNotesPlanter && loadDebitNotesPlanter();
     else if (resource === 'auctions') loadAuctions && loadAuctions();
     else if (resource === 'everything') {
       // Full nuke — refresh every list so no stale rows linger on screen.
@@ -11547,6 +11767,7 @@ async function deleteAll(resource, label, ev){
       loadPurchases && loadPurchases();
       loadBills && loadBills();
       loadDebitNotes && loadDebitNotes();
+      loadDebitNotesPlanter && loadDebitNotesPlanter();
       loadAuctions && loadAuctions();
     }
     // Refresh the audit log if it's visible so the operator can see
@@ -14961,6 +15182,7 @@ const _GEN_LOCK_TOOLTIP = {
   purchases:   'All registered dealers in this trade have purchase invoices. Ask an admin to click 🔓 Allow regeneration to unlock.',
   bills:       'All agriculturist sellers in this trade have bills of supply. Ask an admin to click 🔓 Allow regeneration to unlock.',
   debit_notes: 'Every purchase in this trade has a debit note. Ask an admin to click 🔓 Allow regeneration to unlock.',
+  debit_notes_planter: 'Every bill of supply in this trade has a debit note. Ask an admin to click 🔓 Allow regeneration to unlock.',
 };
 // Force-toggle visibility on a bulk-action button. Permission CSS
 // (.needs-admin etc.) applies `display: inline-flex !important` to
@@ -15016,10 +15238,11 @@ async function adminAllowRegeneration(docType) {
   const selectorIdByDocType = {
     invoices: 'inv-auction', purchases: 'pur-auction',
     bills: 'bill-auction', debit_notes: 'dn-auction',
+    debit_notes_planter: 'dnp-auction',
   };
   const sel = document.getElementById(selectorIdByDocType[docType]);
   if (sel) {
-    if (docType === 'debit_notes') {
+    if (docType === 'debit_notes' || docType === 'debit_notes_planter') {
       auctionId = sel.selectedOptions[0]?.dataset?.auctionId || '';
     } else if (sel.value) {
       auctionId = sel.value;
@@ -15030,7 +15253,7 @@ async function adminAllowRegeneration(docType) {
     if (tabEl && tabEl.id) tabScope = '#' + tabEl.id;
   }
   if (!auctionId) { toast('Pick a trade first'); return; }
-  const label = ({invoices:'invoices', purchases:'purchase invoices', bills:'bills', debit_notes:'debit notes'})[docType] || docType;
+  const label = ({invoices:'invoices', purchases:'purchase invoices', bills:'bills', debit_notes:'debit notes', debit_notes_planter:'planter debit notes'})[docType] || docType;
   if (!await appConfirm(`Allow operator to regenerate ${label} for this trade?\n\nThis is a ONE-SHOT unlock — the gate re-engages automatically after the next successful generate.`)) return;
   try {
     await j(`/api/auctions/${encodeURIComponent(auctionId)}/generation-override`, {
@@ -15168,12 +15391,17 @@ async function loadInvoices(opts){
           const isASPCtx = (getCurrentBusinessMode && getCurrentBusinessState)
             ? (getCurrentBusinessMode() === 'e-Trade' && String(getCurrentBusinessState() || '').toUpperCase() === 'KERALA')
             : false;
+          // e-Auction has no ASP\u2194ISP purchase-view mirror \u2192 hide the icon entirely.
+          const isEAuction = getCurrentBusinessMode
+            && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-auction';
           const purchaseTitle = isASPCtx
             ? 'Print Purchase Invoice (ISPL-side view of this ASP sale)'
             : 'Purchase view \u2014 available only in ASP context (Kerala + e-Trade)';
-          const purchaseBtn = isASPCtx
-            ? iconBtn('purchase', purchaseTitle, `viewPurchaseViewPDF(${i.id})`)
-            : `<button class="icon-btn i-purchase" title="${purchaseTitle}" style="opacity:.35;cursor:not-allowed" disabled>${ICONS.purchase}</button>`;
+          const purchaseBtn = isEAuction
+            ? ''
+            : (isASPCtx
+              ? iconBtn('purchase', purchaseTitle, `viewPurchaseViewPDF(${i.id})`)
+              : `<button class="icon-btn i-purchase" title="${purchaseTitle}" style="opacity:.35;cursor:not-allowed" disabled>${ICONS.purchase}</button>`);
           return iconBtn('pdf','View / download PDF',`viewInvoicePDF(${i.id})`)
             + purchaseBtn
             + iconBtn('whatsapp','Send via WhatsApp',`whatsappInvoice(${i.id},'${encodeURIComponent(i.buyer1||i.buyer||'')}','${encodeURIComponent(i.invo||'')}','${encodeURIComponent(i.sale||'')}',${Number(i.tot)||0},'${esc(i.ano||'')}')`)
@@ -16266,7 +16494,7 @@ function _updatePayBulkToolbar(ticked){
     if (on) el.style.removeProperty('display');
     else    el.style.setProperty('display', 'none', 'important');
   };
-  ['pay-bulk-export-bank', 'pay-bulk-export', 'pay-bulk-print', 'pay-bulk-wa'].forEach(id => show(document.getElementById(id), ticked > 0));
+  ['pay-bulk-export-bank', 'pay-bulk-export', 'pay-bulk-print', 'pay-bulk-wa', 'pay-bulk-del'].forEach(id => show(document.getElementById(id), ticked > 0));
   if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
 }
 // Delegate: per-row checkbox changes drive the master + bulk toolbar.
@@ -16752,6 +16980,32 @@ function _collectSelectedPaymentNames(){
 }
 function exportSelectedBankPayment(){
   _payDownloadSelected('bank_payment', document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
+}
+// Delete Selected → removes the underlying lots (and any debit notes) for
+// the ticked sellers in this trade. Payments is a derived view, so a row
+// "delete" really clears that seller's lots. Trade-scoped + irreversible.
+async function deleteSelectedPayments(){
+  const aid = document.getElementById('pay-auction')?.value || '';
+  const names = _collectSelectedPaymentNames();
+  if (!aid) { alert('Select an auction first'); return; }
+  if (!names.length) { alert('Tick one or more sellers first'); return; }
+  if (!confirm(
+    `Delete the lots for ${names.length} seller${names.length === 1 ? '' : 's'} in this auction?\n\n` +
+    `This permanently removes all lots (and any debit notes) for the selected sellers in this auction. ` +
+    `Other auctions' data is not touched. This action CANNOT be undone.`
+  )) return;
+  try {
+    const d = await j(`/api/payments/${aid}/delete-sellers`, {
+      method: 'POST',
+      body: JSON.stringify({ sellerNames: names })
+    });
+    toast(`Deleted ${d.lotsDeleted || 0} lot${(d.lotsDeleted || 0) === 1 ? '' : 's'}` +
+          (d.dnsDeleted ? ` + ${d.dnsDeleted} DN${d.dnsDeleted === 1 ? '' : 's'}` : '') +
+          ` for ${d.sellers || 0} seller${(d.sellers || 0) === 1 ? '' : 's'}`);
+    loadPayments();
+  } catch (e) {
+    showError(e);
+  }
 }
 function exportSelectedPaymentXlsx(){
   _payDownloadSelected('payment', document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
@@ -18061,7 +18315,10 @@ async function loadBills(){
         fmt:(n)=>fmtI(n,2),
         render:(b)=>`<strong>${fmtI(b.net||0,2)}</strong>` },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(b)=>
-          iconBtn('pdf','View PDF',`viewBillPDF('${b.auction_id||1}','${encodeURIComponent(b.name)}','${b.bil}')`)
+          // Purchase Bill mode (flag_bos_purchase_bill ON): PDF (View/Print) icon.
+          iconBtn('pdf','View PDF',`viewBillPDF('${b.auction_id||1}','${encodeURIComponent(b.name)}','${b.bil}')`,'feat-bos-purchase-bill')
+          // Commission Bill mode (flag OFF): download the Commission Bill (BoS).
+          + iconBtn('commission','Download Commission Bill',`downloadBillCommissionBoS(${b.id},'${encodeURIComponent(b.name||'')}','${encodeURIComponent(b.bil||'')}')`,'feat-bos-commission')
           + iconBtn('whatsapp','Send via WhatsApp',`whatsappBill('${b.auction_id||1}','${encodeURIComponent(b.name)}','${encodeURIComponent(b.bil||'')}',${Number(b.net)||0},'${esc(b.ano||'')}')`)
           + iconBtn('edit','Edit bill',`openBillEdit(${JSON.stringify(b).replace(/"/g,'&quot;')})`)
           + iconBtn('del','Delete bill',`delBill(${b.id})`) }
@@ -18112,6 +18369,71 @@ async function viewBillPDF(auctionId,sellerName,billNo){
   );
 }
 async function delBill(id){if(!await appConfirm('Delete bill?'))return;await j(`/api/bills/${id}`,{method:'DELETE'});loadBills()}
+
+// ── Commission Bill (Bill of Supply variant) ───────────────
+// Commission Bill for the ticked bills. One A4 page per LOT, modeled on
+// the IMCPC commission-bill layout: seller + purchaser header, per-lot
+// cardamom cost + sample-refund rows, [-] COMMISSION row, CGST/SGST (or
+// IGST) split, NETT AMOUNT and amount in words. Shown in Commission Bill
+// mode (flag_bos_purchase_bill OFF).
+async function printSelectedCommissionBoS(){
+  const body=document.getElementById('bills-list');
+  if(!body){alert('No bills list found');return}
+  const checked=Array.from(body.querySelectorAll('.bill-select-cb:checked'));
+  if(!checked.length){alert('Tick one or more bills first');return}
+  const ids=checked.map(cb=>Number(cb.value)).filter(Boolean);
+  await fetchPdfWithOverlay(
+    `Building Commission Bill (BoS) for ${ids.length} bill${ids.length===1?'':'s'}…`,
+    '/api/bills/commission-bos-bulk',
+    `CommissionBoS_Batch_${ids.length}.pdf`,
+    { ids }
+  );
+}
+// Download the Commission Bill for a single row. Shown in commission mode
+// in place of the PDF icon. Reuses the bulk endpoint with a single id so
+// the layout matches the "🧾 Commission Bill Selected" output exactly.
+async function downloadBillCommissionBoS(id,sellerName,billNo){
+  if(!id){toast('Bill not found');return}
+  const name=decodeURIComponent(sellerName||'').replace(/[^\w.-]+/g,'_')||'bill';
+  await fetchPdfWithOverlay(
+    'Building Commission Bill (BoS)…',
+    '/api/bills/commission-bos-bulk',
+    `CommissionBoS_${name}_${decodeURIComponent(billNo||'')}.pdf`,
+    { ids:[id] }
+  );
+}
+// Commission Bill (Format 2) — one consolidated seller-wise report for
+// the whole trade (optionally one branch). Opens the gen modal where the
+// operator picks branch + output format (Excel / PDF / Print).
+async function openGenCommissionBillModal(){
+  const aid=document.getElementById('bill-auction')?.value;
+  if(!aid){toast('Select an auction first');return}
+  // Clone branch options from the Bills toolbar's branch filter into the
+  // modal's cb2-branch select (target has no shared populateBranchSelect).
+  const src=document.getElementById('bill-branch-filter');
+  const dst=document.getElementById('cb2-branch');
+  if(dst){
+    dst.innerHTML = src ? src.innerHTML : '<option value="">All branches</option>';
+    const cur=(src?.value||'').trim();
+    if(cur && Array.from(dst.options).some(o=>o.value===cur)) dst.value=cur;
+  }
+  showModal('gen-commission-bill-modal');
+}
+function downloadCommissionBillF2(format){
+  const aid=document.getElementById('bill-auction')?.value;
+  if(!aid){toast('Select an auction first');return}
+  const br=(document.getElementById('cb2-branch')?.value||'').trim();
+  const qs=new URLSearchParams({format, token:T});
+  if(br) qs.set('branch', br);
+  hideModal('gen-commission-bill-modal');
+  if(format==='print'){
+    // Open the PDF view; user can use the browser's Print command.
+    qs.set('format','pdf');
+    window.open(`${B}/api/bills/commission-bill-f2/${aid}?${qs.toString()}`,'_blank');
+    return;
+  }
+  window.open(`${B}/api/bills/commission-bill-f2/${aid}?${qs.toString()}`,'_blank');
+}
 
 // ── Debit Notes ────────────────────────────────────────────
 // Populate the trade filter dropdown for the Debit Notes tab. Pulls
@@ -18491,6 +18813,365 @@ async function deleteSelectedDebitNotes(){
   } catch (e) { showError(e); }
 }
 
+// ── Debit Notes - Planter ──────────────────────────────────
+// Mirrors the dealer Debit Notes feature, but targets planter bills of
+// supply via /api/debit-notes-planter. Trade source of truth is the
+// dnp-auction dropdown. WhatsApp share is intentionally omitted here.
+async function _populateDnpAuctionFilter(){
+  const sel = document.getElementById('dnp-auction');
+  if (!sel) return;
+  // Skip if already populated (idempotent — keeps the user's current selection).
+  if (sel.options.length > 1) return;
+  try {
+    const list = await j('/api/auctions');
+    const allTerm = (typeof termAuction === 'function') ? termAuction(true, true) : 'auctions';
+    sel.innerHTML = `<option value="">All ${esc(allTerm)}</option>` +
+      (list || []).map(a => {
+        return `<option value="${a.ano}" data-auction-id="${a.id}">${esc(a.ano)} — ${fmtD(a.date)}</option>`;
+      }).join('');
+  } catch (e) { /* non-fatal — filter just won't populate */ }
+}
+
+async function loadDebitNotesPlanter(opts){
+  // First call populates the trade filter; subsequent calls reuse it.
+  _populateDnpAuctionFilter();
+
+  const ano    = (document.getElementById('dnp-auction')?.value || '').trim();
+  // dnp-auction stores `ano`; the numeric auction id we need for the
+  // generation-status endpoint is mirrored on the selected option.
+  const _dnSel = document.getElementById('dnp-auction');
+  const _dnAid = _dnSel ? (_dnSel.selectedOptions[0]?.dataset?.auctionId || '') : '';
+  if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(_dnAid, '#tc-debitplanter', ['debit_notes_planter']);
+  const search = (document.getElementById('dnp-search')?.value || '').trim();
+  // Build URL — when search is active, drop the ano filter so the
+  // search spans every trade. Mode + business-state filters still
+  // apply via the server's modeWhereClause.
+  const qs = [];
+  if (ano && !search) qs.push(`ano=${encodeURIComponent(ano)}`);
+  if (search)         qs.push(`search=${encodeURIComponent(search)}`);
+  const url = qs.length ? `/api/debit-notes-planter?${qs.join('&')}` : '/api/debit-notes-planter';
+
+  const d = await j(url);
+  const arr = Array.isArray(d) ? d : [];
+
+  // ── Update KPI strip ───────────────────────────────────────────
+  const kpiStrip = document.getElementById('debitp-kpis');
+  if (kpiStrip) {
+    if (!arr.length) {
+      kpiStrip.style.display = 'none';
+      if (typeof hideSummaryPanel === 'function') hideSummaryPanel('debitplanter');
+    } else {
+      kpiStrip.style.display = 'grid';
+      const totalAmount = arr.reduce((a,n) => a + (Number(n.amount) || 0), 0);
+      const totalTax    = arr.reduce((a,n) => a + (Number(n.cgst) || 0) + (Number(n.sgst) || 0) + (Number(n.igst) || 0), 0);
+      const grandTotal  = arr.reduce((a,n) => a + (Number(n.total) || 0), 0);
+      const $ = (id) => document.getElementById(id);
+      if ($('debitp-kpi-count'))  $('debitp-kpi-count').textContent  = arr.length;
+      if ($('debitp-kpi-amount')) $('debitp-kpi-amount').innerHTML   = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalAmount, 2)}`;
+      if ($('debitp-kpi-tax'))    $('debitp-kpi-tax').innerHTML      = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(totalTax, 2)}`;
+      if ($('debitp-kpi-total'))  $('debitp-kpi-total').innerHTML    = `<span class="kpi-unit" style="margin-right:4px">₹</span>${fmtI(grandTotal, 2)}`;
+      if (typeof updateSummaryStats === 'function') {
+        updateSummaryStats('debitplanter',
+          `<strong>${arr.length}</strong> debit note${arr.length === 1 ? '' : 's'} · `
+          + `<strong>₹${fmtI(grandTotal, 2)}</strong> total`);
+      }
+    }
+  }
+
+  DataTable.mount('debitp-list', arr, {
+    columns: [
+      { key:'_select', label:'',
+        labelHTML:'<input type="checkbox" id="dnp-select-all" onclick="event.stopPropagation();toggleAllDnp(this.checked)" title="Select / clear all visible" style="cursor:pointer;width:16px;height:16px;vertical-align:middle;accent-color:var(--green)">',
+        sortable:false, searchable:false,
+        render:(n)=>`<input type="checkbox" class="dnp-select-cb" value="${n.id}" onclick="event.stopPropagation()" style="cursor:pointer">` },
+      { key:'note_no', label:'Note#', sort:'text' },
+      { key:'date', label:'Date', sort:'date', render:(n)=>fmtD(n.date) },
+      { key:'ano', label:'Auction', sort:'text', render:(n)=>n.ano?('#'+esc(n.ano)):'—' },
+      { key:'name', label:'Name', sort:'text' },
+      { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(v)=>fmtI(v,2) },
+      { key:'cgst', label:'CGST', sort:'number', numeric:true, fmt:(v)=>fmtI(v,2) },
+      { key:'sgst', label:'SGST', sort:'number', numeric:true, fmt:(v)=>fmtI(v,2) },
+      { key:'igst', label:'IGST', sort:'number', numeric:true, fmt:(v)=>fmtI(v,2) },
+      { key:'total', label:'Total', sort:'number', numeric:true,
+        fmt:(v)=>fmtI(v,2),
+        render:(n)=>`<strong>${fmtI(n.total||0,2)}</strong>` },
+      { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(n)=>
+          iconBtn('pdf','View PDF',`viewDebitNotePlanterPDF(${n.id})`)
+          + iconBtn('edit','Edit debit note',`openDebitPlanterEdit(${JSON.stringify(n).replace(/"/g,'&quot;')})`)
+          + iconBtn('del','Delete debit note',`delDebitNotePlanter(${n.id})`) }
+    ]
+  });
+  syncDnpMaster();
+}
+
+function openDebitPlanterEdit(n){
+  document.getElementById('dnp-edit-id').value=n.id;
+  const fields=['ano','date','state','name','note_no','amount','cgst','sgst','igst','total'];
+  for(const f of fields){const el=document.getElementById('dnpe-'+f);if(el)el.value=n[f]!=null?n[f]:''}
+  showModal('dnp-edit-modal');
+}
+async function saveDebitPlanterEdit(){
+  const id=document.getElementById('dnp-edit-id').value;
+  const body={};
+  const nums=['amount','cgst','sgst','igst','total'];
+  const fields=['ano','date','state','name','note_no',...nums];
+  for(const f of fields){
+    const el=document.getElementById('dnpe-'+f);if(!el)continue;
+    body[f]=nums.includes(f)?(parseFloat(el.value)||0):el.value;
+  }
+  try{
+    const r=await fetch(B+`/api/debit-notes-planter/${id}`,{method:'PUT',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(body)});
+    if(!r.ok){const d=await r.json();throw new Error(d.error||'Save failed')}
+    hideModal('dnp-edit-modal');toast('Debit note updated');loadDebitNotesPlanter();
+  }catch(e){showError(e)}}
+// ── Generate Debit Note - Planter (single + Generate All) ───────
+// Both flows read the trade from the dnp-auction dropdown. Numbering is
+// trade-wise — each trade has its own 1..N sequence.
+function _resolveDnpTrade(){
+  const sel = document.getElementById('dnp-auction');
+  const ano = sel ? sel.value : '';
+  if (!ano) return null;
+  const label = sel.options[sel.selectedIndex]?.textContent || '';
+  return { ano, label };
+}
+
+// Single-DN modal opener. Pulls the trade from dnp-auction, pre-fills
+// the next-available DN number, focuses the bill-of-supply field.
+async function openGenDebitPlanterSingleModal(){
+  const t = _resolveDnpTrade();
+  if (!t) { toast('Select a trade first (use the filter dropdown above)'); return; }
+  document.getElementById('gd1p-trade-info').textContent = `Trade: ${t.label}`;
+  document.getElementById('gd1p-bilno').value = '';
+  document.getElementById('gd1p-startno').value = '';
+  document.getElementById('gd1p-err').style.display = 'none';
+  showModal('gen-debitp-single-modal');
+  // Pre-fill startno with the next-available number FOR THIS TRADE.
+  try {
+    const r = await j(`/api/debit-notes-planter/next-note-no?ano=${encodeURIComponent(t.ano)}`);
+    document.getElementById('gd1p-startno').value = r && r.next ? r.next : '';
+  } catch (_) { /* leave blank — server will fall back to MAX+1 */ }
+  setTimeout(() => document.getElementById('gd1p-bilno').focus(), 50);
+}
+
+async function generateDebitNotePlanterSingle(){
+  const t = _resolveDnpTrade();
+  if (!t) { toast('Select a trade first'); return; }
+  const bilno = (document.getElementById('gd1p-bilno').value || '').trim();
+  const startNoVal = (document.getElementById('gd1p-startno').value || '').trim();
+  const errEl = document.getElementById('gd1p-err');
+  const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
+  errEl.style.display = 'none';
+  if (!bilno) return showErr('Enter a bill of supply number');
+  if (!startNoVal) return showErr('Enter the debit note number');
+  const startNo = parseInt(startNoVal, 10);
+  if (!Number.isFinite(startNo) || startNo < 1) {
+    return showErr('Debit note number must be a positive integer');
+  }
+  const btn = document.getElementById('gd1p-save');
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {
+    const d = await j('/api/debit-notes-planter/generate', {
+      method: 'POST',
+      body: JSON.stringify({ bilno, ano: t.ano, startNoteNo: startNo })
+    });
+    hideModal('gen-debitp-single-modal');
+    if (d.created) {
+      toast(`Debit note #${d.note_no} generated for bill ${bilno}`);
+    } else if (d.note) {
+      toast(d.note);
+    } else {
+      toast('Generated');
+    }
+    loadDebitNotesPlanter();
+  } catch (e) {
+    showErr(e.message || 'Failed');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate';
+  }
+}
+
+// Generate All — trade-wide. Inputs: trade (dropdown) + starting DN
+// number (modal). Generates one DN per eligible bill of supply.
+async function openGenDebitPlanterAllModal(){
+  const t = _resolveDnpTrade();
+  if (!t) { toast('Select a trade first (use the filter dropdown above)'); return; }
+  document.getElementById('gdap-trade-info').textContent = `Trade: ${t.label}`;
+  document.getElementById('gdap-err').style.display = 'none';
+  document.getElementById('gdap-startno').value = '';
+  document.getElementById('gdap-preview').innerHTML = '<em>Loading eligible bills of supply…</em>';
+  showModal('gen-debitp-all-modal');
+  // Pre-fill startno with the next-available number FOR THIS TRADE.
+  try {
+    const r = await j(`/api/debit-notes-planter/next-note-no?ano=${encodeURIComponent(t.ano)}`);
+    document.getElementById('gdap-startno').value = r && r.next ? r.next : '';
+  } catch (_) { /* leave blank */ }
+  // Resolve trade's auctionId from /api/auctions so we can ask for
+  // its eligible bills. Match by ano (could collide across modes,
+  // but dnp-auction is mode-filtered upstream so a single match is OK).
+  let auctionId = null;
+  try {
+    const all = await j('/api/auctions');
+    const hit = (all || []).find(a => String(a.ano) === String(t.ano));
+    if (hit) auctionId = hit.id;
+  } catch (_) {}
+  if (auctionId) {
+    loadGenDebitPlanterAllPreview(auctionId);
+  } else {
+    document.getElementById('gdap-preview').innerHTML =
+      '<div style="color:var(--spice-chili);text-align:center;padding:14px">Could not resolve trade id. Refresh and retry.</div>';
+    document.getElementById('gdap-save').disabled = true;
+  }
+}
+
+// Preview pane — list every bill of supply in this trade that's eligible
+// for a DN (no existing DN for the same planter + has amount > 0).
+async function loadGenDebitPlanterAllPreview(auctionId){
+  const host = document.getElementById('gdap-preview');
+  try {
+    const data = await j(`/api/debit-notes-planter/eligible-bills/${auctionId}`);
+    if (!data || !data.length) {
+      host.innerHTML = '<div style="color:var(--spice-saffron);text-align:center;padding:14px">No eligible bills of supply. Every bill in this trade already has a debit note, or no bills exist for this trade.</div>';
+      document.getElementById('gdap-save').disabled = true;
+      return;
+    }
+    document.getElementById('gdap-save').disabled = false;
+    const totalAmt = data.reduce((s, r) => s + Number(r.amount || 0), 0);
+    host.innerHTML =
+      `<div style="font-weight:600;margin-bottom:6px;color:var(--spice-text-main)">${data.length} eligible bill${data.length === 1 ? '' : 's'} · ₹${fmtI(totalAmt, 2)} total</div>`
+      + '<table style="width:100%;font-size:11px;border-collapse:collapse">'
+      + '<thead><tr style="border-bottom:1px solid var(--border);text-align:left">'
+      +   '<th style="padding:4px 6px">Bill#</th><th style="padding:4px 6px">Planter</th>'
+      +   '<th style="padding:4px 6px;text-align:right">Amount</th>'
+      + '</tr></thead><tbody>'
+      + data.map(r => `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:4px 6px;font-family:monospace">${esc(r.bil)}</td>
+          <td style="padding:4px 6px">${esc(r.name || '—')}</td>
+          <td style="padding:4px 6px;text-align:right;font-family:monospace">${fmtI(r.amount || 0, 2)}</td>
+        </tr>`).join('')
+      + '</tbody></table>';
+  } catch (e) {
+    host.innerHTML = `<div style="color:var(--spice-chili);text-align:center;padding:14px">Failed to load: ${esc(e.message || e)}</div>`;
+    document.getElementById('gdap-save').disabled = true;
+  }
+}
+
+async function generateAllDebitNotesPlanterForTrade(){
+  const t = _resolveDnpTrade();
+  if (!t) { toast('Select a trade first'); return; }
+  const errEl = document.getElementById('gdap-err');
+  const showErr = (m) => { errEl.textContent = m; errEl.style.display = 'block'; };
+  errEl.style.display = 'none';
+  const startNoVal = (document.getElementById('gdap-startno').value || '').trim();
+  if (!startNoVal) return showErr('Enter the starting debit note number');
+  const startNo = parseInt(startNoVal, 10);
+  if (!Number.isFinite(startNo) || startNo < 1) {
+    return showErr('Starting Number must be a positive integer');
+  }
+  const btn = document.getElementById('gdap-save');
+  btn.disabled = true; btn.textContent = 'Generating…';
+  try {
+    const d = await j('/api/debit-notes-planter/generate-bulk', {
+      method: 'POST',
+      body: JSON.stringify({ ano: t.ano, startNoteNo: startNo })
+    });
+    hideModal('gen-debitp-all-modal');
+    const c = d.created || 0;
+    const s = d.skipped || 0;
+    if (c === 0 && s === 0 && d.note) {
+      toast(d.note);
+    } else {
+      toast(`Generated ${c} debit note${c === 1 ? '' : 's'}${s ? ` · ${s} skipped` : ''}`);
+    }
+    loadDebitNotesPlanter();
+  } catch (e) {
+    showErr(e.message || 'Failed');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Generate';
+  }
+}
+async function viewDebitNotePlanterPDF(id){
+  return fetchAndPrint(`/api/debit-notes-planter/${id}/pdf`, `DebitNotePlanter_${id}.pdf`);
+}
+async function delDebitNotePlanter(id){if(!await appConfirm('Delete debit note?'))return;await j(`/api/debit-notes-planter/${id}`,{method:'DELETE'});loadDebitNotesPlanter()}
+
+// ── Planter debit note bulk selection + cross-trade search ──
+function toggleAllDnp(state){
+  const body=document.getElementById('debitp-list');
+  if(!body)return;
+  body.querySelectorAll('.dnp-select-cb').forEach(cb=>{
+    const row=cb.closest('tr');
+    if(row && row.style.display !== 'none') cb.checked=state;
+  });
+  syncDnpMaster();
+}
+function syncDnpMaster(){
+  const master=document.getElementById('dnp-select-all');
+  const body=document.getElementById('debitp-list');
+  if(!body){
+    if(master){master.checked=false;master.indeterminate=false}
+    _updateDnpBulkToolbar(0);
+    return;
+  }
+  const visible=Array.from(body.querySelectorAll('.dnp-select-cb')).filter(cb=>{
+    const row=cb.closest('tr');return row && row.style.display !== 'none';
+  });
+  const ticked=visible.filter(cb=>cb.checked).length;
+  if(master){
+    master.indeterminate = ticked>0 && ticked<visible.length;
+    master.checked       = visible.length>0 && ticked===visible.length;
+  }
+  _updateDnpBulkToolbar(ticked);
+}
+function _updateDnpBulkToolbar(ticked){
+  const del = document.getElementById('dnp-bulk-del');
+  const counter = document.getElementById('dnp-sel-count');
+  const show = (el, on) => {
+    if (!el) return;
+    if (typeof _bulkBtnSetVisible === 'function') return _bulkBtnSetVisible(el, on);
+    if (on) el.style.removeProperty('display');
+    else    el.style.setProperty('display', 'none', 'important');
+  };
+  show(del, ticked > 0);
+  if (counter) counter.textContent = ticked > 0 ? String(ticked) : '';
+}
+// Delegate: per-row checkbox changes sync the master + bulk toolbar.
+document.addEventListener('change', (e)=>{
+  if(e.target && e.target.classList && e.target.classList.contains('dnp-select-cb')){
+    syncDnpMaster();
+  }
+});
+
+// Planter debit notes search debouncer — 200ms after the last keystroke.
+let _dnpSearchTimer = null;
+function searchDebitNotesPlanterDebounced(_q){
+  clearTimeout(_dnpSearchTimer);
+  _dnpSearchTimer = setTimeout(() => loadDebitNotesPlanter(), 200);
+}
+
+// Bulk-delete ticked planter debit notes.
+async function deleteSelectedDebitNotesPlanter(){
+  const body = document.getElementById('debitp-list');
+  if (!body) return;
+  const checked = Array.from(body.querySelectorAll('.dnp-select-cb:checked'));
+  if (!checked.length) { toast('Tick one or more debit notes first'); return; }
+  const ids = checked.map(cb => Number(cb.value)).filter(Boolean);
+  const btn = document.getElementById('dnp-bulk-del');
+  const proceed = (typeof confirmTwoClick === 'function')
+    ? await confirmTwoClick('dnpBulkDelete', btn, {
+        confirmLabel: `⚠ Click again to DELETE ${ids.length} debit note${ids.length === 1 ? '' : 's'}`,
+        fallbackMessage: `Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
+      })
+    : await appConfirm(`Delete ${ids.length} debit note${ids.length === 1 ? '' : 's'}? This cannot be undone.`);
+  if (!proceed) return;
+  try {
+    const r = await j('/api/debit-notes-planter/bulk-delete', { method: 'POST', body: JSON.stringify({ ids }) });
+    const n = r.deleted || 0;
+    toast(`Deleted ${n} debit note${n === 1 ? '' : 's'}`);
+    loadDebitNotesPlanter();
+  } catch (e) { showError(e); }
+}
+
 // ── Journals ───────────────────────────────────────────────
 function loadJournalDefault(){
   const today=new Date().toISOString().slice(0,10);
@@ -18512,7 +19193,8 @@ const TALLY_LABELS={
   isp_purchase:'ISP Purchase',
   rd_purchase:'RD Purchase',
   urd_purchase:'URD Purchase',
-  debit_note:'Debit Note'
+  debit_note:'Debit Note',
+  debit_note_planter:'Debit Note - Planter'
 };
 const TALLY_TYPES=Object.keys(TALLY_LABELS);
 const TALLY_LEDGER_TYPES=['ledger_sales','ledger_rd_purchase','ledger_urd_purchase','ledger'];
@@ -18683,7 +19365,7 @@ function renderTallyPartyList(){
   for(const kind of ['sales','rd_purchase','urd_purchase']){
     const arr=byKind[kind];if(!arr||arr.length===0)continue;
     const co=TALLY_PARTY_KIND_CO[kind]||'isp';
-    html+=`<div style="padding:6px 12px;background:${TALLY_PARTY_KIND_BG[kind]};font-size:11px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.5px">${TALLY_PARTY_KIND_LABEL[kind]} · ${arr.length} <span class="tally-co-badge tally-co-${co}">${co.toUpperCase()}</span></div>`;
+    html+=`<div style="padding:6px 12px;background:${TALLY_PARTY_KIND_BG[kind]};font-size:11px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.5px">${TALLY_PARTY_KIND_LABEL[kind]} · ${arr.length} <span class="tally-co-badge tally-co-${co}" data-logo-code-badge="${co}">${tallyLogoCode(co)}</span></div>`;
     for(const p of arr){
       const safeName=(p.name||'').replace(/'/g,"\\'");
       html+=`<div style="padding:8px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;align-items:center;gap:10px">
@@ -18843,7 +19525,7 @@ function renderTallyPartyVoucherList(){
       const safeName=(p.name||'').replace(/'/g,"\\'");
       let btns='';
       for(const t of types){
-        btns+=`<button class="btn btn-g" onclick="tallyDownloadPartyVoucher('${t.type}','${safeName.replace(/"/g,'&quot;')}')" title="${esc(t.title)}" style="padding:5px 8px;font-size:11px;flex:0 0 auto;display:inline-flex;align-items:center;gap:4px"><span class="tally-co-badge tally-co-${t.co}" style="font-size:9px;padding:1px 4px">${t.co.toUpperCase()}</span>${esc(t.label)}</button>`;
+        btns+=`<button class="btn btn-g" onclick="tallyDownloadPartyVoucher('${t.type}','${safeName.replace(/"/g,'&quot;')}')" title="${esc(t.title)}" style="padding:5px 8px;font-size:11px;flex:0 0 auto;display:inline-flex;align-items:center;gap:4px"><span class="tally-co-badge tally-co-${t.co}" data-logo-code-badge="${t.co}" style="font-size:9px;padding:1px 4px">${tallyLogoCode(t.co)}</span>${esc(t.label)}</button>`;
       }
       html+=`<div style="padding:8px 12px;border-bottom:1px solid var(--border);background:#fff;display:flex;align-items:center;gap:8px">
         <div style="flex:1;min-width:0">

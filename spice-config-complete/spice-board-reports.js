@@ -157,6 +157,7 @@ function getReportContext(db, opts) {
       l.ppla            AS seller_place,
       l.pstate          AS seller_state,
       l.cr              AS seller_cr,
+      l.aadhar          AS seller_aadhar,
       l.tel             AS seller_tel,
       l.grade           AS grade,
       l.crpt            AS crpt,
@@ -165,6 +166,7 @@ function getReportContext(db, opts) {
       l.trader_id       AS trader_id,
       t.name            AS trader_name,
       t.cr              AS trader_cr,
+      t.aadhar          AS trader_aadhar,
       t.padd            AS trader_addr,
       t.ppla            AS trader_place,
       t.pstate          AS trader_state,
@@ -183,7 +185,7 @@ function getReportContext(db, opts) {
       ON UPPER(TRIM(b.code))  = UPPER(TRIM(l.code))
       OR UPPER(TRIM(b.buyer)) = UPPER(TRIM(l.buyer))
     WHERE ${where.join(' AND ')}
-      ${opts.allLots ? '' : 'AND l.amount > 0'}
+      ${opts.allLots ? '' : (opts.includeWithdrawn ? "AND (l.amount > 0 OR UPPER(TRIM(COALESCE(l.code,''))) = 'WD')" : 'AND l.amount > 0')}
     ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no
   `, params);
 
@@ -586,14 +588,51 @@ function buildFormD(ctx, db, opts) {
   if (!isFinite(minRate)) minRate = 0;
   const avgRate = totalKilos > 0 ? (totalValue / totalKilos) : 0;
 
-  const buyerMap = new Map();
-  for (const r of rows) {
-    const key = (r.buyer_code || r.buyer_full || 'UNKNOWN').toUpperCase();
-    if (!buyerMap.has(key)) buyerMap.set(key, { name: r.buyer1 || r.buyer_full, kilos: 0, value: 0 });
-    const b = buyerMap.get(key);
-    b.kilos += Number(r.qty) || 0; b.value += Number(r.amount) || 0;
+  // Top buyers — built from the invoices table so each buyer appears exactly
+  // ONCE with their CUMULATIVE invoice value (a buyer with more than one
+  // invoice has the totals, incl. commission/GST/TCS/gunny, summed). We group
+  // on the TRADE NAME (`buyer1`, falling back to the buyer code) because the
+  // same buyer can have more than one buyer code — e.g. "ALLUS CARDAMOM POINT"
+  // invoiced under both "...ACP" and "...ACP0" — and must still collapse to a
+  // single row. Invoices aren't branch-tagged, so the buyer figures are
+  // whole-auction even when the report is branch-filtered. If no invoices
+  // exist yet for the auction, fall back to lot-derived figures so the report
+  // still renders.
+  let buyersAll = [];
+  // Dual-company guard (e-Auction): each buyer has TWO invoice rows in this
+  // build — the ISP (buyer-facing, Tamil Nadu) sale and the ASP→ISP transfer
+  // (Kerala). Summing both would double-count the buyer's kilos/value, so we
+  // count only the ISP sale (the actual sale to the outside customer). ASP
+  // invoices are identified by a Kerala `state`, matching how the payment /
+  // sales-journal code distinguishes them elsewhere in this build.
+  const invRows = db ? db.all(
+    `SELECT MAX(TRIM(buyer1)) AS name, MAX(TRIM(buyer)) AS code,
+            SUM(COALESCE(qty,0)) AS kilos, SUM(COALESCE(tot,0)) AS value
+       FROM invoices
+      WHERE ano = ? AND LOWER(COALESCE(state,'')) NOT LIKE '%kerala%'
+      GROUP BY UPPER(TRIM(COALESCE(NULLIF(TRIM(buyer1),''), buyer)))`,
+    [auction.ano]) || [] : [];
+  if (invRows.length) {
+    buyersAll = invRows.map(r => ({
+      name: r.name || r.code || 'UNKNOWN',
+      kilos: Number(r.kilos) || 0,
+      value: Number(r.value) || 0,
+    }));
+  } else {
+    // Fallback (pre-invoicing): derive from lots, keyed on the trade name
+    // (falling back to buyer code) — normalised so one buyer = one row.
+    const buyerMap = new Map();
+    for (const r of rows) {
+      const code = String(r.buyer_code || '').trim();
+      const name = r.buyer1 || r.buyer_full || '';
+      const key = (name || code || 'UNKNOWN').toUpperCase().replace(/\s+/g, ' ').trim();
+      if (!buyerMap.has(key)) buyerMap.set(key, { name, kilos: 0, value: 0 });
+      const b = buyerMap.get(key);
+      b.kilos += Number(r.qty) || 0; b.value += Number(r.amount) || 0;
+    }
+    buyersAll = [...buyerMap.values()];
   }
-  const top5 = [...buyerMap.values()].sort((a, b) => b.kilos - a.kilos).slice(0, 5);
+  const top5 = buyersAll.sort((a, b) => b.kilos - a.kilos).slice(0, 5);
   const top5Totals = top5.reduce((a, b) => ({ kilos: a.kilos + b.kilos, value: a.value + b.value }), { kilos: 0, value: 0 });
 
   const seasonStart = readSetting(db, 'season_start_year', '');
@@ -610,16 +649,17 @@ function buildFormD(ctx, db, opts) {
     const placeKL = placeBizState === 'KERALA' || placeBizState === 'KL';
     place = readSetting(db, placeKL ? 'kl_branch' : 'tn_branch',
               readSetting(db, 'tn_branch',
-                readSetting(db, 'kl_branch', '')));
+                readSetting(db, 'kl_branch',
+                  readSetting(db, 'business_place', ''))));
   }
-  const company = readSetting(db, 'trade_name', readSetting(db, 'short_name', ''));
+  const company = readSetting(db, 'trade_name', readSetting(db, 'company_name', ''));
   const bizState = String(readSetting(db, 'business_state', '')).toUpperCase();
   const isKL     = bizState === 'KERALA' || bizState === 'KL';
   const a1key    = isKL ? 'kl_address1' : 'tn_address1';
   const a2key    = isKL ? 'kl_address2' : 'tn_address2';
   const branch   = readSetting(db, isKL ? 'kl_branch' : 'tn_branch', '');
   const address  = [readSetting(db, a1key, ''), readSetting(db, a2key, ''), branch]
-                    .filter(Boolean).join(', ');
+                    .filter(Boolean).join(', ') || readSetting(db, 'address1', '');
 
   return {
     auction, season, licence, place, company, address,
@@ -917,55 +957,82 @@ function isGstinDealer(cr) {
 function buildFormC(ctx) {
   const { auction, rows } = ctx;
   const planters = [], dealers = [];
-  let maxRate = 0, minRate = Infinity, totalKilos = 0, totalValue = 0;
+  let maxRate = 0, minRate = Infinity, totalKilosPut = 0, totalKilos = 0, totalValue = 0;
   for (const r of rows) {
     const seller = r.trader_name || r.seller_name || '';
     const cr = r.trader_cr || r.seller_cr || '';
     const place = r.trader_place || r.seller_place || '';
+    // Estate Reg / Licence # — prefer the seller's Spices Board Licence (SBL)
+    // number, falling back to the GSTIN held in the `cr` (CR / GSTIN) column.
+    // The SBL is stored in the seller's `aadhar` column, which doubles as
+    // Aadhaar OR SBL. They are told apart by character content, not length:
+    //   • SBL always contains LETTERS — a 2-letter category code + "REG",
+    //     e.g. "ML/REG/16071/2021". Any value with a letter is the SBL.
+    //   • Aadhaar is purely numeric (12 digits, with or without
+    //     hyphen/space/dot separators) — never used here.
+    // So a value containing a letter → SBL (used); a digits-only value →
+    // Aadhaar → ignored, falling back to the GSTIN (cr). Never the Aadhaar.
+    const aadhar = String(r.trader_aadhar || r.seller_aadhar || '').trim();
+    const sblNo = /[A-Za-z]/.test(aadhar) ? aadhar : '';
+    // Withdrawn lots (code = 'WD') are put for auction but not sold — they
+    // appear in Form C with their Qty put, but Qty sold / Rate / Value = 0
+    // and no bidder.
+    const isWD = String(r.lot_code || '').trim().toUpperCase() === 'WD';
+    const qty = Number(r.qty) || 0;
     const item = {
       lot:    r.lot,
       seller: seller,
       address: place,
-      regId:  cr,
-      qtyPut: Number(r.qty) || 0,
-      qtySold: Number(r.qty) || 0,
-      rate:   Number(r.price) || 0,
-      value:  Number(r.amount) || 0,
-      sample: Number(r.sample_refund || r.sample_refud) || 0,
-      commission: Number(r.commission) || 0,
-      buyer:  r.buyer1 || r.buyer_full || '',
-      sbl:    r.buyer_sbl || '',
+      regId:  sblNo || cr,
+      qtyPut: qty,
+      qtySold: isWD ? 0 : qty,
+      rate:   isWD ? 0 : (Number(r.price) || 0),
+      value:  isWD ? 0 : (Number(r.amount) || 0),
+      sample: isWD ? 0 : (Number(r.sample_refund || r.sample_refud) || 0),
+      commission: isWD ? 0 : (Number(r.commission) || 0),
+      buyer:  isWD ? '' : (r.buyer1 || r.buyer_full || ''),
+      sbl:    isWD ? '' : (r.buyer_sbl || ''),
       hasGstin: isGstinDealer(cr),
+      isWD,
     };
+    // Form C bucketing rule (user spec): rows whose registration parses
+    // as a GSTIN go under DEALERS; everything else (CR codes, blank,
+    // Board CS-codes without a GSTIN) goes under PLANTERS. The legacy
+    // classifySeller() CS-prefix rule is no longer used here — it
+    // mis-classified Spices Board CS dealers without a GSTIN as dealers.
     (item.hasGstin ? dealers : planters).push(item);
     if (item.rate > maxRate) maxRate = item.rate;
     if (item.rate < minRate && item.rate > 0) minRate = item.rate;
-    totalKilos += item.qtySold; totalValue += item.value;
+    totalKilosPut += item.qtyPut; totalKilos += item.qtySold; totalValue += item.value;
   }
-  const _sblSort = (a, b) => {
-    const aw = String(a.regId || '').trim();
-    const bw = String(b.regId || '').trim();
-    if (!aw && bw) return 1;
-    if (aw && !bw) return -1;
-    return aw.localeCompare(bw, 'en', { numeric: true, sensitivity: 'base' });
+  // Sort each bucket by lot number (the Sl.No column) ascending, so the PDF,
+  // Excel, and JSON outputs are deterministic and read in lot order. Numeric
+  // lots sort numerically ("2" before "10"); non-numeric lots fall back to a
+  // natural string compare.
+  const _lotSort = (a, b) => {
+    const an = parseInt(a.lot, 10), bn = parseInt(b.lot, 10);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    return String(a.lot || '').localeCompare(String(b.lot || ''), 'en', { numeric: true, sensitivity: 'base' });
   };
-  planters.sort(_sblSort);
-  dealers.sort(_sblSort);
+  planters.sort(_lotSort);
+  dealers.sort(_lotSort);
   if (!isFinite(minRate)) minRate = 0;
   const avg = totalKilos > 0 ? totalValue / totalKilos : 0;
-  const sum = arr => arr.reduce((a, x) => ({ kilos: a.kilos + x.qtySold, value: a.value + x.value }), { kilos: 0, value: 0 });
+  // Track Qty put and Qty sold separately so withdrawn lots (put > 0, sold = 0)
+  // reconcile correctly in the section + grand totals.
+  const sum = arr => arr.reduce((a, x) => ({ kilosPut: a.kilosPut + x.qtyPut, kilos: a.kilos + x.qtySold, value: a.value + x.value }), { kilosPut: 0, kilos: 0, value: 0 });
   return {
     auction, planters, dealers,
     plantersTotals: sum(planters), dealersTotals: sum(dealers),
     gstinDealers: dealers,
     gstinDealerTotals: sum(dealers),
-    grand: { kilos: totalKilos, value: totalValue },
+    grand: { kilosPut: totalKilosPut, kilos: totalKilos, value: totalValue },
     maxRate, minRate, avgRate: avg,
   };
 }
 
 function formCJson(db, opts) {
-  const ctx = getReportContext(db, opts);
+  const ctx = getReportContext(db, Object.assign({}, opts, { includeWithdrawn: true }));
   const d = buildFormC(ctx);
   const licence = readSetting(db, 'sbl', '');
   const seasonStart = readSetting(db, 'season_start_year', '');
@@ -984,23 +1051,24 @@ function formCJson(db, opts) {
     { key: 'buyer',      header: 'Name and full address of bidder' },
     { key: 'sbl',        header: 'Spices Board licence number' },
   ];
-  const numberRows = arr => arr.map((r, i) => Object.assign({ slNo: i + 1 }, r));
+  // Sl.No column carries the lot number (per spec), not a running serial.
+  const numberRows = arr => arr.map((r) => Object.assign({ slNo: r.lot }, r));
   return {
     title: 'FORM - C (Auction Report)',
     auction: { ano: ctx.auction.ano, date: fmtDateDMY(ctx.auction.date), state: ctx.auction.state },
     meta: { licence, season, maxRate: d.maxRate, minRate: d.minRate, avgRate: d.avgRate },
     columns: cols,
     sections: [
-      { title: 'PLANTERS', rows: numberRows(d.planters), totals: { label: 'PLANTERS TOTAL', qtyPut: d.plantersTotals.kilos, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value } },
-      { title: 'DEALERS',  rows: numberRows(d.dealers),  totals: { label: 'DEALERS TOTAL',  qtyPut: d.dealersTotals.kilos,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value } },
+      { title: 'PLANTERS', rows: numberRows(d.planters), totals: { label: 'PLANTERS TOTAL', qtyPut: d.plantersTotals.kilosPut, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value } },
+      { title: 'DEALERS',  rows: numberRows(d.dealers),  totals: { label: 'DEALERS TOTAL',  qtyPut: d.dealersTotals.kilosPut,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value } },
     ],
-    grand: { label: 'GRAND TOTAL', qtyPut: d.grand.kilos, qtySold: d.grand.kilos, value: d.grand.value },
+    grand: { label: 'GRAND TOTAL', qtyPut: d.grand.kilosPut, qtySold: d.grand.kilos, value: d.grand.value },
   };
 }
 
 async function formCXlsx(db, opts) {
   _loadDateFormat(db);
-  const ctx = getReportContext(db, opts);
+  const ctx = getReportContext(db, Object.assign({}, opts, { includeWithdrawn: true }));
   const d   = buildFormC(ctx);
   const licence = readSetting(db, 'sbl', '');
   const seasonStart = readSetting(db, 'season_start_year', '');
@@ -1037,8 +1105,9 @@ async function formCXlsx(db, opts) {
     sec.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
     const stripYearHyphen = (s) =>
       String(s == null ? '' : s).trim().replace(/(\d{2})-(\d{2})\b/g, '$1$2');
-    rows.forEach((r, i) => {
-      const dr = ws.addRow([i + 1, r.seller, stripYearHyphen(r.regId), r.qtyPut, r.qtySold, r.rate, r.value, r.sample, r.commission, r.buyer, stripYearHyphen(r.sbl)]);
+    rows.forEach((r) => {
+      // Sl.No column carries the lot number (per spec), not a running serial.
+      const dr = ws.addRow([r.lot, r.seller, stripYearHyphen(r.regId), r.qtyPut, r.qtySold, r.rate, r.value, r.sample, r.commission, r.buyer, stripYearHyphen(r.sbl)]);
       dr.getCell(4).numFmt = '#,##0.000'; dr.getCell(5).numFmt = '#,##0.000';
       dr.getCell(6).numFmt = '#,##0.00';  dr.getCell(7).numFmt = '#,##,##0.00';
       dr.getCell(8).numFmt = '#,##0.00';  dr.getCell(9).numFmt = '#,##0.00';
@@ -1050,9 +1119,9 @@ async function formCXlsx(db, opts) {
                       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7F5F2' } }; });
     ws.addRow([]);
   }
-  emitSection('PLANTERS', d.planters, { label: 'PLANTERS TOTAL', qtyPut: d.plantersTotals.kilos, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value });
-  emitSection('DEALERS',  d.dealers,  { label: 'DEALERS TOTAL',  qtyPut: d.dealersTotals.kilos,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value });
-  const g = ws.addRow(['', 'GRAND TOTAL', '', d.grand.kilos, d.grand.kilos, '', d.grand.value, '', '', '', '']);
+  emitSection('PLANTERS', d.planters, { label: 'PLANTERS TOTAL', qtyPut: d.plantersTotals.kilosPut, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value });
+  emitSection('DEALERS',  d.dealers,  { label: 'DEALERS TOTAL',  qtyPut: d.dealersTotals.kilosPut,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value });
+  const g = ws.addRow(['', 'GRAND TOTAL', '', d.grand.kilosPut, d.grand.kilos, '', d.grand.value, '', '', '', '']);
   g.font = { bold: true, size: 11 };
   g.getCell(4).numFmt = '#,##0.000'; g.getCell(5).numFmt = '#,##0.000'; g.getCell(7).numFmt = '#,##,##0.00';
   g.eachCell(c => { c.border = { top: { style: 'double' }, bottom: { style: 'double' } };
@@ -1062,7 +1131,7 @@ async function formCXlsx(db, opts) {
 
 async function formCPdf(db, opts) {
   _loadDateFormat(db);
-  const ctx = getReportContext(db, opts);
+  const ctx = getReportContext(db, Object.assign({}, opts, { includeWithdrawn: true }));
   const d   = buildFormC(ctx);
   const licence = readSetting(db, 'sbl', '');
   const seasonStart = readSetting(db, 'season_start_year', '');
@@ -1072,7 +1141,8 @@ async function formCPdf(db, opts) {
   const _fcKL = _fcBS === 'KERALA' || _fcBS === 'KL';
   const place = readSetting(db, _fcKL ? 'kl_branch' : 'tn_branch',
                   readSetting(db, 'tn_branch',
-                    readSetting(db, 'kl_branch', '')));
+                    readSetting(db, 'kl_branch',
+                      readSetting(db, 'business_place', ''))));
 
   const doc = new PDFDocument({ size: 'A4', layout: 'portrait', margin: 18 });
   const buffers = []; doc.on('data', b => buffers.push(b));
@@ -1240,7 +1310,8 @@ async function formCPdf(db, opts) {
   }
 
   function row(r, idx, sectionStartIdx) {
-    const slNo = String(sectionStartIdx + idx + 1).padStart(3, '0');
+    // Sl.No column carries the lot number (per spec), not a running serial.
+    const slNo = String(r.lot == null ? '' : r.lot);
     const BASE_FONT = 6.5;
     const MIN_FONT  = 5.0;
     doc.fillColor('#000').font('Helvetica').fontSize(BASE_FONT);
@@ -1324,11 +1395,11 @@ async function formCPdf(db, opts) {
     totalsRow(title, totals);
     runningStart += rows.length;
   }
-  emitSection('PLANTERS TOTAL', d.planters, { qtyPut: d.plantersTotals.kilos, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value });
-  emitSection('DEALERS TOTAL',  d.dealers,  { qtyPut: d.dealersTotals.kilos,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value });
+  emitSection('PLANTERS TOTAL', d.planters, { qtyPut: d.plantersTotals.kilosPut, qtySold: d.plantersTotals.kilos, value: d.plantersTotals.value });
+  emitSection('DEALERS TOTAL',  d.dealers,  { qtyPut: d.dealersTotals.kilosPut,  qtySold: d.dealersTotals.kilos,  value: d.dealersTotals.value });
 
   ensureRoom(20);
-  totalsRow('GRAND TOTAL', { qtyPut: d.grand.kilos, qtySold: d.grand.kilos, value: d.grand.value }, { grand: true });
+  totalsRow('GRAND TOTAL', { qtyPut: d.grand.kilosPut, qtySold: d.grand.kilos, value: d.grand.value }, { grand: true });
 
   ensureRoom(70);
   y += 10;

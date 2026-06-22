@@ -597,6 +597,28 @@ async function initDb() {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
+  // ── DEBIT NOTES — PLANTER ──────────────────────────────────
+  // Planter/agriculturist debit-note stream, sourced from bills of
+  // supply (the planter/URD purchase side) rather than dealer sales.
+  // Kept as a SEPARATE table from the dealer `debit_notes` above so the
+  // two streams maintain independent, trade-wise numbering and can be
+  // audited / exported without colliding. Same column shape as the
+  // dealer table.
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS debit_notes_planter (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ano TEXT NOT NULL,
+    date TEXT NOT NULL,
+    state TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    note_no TEXT DEFAULT '',
+    amount REAL DEFAULT 0,
+    cgst REAL DEFAULT 0,
+    sgst REAL DEFAULT 0,
+    igst REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+
   // ── AUDIT LOG ──────────────────────────────────────────────
   wrapped.exec(`CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -737,7 +759,7 @@ async function initDb() {
   // row" is either meaningless or already captured by the table itself.
   const AUDITED_TABLES = ['traders','trader_banks','buyers','auctions',
     'generation_overrides','lots','invoices','purchases','bills',
-    'debit_notes','lot_allocations','route_distances','users'];
+    'debit_notes','debit_notes_planter','lot_allocations','route_distances','users'];
 
   // ── MIGRATIONS (for existing databases created before schema changes) ──
   const migrations = [
@@ -745,6 +767,7 @@ async function initDb() {
     'ALTER TABLE invoices ADD COLUMN auction_id INTEGER',
     'ALTER TABLE bills ADD COLUMN auction_id INTEGER',
     'ALTER TABLE debit_notes ADD COLUMN auction_id INTEGER',
+    'ALTER TABLE debit_notes_planter ADD COLUMN auction_id INTEGER',
     "ALTER TABLE buyers ADD COLUMN code TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN cadd2 TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN email TEXT DEFAULT ''",

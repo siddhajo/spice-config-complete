@@ -286,7 +286,13 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
   };
   // Each entry is either a plain line ({ t:'text' }) or an aligned
   // label/colon/value row ({ t:'kv' }) so GSTIN/PAN/STATE colons line up.
-  buyerLines.push({ t: 'text', s: (buyer.name || '').toUpperCase() });
+  // e-Auction: BILLED/SHIPPED TO uses the company short name instead of the
+  // full legal name, per spec.
+  const isEAuction = (cfg.business_mode || '').toLowerCase() === 'e-auction';
+  const buyerDisplayName = isEAuction
+    ? (cfg.s_short_name || cfg.short_name || buyer.name)
+    : buyer.name;
+  buyerLines.push({ t: 'text', s: (buyerDisplayName || '').toUpperCase() });
   const buyerAddr = [buyer.address, buyer.place ? 'DOOR No.650, ' + buyer.place : ''].filter(Boolean).join(', ').toUpperCase();
   if (buyerAddr) buyerLines.push({ t: 'text', s: buyerAddr });
   if (buyer.gstin) buyerLines.push({ t: 'kv', l: 'GSTIN', v: buyer.gstin });
@@ -748,7 +754,7 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   });
 }
 
-module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF };
+module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF };
 
 /**
  * Sales Invoice PDF (Tax Invoice)
@@ -811,6 +817,9 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   //         invoices don't reference a separate dispatch), logo swap.
   const isASP = (cfg.business_mode || '').toLowerCase() === 'e-trade'
              && (cfg.business_state || '').toUpperCase() === 'KERALA';
+  // e-Auction mode: no ASP↔ISP mirror, so the "Other References" cross-ref
+  // is meaningless and is blanked below.
+  const isEAuction = (cfg.business_mode || '').toLowerCase() === 'e-auction';
   // ISP inter-state invoices should not bill Transport/Insurance separately
   // (item 5: those costs are absorbed in the buyer's freight, not invoiced).
   // Combine with the existing ASP rule: ASP also hides them.
@@ -935,10 +944,11 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
 
   // ── LEFT BLOCK: Logo + company details ──────────────────────
   box(leftX, topY, leftW, topHeaderH);
-  // Logo file pick. For ASP sales invoice → ASP logo. For ASP purchase view
-  // (issuer is ISPL, not ASP) → ISPL logo.
+  // Logo file pick. Kerala installs operate as the Sister Company (ASP) in
+  // BOTH e-Trade and e-Auction modes (matches effectiveCompany), so the logo
+  // follows business_state, not mode. For ASP purchase view (issuer is ISPL,
+  // not ASP) → ISPL logo.
   const useASPLogo = !isPurchaseView
-                  && (cfg.business_mode || '').toLowerCase() === 'e-trade'
                   && (cfg.business_state || '').toUpperCase() === 'KERALA';
   const logoFile = useASPLogo ? 'logo-asp.png' : 'logo-ispl.png';
   const logoPath = require('path').join(__dirname, 'public', logoFile);
@@ -1025,7 +1035,8 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     // regardless of the actual ISP sale type to the external buyer).
     const aspInvo = invoiceData && invoiceData.aspInvo;
     const otherRefCfg = { ...cfg, inv_prefix: otherPrefix };
-    const otherRefs = formatInvoiceNo(otherRefCfg, 'I', aspInvo || invoiceNo);
+    // e-Auction has no mirrored ASP invoice to cross-reference → leave blank.
+    const otherRefs = isEAuction ? '' : formatInvoiceNo(otherRefCfg, 'I', aspInvo || invoiceNo);
     labeledCell(rightX,         ry, rCell, rRow, 'Reference No. & Date.', '');
     labeledCell(rightX + rCell, ry, rCell, rRow, 'Other References', otherRefs);
   }
@@ -2297,6 +2308,464 @@ function generateAgriBillsBatchPDF(bills, cfg) {
 
   for (const bill of bills) {
     generateAgriBillPDF(bill.billData, cfg, bill.billNo, doc);
+  }
+
+  return new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+// ── Commission Bill (Bills of Supply, Commission-Bill mode) ──────────
+// IMCPC "MEMORANDUM OF CARDAMOM SOLD" format — one A4 page per LOT.
+// Seller (billed-for) on the left, purchaser (sold-to) on the right,
+// a cardamom line + optional sample-refund sub-row, a [-] COMMISSION row
+// (HSN 996111) with CGST/SGST (intra) or IGST (inter), a TAX AMOUNT band,
+// a NETT AMOUNT strip and amount-in-words. Self-contained — depends only
+// on effectiveCompany() + amountToWords(). billData shape:
+//   { seller:{name,address,place,state,st_code,cr,pan},
+//     purchaser:{name,invo,address,place,pin,state,st_code,sbl,gstin,pan},
+//     auction:{ano,date}, crpt, lineItems:[{lot,qty,bags,rate,cardamomCost,
+//     refundQty,refundRate,refundAmount}], commission, gstRate, cgst, sgst,
+//     igst, interState, nett, hsnCardamom, hsnCommission }
+function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
+  const isBatch = !!externalDoc;
+  let doc, buffers;
+  if (isBatch) {
+    doc = externalDoc;
+    if (doc._commBoSCount && doc._commBoSCount > 0) doc.addPage({ size: 'A4', margin: 20 });
+    doc._commBoSCount = (doc._commBoSCount || 0) + 1;
+  } else {
+    doc = new PDFDocument({ size: 'A4', margin: 20 });
+    buffers = [];
+    doc.on('data', b => buffers.push(b));
+  }
+
+  const PAGE_W = doc.page.width;
+  const MX = 20;
+  const x0 = MX;
+  const x1 = PAGE_W - MX;
+  const W = x1 - x0;
+  let y = MX;
+
+  doc.lineWidth(0.5).strokeColor('#000');
+
+  const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const fmtRup = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Resolve company identity using the same state-aware helper the rest
+  // of this file uses (effectiveCompany picks KL/TN block based on
+  // cfg.business_state) — guarantees the address actually renders.
+  const co = effectiveCompany(cfg);
+  const hsnCardamom = billData.hsnCardamom || cfg.hsn_cardamom || '09083120';
+  const hsnCommission = billData.hsnCommission || '996111';
+
+  // ── "ORIGINAL/DUPLICATE/TRIPLICATE" tag (top-right, above outer border) ──
+  doc.font('Helvetica').fontSize(7.5).fillColor('#000');
+  doc.text('ORIGINAL/DUPLICATE/TRIPLICATE', x0, y, { width: W - 4, align: 'right' });
+  y += 9;
+
+  const boxTopY = y;
+
+  // ── Company header block ──
+  y += 4;
+  doc.font('Helvetica-Bold').fontSize(11);
+  doc.text((co.name || '').toUpperCase(), x0, y, { width: W, align: 'center', lineBreak: false });
+  y += 13;
+
+  // REGD OFFICE line: assemble from whichever address fields the company
+  // has configured. Some users embed the literal text "REGD OFFICE:" in
+  // their address1 field, and others bake the state name + code into
+  // address2 — we detect and skip those so the prefix and " STATE CODE:"
+  // don't get printed twice.
+  doc.font('Helvetica').fontSize(8);
+  const addrJoined = [co.address1 || '', co.address2 || '']
+    .filter(p => p && String(p).trim()).join(' ');
+  const stateCodeAlreadyInAddr = co.stateName
+    && new RegExp(co.stateName + '\\s*CODE\\s*:', 'i').test(addrJoined);
+  const stateTail = (co.stateName && !stateCodeAlreadyInAddr)
+    ? (co.stateName + ' CODE:' + (co.stateCode || '')) : '';
+  const phoneTail = co.phone ? 'Ph:' + co.phone : '';
+  const regdBody = [addrJoined, stateTail, phoneTail].filter(Boolean).join(' ');
+  if (regdBody) {
+    // Only add the "REGD OFFICE:" prefix when the user didn't already
+    // bake one into their address line.
+    const alreadyHasPrefix = /^\s*REGD\s+OFFICE\s*:/i.test(addrJoined);
+    const regdLine = alreadyHasPrefix ? regdBody : ('REGD OFFICE:' + regdBody);
+    doc.text(regdLine, x0, y, { width: W, align: 'center', lineBreak: false });
+    y += 10;
+  }
+  const idLine = co.cinLabel
+    ? { label: co.cinLabel, value: co.cinValue || '' }
+    : { label: 'CIN', value: cfg.cin || '' };
+  doc.text(`${idLine.label}:${idLine.value}   PAN:${co.pan || cfg.pan || ''}`,
+    x0, y, { width: W, align: 'center', lineBreak: false });
+  y += 10;
+  doc.text(`GSTIN:${co.gstin || ''}   SBL:${co.sbl || cfg.sbl || ''}`,
+    x0, y, { width: W, align: 'center', lineBreak: false });
+  y += 10;
+  if (co.email) {
+    doc.text('e-Mail ID:' + co.email, x0, y, { width: W, align: 'center', lineBreak: false });
+    y += 10;
+  }
+  y += 4;
+
+  // ── Crop Receipt No (left) | Bill No (right) ──
+  doc.font('Helvetica').fontSize(9);
+  doc.text(`Cropt Receipt No.:${billData.crpt || ''}`, x0 + 6, y);
+  doc.text(`Bill No: ${billNo || ''}`, x0, y, { width: W - 6, align: 'right' });
+  y += 14;
+
+  // ── Title + subtitle ──
+  doc.font('Helvetica-Bold').fontSize(12);
+  doc.text('COMMISSION BILL', x0, y, { width: W, align: 'center' });
+  y += 14;
+  doc.font('Helvetica').fontSize(8);
+  doc.text('[ MEMORANDAM OF CARDAMOM SOLD THROUGH ' + (cfg.short_name || co.short || co.name || 'COMPANY') + ' ]',
+    x0, y, { width: W, align: 'center' });
+  y += 14;
+
+  // ── eAuction No + Date strip ──
+  const stripH = 16;
+  doc.moveTo(x0, y).lineTo(x1, y).stroke();
+  doc.moveTo(x0, y + stripH).lineTo(x1, y + stripH).stroke();
+  doc.font('Helvetica').fontSize(8.5);
+  const auc = billData.auction || {};
+  doc.text(`eAuction No: ${auc.ano || ''}`, x0 + 6, y + 4);
+  doc.text(`Date :${auc.date || ''}`, x0, y + 4, { width: W - 6, align: 'right' });
+  y += stripH;
+
+  // ── Two-column seller / purchaser header band ──
+  const headColW = Math.floor(W / 2);
+  const splitX = x0 + headColW;
+  const bandH = 14;
+  doc.rect(x0, y, headColW, bandH).fill('#e8e8e8').stroke();
+  doc.rect(splitX, y, W - headColW, bandH).fill('#e8e8e8').stroke();
+  doc.fillColor('#000').font('Helvetica-Bold').fontSize(9);
+  doc.text('DETAILS OF SELLER [BILLED FOR]', x0, y + 3, { width: headColW, align: 'center' });
+  doc.text('DETAILS OF PURCHASER [SOLD TO]', splitX, y + 3, { width: W - headColW, align: 'center' });
+  doc.moveTo(splitX, y).lineTo(splitX, y + bandH).stroke();
+  doc.moveTo(x0, y + bandH).lineTo(x1, y + bandH).stroke();
+  y += bandH;
+
+  // ── Two-column seller / purchaser body ──
+  const partyLineH = 10;
+  const seller = billData.seller || {};
+  const pur = billData.purchaser || {};
+  const sellerLines = [];
+  if (seller.name) sellerLines.push('Sri/M/s.' + seller.name);
+  if (seller.address) sellerLines.push(seller.address);
+  if (seller.place) sellerLines.push(String(seller.place || '').toUpperCase());
+  if (seller.state) sellerLines.push(String(seller.state || '').toUpperCase() + '   CODE:' + (seller.st_code || ''));
+  sellerLines.push('CR.' + (seller.cr || '') + (seller.pan ? '   PAN:' + seller.pan : ''));
+
+  const purLines = [];
+  if (pur.name) purLines.push('M/s.' + pur.name + (pur.invo ? '   INV:' + pur.invo : ''));
+  if (pur.address) purLines.push(pur.address);
+  if (pur.place) purLines.push(String(pur.place || '').toUpperCase() + (pur.pin ? '   PIN:' + pur.pin : ''));
+  if (pur.state) purLines.push(String(pur.state || '').toUpperCase() + '   CODE:' + (pur.st_code || '') + (pur.sbl ? '   SBL:' + pur.sbl : ''));
+  if (pur.gstin) purLines.push('GSTIN:' + pur.gstin + (pur.pan ? '   PAN:' + pur.pan : ''));
+
+  // Height: tall enough for the longest side (purchaser block has up to
+  // 5 long lines: name, two address lines, state+SBL, GSTIN+PAN), plus
+  // a one-line margin at the bottom.
+  const partyMaxLines = Math.max(sellerLines.length, purLines.length);
+  const partyH = (Math.max(6, partyMaxLines) + 1) * partyLineH;
+  doc.moveTo(x0, y).lineTo(x0, y + partyH).stroke();
+  doc.moveTo(splitX, y).lineTo(splitX, y + partyH).stroke();
+  doc.moveTo(x1, y).lineTo(x1, y + partyH).stroke();
+  doc.moveTo(x0, y + partyH).lineTo(x1, y + partyH).stroke();
+  // lineBreak:false is critical — without it, a long address line wraps
+  // back to x=0 and overprints the next y-positioned line. To avoid losing
+  // the END of long names / the GSTIN+PAN line to an ellipsis, pick the
+  // largest font (8pt → 6pt floor) at which EVERY line on that side fits
+  // its column, then draw uniformly.
+  const fitPartySize = (lines, colW) => {
+    let size = 8;
+    while (size > 6) {
+      doc.font('Helvetica').fontSize(size);
+      if (lines.every(l => doc.widthOfString(String(l)) <= colW - 12)) break;
+      size -= 0.25;
+    }
+    return size;
+  };
+  const sellerSize = fitPartySize(sellerLines, headColW);
+  const purSize = fitPartySize(purLines, W - headColW);
+  let sy = y + 3;
+  doc.font('Helvetica').fontSize(sellerSize);
+  for (const line of sellerLines) {
+    doc.text(line, x0 + 6, sy, { width: headColW - 12, lineBreak: false, ellipsis: true });
+    sy += partyLineH;
+  }
+  let py = y + 3;
+  doc.font('Helvetica').fontSize(purSize);
+  for (const line of purLines) {
+    doc.text(line, splitX + 6, py, { width: W - headColW - 12, lineBreak: false, ellipsis: true });
+    py += partyLineH;
+  }
+  y += partyH;
+
+  // ── Line-item table column geometry ──
+  // 13 leaf columns. CGST/SGST/IGST each split RATE | AMOUNT.
+  const cols = [
+    { key: 'lot',   w: 26 },   // 0
+    { key: 'desc',  w: 74 },   // 1
+    { key: 'hsn',   w: 44 },   // 2
+    { key: 'qty',   w: 50 },   // 3
+    { key: 'bags',  w: 32 },   // 4
+    { key: 'rate',  w: 44 },   // 5
+    { key: 'cost',  w: 79 },   // 6  CARDAMOM COST / TAXABLE VALUE
+    { key: 'cgstR', w: 28 },   // 7
+    { key: 'cgstA', w: 50 },   // 8
+    { key: 'sgstR', w: 28 },   // 9
+    { key: 'sgstA', w: 50 },   // 10
+    { key: 'igstR', w: 28 },   // 11
+    { key: 'igstA', w: 50 },   // 12
+  ];
+  const colsTot = cols.reduce((s, c) => s + c.w, 0);
+  const colScale = W / colsTot;
+  for (const c of cols) c.w = c.w * colScale;
+  let cx = x0;
+  for (const c of cols) { c.x = cx; cx += c.w; }
+  const colEndX = c => c.x + c.w;
+
+  // Right-aligned numeric drawer that shrinks the font from `baseSize` down to
+  // a 6pt floor so a wide ₹ amount fits on one line instead of being clipped.
+  const drawNum = (text, x, yPos, w, baseSize) => {
+    const s = String(text == null ? '' : text);
+    let size = baseSize;
+    doc.font('Helvetica').fontSize(size);
+    while (size > 6 && doc.widthOfString(s) > w) { size -= 0.25; doc.fontSize(size); }
+    doc.text(s, x, yPos, { width: w, align: 'right', lineBreak: false });
+    doc.fontSize(baseSize);
+  };
+
+  // ── Table header (two-band): top band has merged "CGST"/"SGST"/"IGST"
+  // labels; bottom band has per-leaf sub-labels. ──
+  const hdrTopH = 11;
+  const hdrBotH = 14;
+  const hdrTotalH = hdrTopH + hdrBotH;
+  doc.rect(x0, y, W, hdrTotalH).fill('#e8e8e8').stroke();
+  doc.fillColor('#000').font('Helvetica-Bold').fontSize(7.5);
+
+  const topLeafLabels = [
+    'LOT', 'DESCRIPTION', 'HSN', 'QTY', 'UNIT', 'RATE', 'CARDAMOM',
+  ];
+  const botLeafLabelsLeft = [
+    'NO', 'OF GOODS', 'SAC', 'Kg. gr.', 'BAGS', 'Rs. P.', 'COST',
+  ];
+  for (let i = 0; i < 7; i++) {
+    doc.text(topLeafLabels[i], cols[i].x + 1, y + 2, { width: cols[i].w - 2, align: 'center' });
+    doc.text(botLeafLabelsLeft[i], cols[i].x + 1, y + 2 + hdrTopH, { width: cols[i].w - 2, align: 'center' });
+  }
+  // Merged group labels
+  const grpDefs = [
+    { label: 'CGST', from: 7,  to: 8  },
+    { label: 'SGST', from: 9,  to: 10 },
+    { label: 'IGST', from: 11, to: 12 },
+  ];
+  for (const g of grpDefs) {
+    const gx = cols[g.from].x;
+    const gw = colEndX(cols[g.to]) - gx;
+    doc.text(g.label, gx, y + 2, { width: gw, align: 'center' });
+    doc.text('RATE', cols[g.from].x, y + 2 + hdrTopH, { width: cols[g.from].w, align: 'center' });
+    doc.text('AMOUNT', cols[g.to].x, y + 2 + hdrTopH, { width: cols[g.to].w, align: 'center' });
+  }
+
+  // Header dividers
+  doc.moveTo(cols[7].x, y + hdrTopH).lineTo(x1, y + hdrTopH).stroke();
+  for (const c of cols) doc.moveTo(c.x, y).lineTo(c.x, y + hdrTotalH).stroke();
+  doc.moveTo(x1, y).lineTo(x1, y + hdrTotalH).stroke();
+  doc.moveTo(x0, y + hdrTotalH).lineTo(x1, y + hdrTotalH).stroke();
+  y += hdrTotalH;
+
+  // ── Body rows ──
+  const items = billData.lineItems || [];
+  const rowH = 14;
+  const bodyStartY = y;
+  doc.font('Helvetica').fontSize(7.5).fillColor('#000');
+
+  let totalCost = 0, totalRefund = 0;
+  for (const li of items) {
+    const cost = Number(li.cardamomCost || 0);
+    const refAmt = Number(li.refundAmount || 0);
+    totalCost += cost;
+    totalRefund += refAmt;
+
+    const cellOpts = (col, align = 'center') => ({
+      width: col.w - (align === 'right' ? 3 : 0),
+      align, lineBreak: false, ellipsis: true,
+    });
+    doc.save(); doc.moveTo(x0, y).lineTo(x1, y).lineWidth(0.25).strokeColor('#CCC').stroke(); doc.restore();
+    // Pad numeric lot numbers; leave blank/non-numeric (consolidated line) as-is.
+    const _lotStrC = /^\d+$/.test(String(li.lot || '')) ? String(li.lot).padStart(3, '0') : String(li.lot || '');
+    doc.text(_lotStrC, cols[0].x, y + 3, cellOpts(cols[0]));
+    doc.text('CARDAMOM',                           cols[1].x, y + 3, cellOpts(cols[1]));
+    doc.text(hsnCardamom,                          cols[2].x, y + 3, cellOpts(cols[2]));
+    drawNum(fmtQty(li.qty),  cols[3].x, y + 3, cols[3].w - 3, 7.5);
+    doc.text(String(li.bags || ''),                cols[4].x, y + 3, cellOpts(cols[4]));
+    drawNum(fmtRup(li.rate), cols[5].x, y + 3, cols[5].w - 3, 7.5);
+    drawNum(fmtRup(cost),    cols[6].x, y + 3, cols[6].w - 3, 7.5);
+    y += rowH;
+
+    // [+] SAMPLE REFUND row (only if refund > 0)
+    if (refAmt > 0 || Number(li.refundQty || 0) > 0) {
+      doc.save(); doc.moveTo(x0, y).lineTo(x1, y).lineWidth(0.25).strokeColor('#CCC').stroke(); doc.restore();
+      doc.text('[+]',                          cols[0].x, y + 3, cellOpts(cols[0]));
+      doc.text('SAMPLE REFUND',                cols[1].x, y + 3, cellOpts(cols[1]));
+      drawNum(fmtQty(li.refundQty),           cols[3].x, y + 3, cols[3].w - 3, 7.5);
+      drawNum(fmtRup(li.refundRate||li.rate), cols[5].x, y + 3, cols[5].w - 3, 7.5);
+      drawNum(fmtRup(refAmt),                 cols[6].x, y + 3, cols[6].w - 3, 7.5);
+      y += rowH;
+    }
+  }
+
+  // Resolve GST amounts. If not supplied, derive from gstRate (intra-state
+  // → CGST + SGST each = commission × gstRate%; inter-state → IGST = commission × 2*gstRate%).
+  const commission = Number(billData.commission || 0);
+  const gstRate = Number(billData.gstRate != null ? billData.gstRate : 9.0);
+  const interState = !!billData.interState;
+  let cgstAmt = Number(billData.cgst != null ? billData.cgst : 0);
+  let sgstAmt = Number(billData.sgst != null ? billData.sgst : 0);
+  let igstAmt = Number(billData.igst != null ? billData.igst : 0);
+  if (!cgstAmt && !sgstAmt && !igstAmt && commission > 0 && gstRate > 0) {
+    if (interState) {
+      igstAmt = Math.round(commission * (2 * gstRate)) / 100;
+    } else {
+      cgstAmt = Math.round(commission * gstRate) / 100;
+      sgstAmt = cgstAmt;
+    }
+  }
+
+  // [-] COMMISSION row — separator above so it visually parts from lot rows
+  doc.moveTo(x0, y).lineTo(x1, y).stroke();
+  const cellOptsCom = (col, align = 'center') => ({
+    width: col.w - (align === 'right' ? 3 : 0),
+    align, lineBreak: false, ellipsis: true,
+  });
+  doc.font('Helvetica').fontSize(7.5);
+  doc.text('[-]',                 cols[0].x, y + 3, cellOptsCom(cols[0]));
+  doc.text('COMMISSION',          cols[1].x, y + 3, cellOptsCom(cols[1]));
+  doc.text(hsnCommission,         cols[2].x, y + 3, cellOptsCom(cols[2]));
+  drawNum(fmtRup(commission),     cols[6].x, y + 3, cols[6].w - 3, 7.5);
+  if (cgstAmt) {
+    doc.text(gstRate.toFixed(1) + '%', cols[7].x, y + 3, cellOptsCom(cols[7]));
+    drawNum(fmtRup(cgstAmt),           cols[8].x, y + 3, cols[8].w - 3, 7.5);
+  }
+  if (sgstAmt) {
+    doc.text(gstRate.toFixed(1) + '%', cols[9].x,  y + 3, cellOptsCom(cols[9]));
+    drawNum(fmtRup(sgstAmt),           cols[10].x, y + 3, cols[10].w - 3, 7.5);
+  }
+  if (igstAmt) {
+    doc.text((2 * gstRate).toFixed(1) + '%', cols[11].x, y + 3, cellOptsCom(cols[11]));
+    drawNum(fmtRup(igstAmt),                 cols[12].x, y + 3, cols[12].w - 3, 7.5);
+  }
+  y += rowH;
+
+  const tableEndY = y;
+  // Verticals for the body
+  for (const c of cols) doc.moveTo(c.x, bodyStartY).lineTo(c.x, tableEndY).stroke();
+  doc.moveTo(x1, bodyStartY).lineTo(x1, tableEndY).stroke();
+  doc.moveTo(x0, tableEndY).lineTo(x1, tableEndY).stroke();
+
+  // ── Summary band: TAXABLE VALUE | CGST | SGST | IGST headers ──
+  const sumHdrH = 14;
+  const leftEndX = colEndX(cols[5]);
+  doc.rect(x0, y, leftEndX - x0, sumHdrH).stroke();
+  doc.rect(cols[6].x, y, cols[6].w, sumHdrH).fill('#e8e8e8').stroke();
+  doc.fillColor('#000').font('Helvetica-Bold').fontSize(8);
+  doc.text('TAXABLE VALUE', cols[6].x, y + 3, { width: cols[6].w, align: 'center' });
+  for (const g of grpDefs) {
+    const gx = cols[g.from].x;
+    const gw = colEndX(cols[g.to]) - gx;
+    doc.rect(gx, y, gw, sumHdrH).fill('#e8e8e8').stroke();
+    doc.fillColor('#000').text(g.label, gx, y + 3, { width: gw, align: 'center' });
+  }
+  y += sumHdrH;
+
+  // TAX AMOUNT row: "TAX AMOUNT" spans cols 0..5; then per-group AMOUNTs.
+  const taxRowH = 16;
+  doc.rect(x0, y, leftEndX - x0, taxRowH).stroke();
+  doc.font('Helvetica-Bold').fontSize(9);
+  doc.text('TAX AMOUNT', x0, y + 4, { width: leftEndX - x0, align: 'center' });
+  doc.font('Helvetica').fontSize(8.5);
+  doc.rect(cols[6].x, y, cols[6].w, taxRowH).stroke();
+  drawNum(fmtRup(commission), cols[6].x, y + 4, cols[6].w - 3, 8.5);
+  for (const g of grpDefs) {
+    doc.rect(cols[g.from].x, y, cols[g.from].w, taxRowH).stroke();
+    doc.rect(cols[g.to].x,   y, cols[g.to].w,   taxRowH).stroke();
+  }
+  if (cgstAmt) drawNum(fmtRup(cgstAmt), cols[8].x,  y + 4, cols[8].w - 3,  8.5);
+  if (sgstAmt) drawNum(fmtRup(sgstAmt), cols[10].x, y + 4, cols[10].w - 3, 8.5);
+  if (igstAmt) drawNum(fmtRup(igstAmt), cols[12].x, y + 4, cols[12].w - 3, 8.5);
+  y += taxRowH;
+
+  // ── NETT AMOUNT strip ──
+  const nett = Number(
+    billData.nett != null
+      ? billData.nett
+      : (totalCost + totalRefund - commission - cgstAmt - sgstAmt - igstAmt)
+  );
+  const nettH = 18;
+  const nettValueX = cols[10].x;
+  doc.rect(x0, y, nettValueX - x0, nettH).stroke();
+  doc.rect(nettValueX, y, x1 - nettValueX, nettH).stroke();
+  doc.font('Helvetica-Bold').fontSize(10);
+  doc.text('NETT AMOUNT', x0, y + 4, {
+    width: nettValueX - x0 - 6, align: 'right', lineBreak: false,
+  });
+  {
+    let _ns = 10;
+    doc.font('Helvetica-Bold').fontSize(_ns);
+    const _nw = x1 - nettValueX - 3;
+    while (_ns > 7 && doc.widthOfString(fmtRup(nett)) > _nw) { _ns -= 0.25; doc.fontSize(_ns); }
+    doc.text(fmtRup(nett), nettValueX, y + 4, { width: _nw, align: 'right', lineBreak: false });
+  }
+  y += nettH;
+
+  // ── Amount in words ──
+  // amountToWords already prefixes "Rupees " — do not add it again.
+  y += 10;
+  doc.font('Helvetica').fontSize(9);
+  doc.text(amountToWords(Math.round(nett)) + ' Only', x0 + 6, y, {
+    width: W - 12, lineBreak: false, ellipsis: true,
+  });
+  y += 24;
+
+  // ── "for COMPANY" + signatures ──
+  doc.font('Helvetica-Bold').fontSize(9);
+  doc.text('for ' + (cfg.short_name || co.short || co.name || 'COMPANY'), x0, y, { width: W - 6, align: 'right' });
+  y += 30;
+  doc.font('Helvetica').fontSize(8);
+  doc.text('Signature of Seller', x0 + 6, y);
+  doc.text('Authorized Signatory', x0, y, { width: W - 6, align: 'right' });
+  y += 14;
+
+  // ── Outer rectangle border ──
+  doc.rect(x0, boxTopY, W, y - boxTopY).lineWidth(1).stroke();
+
+  if (isBatch) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+/**
+ * Merge N Commission Bills into a single PDF (one per page).
+ * Each item: { billData, billNo }.
+ */
+function generateCommissionBoSBatchPDF(bills, cfg) {
+  if (!Array.isArray(bills) || bills.length === 0) {
+    return Promise.reject(new Error('No bills to print'));
+  }
+  const doc = new PDFDocument({ size: 'A4', margin: 20 });
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+  doc._commBoSCount = 0;
+
+  for (const bill of bills) {
+    generateCommissionBoSPDF(bill.billData, cfg, bill.billNo, doc);
   }
 
   return new Promise((resolve) => {

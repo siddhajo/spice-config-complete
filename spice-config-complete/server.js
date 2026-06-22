@@ -15,7 +15,7 @@ const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
-const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF } = require('./invoice-pdf');
+const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
 const { exportPdf: exportAnyPdf } = require('./exports-pdf');
@@ -31,7 +31,7 @@ const {
   generSalesXML, generSalesIspXML, generSalesAspXML, generIspPurchaseXML,
   generRDPurchaseXML, generURDPurchaseXML, generDebitNoteXML, generLedgerXML,
   buildSalesRows, buildSalesIspRows, buildSalesAspRows,
-  buildRDPurchaseRows, buildURDPurchaseRows, buildDebitNoteRows, buildLedgerRows,
+  buildRDPurchaseRows, buildURDPurchaseRows, buildDebitNoteRows, buildDebitNotePlanterRows, buildLedgerRows,
   buildSalesPartyLedgerRows, buildRDPartyLedgerRows, buildURDPartyLedgerRows,
   listAuctionParties,
 } = require('./tally-xml');
@@ -1547,10 +1547,12 @@ const DELETE_ALL_MAP = {
   purchases:     { table: 'purchases',   cascade: [] },
   bills:         { table: 'bills',       cascade: [] },
   'debit-notes': { table: 'debit_notes', cascade: [] },
+  'debit-notes-planter': { table: 'debit_notes_planter', cascade: [] },
   // Auctions cascade through every transactional table — lots,
-  // invoices, purchases, bills, debit_notes — because the FKs would
-  // otherwise leave orphan rows. Order matters: wipe children first.
-  auctions:      { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes'] },
+  // invoices, purchases, bills, debit_notes, debit_notes_planter —
+  // because the FKs would otherwise leave orphan rows. Order matters:
+  // wipe children first.
+  auctions:      { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'debit_notes_planter'] },
   // Full nuke — everything `auctions` wipes PLUS the master data
   // (trader_banks → traders/sellers, buyers). Children before parents
   // so FK constraints don't reject the deletes; the target `auctions`
@@ -1559,7 +1561,7 @@ const DELETE_ALL_MAP = {
   // modes (it has to, because it removes the shared master data that the
   // surviving mode's rows would otherwise dangle against). The per-entity
   // resources above are mode-scoped — see modeDeleteWhere().
-  everything:    { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'trader_banks', 'traders', 'buyers'], crossMode: true },
+  everything:    { table: 'auctions',    cascade: ['lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'debit_notes_planter', 'trader_banks', 'traders', 'buyers'], crossMode: true },
 };
 
 // Transactional tables whose rows belong to one business mode (via their
@@ -1567,7 +1569,7 @@ const DELETE_ALL_MAP = {
 // rows and vice versa, mirroring exactly what the operator can see on each
 // tab (the same STRICT rule as modeWhereClause: a row belongs to exactly
 // one mode, so a per-mode Delete All never touches the other mode's data).
-const MODE_SCOPED_TABLES = new Set(['auctions', 'lots', 'invoices', 'purchases', 'bills', 'debit_notes']);
+const MODE_SCOPED_TABLES = new Set(['auctions', 'lots', 'invoices', 'purchases', 'bills', 'debit_notes', 'debit_notes_planter']);
 // Master data shared across BOTH modes — never mode-scoped. Wiping these
 // affects e-Trade and e-Auction alike, which the UI warns about.
 const MASTER_TABLES = new Set(['traders', 'buyers', 'trader_banks']);
@@ -1839,6 +1841,7 @@ app.delete('/api/invoices/delete-all',    requireDeleteAll, (req, res) => perfor
 app.delete('/api/purchases/delete-all',   requireDeleteAll, (req, res) => performDeleteAll(req, res, 'purchases'));
 app.delete('/api/bills/delete-all',       requireDeleteAll, (req, res) => performDeleteAll(req, res, 'bills'));
 app.delete('/api/debit-notes/delete-all', requireDeleteAll, (req, res) => performDeleteAll(req, res, 'debit-notes'));
+app.delete('/api/debit-notes-planter/delete-all', requireDeleteAll, (req, res) => performDeleteAll(req, res, 'debit-notes-planter'));
 app.delete('/api/auctions/delete-all',    requireDeleteAll, (req, res) => performDeleteAll(req, res, 'auctions'));
 app.delete('/api/everything/delete-all',  requireDeleteAll, (req, res) => performDeleteAll(req, res, 'everything'));
 
@@ -5429,19 +5432,20 @@ app.get('/api/lots/validate/:auctionId', requireView, (req, res) => {
 // they're outside this gate.
 // ══════════════════════════════════════════════════════════════
 const _GEN_TABLE = {
-  invoices:    'invoices',
-  purchases:   'purchases',
-  bills:       'bills',
-  debit_notes: 'debit_notes',
+  invoices:            'invoices',
+  purchases:           'purchases',
+  bills:               'bills',
+  debit_notes:         'debit_notes',
+  debit_notes_planter: 'debit_notes_planter',
 };
 function _hasGeneratedDocs(db, docType, auctionId) {
   const table = _GEN_TABLE[docType];
   if (!table || !auctionId) return false;
-  if (docType === 'debit_notes') {
-    // debit_notes is keyed by trade `ano`, not auction_id.
+  if (docType === 'debit_notes' || docType === 'debit_notes_planter') {
+    // Both debit-note streams are keyed by trade `ano`, not auction_id.
     const auc = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
     if (!auc || !auc.ano) return false;
-    return !!db.get(`SELECT 1 FROM debit_notes WHERE ano = ? LIMIT 1`, [String(auc.ano)]);
+    return !!db.get(`SELECT 1 FROM ${table} WHERE ano = ? LIMIT 1`, [String(auc.ano)]);
   }
   return !!db.get(`SELECT 1 FROM ${table} WHERE auction_id = ? LIMIT 1`, [auctionId]);
 }
@@ -5518,6 +5522,29 @@ function _hasRemainingParties(db, docType, auctionId) {
       [String(auc.ano)]
     );
   }
+  if (docType === 'debit_notes_planter') {
+    // Planter DNs are scoped by trade `ano`. Mirrors the eligible-bills
+    // query: a remaining party = any planter on a bill of supply in this
+    // trade that has grade-1 commission/handling and no planter DN yet.
+    const auc = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
+    if (!auc || !auc.ano) return false;
+    return !!db.get(
+      `SELECT 1 FROM bills b
+       WHERE TRIM(b.ano) = ?
+         AND b.name IS NOT NULL AND b.name != ''
+         AND EXISTS (
+           SELECT 1 FROM lots l2
+            WHERE l2.auction_id = b.auction_id AND l2.name = b.name
+              AND TRIM(COALESCE(l2.grade,'')) = '1'
+              AND (COALESCE(l2.com,0) + COALESCE(l2.sertax,0)) > 0
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM debit_notes_planter dn WHERE dn.ano = ? AND dn.name = b.name
+         )
+       LIMIT 1`,
+      [String(auc.ano).trim(), String(auc.ano)]
+    );
+  }
   return false;
 }
 // "Fully generated" = at least one doc exists AND no remaining party.
@@ -5552,6 +5579,7 @@ function _checkGenerationGate(db, docType, auctionId) {
   const labels = {
     invoices: 'Invoices', purchases: 'Purchases',
     bills: 'Bills of Supply', debit_notes: 'Debit Notes',
+    debit_notes_planter: 'Planter Debit Notes',
   };
   const label = labels[docType] || docType;
   return {
@@ -7091,6 +7119,392 @@ app.post('/api/bills/pdf-bulk', requireView, async (req, res) => {
   }
 });
 
+// ── Commission Bill (Bills of Supply, Commission-Bill mode) ──────────
+// Bulk Commission-Bill PDF — one A4 page PER LOT for each ticked bill.
+// Body: { ids: [1, 2, 3, ...] } — DB row IDs from the `bills` table.
+// A grower with two lots gets two commission bills, each showing only that
+// lot's cardamom cost / sample-refund / commission / GST / NETT — and its
+// OWN purchaser (lots from one seller may sell to different buyers).
+app.post('/api/bills/commission-bos-bulk', requireView, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'No bill IDs provided' });
+
+    const placeholders = ids.map(() => '?').join(',');
+    const stored = db.all(`SELECT * FROM bills WHERE id IN (${placeholders})`, ids);
+    if (!stored.length) return res.status(404).json({ error: 'No matching bills found' });
+
+    const byId = new Map(stored.map(r => [r.id, r]));
+    const ordered = ids.map(id => byId.get(Number(id))).filter(Boolean);
+
+    const payloads = [];
+    for (const b of ordered) {
+      // Resolve the auction record (id + ano + date) so we can pull the
+      // matching lots and format the eAuction strip. A stored auction_id
+      // can go stale when the trade was deleted and re-imported under a new
+      // id — build a candidate list (stored id first, then every auction
+      // carrying this trade number) and keep the first that actually has
+      // lots for this seller.
+      const lotsForAuction = (aid) => db.all(
+        `SELECT * FROM lots
+           WHERE auction_id = ?
+             AND UPPER(TRIM(name)) = UPPER(TRIM(?))
+             AND (amount > 0 OR puramt > 0)
+         ORDER BY lot_no`,
+        [aid, b.name]
+      );
+      const auctionCands = [];
+      if (b.auction_id) {
+        const a = db.get('SELECT id, ano, date FROM auctions WHERE id = ?', [b.auction_id]);
+        if (a) auctionCands.push(a);
+      }
+      if (b.ano != null && String(b.ano).trim() !== '') {
+        const more = db.all(
+          'SELECT id, ano, date FROM auctions WHERE CAST(ano AS TEXT) = CAST(? AS TEXT) ORDER BY id',
+          [String(b.ano)]
+        );
+        for (const a of more) if (!auctionCands.some(c => c.id === a.id)) auctionCands.push(a);
+      }
+      let auction = auctionCands[0] || null;
+      let lots = [];
+      for (const a of auctionCands) {
+        const ls = lotsForAuction(a.id);
+        if (ls.length) { auction = a; lots = ls; break; }
+      }
+
+      // First lot supplies seller details (consistent with buildAgriBill).
+      const first = lots[0] || {};
+      const seller = {
+        name: b.name || first.name || '',
+        address: b.add_line || first.padd || '',
+        place:   b.pla     || first.ppla || '',
+        state:   b.pstate  || first.pstate || '',
+        st_code: b.st_code || first.pst_code || '',
+        cr:      b.crr     || first.cr || '',
+        pan:     b.pan     || first.pan || '',
+      };
+
+      // Sample refund quantity is the company-wide "SB Sample Refund (Kgs)"
+      // setting (Settings → Rates & Charges → `sb_refund`). The rupee value
+      // stored on the lot (`refund`) was already calculated as sb_refund ×
+      // rate during lot entry.
+      const sbRefundKg = Number(cfg.sb_refund) || 0;
+
+      // Resolve the purchaser block for a SINGLE lot. The `buyers` master
+      // carries the full address — join on buyer CODE first, then buyer1/buyer.
+      const purchaserForLot = (l) => {
+        l = l || {};
+        let buyerRow = null;
+        if (l.code) buyerRow = db.get('SELECT * FROM buyers WHERE code = ? LIMIT 1', [l.code]);
+        if (!buyerRow && (l.buyer1 || l.buyer)) {
+          buyerRow = db.get(
+            'SELECT * FROM buyers WHERE UPPER(TRIM(buyer1)) = UPPER(TRIM(?)) OR UPPER(TRIM(buyer)) = UPPER(TRIM(?)) LIMIT 1',
+            [l.buyer1 || l.buyer, l.buyer1 || l.buyer]
+          );
+        }
+        return {
+          name:    (buyerRow && (buyerRow.buyer1 || buyerRow.buyer)) || l.buyer1 || l.buyer || '',
+          invo:    l.invo || '',
+          address: buyerRow ? [buyerRow.add1, buyerRow.add2].filter(Boolean).join(', ') : '',
+          place:   buyerRow ? (buyerRow.pla || '') : '',
+          pin:     buyerRow ? (buyerRow.pin || '') : '',
+          state:   buyerRow ? (buyerRow.state || '') : (l.sale === 'L' ? (cfg.state || '') : ''),
+          st_code: buyerRow ? (buyerRow.st_code || '') : '',
+          sbl:     buyerRow ? (buyerRow.sbl || '') : '',
+          gstin:   buyerRow ? (buyerRow.gstin || '') : '',
+          pan:     buyerRow ? (buyerRow.pan || '') : '',
+        };
+      };
+      const emptyPurchaser = { name: '', invo: '', address: '', place: '', pin: '', state: '', st_code: '', sbl: '', gstin: '', pan: '' };
+      const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+      // Build one page-spec per lot. Each carries a single line item, that
+      // lot's own commission/GST split, its purchaser, and its NETT.
+      const perLot = [];
+      if (lots.length) {
+        for (const l of lots) {
+          const qty = Number(l.pqty || l.qty || 0);
+          const rate = Number(l.prate || l.price || 0);
+          const cardamomCost = Number(l.puramt || l.amount || (qty * rate));
+          const refundAmount = Number(l.refund || 0);
+          const com = Number(l.com || 0), cg = Number(l.cgst || 0), sg = Number(l.sgst || 0), ig = Number(l.igst || 0);
+          perLot.push({
+            line: { lot: l.lot_no, qty, bags: l.bags || 0, rate, cardamomCost,
+                    refundQty: sbRefundKg, refundRate: rate, refundAmount },
+            purchaser: purchaserForLot(l),
+            commission: com, cgst: cg, sgst: sg, igst: ig,
+            interState: !!(l.sale && l.sale !== 'L'),
+            nett: round2(cardamomCost + refundAmount - com - cg - sg - ig),
+            crpt: l.crpt || '',
+          });
+        }
+      } else {
+        // Live lots are gone — rebuild from the per-lot snapshot stored on the
+        // bill row at generation time (bills.line_items JSON), if present.
+        let snap = [];
+        try { snap = JSON.parse(b.line_items || '[]'); } catch (_) { snap = []; }
+        if (!Array.isArray(snap)) snap = [];
+        for (const li of snap) {
+          const qty  = Number(li.pqty || li.qty || 0);
+          const rate = Number(li.price || li.prate || 0);
+          const rQty = Number(li.refundQty != null ? li.refundQty : sbRefundKg) || 0;
+          const cardamomCost = round2(qty  * rate);
+          const refundAmount = round2(rQty * rate);
+          const com = Number(li.com || 0);
+          perLot.push({
+            line: { lot: li.lot, qty, bags: li.bags || 0, rate, cardamomCost,
+                    refundQty: rQty, refundRate: rate, refundAmount },
+            purchaser: emptyPurchaser,
+            commission: com, cgst: 0, sgst: 0, igst: 0, interState: false,
+            nett: round2(cardamomCost + refundAmount - com),
+            crpt: '',
+          });
+        }
+      }
+
+      // Format the auction date once (shared by every page of this bill).
+      const dateFmt3 = (cfg && cfg.date_format) || 'dd/mm/yyyy';
+      let billDate = '';
+      if (auction && auction.date) billDate = formatDateForDisplay(auction.date, dateFmt3);
+      if (!billDate && b.date) billDate = formatDateForDisplay(b.date, dateFmt3);
+
+      // Last-resort: no live lots and no snapshot. Emit a single consolidated
+      // page from the stored bill totals so the memorandum still prints.
+      if (!perLot.length) {
+        perLot.push({
+          line: { lot: '—', qty: b.qty, bags: 0, rate: 0, cardamomCost: b.cost,
+                  refundQty: 0, refundRate: 0, refundAmount: 0 },
+          purchaser: emptyPurchaser,
+          commission: 0, cgst: 0, sgst: 0, igst: 0, interState: false,
+          nett: Number(b.net != null ? b.net : b.cost) || 0,
+          crpt: '',
+        });
+      }
+
+      // One payload (→ one A4 page) per lot.
+      for (const pl of perLot) {
+        payloads.push({
+          billNo: b.bil,
+          billData: {
+            crpt: b.crpt || pl.crpt || (first.crpt || ''),
+            auction: { ano: auction ? auction.ano : (b.ano || ''), date: billDate },
+            seller,
+            purchaser: pl.purchaser,
+            lineItems: [pl.line],
+            commission: pl.commission,
+            cgst: pl.cgst, sgst: pl.sgst, igst: pl.igst,
+            interState: pl.interState,
+            gstRate: Number(cfg.commission_gst_rate) || 9.0,
+            nett: pl.nett,
+          },
+        });
+      }
+    }
+
+    const pdf = await generateCommissionBoSBatchPDF(payloads, cfg);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="CommissionBoS_Batch_${payloads.length}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('Commission BoS bulk PDF error:', e);
+    res.status(500).json({ error: 'Commission BoS PDF generation failed: ' + e.message });
+  }
+});
+
+// ── Commission Bill (Format 2) — consolidated seller-wise report ──────
+// One row per seller (sum of per-lot commission/handling/refund/GST) for a
+// whole trade, optionally filtered to one branch. Output: PDF (default) or
+// XLSX (?format=xlsx). Token-in-querystring auth so window.open() works.
+app.get('/api/bills/commission-bill-f2/:auctionId', (req, res, next) => {
+  const hdr = (req.headers.authorization || '').replace('Bearer ', '');
+  const tok = hdr || String(req.query.token || '');
+  if (!tok) return res.status(401).json({ error: 'No token' });
+  const db = getDb();
+  const session = db.get('SELECT * FROM sessions WHERE token = ?', [tok]);
+  if (!session) return res.status(403).json({ error: 'Session expired' });
+  const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
+  if (!user) return res.status(403).json({ error: 'Unauthorized' });
+  req.user = user;
+  next();
+}, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const auctionId = parseInt(req.params.auctionId, 10);
+    const auction = db.get('SELECT * FROM auctions WHERE id = ?', [auctionId]);
+    if (!auction) return res.status(404).json({ error: 'Trade not found' });
+
+    const branchFilter = String(req.query.branch || '').trim();
+    const where = branchFilter ? ' AND l.branch = ?' : '';
+    const params = branchFilter ? [auctionId, branchFilter] : [auctionId];
+
+    // One row per seller — sum the per-lot commission/handling/refund/GST.
+    const rows = db.all(
+      `SELECT l.name, l.branch, l.cr,
+              COUNT(*) AS lots,
+              COALESCE(SUM(l.qty),0)     AS qty,
+              COALESCE(SUM(l.amount),0)  AS puramt,
+              COALESCE(SUM(l.refund),0)  AS refund,
+              COALESCE(SUM(l.com),0)     AS commission,
+              COALESCE(SUM(l.sertax),0)  AS handling,
+              COALESCE(SUM(l.cgst),0)    AS cgst,
+              COALESCE(SUM(l.sgst),0)    AS sgst,
+              COALESCE(SUM(l.igst),0)    AS igst
+         FROM lots l
+        WHERE l.auction_id = ? AND l.amount > 0` + where +
+       ` GROUP BY l.name
+         ORDER BY l.name`,
+      params
+    );
+
+    const totals = rows.reduce((acc, r) => {
+      acc.lots       += Number(r.lots) || 0;
+      acc.qty        += Number(r.qty) || 0;
+      acc.puramt     += Number(r.puramt) || 0;
+      acc.refund     += Number(r.refund) || 0;
+      acc.commission += Number(r.commission) || 0;
+      acc.handling   += Number(r.handling) || 0;
+      acc.cgst       += Number(r.cgst) || 0;
+      acc.sgst       += Number(r.sgst) || 0;
+      acc.igst       += Number(r.igst) || 0;
+      return acc;
+    }, { lots:0, qty:0, puramt:0, refund:0, commission:0, handling:0, cgst:0, sgst:0, igst:0 });
+    totals.gst = totals.cgst + totals.sgst + totals.igst;
+    // Net due to the seller = amount + refund − commission − gst − handling.
+    totals.netDue = totals.puramt + totals.refund - totals.commission - totals.gst - totals.handling;
+
+    const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtQtyF = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+    const dateFmt = auction.date ? fmtDate(auction.date) : '';
+    const format = String(req.query.format || 'pdf').toLowerCase();
+
+    if (format === 'xlsx') {
+      const ExcelJS = require('exceljs');
+      const { getCompanyHeader, writeXlsxCompanyHeader } = require('./report-formatters');
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('CommissionBillF2');
+      ws.columns = [
+        { width: 5 }, { width: 28 }, { width: 14 }, { width: 8 }, { width: 12 },
+        { width: 14 }, { width: 12 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 14 },
+      ];
+      const headerStartRow = writeXlsxCompanyHeader(wb, ws, getCompanyHeader(db), {
+        colCount: 11,
+        title: 'COMMISSION BILL (FORMAT 2)',
+        metaLines: [
+          `e-AUCTION No: ${auction.ano}`,
+          `DATE: ${dateFmt}`,
+          branchFilter ? `BRANCH: ${branchFilter}` : 'BRANCH: ALL',
+        ],
+      });
+      const head = ws.getRow(headerStartRow);
+      ['SL', 'SELLER', 'BRANCH', 'LOTS', 'QTY (kg)', 'AMOUNT', 'REFUND',
+       'COMMISSION', 'HANDLING', 'GST', 'NET DUE'].forEach((h, i) => head.getCell(i + 1).value = h);
+      head.font = { bold: true };
+      head.eachCell(c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
+        c.border = { top: { style: 'thin' }, bottom: { style: 'thin' } };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+      rows.forEach((r, idx) => {
+        const gst = (Number(r.cgst)||0)+(Number(r.sgst)||0)+(Number(r.igst)||0);
+        const netDue = (Number(r.puramt)||0)+(Number(r.refund)||0)-(Number(r.commission)||0)-gst-(Number(r.handling)||0);
+        const row = ws.addRow([
+          idx + 1, r.name || '', r.branch || '', Number(r.lots) || 0,
+          Number(r.qty) || 0, Number(r.puramt) || 0, Number(r.refund) || 0,
+          Number(r.commission) || 0, Number(r.handling) || 0, gst, netDue,
+        ]);
+        row.getCell(5).numFmt = '#,##0.000';
+        for (const c of [6, 7, 8, 9, 10, 11]) row.getCell(c).numFmt = '#,##,##0.00';
+      });
+      const totalsRow = ws.addRow([
+        '', 'TOTAL', '', totals.lots, totals.qty, totals.puramt, totals.refund,
+        totals.commission, totals.handling, totals.gst, totals.netDue,
+      ]);
+      totalsRow.font = { bold: true };
+      totalsRow.getCell(5).numFmt = '#,##0.000';
+      for (const c of [6, 7, 8, 9, 10, 11]) totalsRow.getCell(c).numFmt = '#,##,##0.00';
+      totalsRow.eachCell(c => {
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
+        c.border = { top: { style: 'thin' }, bottom: { style: 'double' } };
+      });
+      const buf = await wb.xlsx.writeBuffer();
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition',
+        `attachment; filename="CommissionBillF2_${auction.ano}${branchFilter ? '_' + branchFilter : ''}.xlsx"`);
+      return res.send(Buffer.from(buf));
+    }
+
+    // PDF path (default).
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 24 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition',
+      `inline; filename="CommissionBillF2_${auction.ano}${branchFilter ? '_' + branchFilter : ''}.pdf"`);
+    doc.pipe(res);
+
+    const m = 24, w = doc.page.width - m * 2;
+    doc.font('Helvetica-Bold').fontSize(14).text('COMMISSION BILL (FORMAT 2)', m, m, { width: w, align: 'center' });
+    doc.font('Helvetica').fontSize(10).text(
+      `Trade #${auction.ano}   |   ${dateFmt}   |   Branch: ${branchFilter || 'All'}`,
+      m, m + 18, { width: w, align: 'center' }
+    );
+
+    // Column layout, scaled to exactly fill the printable width.
+    const colDefs = [
+      { k: 'sl',    label: '#',           w: 22,  align: 'right' },
+      { k: 'name',  label: 'Seller',      w: 150, align: 'left'  },
+      { k: 'branch',label: 'Branch',      w: 80,  align: 'left'  },
+      { k: 'lots',  label: 'Lots',        w: 32,  align: 'right' },
+      { k: 'qty',   label: 'Qty (kg)',    w: 66,  align: 'right' },
+      { k: 'puramt',label: 'Amount',      w: 82,  align: 'right' },
+      { k: 'refund',label: 'Refund',      w: 70,  align: 'right' },
+      { k: 'commission', label: 'Commission', w: 82, align: 'right' },
+      { k: 'handling',   label: 'Handling',   w: 72, align: 'right' },
+      { k: 'gst',   label: 'GST',         w: 66,  align: 'right' },
+      { k: 'netDue',label: 'Net Due',     w: 92,  align: 'right' },
+    ];
+    const _colTot = colDefs.reduce((s, c) => s + c.w, 0);
+    colDefs.forEach(c => { c.w = c.w * (w / _colTot); });
+    let cx = m;
+    const colX = colDefs.map(c => { const x = cx; cx += c.w; return x; });
+    let y = m + 50;
+    doc.font('Helvetica-Bold').fontSize(9);
+    colDefs.forEach((c, i) => doc.text(c.label, colX[i] + 2, y, { width: c.w - 4, align: c.align, lineBreak: false, ellipsis: true }));
+    y += 14;
+    doc.moveTo(m, y - 2).lineTo(m + w, y - 2).stroke();
+
+    doc.font('Helvetica').fontSize(9);
+    rows.forEach((r, idx) => {
+      if (y > doc.page.height - 60) { doc.addPage(); y = m + 20; }
+      const gst = (Number(r.cgst)||0)+(Number(r.sgst)||0)+(Number(r.igst)||0);
+      const netDue = (Number(r.puramt)||0)+(Number(r.refund)||0)-(Number(r.commission)||0)-gst-(Number(r.handling)||0);
+      const cells = [
+        String(idx + 1), r.name || '', r.branch || '', String(r.lots || 0),
+        fmtQtyF(r.qty), fmtAmt(r.puramt), fmtAmt(r.refund),
+        fmtAmt(r.commission), fmtAmt(r.handling), fmtAmt(gst), fmtAmt(netDue),
+      ];
+      colDefs.forEach((c, i) => doc.text(cells[i], colX[i] + 2, y, { width: c.w - 4, align: c.align, lineBreak: false, ellipsis: true }));
+      y += 13;
+    });
+
+    doc.moveTo(m, y).lineTo(m + w, y).stroke();
+    y += 4;
+    doc.font('Helvetica-Bold').fontSize(9);
+    const totCells = [
+      '', 'TOTAL', '', String(totals.lots),
+      fmtQtyF(totals.qty), fmtAmt(totals.puramt), fmtAmt(totals.refund),
+      fmtAmt(totals.commission), fmtAmt(totals.handling), fmtAmt(totals.gst), fmtAmt(totals.netDue),
+    ];
+    colDefs.forEach((c, i) => doc.text(totCells[i], colX[i] + 2, y, { width: c.w - 4, align: c.align, lineBreak: false, ellipsis: true }));
+
+    doc.end();
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: 'Commission Bill F2 failed: ' + e.message });
+  }
+});
+
 app.delete('/api/bills/:id', requireDelete, (req, res) => {
   getDb().run('DELETE FROM bills WHERE id = ?', [req.params.id]);
   res.json({ success: true });
@@ -7636,6 +8050,409 @@ app.put('/api/debit-notes/:id', requireInvoiceWrite, (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// DEBIT NOTES — PLANTER (agriculturist / unregistered sellers)
+// ══════════════════════════════════════════════════════════════
+// Mirrors the dealer Debit Notes routes above, but the parties are
+// PLANTERS sourced from bills of supply (the `bills` table) rather than
+// registered-dealer purchases, and the taxable base is the company's
+// service fee charged back to the planter — sum(commission + handling)
+// on the planter's GRADE-1 lots. Written to the separate
+// `debit_notes_planter` table so the two DN streams keep independent
+// trade-wise numbering and never collide.
+
+// Feature flag — gates the write/generate paths (flag_debit_note_planter).
+function requireDebitNotePlanterEnabled(req, res, next) {
+  const cfg = getSettingsFlat(getDb());
+  const on = String(cfg.flag_debit_note_planter || '').toLowerCase() === 'true' || cfg.flag_debit_note_planter === true;
+  if (!on) return res.status(403).json({ error: 'Debit Note — Planter feature is disabled — enable "flag_debit_note_planter" in Settings → Flags' });
+  next();
+}
+
+// Taxable base for a planter DN = sum(commission + service-tax/handling)
+// on the planter's GRADE-1 lots in this auction. Returns 0 when there's
+// nothing to debit.
+function _planterServiceBase(db, auctionId, sellerName) {
+  if (!auctionId || !sellerName) return 0;
+  const row = db.get(
+    `SELECT COALESCE(SUM(COALESCE(com,0) + COALESCE(sertax,0)), 0) AS base
+       FROM lots
+      WHERE auction_id = ? AND name = ? AND TRIM(COALESCE(grade,'')) = '1'`,
+    [auctionId, sellerName]
+  );
+  return row ? Number(row.base) || 0 : 0;
+}
+
+// Intra/inter for a planter (who has no GSTIN): compare the bill-of-supply
+// state code against the company's state code. Returns 'L' (intra) or 'I'
+// (inter). Defaults to 'L' when the planter's state code is unknown.
+function _derivePlanterSaleType(bill, cfg) {
+  const companyStateCode = String(cfg.tally_state_code
+      || (String(cfg.business_state || '').toUpperCase() === 'KERALA' ? '32' : '33'));
+  const raw = String((bill && bill.st_code) || '').trim();
+  const planterCode = /^\d{2}/.test(raw) ? raw.slice(0, 2) : '';
+  if (planterCode) return planterCode === companyStateCode ? 'L' : 'I';
+  return 'L';
+}
+
+// List planter debit notes (trade- + search-filterable). Mode-scoped via
+// the auction's mode, exactly like the dealer DN list.
+app.get('/api/debit-notes-planter', requireView, (req, res) => {
+  const { auction_id, ano, from, to, search } = req.query;
+  const db = getDb();
+  let q = 'SELECT * FROM debit_notes_planter WHERE 1=1'; const p = [];
+  if (auction_id) { q += ' AND auction_id = ?'; p.push(parseInt(auction_id)); }
+  if (ano) { q += ' AND ano = ?'; p.push(ano); }
+  if (from && to) { q += ' AND date BETWEEN ? AND ?'; p.push(from, to); }
+  const searchTerm = String(search || '').trim();
+  if (searchTerm) {
+    const wild = `%${searchTerm}%`;
+    q += ` AND (
+            COALESCE(note_no,'') LIKE ?
+            OR COALESCE(name,'')    LIKE ?
+            OR COALESCE(ano,'')     LIKE ?
+          )`;
+    p.push(wild, wild, wild);
+  }
+  const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=debit_notes_planter.auction_id)');
+  q += mw.sql; p.push(...mw.params);
+  q += ' ORDER BY date DESC, note_no DESC LIMIT 500';
+  res.json(withFmtDate(db.all(q, p)));
+});
+
+// ── Generate planter Debit Note (single, trade-scoped) ───────────
+// Inputs: bilno (bill-of-supply number) + ano (trade) + optional
+// startNoteNo. Numbering is TRADE-WISE.
+app.post('/api/debit-notes-planter/generate', requireInvoiceWrite, requireDebitNotePlanterEnabled, (req, res) => {
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+  const bilno = String(req.body.bilno != null ? req.body.bilno : (req.body.billNo || '')).trim();
+  const ano   = String(req.body.ano || '').trim();
+  if (!bilno) return res.status(400).json({ error: 'bilno (bill of supply number) is required' });
+  if (!ano)   return res.status(400).json({ error: 'ano (trade number) is required' });
+
+  // Generation lock — same one-shot admin override mechanism as dealer DNs.
+  {
+    const _dnAuc = db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC LIMIT 1', [ano]);
+    if (_dnAuc) {
+      const _gen = _checkGenerationGate(db, 'debit_notes_planter', _dnAuc.id);
+      if (!_gen.allowed) return res.status(412).json(_gen.error);
+    }
+  }
+
+  const bill = db.get(
+    `SELECT * FROM bills WHERE TRIM(ano) = ? AND CAST(bil AS TEXT) = ? ORDER BY id DESC LIMIT 1`,
+    [ano, bilno]
+  );
+  if (!bill) return res.status(404).json({ error: `Bill of supply ${bilno} not found in trade #${ano}` });
+
+  const planterName = bill.name || '';
+  const dupe = db.get(
+    `SELECT id, note_no FROM debit_notes_planter WHERE ano = ? AND name = ? LIMIT 1`,
+    [ano, planterName]
+  );
+  if (dupe) {
+    return res.status(409).json({
+      error: `Planter debit note #${dupe.note_no} already exists for ${planterName} in trade #${ano}`,
+      existingId: dupe.id, existingNoteNo: dupe.note_no,
+    });
+  }
+
+  // Taxable base = commission + handling on the planter's grade-1 lots.
+  const dnAmount = _planterServiceBase(db, bill.auction_id, planterName);
+  if (dnAmount <= 0) {
+    return res.status(400).json({ error: `No grade-1 commission/handling found for ${planterName} in trade #${ano} — nothing to debit` });
+  }
+
+  const isInter = _derivePlanterSaleType(bill, cfg) === 'I';
+  const dnGstRate = Number(cfg.gst_service) || 18;
+  let cgst = 0, sgst = 0, igst = 0;
+  if (isInter) {
+    igst = _dnRound2(dnAmount * dnGstRate / 100);
+  } else {
+    const half = _dnRound2(dnAmount * (dnGstRate / 2) / 100);
+    cgst = half; sgst = half;
+  }
+  const total = _dnRound2(dnAmount + cgst + sgst + igst);
+
+  const trade = db.get('SELECT date FROM auctions WHERE ano = ? LIMIT 1', [ano]);
+  const dnDate = trade && trade.date
+    ? _dnAddDays(trade.date, 1)
+    : new Date().toISOString().slice(0, 10);
+
+  const rawStart = req.body.startNoteNo != null ? req.body.startNoteNo : req.body.noteNo;
+  let noteNo;
+  if (rawStart != null && String(rawStart).trim() !== '') {
+    const n = parseInt(String(rawStart).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) return res.status(400).json({ error: 'Starting Number must be a positive integer' });
+    noteNo = String(n);
+    const taken = db.get(`SELECT id FROM debit_notes_planter WHERE ano = ? AND CAST(note_no AS INTEGER) = ? LIMIT 1`, [ano, n]);
+    if (taken) {
+      const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes_planter WHERE ano = ?', [ano]);
+      const mx = parseInt(row && row.mx, 10);
+      return res.status(409).json({
+        error: `Planter debit note #${n} is already used in trade #${ano}. Choose a different number.`,
+        suggested: Number.isFinite(mx) && mx > 0 ? mx + 1 : 1,
+      });
+    }
+  } else {
+    const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes_planter WHERE ano = ?', [ano]);
+    const mx = parseInt(row && row.mx, 10);
+    noteNo = String(Number.isFinite(mx) && mx > 0 ? mx + 1 : 1);
+  }
+
+  db.run(
+    `INSERT INTO debit_notes_planter (ano,date,state,name,note_no,amount,cgst,sgst,igst,total,auction_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [ano, dnDate, stateForRecord(db, bill.pstate || bill.state || ''), planterName,
+     noteNo, dnAmount, cgst, sgst, igst, total, bill.auction_id || null]
+  );
+
+  res.json({
+    success: true, created: 1, note_no: noteNo,
+    bilno, ano, planter: planterName,
+    amount: dnAmount, cgst, sgst, igst, total,
+  });
+});
+
+// ── Generate All planter Debit Notes (trade-scoped bulk) ─────────
+app.post('/api/debit-notes-planter/generate-bulk', requireInvoiceWrite, requireDebitNotePlanterEnabled, (req, res) => {
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
+  const ano = String(req.body.ano || '').trim();
+  if (!ano) return res.status(400).json({ error: 'Trade number (ano) is required' });
+
+  {
+    const _dnAuc = db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC LIMIT 1', [ano]);
+    if (_dnAuc) {
+      const _gen = _checkGenerationGate(db, 'debit_notes_planter', _dnAuc.id);
+      if (!_gen.allowed) return res.status(412).json(_gen.error);
+    }
+  }
+
+  const bills = db.all(`SELECT * FROM bills WHERE TRIM(ano) = ? ORDER BY id`, [ano]);
+  if (!bills.length) {
+    return res.json({
+      success: true, created: 0, skipped: 0, generated: [], skippedDetails: [],
+      note: `No bills of supply in trade #${ano}`,
+    });
+  }
+
+  const existingKeys = new Set(
+    db.all(`SELECT name FROM debit_notes_planter WHERE ano = ?`, [ano]).map(r => r.name || '')
+  );
+  const trade = db.get('SELECT date FROM auctions WHERE ano = ? LIMIT 1', [ano]);
+  const dnDate = trade && trade.date
+    ? _dnAddDays(trade.date, 1)
+    : new Date().toISOString().slice(0, 10);
+
+  const dnGstRate = Number(cfg.gst_service) || 18;
+
+  const eligibleCount = bills.filter(
+    b => !existingKeys.has(b.name || '') && _planterServiceBase(db, b.auction_id, b.name || '') > 0
+  ).length;
+
+  let nextNoteNo;
+  const rawStart = req.body.startNoteNo != null ? req.body.startNoteNo : req.body.startInvoiceNo;
+  if (rawStart != null && String(rawStart).trim() !== '') {
+    const n = parseInt(String(rawStart).trim(), 10);
+    if (!Number.isFinite(n) || n < 1) return res.status(400).json({ error: 'Starting Number must be a positive integer' });
+    nextNoteNo = n;
+    if (eligibleCount > 0) {
+      const upper = nextNoteNo + eligibleCount - 1;
+      const collisions = db.all(
+        `SELECT CAST(note_no AS INTEGER) AS n FROM debit_notes_planter
+          WHERE ano = ? AND CAST(note_no AS INTEGER) BETWEEN ? AND ? ORDER BY n`,
+        [ano, nextNoteNo, upper]
+      );
+      if (collisions.length) {
+        const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes_planter WHERE ano = ?', [ano]);
+        const mx = parseInt(row && row.mx, 10);
+        const safe = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+        return res.status(409).json({
+          error: `Starting Number ${nextNoteNo} would overlap existing planter debit note(s) in trade #${ano}. Try ${safe} or higher.`,
+          collisions: collisions.map(c => c.n), suggested: safe,
+        });
+      }
+    }
+  } else {
+    const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes_planter WHERE ano = ?', [ano]);
+    const mx = parseInt(row && row.mx, 10);
+    nextNoteNo = Number.isFinite(mx) && mx > 0 ? mx + 1 : 1;
+  }
+
+  const generated = [];
+  const skipped   = [];
+  for (const b of bills) {
+    const planterName = b.name || '';
+    if (existingKeys.has(planterName)) {
+      skipped.push({ invo: b.bil, ano, buyer: planterName, reason: 'duplicate (DN already exists for this planter in this trade)' });
+      continue;
+    }
+    const dnAmount = _planterServiceBase(db, b.auction_id, planterName);
+    if (dnAmount <= 0) {
+      skipped.push({ invo: b.bil, ano, buyer: planterName, reason: 'no grade-1 commission/handling' });
+      continue;
+    }
+
+    const isInter = _derivePlanterSaleType(b, cfg) === 'I';
+    let cgst = 0, sgst = 0, igst = 0;
+    if (isInter) {
+      igst = _dnRound2(dnAmount * dnGstRate / 100);
+    } else {
+      const half = _dnRound2(dnAmount * (dnGstRate / 2) / 100);
+      cgst = half; sgst = half;
+    }
+    const total = _dnRound2(dnAmount + cgst + sgst + igst);
+
+    db.run(
+      `INSERT INTO debit_notes_planter (ano,date,state,name,note_no,amount,cgst,sgst,igst,total,auction_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [ano, dnDate, stateForRecord(db, b.pstate || b.state || ''), planterName,
+       String(nextNoteNo), dnAmount, cgst, sgst, igst, total, b.auction_id || null]
+    );
+    generated.push({ note_no: nextNoteNo, bilno: b.bil, planter: planterName, total });
+    existingKeys.add(planterName);
+    nextNoteNo++;
+  }
+
+  res.json({
+    success: true,
+    created: generated.length,
+    skipped: skipped.length,
+    generated,
+    skippedDetails: skipped,
+    note: generated.length === 0 && skipped.length === 0 ? `No eligible bills in trade #${ano}` : undefined,
+  });
+});
+
+// Planters in a trade still missing a DN (drives the Generate All preview).
+app.get('/api/debit-notes-planter/eligible-bills/:auctionId', requireView, (req, res) => {
+  const db = getDb();
+  const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [req.params.auctionId]);
+  if (!auction) return res.status(404).json({ error: 'Auction not found' });
+  const ano = auction.ano;
+  // `amount` is the DN BASE (commission + handling on grade-1 lots), not
+  // the bill value. Only planters with grade-1 service charges are eligible.
+  const rows = db.all(
+    `SELECT b.id, b.bil, b.name,
+            (SELECT COALESCE(SUM(COALESCE(l.com,0) + COALESCE(l.sertax,0)), 0)
+               FROM lots l
+              WHERE l.auction_id = b.auction_id AND l.name = b.name
+                AND TRIM(COALESCE(l.grade,'')) = '1') AS amount,
+            b.date, b.pstate AS state
+       FROM bills b
+      WHERE TRIM(b.ano) = ?
+        AND EXISTS (
+          SELECT 1 FROM lots l2
+           WHERE l2.auction_id = b.auction_id AND l2.name = b.name
+             AND TRIM(COALESCE(l2.grade,'')) = '1'
+             AND (COALESCE(l2.com,0) + COALESCE(l2.sertax,0)) > 0
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM debit_notes_planter dn WHERE dn.ano = ? AND dn.name = b.name
+        )
+      ORDER BY b.id`,
+    [String(ano).trim(), ano]
+  );
+  res.json(rows);
+});
+
+// Next-available planter DN number for a trade (trade-wise sequence).
+app.get('/api/debit-notes-planter/next-note-no', requireView, (req, res) => {
+  const db = getDb();
+  const ano = String(req.query.ano || '').trim();
+  if (!ano) return res.status(400).json({ error: 'ano (trade number) is required' });
+  const row = db.get('SELECT MAX(CAST(note_no AS INTEGER)) AS mx FROM debit_notes_planter WHERE ano = ?', [ano]);
+  const mx = parseInt(row && row.mx, 10);
+  res.json({ next: Number.isFinite(mx) && mx > 0 ? mx + 1 : 1, ano });
+});
+
+app.delete('/api/debit-notes-planter/:id', requireDelete, (req, res) => {
+  getDb().run('DELETE FROM debit_notes_planter WHERE id = ?', [req.params.id]);
+  res.json({ success: true });
+});
+
+// Bulk delete selected planter debit notes.
+app.post('/api/debit-notes-planter/bulk-delete', requireDelete, (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: 'ids array required' });
+  }
+  const cleanIds = ids.map(Number).filter(Number.isFinite);
+  if (!cleanIds.length) return res.status(400).json({ error: 'No valid debit note IDs' });
+  const db = getDb();
+  const placeholders = cleanIds.map(() => '?').join(',');
+  const r = db.run(`DELETE FROM debit_notes_planter WHERE id IN (${placeholders})`, cleanIds);
+  res.json({ ok: true, deleted: r.changes });
+});
+
+// Single planter debit-note PDF — same layout as the dealer DN print,
+// scoped to one note. Pulls the planter's grade-1 lots for the table and
+// the address from the bill of supply.
+app.get('/api/debit-notes-planter/:id/pdf', requireView, async (req, res) => {
+  try {
+    const db = getDb();
+    const cfg = getSettingsFlat(db);
+    const note = db.get('SELECT * FROM debit_notes_planter WHERE id = ?', [req.params.id]);
+    if (!note) return res.status(404).json({ error: 'Debit note not found' });
+
+    const auc = db.get('SELECT * FROM auctions WHERE ano = ? LIMIT 1', [note.ano]) || null;
+    const lots = auc
+      ? db.all(
+          `SELECT lot_no, qty, price, amount FROM lots
+             WHERE auction_id = ? AND amount > 0 AND name = ?
+             ORDER BY CAST(lot_no AS INTEGER), lot_no`,
+          [auc.id, note.name]
+        )
+      : [];
+    const bill = db.get(
+      'SELECT add_line, pla, pan FROM bills WHERE TRIM(ano) = ? AND UPPER(name) = UPPER(?) ORDER BY id DESC LIMIT 1',
+      [String(note.ano).trim(), note.name]
+    ) || {};
+    const addrParts = [bill.add_line, bill.pla].map(s => (s || '').trim()).filter(Boolean);
+    const buyer = {
+      name: note.name,
+      address: addrParts.join(', '),
+      gstin: '',
+      noteNo: note.note_no || '',
+      date: note.date,
+      totalDiscount: Number(note.amount || 0),
+      lots,
+    };
+    const ourCfg = {
+      tally_company_name: cfg.tally_company_name || cfg.short_name || cfg.company || '',
+      tally_dispatch_place: cfg.tally_dispatch_place || cfg.place || '',
+      place: cfg.place || '',
+      gstin: cfg.gstin || '',
+      state: cfg.state || cfg.business_state || '',
+      tally_season: cfg.tally_season || cfg.season_code || '',
+      tally_hsn_cardamom: cfg.tally_hsn_cardamom || '09083120',
+    };
+    const pdf = await generateDebitNoteBatchPDF([buyer], ourCfg);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="DebitNotePlanter_${note.note_no || note.id}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('planter debit-note single pdf error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Update planter debit note (edit).
+app.put('/api/debit-notes-planter/:id', requireInvoiceWrite, (req, res) => {
+  const n = req.body;
+  const fields = ['ano','date','state','name','note_no','amount','cgst','sgst','igst','total'];
+  const sets = []; const vals = [];
+  for (const f of fields) {
+    if (n[f] !== undefined) { sets.push(`${f}=?`); vals.push(n[f]); }
+  }
+  if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+  vals.push(req.params.id);
+  getDb().run(`UPDATE debit_notes_planter SET ${sets.join(',')} WHERE id=?`, vals);
+  res.json({ success: true });
+});
+
+// ══════════════════════════════════════════════════════════════
 // JOURNALS (JOUR.PRG, PUJOUR.PRG, PPUJOUR.PRG)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/journals/sales', requireView, (req, res) => {
@@ -7835,6 +8652,102 @@ app.get('/api/payments/:auctionId', requireView, (req, res) => {
   const cfg = getSettingsFlat(db);
   const summary = getPaymentSummary(db, req.params.auctionId, req.query.state, cfg);
   res.json(summary);
+});
+
+// Delete the lots + DNs for a list of sellers in one auction. Powers
+// the "Delete Selected" button on the Payments tab. Each row in the
+// payments table is a roll-up of one seller's lots in the trade, so
+// deleting a payment "row" means clearing those underlying lots.
+//
+// Body: { sellerNames: ['DealerA', 'DealerB', ...] }
+//
+// Trade-scoped — only touches data in this auction. Names are matched
+// case-insensitively to be tolerant of legacy data inconsistencies.
+app.post('/api/payments/:auctionId/delete-sellers', requireDelete, (req, res) => {
+  try {
+    const db = getDb();
+    const auctionId = req.params.auctionId;
+    const names = Array.isArray(req.body.sellerNames) ? req.body.sellerNames : [];
+    if (!names.length) {
+      return res.status(400).json({ error: 'sellerNames array is required' });
+    }
+    const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
+    if (!auction) return res.status(404).json({ error: 'Auction not found' });
+
+    // Does the planter-DN table exist yet? Cascade into it only if so.
+    const hasPlanter = !!db.get(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='debit_notes_planter'"
+    );
+
+    // Build a parameterised IN clause. SQLite max parameters is 999;
+    // we cap chunks at 500 names per query to stay well within limits.
+    const CHUNK = 500;
+    let lotsDeleted = 0, dnsDeleted = 0;
+    for (let i = 0; i < names.length; i += CHUNK) {
+      const batch = names.slice(i, i + CHUNK).map(s => String(s).trim()).filter(Boolean);
+      if (!batch.length) continue;
+      const placeholders = batch.map(() => '?').join(',');
+      // Lots — case-insensitive match. UPPER() on both sides handles
+      // legacy case mismatches (data sometimes imported as title case,
+      // sometimes uppercased).
+      const upperBatch = batch.map(n => n.toUpperCase());
+      const lotsBefore = db.get(
+        `SELECT COUNT(*) AS c FROM lots
+          WHERE auction_id = ?
+            AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+        [auctionId, ...upperBatch]
+      ).c;
+      db.run(
+        `DELETE FROM lots
+          WHERE auction_id = ?
+            AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+        [auctionId, ...upperBatch]
+      );
+      lotsDeleted += lotsBefore;
+
+      // Cascading DN cleanup — debit_notes for these sellers in this
+      // trade are now orphaned references, so delete them too.
+      const dnsBefore = db.get(
+        `SELECT COUNT(*) AS c FROM debit_notes
+          WHERE ano = ?
+            AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+        [auction.ano, ...upperBatch]
+      ).c;
+      db.run(
+        `DELETE FROM debit_notes
+          WHERE ano = ?
+            AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+        [auction.ano, ...upperBatch]
+      );
+      dnsDeleted += dnsBefore;
+
+      // Planter debit notes (when that feature/table is present).
+      if (hasPlanter) {
+        const dnpBefore = db.get(
+          `SELECT COUNT(*) AS c FROM debit_notes_planter
+            WHERE ano = ?
+              AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+          [auction.ano, ...upperBatch]
+        ).c;
+        db.run(
+          `DELETE FROM debit_notes_planter
+            WHERE ano = ?
+              AND UPPER(COALESCE(name,'')) IN (${placeholders})`,
+          [auction.ano, ...upperBatch]
+        );
+        dnsDeleted += dnpBefore;
+      }
+    }
+
+    res.json({
+      success: true,
+      sellers: names.length,
+      lotsDeleted,
+      dnsDeleted,
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Delete failed: ' + (e.message || e) });
+  }
 });
 
 // ── Bank payment data (BANKPAY.PRG) ──────────────────────────
@@ -8754,6 +9667,7 @@ const TALLY_EXPORTS = {
   rd_purchase:         { label: 'RD Purchase Vouchers',                             name: 'RDPurchase',         builder: buildRDPurchaseRows,       generator: generRDPurchaseXML,   company: 'asp' },
   urd_purchase:        { label: 'URD Purchase Vouchers (Agriculturist)',            name: 'URDPurchase',        builder: buildURDPurchaseRows,      generator: generURDPurchaseXML,  company: 'asp' },
   debit_note:          { label: 'Debit Notes (Discount)',                           name: 'DebitNote',          builder: buildDebitNoteRows,        generator: generDebitNoteXML,    company: 'isp' },
+  debit_note_planter:  { label: 'Debit Notes — Planter (Discount)',                 name: 'DebitNotePlanter',   builder: buildDebitNotePlanterRows, generator: generDebitNoteXML,    company: 'isp' },
 };
 
 // Resolve the Tally company name for a given export type.

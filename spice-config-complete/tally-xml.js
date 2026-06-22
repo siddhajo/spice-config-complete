@@ -2066,7 +2066,14 @@ function generDebitNoteXML(rows, cfg, opts = {}) {
     const fullGstin   = String(row.gstin || '');
     const partyGstin  = row.partyGstin || (fullGstin.toUpperCase().startsWith('GST') ? fullGstin.slice(6, 21) : fullGstin);
     const state       = xe(findState(partyGstin));
-    const isIntra     = String(partyGstin).slice(0, 2) === String(intra);
+    // Registered dealers carry a PARTYGSTIN, so its 2-digit state code is
+    // authoritative. URD / planter debit notes have NO GSTIN — for those we
+    // fall back to the GST split stored on the row (CGST/SGST present ⇒
+    // intra, else inter). The fallback only fires when partyGstin is empty,
+    // so registered-dealer behaviour is unchanged.
+    const isIntra     = partyGstin
+      ? (String(partyGstin).slice(0, 2) === String(intra))
+      : (Number(row.cgsttot || row.cgst || 0) > 0 || Number(row.sgsttot || row.sgst || 0) > 0);
     const refundtot   = r2(row.refundtot || row.amount || 0);
     const cgsttot     = r2(row.cgsttot || row.cgst || 0);
     const sgsttot     = r2(row.sgsttot || row.sgst || 0);
@@ -2074,6 +2081,13 @@ function generDebitNoteXML(rows, cfg, opts = {}) {
     const total       = r2(row.total || (refundtot + cgsttot + sgsttot + igsttot));
     const totalRound  = tlyrnd ? r0(total) : total;
     const rnd         = tlyrnd ? r2(totalRound - total) : 0;
+    // Planter (URD) debit notes post their commission/handling discount to
+    // their own ledger (tally_dnp_discount); registered-dealer DNs use the
+    // regular DN discount ledger. Falls back to the dealer ledger when the
+    // planter ledger isn't separately configured.
+    const discountLdr = row.planter
+      ? cfgGet(cfg, 'tally_dnp_discount', Discount_LDR)
+      : Discount_LDR;
 
     const startVoucher = `<VOUCHER VCHTYPE="Debit Note" ACTION="Create" OBJVIEW="Invoice Voucher View">`;
 
@@ -2117,13 +2131,13 @@ ${TAGS.DEEMNO}
 </LEDGERENTRIES.LIST>
 
 <LEDGERENTRIES.LIST>
-<LEDGERNAME>${xe(Discount_LDR)}</LEDGERNAME>
+<LEDGERNAME>${xe(discountLdr)}</LEDGERNAME>
 <GSTOVRDNTAXABILITY>Taxable</GSTOVRDNTAXABILITY>
 <HSNSOURCETYPE>Ledger</HSNSOURCETYPE>
-<HSNLEDGERSOURCE>${xe(Discount_LDR)}</HSNLEDGERSOURCE>
+<HSNLEDGERSOURCE>${xe(discountLdr)}</HSNLEDGERSOURCE>
 <GSTOVRDNTYPEOFSUPPLY>Services</GSTOVRDNTYPEOFSUPPLY>
 <GSTHSNNAME>${xe(HSN_Service)}</GSTHSNNAME>
-<GSTHSNDESCRIPTION>${xe(Discount_LDR)}</GSTHSNDESCRIPTION>
+<GSTHSNDESCRIPTION>${xe(discountLdr)}</GSTHSNDESCRIPTION>
 ${TAGS.DEEMNO}
 <AMOUNT>${refundtot}</AMOUNT>
 <VATEXPAMOUNT>${refundtot}</VATEXPAMOUNT>
@@ -2742,6 +2756,68 @@ function buildDebitNoteRows(db, auctionId, cfg) {
   });
 }
 
+// URD/planter party-ledger name convention: `<name>-[<PAN>]` when a PAN is
+// known, else `<name>-PURCHASE`. Matches the URD party ledgers emitted for
+// agriculturist purchases so the planter debit-note voucher references an
+// existing ledger in Tally.
+function _urdPurchaseLedgerName(n, pan) {
+  const s = String(n || '').trim();
+  if (!s) return s;
+  const p = String(pan || '').trim();
+  return p ? `${s}-[${p}]` : `${s}-PURCHASE`;
+}
+
+// PLANTER debit notes — mirrors buildDebitNoteRows but reads the
+// `debit_notes_planter` table. Parties are agriculturists / unregistered
+// sellers (URD), so the PARTYLEDGERNAME uses the URD ledger-name convention
+// and `gstin` is left blank (planters have none) — generDebitNoteXML then
+// classifies intra/inter from the stored CGST/SGST/IGST amounts and posts
+// the discount to the planter discount ledger. Address / place / PAN come
+// from the seller's own bill of supply for the trade.
+function buildDebitNotePlanterRows(db, auctionId, cfg) {
+  const a = db.prepare('SELECT ano FROM auctions WHERE id = ?').get(auctionId);
+  if (!a) return [];
+  const raw = db.prepare(`
+    SELECT * FROM debit_notes_planter WHERE ano = ? ORDER BY id
+  `).all(a.ano);
+
+  // Pull the matching bill-of-supply row (address / place / PAN) for each
+  // distinct planter in this DN batch. Bills store single-digit trade
+  // numbers space-padded → match on TRIM(ano).
+  const planterNames = [...new Set(raw.map(d => String(d.name || '').trim()).filter(Boolean))];
+  const planters = {};
+  for (const name of planterNames) {
+    const b = db.prepare(
+      `SELECT name, add_line, pla, st_code, pan
+         FROM bills
+        WHERE TRIM(ano) = ? AND UPPER(name) = UPPER(?)
+        ORDER BY id DESC LIMIT 1`
+    ).get(String(a.ano).trim(), name);
+    if (b) planters[name] = b;
+  }
+
+  return raw.map((d) => {
+    const planter = planters[String(d.name || '').trim()] || {};
+    const dnPre = r2((Number(d.amount) || 0) + (Number(d.cgst) || 0) + (Number(d.sgst) || 0) + (Number(d.igst) || 0));
+    return {
+      ano: d.ano,
+      date: d.date,
+      name: _urdPurchaseLedgerName(d.name, planter.pan),
+      address: planter.add_line || '',
+      place:   planter.pla || '',
+      pin:     '',
+      // URD/planter — no GSTIN. generDebitNoteXML reads the GST amounts to
+      // pick intra vs inter when the GSTIN is blank.
+      gstin: '',
+      refundtot: d.amount,
+      cgsttot: d.cgst, sgsttot: d.sgst, igsttot: d.igst,
+      total: dnPre > 0 ? dnPre : r2(d.total || 0),
+      voucherNum: d.note_no || String(d.id),
+      planter: true,
+    };
+  });
+}
+
 // =====================================================================
 // 5. LEDGER MASTERS (party + tax + sales + purchase ledgers)
 // =====================================================================
@@ -3211,6 +3287,7 @@ module.exports = {
   buildRDPurchaseRows,
   buildURDPurchaseRows,
   buildDebitNoteRows,
+  buildDebitNotePlanterRows,
   buildLedgerRows,
   buildSalesPartyLedgerRows,
   buildRDPartyLedgerRows,
