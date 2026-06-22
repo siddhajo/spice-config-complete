@@ -4046,77 +4046,80 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
         </div><!-- /tally-sec-single-ledger -->
 
-        <!-- Single Party Voucher picker -->
+        <!-- Single Voucher picker — by Party OR by Invoice, combined into one
+             section (toggle below) to save vertical space. -->
         <div class="tally-section" id="tally-sec-single-voucher">
         <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-single-voucher')">
           <span class="tally-section-chev">▼</span>
-          <span>🎫 Single Party Voucher</span>
+          <span>🎫 Single Voucher</span>
         </h3>
         <div class="tally-section-body">
         <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate a voucher XML for just one party. Useful when you missed an entry or need a single voucher re-imported. Each party gets a download button per applicable voucher type — Sales (ISP / ASP) for buyers, RD or URD Purchase for traders.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <div style="flex:2;min-width:220px"><label style="font-size:11px;color:var(--text2);font-weight:600">Search</label>
-              <div class="tally-search" id="tally-pv-search-wrap">
-                <span class="tally-search-icon">🔍</span>
-                <input type="text" id="tally-pv-search" placeholder="Type to filter by name, GSTIN, or place…" oninput="onTallySearchInput('tally-pv-search', renderTallyPartyVoucherList)">
-                <button type="button" class="tally-search-clear" onclick="clearTallySearch('tally-pv-search', renderTallyPartyVoucherList)" title="Clear">✕</button>
-              </div>
-            </div>
-            <div style="flex:1;min-width:160px"><label style="font-size:11px;color:var(--text2);font-weight:600">Filter by kind</label>
-              <select id="tally-pv-kind" onchange="renderTallyPartyVoucherList()" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-                <option value="">All kinds</option>
-                <!-- Sales applies to BOTH companies (ISP sale + ASP→ISP transfer),
-                     so it must stay selectable in either mode — no data-tally-co tag. -->
-                <option value="sales">Sales (buyer)</option>
-                <option value="rd_purchase" data-tally-co="asp">RD Purchase (dealer)</option>
-                <option value="urd_purchase" data-tally-co="asp">URD Purchase (agriculturist)</option>
-              </select>
-            </div>
-            <button class="btn btn-a" onclick="loadTallyParties()" style="padding:7px 14px;font-size:12px">Refresh List</button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            <label style="font-size:11px;color:var(--text2);font-weight:600">Pick by</label>
+            <select id="tally-sv-mode" onchange="tallySvModeChange()" style="padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+              <option value="party">🎯 Party</option>
+              <option value="invoice">🧾 Invoice</option>
+            </select>
+            <span id="tally-sv-desc" style="font-size:11px;color:var(--text3);flex:1;min-width:200px">One voucher per party (covers all their lots) — for a missed entry or a re-import.</span>
           </div>
-          <div id="tally-pv-list" style="margin-top:10px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
-            <div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Pick an auction and click <strong>Refresh List</strong> to load parties.</div>
+
+          <!-- BY PARTY -->
+          <div id="tally-sv-party">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+              <div style="flex:2;min-width:220px"><label style="font-size:11px;color:var(--text2);font-weight:600">Search</label>
+                <div class="tally-search" id="tally-pv-search-wrap">
+                  <span class="tally-search-icon">🔍</span>
+                  <input type="text" id="tally-pv-search" placeholder="Type to filter by name, GSTIN, or place…" oninput="onTallySearchInput('tally-pv-search', renderTallyPartyVoucherList)">
+                  <button type="button" class="tally-search-clear" onclick="clearTallySearch('tally-pv-search', renderTallyPartyVoucherList)" title="Clear">✕</button>
+                </div>
+              </div>
+              <div style="flex:1;min-width:160px"><label style="font-size:11px;color:var(--text2);font-weight:600">Filter by kind</label>
+                <select id="tally-pv-kind" onchange="renderTallyPartyVoucherList()" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                  <option value="">All kinds</option>
+                  <!-- Sales applies to BOTH companies (ISP sale + ASP→ISP transfer),
+                       so it must stay selectable in either mode — no data-tally-co tag. -->
+                  <option value="sales">Sales (buyer)</option>
+                  <option value="rd_purchase" data-tally-co="asp">RD Purchase (dealer)</option>
+                  <option value="urd_purchase" data-tally-co="asp">URD Purchase (agriculturist)</option>
+                </select>
+              </div>
+              <button class="btn btn-a" onclick="loadTallyParties()" style="padding:7px 14px;font-size:12px">Refresh List</button>
+            </div>
+            <div id="tally-pv-list" style="margin-top:10px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+              <div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Pick an auction and click <strong>Refresh List</strong> to load parties.</div>
+            </div>
+          </div>
+
+          <!-- BY INVOICE -->
+          <div id="tally-sv-invoice" style="display:none">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+              <div style="flex:1;min-width:170px"><label style="font-size:11px;color:var(--text2);font-weight:600">Voucher type</label>
+                <select id="tally-inv-type" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
+                  <option value="sales_isp" data-tally-co="isp">Sales — ISP</option>
+                  <option value="sales_asp" data-tally-co="asp">Sales — ASP</option>
+                  <option value="isp_purchase" data-tally-co="isp">ISP Purchase</option>
+                  <option value="rd_purchase" data-tally-co="asp">RD Purchase</option>
+                  <option value="urd_purchase" data-tally-co="asp">URD Purchase</option>
+                  <option value="debit_note" data-tally-co="isp">Debit Note</option>
+                </select>
+              </div>
+              <div style="flex:2;min-width:220px"><label style="font-size:11px;color:var(--text2);font-weight:600">Search</label>
+                <div class="tally-search" id="tally-inv-search-wrap">
+                  <span class="tally-search-icon">🔍</span>
+                  <input type="text" id="tally-inv-search" placeholder="Type to filter by party or invoice no…" oninput="onTallySearchInput('tally-inv-search', renderTallyInvoiceList)">
+                  <button type="button" class="tally-search-clear" onclick="clearTallySearch('tally-inv-search', renderTallyInvoiceList)" title="Clear">✕</button>
+                </div>
+              </div>
+              <button class="btn btn-a" onclick="loadTallyInvoices()" style="padding:7px 14px;font-size:12px">Load Invoices</button>
+            </div>
+            <div id="tally-inv-list" style="margin-top:10px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+              <div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Pick an auction + voucher type and click <strong>Load Invoices</strong>.</div>
+            </div>
           </div>
         </div>
         </div>
         </div><!-- /tally-sec-single-voucher -->
-
-        <!-- Single Invoice Voucher picker -->
-        <div class="tally-section" id="tally-sec-single-invoice">
-        <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-single-invoice')">
-          <span class="tally-section-chev">▼</span>
-          <span>🧾 Single Invoice Voucher</span>
-        </h3>
-        <div class="tally-section-body">
-        <div style="padding:14px;border:1px solid var(--border);border-radius:10px;background:#fff">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Generate a Tally voucher XML for just one invoice. Useful when a single invoice was missed or corrected and needs re-importing on its own. Pick a voucher type, load its invoices, then download the one you need.</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-            <div style="flex:1;min-width:170px"><label style="font-size:11px;color:var(--text2);font-weight:600">Voucher type</label>
-              <select id="tally-inv-type" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-                <option value="sales_isp" data-tally-co="isp">Sales — ISP</option>
-                <option value="sales_asp" data-tally-co="asp">Sales — ASP</option>
-                <option value="isp_purchase" data-tally-co="isp">ISP Purchase</option>
-                <option value="rd_purchase" data-tally-co="asp">RD Purchase</option>
-                <option value="urd_purchase" data-tally-co="asp">URD Purchase</option>
-                <option value="debit_note" data-tally-co="isp">Debit Note</option>
-              </select>
-            </div>
-            <div style="flex:2;min-width:220px"><label style="font-size:11px;color:var(--text2);font-weight:600">Search</label>
-              <div class="tally-search" id="tally-inv-search-wrap">
-                <span class="tally-search-icon">🔍</span>
-                <input type="text" id="tally-inv-search" placeholder="Type to filter by party or invoice no…" oninput="onTallySearchInput('tally-inv-search', renderTallyInvoiceList)">
-                <button type="button" class="tally-search-clear" onclick="clearTallySearch('tally-inv-search', renderTallyInvoiceList)" title="Clear">✕</button>
-              </div>
-            </div>
-            <button class="btn btn-a" onclick="loadTallyInvoices()" style="padding:7px 14px;font-size:12px">Load Invoices</button>
-          </div>
-          <div id="tally-inv-list" style="margin-top:10px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
-            <div style="padding:14px;color:var(--text3);font-size:12px;text-align:center">Pick an auction + voucher type and click <strong>Load Invoices</strong>.</div>
-          </div>
-        </div>
-        </div>
-        </div><!-- /tally-sec-single-invoice -->
 
         <div class="tally-section" id="tally-sec-vouchers">
         <h3 class="tally-section-head" onclick="toggleTallySection('tally-sec-vouchers')">
@@ -18466,6 +18469,23 @@ function clearTallySearch(inputId,renderFn){
   if(wrap)wrap.classList.remove('has-text');
   if(typeof renderFn==='function')renderFn();
   inp.focus();
+}
+
+// Single Voucher: switch between the by-Party and by-Invoice pickers, which
+// share one collapsible section (combined to save vertical space). Only the
+// selected picker's controls + list are shown; both keep their own element
+// IDs so the underlying load/render functions are unchanged.
+function tallySvModeChange(){
+  const mode=document.getElementById('tally-sv-mode')?.value||'party';
+  const isInv=(mode==='invoice');
+  const partyEl=document.getElementById('tally-sv-party');
+  const invEl=document.getElementById('tally-sv-invoice');
+  const desc=document.getElementById('tally-sv-desc');
+  if(partyEl)partyEl.style.display=isInv?'none':'';
+  if(invEl)invEl.style.display=isInv?'':'none';
+  if(desc)desc.textContent=isInv
+    ?'One voucher for a specific invoice — for a missed or corrected invoice re-imported on its own.'
+    :'One voucher per party (covers all their lots) — for a missed entry or a re-import.';
 }
 
 // ── Single Party Voucher list ────────────────────────────────────
