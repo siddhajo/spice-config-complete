@@ -5480,9 +5480,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <label style="display:block;font-size:11px;font-weight:600;color:#7C2D12;margin-bottom:3px">Report</label>
         <select id="pi-type" onchange="piOnTypeChange()" style="width:100%;padding:7px 8px;border:1px solid #FDE68A;border-radius:6px;background:#FFFBEB;color:#7C2D12;font-size:12px;font-weight:600"></select>
       </div>
-      <span style="display:flex;gap:4px">
+      <span style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-g" type="button" id="pi-btn-preview" onclick="piLoadPreview()" title="Preview the report below" style="padding:6px 10px;font-size:11px;font-weight:600">👁 Preview</button>
         <button class="btn btn-o" type="button" id="pi-btn-xlsx" onclick="piQuickExport(piCurrentType(),'xlsx')" title="Download as Excel" style="padding:6px 10px;font-size:11px;font-weight:600">📊 XLSX</button>
         <button class="btn btn-o" type="button" id="pi-btn-pdf"  onclick="piQuickExport(piCurrentType(),'pdf')"  title="Download as PDF"   style="padding:6px 10px;font-size:11px;font-weight:600">📄 PDF</button>
+        <button class="btn btn-o" type="button" id="pi-btn-print" onclick="piPrintCurrent()" title="Open the PDF and print" style="padding:6px 10px;font-size:11px;font-weight:600">🖨 Print</button>
         <button class="btn btn-o" type="button" id="pi-btn-csv"  onclick="piQuickExport(piCurrentType(),'csv')"  title="Download as CSV"   style="padding:6px 10px;font-size:11px;font-weight:600;display:none">📄 CSV</button>
       </span>
     </div>
@@ -5491,6 +5493,12 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       Snapshots saved — proceed with import
     </label>
   </div>
+
+  <!-- Inline preview of the selected pre-trade report (PDF iframe, or an
+       HTML table for CSV/XLSX-only reports). Hidden until Preview is clicked;
+       reuses the shared export-preview helpers. -->
+  <div id="pi-meta" style="font-size:12px;color:var(--text2);margin-bottom:6px"></div>
+  <div id="pi-preview" style="overflow:auto;max-height:360px;border:1px solid var(--spice-line);border-radius:8px;padding:8px;background:#fff;margin-bottom:14px;display:none"></div>
 
   <p style="font-size:13px;color:var(--spice-text-mute);margin-bottom:10px">Use this after the auction ends to update prices, buyer codes, and quantities on existing lots.</p>
   <div style="font-size:12px;color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);border:1px solid #C5E3D2;border-radius:8px;padding:10px 12px;margin-bottom:14px">
@@ -12636,15 +12644,45 @@ function piPopulateTypes(){
 }
 // Toggle the format buttons by the selected report's rules — identical to
 // the Export Center / Pre-Trade section: CSV-only types show only CSV;
-// XLSX-only types drop PDF.
+// XLSX-only types drop PDF + Print. Preview stays available for every type
+// (PDF inline, or an HTML table for CSV/XLSX-only). Switching report clears
+// any open preview so it can't show stale output for the new report.
 function piOnTypeChange(){
   const t=piCurrentType();
   const isCsv=EXP_CSV_ONLY.has(t), isXlsx=EXP_XLSX_ONLY.has(t);
   const show=(id,v)=>{const el=document.getElementById(id);if(el)el.style.display=v?'':'none';};
   show('pi-btn-xlsx', !isCsv);
   show('pi-btn-pdf',  !isCsv && !isXlsx);
+  show('pi-btn-print',!isCsv && !isXlsx);
   show('pi-btn-csv',  isCsv);
+  const prev=document.getElementById('pi-preview'); if(prev){ prev.innerHTML=''; prev.style.display='none'; }
+  const meta=document.getElementById('pi-meta'); if(meta) meta.textContent='';
 }
+// Shared trade pick for the modal's snapshot reports — topbar first, then
+// the Lots-screen auction selector as a fallback.
+function piAid(){
+  return (document.getElementById('global-aid')?.value
+        || document.getElementById('lot-auction')?.value
+        || '').trim();
+}
+// Preview the selected snapshot inline (same helpers as the Pre-Trade
+// Exports section): a real PDF iframe for printable reports, or an HTML
+// table for CSV/XLSX-only reports (Praman / Full File).
+function piLoadPreview(){
+  const aid=piAid();
+  if(!aid){
+    alert('Pick a '+termAuction(false,true)+' in the topbar first — the snapshots need to know which '+termAuction(false,true)+' to preview.');
+    return;
+  }
+  const root=document.getElementById('pi-preview'); if(root) root.style.display='';
+  const t=piCurrentType();
+  if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'pi-meta','pi-preview',PRETRADE_EXP_LABELS[t]);
+  }
+  return _renderPdfPreview(t, aid, 'pi-meta', 'pi-preview', PRETRADE_EXP_LABELS[t]);
+}
+// Open the selected snapshot's PDF in a new tab and fire the print dialog.
+function piPrintCurrent(){ return _printExportPdf(piCurrentType(), piAid()); }
 function piAckChanged(){
   const ack=document.getElementById('pi-ack');
   const submit=document.getElementById('pi-submit');
@@ -12656,9 +12694,7 @@ function piAckChanged(){
 // first. Each report offers XLSX + PDF (Praman is CSV-only). `format`
 // defaults to PDF, or CSV for Praman.
 async function piQuickExport(type, format){
-  const aid=(document.getElementById('global-aid')?.value
-           || document.getElementById('lot-auction')?.value
-           || '').trim();
+  const aid=piAid();
   if(!aid){
     alert('Pick a '+termAuction(false,true)+' in the topbar first — the snapshots need to know which '+termAuction(false,true)+' to export.');
     return;
