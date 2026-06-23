@@ -3858,7 +3858,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button class="btn feat-bos-purchase-bill" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedBills()" title="Print all ticked bills">🖨 Print Selected</button>
+            <button class="btn feat-bos-purchase-bill" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedCommissionBoS()" title="Print Commission Bill (Memorandum) for all ticked bills">🖨 Print Selected</button>
             <button class="btn btn-o feat-bos-commission" style="height:38px;padding:0 16px;font-weight:600" onclick="printSelectedCommissionBoS()" title="Print Commission Bill (Memorandum) for all ticked bills — one A4 page per lot, matches IMCPC reference format">🧾 Commission Bill Selected</button>
           </div>
 
@@ -18310,9 +18310,11 @@ async function loadBills(){
         fmt:(n)=>fmtI(n,2),
         render:(b)=>`<strong>${fmtI(b.net||0,2)}</strong>` },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(b)=>
-          // Purchase Bill mode (flag_bos_purchase_bill ON): PDF (View/Print) icon.
-          iconBtn('pdf','View PDF',`viewBillPDF('${b.auction_id||1}','${encodeURIComponent(b.name)}','${b.bil}')`,'feat-bos-purchase-bill')
-          // Commission Bill mode (flag OFF): download the Commission Bill (BoS).
+          // The Actions print icon prints the Commission Bill (BoS) in BOTH
+          // flag states (operator spec) — the purchase-bill PDF is no longer
+          // wired to a button. The two icons differ only by which feat-* class
+          // shows them; both call the commission generator.
+          iconBtn('pdf','Print Commission Bill',`downloadBillCommissionBoS(${b.id},'${encodeURIComponent(b.name||'')}','${encodeURIComponent(b.bil||'')}')`,'feat-bos-purchase-bill')
           + iconBtn('commission','Download Commission Bill',`downloadBillCommissionBoS(${b.id},'${encodeURIComponent(b.name||'')}','${encodeURIComponent(b.bil||'')}')`,'feat-bos-commission')
           + iconBtn('whatsapp','Send via WhatsApp',`whatsappBill('${b.auction_id||1}','${encodeURIComponent(b.name)}','${encodeURIComponent(b.bil||'')}',${Number(b.net)||0},'${esc(b.ano||'')}')`)
           + iconBtn('edit','Edit bill',`openBillEdit(${JSON.stringify(b).replace(/"/g,'&quot;')})`)

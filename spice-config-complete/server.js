@@ -7291,10 +7291,11 @@ app.post('/api/bills/commission-bos-bulk', requireView, async (req, res) => {
       }
 
       // Format the auction date once (shared by every page of this bill).
-      const dateFmt3 = (cfg && cfg.date_format) || 'dd/mm/yyyy';
+      // Use the in-scope fmtDate helper — it applies the configured display
+      // format (formatDateForDisplay is not a module-level binding here).
       let billDate = '';
-      if (auction && auction.date) billDate = formatDateForDisplay(auction.date, dateFmt3);
-      if (!billDate && b.date) billDate = formatDateForDisplay(b.date, dateFmt3);
+      if (auction && auction.date) billDate = fmtDate(auction.date);
+      if (!billDate && b.date) billDate = fmtDate(b.date);
 
       // Last-resort: no live lots and no snapshot. Emit a single consolidated
       // page from the stored bill totals so the memorandum still prints.

@@ -395,9 +395,18 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // type. Used for the GST split, transport/insurance suppression, and the
   // returned/stored sale type.
   const effectiveSaleType = isASP ? 'I' : saleType;
-  // ASP invoices are always inter-state; otherwise the GST split follows the
-  // buyer's GST state vs the company's home state.
-  const isInterState = isASP ? true : (buyerState !== companyState);
+  // Inter-state vs intra-state drives the GST split (IGST vs CGST+SGST).
+  // The explicit sale type is the legal source of truth — the operator
+  // picks L/I/E per invoice and the sales-list IGST/CGST columns already
+  // follow it — so honour it directly here so the PDF matches the list.
+  // 'I'/'E' → inter-state (IGST); 'L' → intra-state (CGST+SGST). Fall back
+  // to comparing the buyer's GSTIN state with the company's home state only
+  // when no sale type was supplied. ASP transfers are always inter-state.
+  const _est = String(effectiveSaleType || '').toUpperCase();
+  const isInterState = isASP ? true
+    : (_est === 'I' || _est === 'E') ? true
+    : (_est === 'L') ? false
+    : (buyerState !== companyState);
 
   let totalQty = 0, totalBags = 0, totalAmount = 0;
   const lineItems = [];
@@ -439,8 +448,14 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
     });
   }
 
+  // e-Auction LOCAL sales bill ONLY the cardamom — no Gunny, Transport or
+  // Insurance line (per operator spec). hideTI below suppresses Transport/
+  // Insurance for this case; gunny is zeroed here so it drops out of the
+  // taxable value, GST and the PDF row. e-Trade (ISP/ASP) billing is
+  // unaffected — only e-Auction local invoices change.
+  const hideLocalCharges = isEAuction && (_est === 'L');
   // Gunny cost (HSN: jute bags)
-  const gunnyCost = totalBags * (cfg.gunny_rate || 165);
+  const gunnyCost = hideLocalCharges ? 0 : totalBags * (cfg.gunny_rate || 165);
 
   // Transport & Insurance rates depend on sale type:
   //   L (Local)        → local_transport / local_insurance
@@ -470,9 +485,13 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // ISP inter-state invoices ('I') don't bill transport/insurance separately
   // (the buyer covers freight). Match the rendering rule that hides these
   // rows from the PDF — see invoice-pdf.js hideTransportInsurance.
-  // e-Auction interstate keeps Transport/Insurance (only ISP e-Trade
-  // interstate suppresses them).
-  const hideTI = !isASP && !isEAuction && (String(effectiveSaleType || '').toUpperCase() === 'I');
+  // Transport/Insurance suppression:
+  //   - ISP e-Trade INTER-state ('I'): buyer covers freight (original rule).
+  //   - e-Auction LOCAL ('L'): local auction invoices bill only cardamom
+  //     (see hideLocalCharges above). e-Auction interstate KEEPS them.
+  // ASP suppression is handled separately via `isASP` in the rate calc below.
+  const hideTI = (!isASP && !isEAuction && _est === 'I')
+              || (isEAuction && _est === 'L');
   // Per-component enable flags from Rates & Charges. When the matching flag
   // is OFF the rate is forced to 0, so the component drops out of the taxable
   // value, GST, and PDF entirely. Blank/legacy values default to ON.
