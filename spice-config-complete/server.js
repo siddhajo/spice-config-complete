@@ -3880,9 +3880,14 @@ app.get('/api/auctions/:id/validate-lot', requireViewOrLotEntry, (req, res) => {
   const auctionId = parseInt(req.params.id, 10);
   const lotNo = String(req.query.lot_no || '').trim();
   const branch = String(req.query.branch || '').trim();
+  // exclude_id lets the edit form validate the lot it's editing without
+  // tripping on the lot's own existing number (0/blank = create mode).
+  const excludeId = parseInt(req.query.exclude_id, 10) || 0;
   if (!lotNo) return res.json({ valid: false, error: 'Enter lot number' });
 
-  const dup = db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [auctionId, lotNo]);
+  const dup = excludeId
+    ? db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ? AND id != ?', [auctionId, lotNo, excludeId])
+    : db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [auctionId, lotNo]);
   if (dup) return res.json({ valid: false, error: 'Lot #' + lotNo + ' already exists' });
 
   const allocs = db.all('SELECT * FROM lot_allocations WHERE auction_id = ? AND branch = ?', [auctionId, branch]);
@@ -4321,6 +4326,16 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // when the flag is off so 0 is what flows in by default.
   const reservedPrice = Number(l.reserved_price);
   const _db = getDb();
+  // Duplicate-lot guard: a lot number must be unique within its trade.
+  // Enforced server-side so no client (desktop, mobile PWA, or a raw API
+  // call) can create a collision — the validate-lot endpoint is only an
+  // advisory pre-check and the frontend doesn't always run it.
+  {
+    const _lotNoTrim = String(l.lot_no || '').trim();
+    if (!_lotNoTrim) return res.status(400).json({ error: 'Lot number is required' });
+    const _dupLot = _db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [l.auction_id, _lotNoTrim]);
+    if (_dupLot) return res.status(409).json({ error: `Lot #${_lotNoTrim} already exists in this trade`, duplicate: true });
+  }
   // Backfill the denormalised seller fields from the trader record when the
   // client sent only trader_id. The mobile PWA does exactly that (it posts
   // trader_id but no name/place/CR), which previously left lots.name empty —
@@ -4437,6 +4452,17 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   // gate to 'stale' (re-surfacing the lots-tab banner) and the full
   // snapshot feeds the audit-log field diff below.
   const _before = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+  // Duplicate-lot guard on edit: changing a lot's number must not collide
+  // with another lot in the same trade. Excludes the row being edited so
+  // re-saving a lot without touching its number is always allowed. Uses
+  // the stored auction_id (auction_id is never updatable via this route).
+  if (_before && Object.prototype.hasOwnProperty.call(l, 'lot_no')) {
+    const _newLotNo = String(l.lot_no || '').trim();
+    if (!_newLotNo) return res.status(400).json({ error: 'Lot number is required' });
+    const _dupLot = db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ? AND id != ?',
+      [_before.auction_id, _newLotNo, parseInt(req.params.id, 10)]);
+    if (_dupLot) return res.status(409).json({ error: `Lot #${_newLotNo} already exists in this trade`, duplicate: true });
+  }
   const _pcRow = _before ? { auction_id: _before.auction_id } : null;
   db.run(`UPDATE lots SET ${sets.join(',')} WHERE id=?`, vals);
   // After a withdrawal, recompute the derived columns from the now-zeroed
