@@ -841,7 +841,15 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   //     flag_ship / flag_dispatch are kept for backward compat but
   //     overridden in the TN/ISP path.
   const showShipTo   = isASP ? false : true;
-  const showDispatch = isASP ? readFlagSafe(cfg.flag_dispatch, true) : true;
+  // Dispatch-From visibility:
+  //   e-Auction → SINGLE company, so it's opt-in via flag_eauc_dispatch
+  //               (default OFF) and, when on, prints the company's OWN
+  //               address (no separate sister-company dispatch exists).
+  //   e-Trade ASP → flag_dispatch (KL internal transfers usually hide it).
+  //   e-Trade ISP → always shown (TN invoices reference the ASP godown).
+  const showDispatch = isEAuction
+    ? readFlagSafe(cfg.flag_eauc_dispatch, false)
+    : (isASP ? readFlagSafe(cfg.flag_dispatch, true) : true);
 
   // ── Page geometry ───────────────────────────────────────────
   const pageW = doc.page.width;
@@ -1200,8 +1208,18 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   if (showDispatch) {
     box(rightX, ry2, rightW, dispatchFromH);
     const dispatchY = ry2;
+    // Dispatch origin source:
+    //   e-Auction → the invoice's own company (effectiveCompany `co`), since
+    //               there's only one company in this mode.
+    //   e-Trade   → the ASP sister company (s_* settings) as the godown.
+    const dName  = isEAuction ? (co.name || '')      : (cfg.s_company || 'AMAZING SPICE PARK PRIVATE LIMITED');
+    const dAddr1 = isEAuction ? (co.address1 || '')  : cfg.s_address1;
+    const dAddr2 = isEAuction ? (co.address2 || '')  : cfg.s_address2;
+    const dState = isEAuction ? (co.stateName || '') : cfg.s_state;
+    const dStCd  = isEAuction ? (co.stateCode || '') : (cfg.s_st_code || '32');
+    const dGstin = isEAuction ? (co.gstin || '')     : cfg.s_gstin;
     doc.font('Helvetica-Bold').fontSize(8).text('Dispatch From:', rightX + 3, dispatchY + 4, { width: rightW - 6 });
-    doc.font('Helvetica-Bold').fontSize(9).text(cfg.s_company || 'AMAZING SPICE PARK PRIVATE LIMITED', rightX + 3, dispatchY + 14, { width: rightW - 6 });
+    doc.font('Helvetica-Bold').fontSize(9).text(dName, rightX + 3, dispatchY + 14, { width: rightW - 6 });
     doc.font('Helvetica').fontSize(8);
     // Advance dy by actual rendered height so wrapped text doesn't overlap next line.
     let dy = dispatchY + 26;
@@ -1211,10 +1229,10 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
       doc.text(txt, rightX + 3, dy, { width: dispW });
       dy += doc.heightOfString(txt, { width: dispW }) + 1;
     };
-    writeLine(cfg.s_address1);
-    writeLine(cfg.s_address2);
-    if (cfg.s_state) writeLine(`${cfg.s_state} Code:${cfg.s_st_code || '32'}`);
-    if (cfg.s_gstin) writeLine(`GSTIN.${cfg.s_gstin}`);
+    writeLine(dAddr1);
+    writeLine(dAddr2);
+    if (dState) writeLine(`${dState} Code:${dStCd || '32'}`);
+    if (dGstin) writeLine(`GSTIN.${dGstin}`);
   } else {
     // Empty bordered cell to keep the frame consistent with the left column
     box(rightX, ry2, rightW, dispatchFromH);
@@ -1774,12 +1792,13 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     //   ISP invoices          → TN bank
     const useKLBank = isASP; // same for both sales AND purchase view when isASP
     const bankName = useKLBank ? (cfg.bank_kl_name || '') : (cfg.bank_tn_name || '');
-    // Account no. + IFSC honour the display masking policy (mask_acct /
-    // mask_ifsc). Defaults: acct → last4, ifsc → none, so by default only the
-    // account is partially masked and the IFSC prints in full.
-    const { maskAcct, maskIfsc } = makeMaskers(cfg);
-    const bankAcct = maskAcct(useKLBank ? (cfg.bank_kl_acct || '') : (cfg.bank_tn_acct || ''));
-    const bankIfsc = maskIfsc(useKLBank ? (cfg.bank_kl_ifsc || '') : (cfg.bank_tn_ifsc || ''));
+    // The COMPANY's OWN bank account + IFSC always print in FULL on the
+    // sales invoice so the customer can actually pay. The mask_acct /
+    // mask_ifsc display policy applies only to CLIENT/seller bank details
+    // (e.g. the seller account on the mobile lot receipts), NOT to our own
+    // bank — masking our own A/c here just stops customers from paying.
+    const bankAcct = useKLBank ? (cfg.bank_kl_acct || '') : (cfg.bank_tn_acct || '');
+    const bankIfsc = useKLBank ? (cfg.bank_kl_ifsc || '') : (cfg.bank_tn_ifsc || '');
     // Align values at a fixed x so all three rows start at the same column
     const labelW = 90;
     const valX = bkX + labelW;

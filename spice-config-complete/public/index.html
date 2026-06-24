@@ -10634,7 +10634,7 @@ const FLAG_GROUPS = [
     'flag_pooling','flag_sister','flag_tnpa','flag_eway','flag_export'
   ]},
   { id:'invoice', title:'Invoice Layout & Content', icon:'📄', keys:[
-    'flag_hsn','flag_bank','flag_dispatch','flag_ship','flag_sample',
+    'flag_hsn','flag_bank','flag_dispatch','flag_eauc_dispatch','flag_ship','flag_sample',
     'flag_round','flag_invoice_stripe'
   ]},
   { id:'tax', title:'Tax, TDS & Discount', icon:'💸', keys:[
@@ -10748,6 +10748,7 @@ const FIELD_HELP = {
   business_mode:   'e-Trade: grade-based deduction + discount workflow. e-Auction: commission + handling + sample refund workflow.',
   business_state:  'Tamil Nadu uses ISP logo + TN office details. Kerala uses ASP logo + KL office details. Invoices adapt automatically.',
   tcs_tds:         'TDS / TCS percentage applied on eligible invoices for tax compliance.',
+  flag_eauc_dispatch: 'e-Auction sales invoices: show the "Dispatch From" block using the company\'s own address (single-company mode). OFF = hidden (default).',
 };
 function fld(f){
   // Logo Code: special-case as a dropdown (ISP/ASP) with auto-fill behavior.

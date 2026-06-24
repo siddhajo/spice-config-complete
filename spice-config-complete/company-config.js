@@ -162,6 +162,7 @@ const DEFAULTS = [
   { key: 'flag_tnpa',       value: 'true',           category: 'flags',     label: 'ASP Ship To Address',      type: 'boolean' },
   { key: 'flag_sample',     value: 'false',          category: 'flags',     label: 'Discount in Invoice',      type: 'boolean' },
   { key: 'flag_dispatch',   value: 'true',           category: 'flags',     label: 'Show Dispatch Address',    type: 'boolean' },
+  { key: 'flag_eauc_dispatch', value: 'false',       category: 'flags',     label: 'Show Dispatch Address (e-Auction)', type: 'boolean' },
   { key: 'flag_ship',       value: 'true',           category: 'flags',     label: 'Show Ship To Address',     type: 'boolean' },
   { key: 'flag_hsn',        value: 'true',           category: 'flags',     label: 'Show HSN Codes',           type: 'boolean' },
   { key: 'flag_bank',       value: 'true',           category: 'flags',     label: 'Bank Details in Invoice',  type: 'boolean' },
@@ -553,6 +554,9 @@ function initCompanySettings(db) {
     // vs Commission Bill (OFF) mode for the Bills tab. Default ON so
     // upgraded installs keep the existing purchase-bill surfaces.
     seedNew.run('flag_bos_purchase_bill', 'true', 'flags', 'Bills of Supply: Purchase Bill (off = Commission Bill)', 'boolean');
+    // flag_eauc_dispatch — e-Auction sales invoices: show the "Dispatch From"
+    // block (sourced from the single company's own address). Default OFF.
+    seedNew.run('flag_eauc_dispatch', 'false', 'flags', 'Show Dispatch Address (e-Auction)', 'boolean');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs
