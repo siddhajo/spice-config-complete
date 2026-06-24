@@ -671,6 +671,16 @@ function generateLotReceiptPDF(lots, cfg, opts) {
     ? String(opts.date).slice(0, 10).split('-').reverse().join('/')
     : new Date().toLocaleDateString('en-GB');
 
+  // Thermal paper width (Settings → Lot Entry Defaults → "Lot Receipt Paper
+  // Width"). When set (e.g. 58 for a HOP-HL58 roll), render a narrow thermal
+  // slip with auto height instead of the A4 sheet, so the WhatsApp attachment
+  // matches the printed slip. opts.widthMm lets a caller override; otherwise
+  // it comes from cfg. Blank/0 keeps the legacy A4 layout below untouched.
+  const widthMm = Number(opts.widthMm != null ? opts.widthMm : (cfg && cfg.lot_receipt_width_mm)) || 0;
+  if (widthMm > 0) {
+    return generateLotReceiptThermalPDF({ co, lots, traderName, ano, dateStr, widthMm });
+  }
+
   const doc = new PDFDocument({ size: 'A4', margin: 36 });
   const buffers = [];
   doc.on('data', b => buffers.push(b));
@@ -747,6 +757,119 @@ function generateLotReceiptPDF(lots, cfg, opts) {
 
   doc.font('Helvetica').fontSize(7).fillColor('#555')
      .text('This is a computer-generated lot receipt.', x, y, { align: 'center', width: w });
+
+  return new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+// Thermal-roll variant of the lot receipt — used when "Lot Receipt Paper
+// Width" (Settings → Lot Entry Defaults) is set, so the WhatsApp attachment
+// prints edge-to-edge on a narrow roll (e.g. 58mm HOP-HL58) instead of being
+// scaled onto an A4 sheet. Single-column thermal slip: company name + GSTIN,
+// trade/date/seller meta, then the same Lot/Bags/Qty/Rate/Amount table as the
+// A4 slip but sized to the roll. Page width follows the configured mm; height
+// is computed from the lot count so the whole slip lands on ONE continuous
+// page (no mid-slip break that a thermal cutter would chop in half).
+function generateLotReceiptThermalPDF(p) {
+  const { co, lots, traderName, ano, dateStr } = p;
+  // mm → points (72pt = 1in). Floored so a fat-fingered tiny value can't make
+  // a zero-width unprintable page.
+  const pageW = Math.max(120, Math.round(p.widthMm * 72 / 25.4));
+  const m = 8;
+  const cw = pageW - 2 * m;
+  // Fonts scale gently around an 80mm (226pt) reference so a 58mm slip stays
+  // legible and an 80mm slip isn't oversized. Clamped to a sane band.
+  const fr = Math.max(0.85, Math.min(1.25, pageW / 226));
+  const nameFs = 11 * fr, subFs = 7.5 * fr, metaFs = 8 * fr,
+        thFs = 7 * fr, tdFs = 7.5 * fr, footFs = 6.5 * fr;
+  const rowH = tdFs + 5;
+
+  const fmtN = (n, dp = 2) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+  // Column widths (fractions of content width) mirror the A4 slip's ratios:
+  // Lot / Bags / Qty / Rate / Amount.
+  const fr_cols = [0.18, 0.12, 0.24, 0.22, 0.24];
+  const cols = fr_cols.map((f, i) => ({
+    cw: f * cw,
+    cx: m + fr_cols.slice(0, i).reduce((s, v) => s + v, 0) * cw,
+    align: i === 0 ? 'left' : 'right',
+  }));
+  const labels = ['Lot', 'Bags', 'Qty', 'Rate', 'Amount'];
+
+  // Pre-compute page height so the slip is one continuous page sized to fit.
+  const placeLine = [co.place, co.pin].filter(Boolean).join(' - ');
+  let h = m;
+  h += nameFs + 5;                       // company name
+  if (placeLine) h += subFs + 2;         // place line
+  if (co.gstin) h += subFs + 2;          // GSTIN
+  h += 8;                                // rule + gap
+  h += metaFs + 4;                       // "LOT RECEIPT"
+  h += metaFs + 4;                       // trade / date
+  h += metaFs + 6;                       // To: seller
+  h += thFs + 6;                         // table header
+  h += lots.length * rowH;               // lot rows
+  h += rowH + 6;                         // totals row
+  h += footFs + 10;                      // footer note
+  const pageH = Math.ceil(h + m);
+
+  const doc = new PDFDocument({ size: [pageW, pageH], margin: m });
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  let y = m;
+  // Header — company name, optional place + GSTIN, centered.
+  doc.fillColor('#000').font('Helvetica-Bold').fontSize(nameFs)
+     .text((co.name || 'COMPANY').toUpperCase(), m, y, { align: 'center', width: cw });
+  y += nameFs + 5;
+  doc.font('Helvetica').fontSize(subFs);
+  if (placeLine) { doc.text(placeLine, m, y, { align: 'center', width: cw }); y += subFs + 2; }
+  if (co.gstin)  { doc.text('GSTIN: ' + co.gstin, m, y, { align: 'center', width: cw }); y += subFs + 2; }
+
+  doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.5).stroke(); y += 5;
+  doc.font('Helvetica-Bold').fontSize(metaFs)
+     .text('LOT RECEIPT', m, y, { align: 'center', width: cw });
+  y += metaFs + 4;
+
+  // Meta — Trade No (left half) + Date (right half) on one line, then To.
+  // Two separate fixed-width cells (no `continued`) so the right-aligned date
+  // can't collide with the left label.
+  doc.fontSize(metaFs);
+  doc.font('Helvetica-Bold').text('Trade: ' + (ano || '-'), m, y, { width: cw / 2, align: 'left' });
+  doc.text(dateStr, m + cw / 2, y, { width: cw / 2, align: 'right' });
+  y += metaFs + 4;
+  doc.font('Helvetica-Bold').text('To: ', m, y, { continued: true })
+     .font('Helvetica').text(traderName || '-');
+  y += metaFs + 6;
+
+  // Table header.
+  doc.font('Helvetica-Bold').fontSize(thFs);
+  cols.forEach((c, i) => doc.text(labels[i], c.cx, y, { width: c.cw, align: c.align }));
+  y += thFs + 2;
+  doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.4).stroke(); y += 4;
+
+  // Rows.
+  let totBags = 0, totQty = 0, totAmt = 0;
+  doc.font('Helvetica').fontSize(tdFs);
+  for (const l of lots) {
+    const bags = Number(l.bags) || 0, qty = Number(l.qty) || 0, price = Number(l.price) || 0;
+    const amt = Number(l.amount) || (qty * price);
+    totBags += bags; totQty += qty; totAmt += amt;
+    const row = [String(l.lot_no || ''), String(bags), fmtN(qty, 3), fmtN(price), fmtN(amt)];
+    cols.forEach((c, i) => doc.text(row[i], c.cx, y, { width: c.cw, align: c.align }));
+    y += rowH;
+  }
+
+  // Totals.
+  doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.5).stroke(); y += 3;
+  doc.font('Helvetica-Bold').fontSize(tdFs);
+  const totals = ['Total', String(totBags), fmtN(totQty, 3), '', fmtN(totAmt)];
+  cols.forEach((c, i) => { if (totals[i] !== '') doc.text(totals[i], c.cx, y, { width: c.cw, align: c.align }); });
+  y += rowH + 3;
+
+  doc.font('Helvetica').fontSize(footFs).fillColor('#555')
+     .text('Computer-generated lot receipt.', m, y, { align: 'center', width: cw });
 
   return new Promise((resolve) => {
     doc.on('end', () => resolve(Buffer.concat(buffers)));

@@ -23719,10 +23719,15 @@ function leBuildReceiptHtml(format, lots, ctx) {
   const escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
   const co = { nickname, tradeName, shortName, phone, email, addr1, addr2, place, pin, gstin, pan, fssai, sbl, branch, logoUrl };
+  // Thermal paper width (Settings → Lot Entry Defaults → "Lot Receipt Paper
+  // Width"). Drives the printed slip's @page size + content width so a
+  // narrow roll (e.g. 58mm HOP-HL58) prints edge-to-edge instead of being
+  // scaled onto an A4 sheet. 0 / blank keeps each format's built-in default.
+  const paperWidthMm = parseFloat(cfg.lot_receipt_width_mm) || 0;
   if (format === 'compact') {
-    return leBuildCompactHtml({ groups, co, dateStr, ano, printedAt, escapeHtml });
+    return leBuildCompactHtml({ groups, co, dateStr, ano, printedAt, paperWidthMm, escapeHtml });
   }
-  return leBuildDetailedHtml({ groups, co, dateStr, ano, printedAt, traderInfo, escapeHtml });
+  return leBuildDetailedHtml({ groups, co, dateStr, ano, printedAt, traderInfo, paperWidthMm, escapeHtml });
 }
 
 function leGroupLotsByTrader(lots) {
@@ -23795,16 +23800,20 @@ function leBuildCompactHtml(p) {
     </section>`;
   }).join('');
 
-  // CSS targets 80mm thermal width but renders fine in a regular
-  // browser window for preview. font-size in mm so it scales right
-  // on actual thermal hardware.
+  // CSS targets 80mm thermal width by default but follows the configured
+  // paper width (p.paperWidthMm) when set — e.g. 58 for a HOP-HL58 roll.
+  // The 3mm @page margin is reserved on each side, so the slip body is the
+  // paper width minus 6mm. Renders fine in a regular browser window for
+  // preview; font-size in mm so it scales right on actual thermal hardware.
+  const pageMm = p.paperWidthMm > 0 ? p.paperWidthMm : 80;
+  const recMm  = Math.max(20, pageMm - 6);
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Receipt</title>
 <style>
-  @page { size: 80mm auto; margin: 3mm }
+  @page { size: ${pageMm}mm auto; margin: 3mm }
   html, body { margin:0; padding:0; background:#eee; font-family: 'Courier New', ui-monospace, monospace; }
   body { padding:20px; display:flex; flex-direction:column; align-items:center; gap:14px }
-  .receipt { width: 74mm; background:#fff; padding:6mm 4mm; box-sizing:border-box; box-shadow:0 2px 6px rgba(0,0,0,.15); page-break-after: always; }
+  .receipt { width: ${recMm}mm; background:#fff; padding:6mm 4mm; box-sizing:border-box; box-shadow:0 2px 6px rgba(0,0,0,.15); page-break-after: always; }
   .receipt:last-child { page-break-after: auto; }
   .logo-wrap { text-align:center; margin-bottom:4px }
   .logo-img { max-height:40px; max-width:60mm; object-fit:contain }
@@ -23892,18 +23901,22 @@ function leBuildDetailedHtml(p) {
     </section>`;
   }).join('');
 
+  // Detailed slip defaults to ~2.5in wide but follows the configured paper
+  // width (p.paperWidthMm) when set — e.g. 58 for a HOP-HL58 roll. A 2mm
+  // @page margin is reserved each side, so the body is paper width − 4mm.
+  const pageSize = p.paperWidthMm > 0 ? `${p.paperWidthMm}mm auto` : '2.5in auto';
+  const recWidth = p.paperWidthMm > 0 ? `${Math.max(20, p.paperWidthMm - 4)}mm` : '60mm';
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Receipt</title>
 <style>
-  /* Detailed slip — sized to ~2.5in × 3.5in (≈ 64mm × 89mm). Width is
-     fixed; height is auto so receipts with multiple lots can grow
-     downward instead of clipping content. The browser's print dialog
-     respects @page size, so a thermal/label printer with matching
-     stock prints edge-to-edge. */
-  @page { size: 2.5in auto; margin: 2mm }
+  /* Detailed slip — width follows the configured paper width (height is
+     auto so multi-lot receipts grow downward instead of clipping). The
+     browser's print dialog respects @page size, so a thermal/label printer
+     with matching stock prints edge-to-edge. */
+  @page { size: ${pageSize}; margin: 2mm }
   html, body { margin:0; padding:0; background:#eee; font-family: 'Inter', -apple-system, sans-serif; color:#1a1a1a; }
   body { padding:14px; display:flex; flex-direction:column; align-items:center; gap:12px }
-  .receipt { width: 60mm; background:#fff; padding:3mm 4mm; box-sizing:border-box; box-shadow:0 1px 4px rgba(0,0,0,.12); page-break-after: always; }
+  .receipt { width: ${recWidth}; background:#fff; padding:3mm 4mm; box-sizing:border-box; box-shadow:0 1px 4px rgba(0,0,0,.12); page-break-after: always; }
   .receipt:last-child { page-break-after: auto; }
   header { text-align:center; padding-bottom:4px }
   .brand { display:inline-flex; gap:6px; align-items:center; justify-content:center }

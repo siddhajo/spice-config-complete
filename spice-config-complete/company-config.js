@@ -401,6 +401,16 @@ const DEFAULTS = [
   // option is pre-selected. "compact" = thermal-printer slip;
   // "detailed" = A4-style with seller bank details.
   { key: 'lot_receipt_format', value: 'detailed', category: 'lot_entry', label: 'Lot Receipt Format (compact|detailed)', type: 'text' },
+  // Physical paper width of the lot-receipt slip, in millimetres. Thermal
+  // receipt printers come in fixed roll widths (e.g. the HOP-HL58 is a
+  // 58mm roll; common alternatives are 80mm and 76mm). When this is blank
+  // / 0 the slip uses its built-in default page size (80mm for compact,
+  // 2.5in for detailed) — which on a narrower 58mm printer overflows the
+  // paper and the driver silently falls back to scaling onto an A4 sheet.
+  // Set this to the printer's roll width (58 for the HOP-HL58) so the
+  // print @page size and the WhatsApp/mobile PDF slip all match the paper.
+  // Height is always automatic — receipts grow down the continuous roll.
+  { key: 'lot_receipt_width_mm', value: '', category: 'lot_entry', label: 'Lot Receipt Paper Width (mm; blank = default. e.g. 58 for HOP-HL58 thermal)', type: 'number' },
 
   // ── SPICE BOARD REPORTS ───────────────────────────────────
   // Statutory cardamom-auction reports submitted to the Spices Board.
@@ -453,7 +463,7 @@ const CATEGORIES = {
   invoice:    { order: 10, title: 'Invoice Settings',     icon: '📄' },
   flags:      { order: 11, title: 'Feature Flags',        icon: '🔧' },
   booking:    { order: 11.55, title: 'Booking Limits & Alerts', icon: '🚦', description: 'Soft/escalation alerts when a single seller’s booked weight in a trade crosses a share of the planned weight. The limit is a percentage of the per-seller planned weight (MT). At the soft threshold the depot manager is alerted on WhatsApp; if booking continues past the escalation threshold the immediate superior is alerted. Per-branch manager/superior numbers can be set via the Booking Contacts API; the numbers here are fallbacks.' },
-  lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, and receipt format.' },
+  lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, receipt format, and the thermal paper width used when printing lot receipts (set this to your printer roll width, e.g. 58 for a HOP-HL58, so slips print edge-to-edge instead of scaling onto A4).' },
   notifications: { order: 11.9, title: 'Notifications',   icon: '🔔', description: 'Seller-facing notification settings. The YouTube link below is appended to the WhatsApp notices sent to sellers (lot-sold alerts and invoice details) when configured.' },
   integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },
@@ -661,6 +671,11 @@ function initCompanySettings(db) {
     // flag_eauc_dispatch — e-Auction sales invoices: show the "Dispatch From"
     // block (sourced from the single company's own address). Default OFF.
     seedNew('flag_eauc_dispatch', 'false', 'flags', 'Show Dispatch Address (e-Auction)', 'boolean');
+    // lot_receipt_width_mm — thermal paper width (mm) for printed lot
+    // receipts. Blank = each format's built-in default; set to the printer
+    // roll width (e.g. 58 for a HOP-HL58) so slips print edge-to-edge
+    // instead of scaling onto A4.
+    seedNew('lot_receipt_width_mm', '', 'lot_entry', 'Lot Receipt Paper Width (mm; blank = default. e.g. 58 for HOP-HL58 thermal)', 'number');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs
