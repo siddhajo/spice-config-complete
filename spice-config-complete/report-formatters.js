@@ -136,10 +136,13 @@ function getCompanyHeader(db) {
       const nameKey = isASP ? 's_short_name' : 'short_name';
       const logoKey = isASP ? 's_logo'        : 'logo';
 
-      const nameRow = db.get('SELECT value FROM company_settings WHERE key = ?', [nameKey]);
+      // Company-identity settings are per-mode now — scope to the active mode.
+      const _bm = require('./company-config').getActiveMode(db);
+
+      const nameRow = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?', [nameKey, _bm]);
       if (nameRow && nameRow.value) name = nameRow.value;
 
-      const logoRow = db.get('SELECT value FROM company_settings WHERE key = ?', [logoKey]);
+      const logoRow = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?', [logoKey, _bm]);
       const logoCode = logoRow && logoRow.value ? String(logoRow.value).toLowerCase() : (isASP ? 'asp' : 'isp');
       // logo-ispl.png is the actual filename in /public for the ISP preset
       logoFile = logoCode === 'asp' ? 'logo-asp.png' : 'logo-ispl.png';
@@ -149,9 +152,9 @@ function getCompanyHeader(db) {
       // ASP we use the sister/Kerala fields (s_address1 + kl_branch).
       const addrPrefix = isASP ? 's_' : 'tn_';
       const branchKey = isASP ? 'kl_branch' : 'tn_branch';
-      const a1Row = db.get('SELECT value FROM company_settings WHERE key = ?', [addrPrefix + 'address1']);
+      const a1Row = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?', [addrPrefix + 'address1', _bm]);
       if (a1Row && a1Row.value) address1 = a1Row.value;
-      const bRow = db.get('SELECT value FROM company_settings WHERE key = ?', [branchKey]);
+      const bRow = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?', [branchKey, _bm]);
       if (bRow && bRow.value) branch = bRow.value;
     } catch (_) {
       // Ignore — fall through to defaults

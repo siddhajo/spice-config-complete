@@ -956,6 +956,9 @@ body:not([data-feat-bos-purchase-bill="1"]) .feat-bos-purchase-bill{display:none
 body[data-feat-bos-purchase-bill="1"] .feat-bos-commission{display:none !important}
 body:not([data-feat-price-list-mapping="1"]) .feat-price-list-mapping{display:none !important}
 body:not([data-feat-price-check="1"]) .feat-price-check{display:none !important}
+/* flag_lot_validation — hide the "Validate Lots" button + price-import gate
+   banner (any .feat-lot-validation element) when the flag is off. */
+body:not([data-feat-lot-validation="1"]) .feat-lot-validation{display:none !important}
 body:not([data-feat-whatsapp="1"]) .feat-whatsapp,
 body:not([data-feat-whatsapp="1"]) .i-whatsapp{display:none !important}
 body:not([data-feat-set-buyer="1"]) .feat-set-buyer{display:none !important}
@@ -4620,6 +4623,10 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">My Today's Lots</div>
             <div id="le-stats" style="height:38px;padding:0 12px;display:inline-flex;align-items:center;background:var(--green-bg);color:var(--green);font-weight:700;border-radius:8px;font-size:14px;font-family:monospace">0 lots · 0 kg</div>
           </div>
+          <!-- Validate the entered lots for this trade (flag_lot_validation).
+               Sits here so the operator can check the lots tally right after
+               entry; price import (Lots tab) is also gated on this. -->
+          <button id="le-validate-btn" class="needs-lot-write btn btn-o feat-lot-validation" style="height:38px;padding:0 16px;font-weight:600" onclick="openLotValidate(document.getElementById('le-auction').value)" title="Check the entered lots tally — no duplicate lots, no sellers missing details — before price import">✅ Validate Lots</button>
           <button class="needs-auction-write btn btn-g" onclick="leOpenNewTradeModal()" style="height:38px;padding:0 16px;font-weight:600">+ New <span data-term-auction="singular">Trade</span></button>
         </div>
       </div>
@@ -5681,9 +5688,47 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   <div class="fg" style="margin-top:10px"><label>Select File (.xls or .xlsx)</label>
     <input type="file" id="pi-file" accept=".xls,.xlsx" style="padding:6px">
   </div>
+  <!-- Lot-validation gate banner (flag_lot_validation). Shown by
+       doPriceImport() when the server blocks import (412) because the
+       trade's entered lots haven't passed "Validate Lots". Hidden when the
+       flag is off or the trade is already validated. -->
+  <div id="pi-validate-gate" class="feat-lot-validation" style="display:none;background:#FEE2E2;border:1px solid #DC2626;border-radius:8px;padding:12px 14px;margin-bottom:14px">
+    <div style="font-weight:700;color:#7F1D1D;font-size:13px;margin-bottom:4px">🚫 Validate entered lots first</div>
+    <div style="font-size:12px;color:#7F1D1D;margin-bottom:8px;line-height:1.45" id="pi-validate-gate-msg">
+      This trade's entered lots haven't been validated. Run validation and resolve any issues before importing prices.
+    </div>
+    <button class="btn btn-o" type="button" onclick="hideModal('price-import-modal');openLotValidate(_piGateAid)" style="padding:6px 14px;font-size:12px;font-weight:700">✅ Validate Lots →</button>
+  </div>
+
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('price-import-modal')">Cancel</button>
     <button class="btn btn-g" id="pi-submit" onclick="doPriceImport()" disabled>Import Prices</button>
+  </div>
+</div></div>
+
+<!-- ═══ VALIDATE ENTERED LOTS ═══════════════════════════════ -->
+<!-- Pre-price-import safety net (flag_lot_validation). Shows a
+     reconciliation of entered lots, hard errors (duplicate lots, lots
+     with no seller) that block import, and acknowledge-able warnings
+     (sellers missing GSTIN / bank / PAN / phone). Confirming stamps the
+     gate that doPriceImport() checks. -->
+<div class="modal-bg" id="lot-validate-modal"><div class="modal" style="max-width:760px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden;padding:0">
+  <div style="flex-shrink:0;padding:24px 28px 10px">
+    <h2 style="margin:0 0 8px">Validate Entered Lots</h2>
+    <div id="lv-subtitle" style="font-size:12px;color:var(--text2)"></div>
+  </div>
+  <div id="lv-body" style="flex:1 1 auto;overflow-y:auto;padding:4px 28px 10px;min-height:80px">
+    <div style="padding:24px;text-align:center;color:var(--text2)">Loading…</div>
+  </div>
+  <div id="lv-footer" style="flex-shrink:0;background:var(--card);padding:14px 28px 22px;border-top:1px solid var(--border)">
+    <label id="lv-ack-wrap" style="display:none;align-items:center;gap:11px;font-size:13.5px;color:#7C2D12;cursor:pointer;font-weight:700;background:#FEF3C7;border:1.5px solid #F59E0B;border-radius:9px;padding:12px 14px;margin:0 0 12px">
+      <input type="checkbox" id="lv-ack" onchange="lvAckChanged()" style="width:18px;height:18px;cursor:pointer;flex-shrink:0">
+      <span id="lv-ack-label">I confirm the lots above are intentional</span>
+    </label>
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-o" onclick="hideModal('lot-validate-modal')">Close</button>
+      <button class="btn btn-g" id="lv-confirm" onclick="confirmLotValidate()" disabled>Mark Validated</button>
+    </div>
   </div>
 </div></div>
 
@@ -9610,6 +9655,8 @@ async function loadSettings(){
 //                         hide pooler/dealer deductions, ASP/ISP profit, sample refund
 // When mode = e-Trade:   hide commission, handling, SB sample refund
 const _MODE_HIDE_CATS = { 'e-Auction': ['sister'], 'e-Trade': [] };
+// IMPORTANT: keep this in sync with MODE_HIDE_KEYS in company-config.js — the
+// server uses its copy to seed each new setting into the correct mode(s).
 const _MODE_HIDE_KEYS = {
   // The 8 e-Trade-only Rates & Charges fields are hidden in e-Auction mode.
   'e-Auction': ['deduction1','deduction2','asp_profit_pooler','asp_profit_dealer','isp_profit_pooler','isp_profit_dealer','refund',
@@ -9620,7 +9667,10 @@ const _MODE_HIDE_KEYS = {
                 'flag_sister',                                        // (5) Sister Concern Active
                 'flag_disc_gst','flag_discount_in_prate',             // (6) Discount includes GST + Roll Discount into P_Rate
                 // (8) To Tally → ISP/Home fields that don't apply to e-Auction:
-                'tally_company_name','tally_state_code','tally_home_state','tally_inv_prefix'],
+                'tally_company_name','tally_state_code','tally_home_state','tally_inv_prefix',
+                // TN (Tamil Nadu / ISP) bank details — irrelevant in e-Auction
+                // (the auction company is the Kerala/ASP entity):
+                'bank_tn_name','bank_tn_acct','bank_tn_ifsc'],
   // e-Auction-only fields hidden in e-Trade mode:
   'e-Trade':   ['commission','hpc','sb_refund',
                 'flag_crop_receipt','flag_reserved_price','flag_price_list_mapping', // (7) e-Auction feature flags
@@ -9751,6 +9801,7 @@ function applyFeatureFlags(){
   //   Set Grade 1 → flag_discount_in_prate ("Roll Discount into P_Rate" toggle)
   setFlag('data-feat-set-buyer',      lookupFlag('flag_set_buyer'));
   setFlag('data-feat-disc-in-prate',  lookupFlag('flag_discount_in_prate'));
+  setFlag('data-feat-lot-validation', lookupFlag('flag_lot_validation'));
   // Re-evaluate the ASP-only "Print Selected Purchase" button — it AND's
   // flag_print_purchase with ASP (Kerala + e-Trade) context.
   if (typeof applyAspContextVisibility === 'function') applyAspContextVisibility();
@@ -10522,33 +10573,14 @@ async function onBusinessModeChanged(newMode){
   // Persist the change into _sdata immediately (so helpers read the new value)
   const f = (_sdata.mode||[]).find(x => x.key === 'business_mode');
   if (f) f.value = newMode;
-  // (2) e-Auction forces the business state to Kerala (the auction company is
-  // always the Kerala/ASP entity). Flip it here — synchronously into _sdata
-  // and live on the server (applyStateToCompanyProfile also realigns the
-  // ASP preset, logo, theme and flags) — before the re-render so the now
-  // disabled state select paints with KERALA selected.
-  if (newMode === 'e-Auction') {
-    const sf = (_sdata.mode||[]).find(x => x.key === 'business_state');
-    if (sf && String(sf.value).toUpperCase() !== 'KERALA') {
-      sf.value = 'KERALA';
-      try { await applyStateToCompanyProfile('KERALA'); } catch (e) { console.error('Failed to force Kerala on e-Auction:', e); }
-    }
-  }
-  // Re-render nav + panel: categories/fields appear or disappear based on mode
-  renderSettingsNav();
-  renderSettingsPanel();
-  // Update the sidebar label (Auctions ↔ Trades) immediately
+  // Snappy label flip (Auctions ↔ Trades) before the round-trip.
   applyModeLabels();
-  // Logo code may have flipped (ASP ↔ ISP)
-  applyLogoBadge();
-  // e-Auction-only fields show/hide live so the Lot Entry tab reflects
-  // the new mode without a tab switch
-  applyFeatureFlags();
-  // Persist the mode to the server LIVE — mirrors onBusinessStateChanged.
-  // Mode-scoped endpoints (/api/auctions and every per-tab loader) filter
-  // rows by the server's stored business_mode, so without this the global
-  // trade picker keeps showing the previous mode's data even though the
-  // label already flipped (Auction ↔ Trade). This is the bug being fixed.
+  // Persist the mode to the server FIRST. Settings are now stored
+  // independently PER MODE, so the server must switch its active mode before
+  // anything below reads or writes mode-scoped settings. Mode-scoped
+  // endpoints (/api/auctions and every per-tab loader) also filter rows by
+  // the server's stored business_mode, so the global trade picker needs this
+  // to list THIS mode's data.
   try {
     await j('/api/company-settings', {
       method: 'PUT',
@@ -10557,6 +10589,21 @@ async function onBusinessModeChanged(newMode){
   } catch (e) {
     console.error('Failed to persist business mode change:', e);
   }
+  // (2) e-Auction forces the business state to Kerala (the auction company is
+  // always the Kerala/ASP entity). Applied AFTER the mode PUT so the flags it
+  // realigns (dispatch/ship etc.) land in the now-active mode's settings.
+  if (newMode === 'e-Auction') {
+    const sf = (_sdata.mode||[]).find(x => x.key === 'business_state');
+    if (sf && String(sf.value).toUpperCase() !== 'KERALA') {
+      sf.value = 'KERALA';
+      try { await applyStateToCompanyProfile('KERALA'); } catch (e) { console.error('Failed to force Kerala on e-Auction:', e); }
+    }
+  }
+  // Reload settings from the server so the panel repaints with THIS mode's
+  // stored values — rates, feature flags, invoice prefixes and Tally
+  // mappings all differ per mode. loadSettings() also re-renders nav + panel
+  // and re-applies labels, logo badge and feature-flag body attributes.
+  try { await loadSettings(); } catch (e) { console.error('Failed to reload settings after mode switch:', e); }
   // Now that the server knows the new mode, reload the global trade/auction
   // picker so it lists THIS mode's rows, then broadcast the (possibly new)
   // selection into every per-tab selector and re-run their loaders.
@@ -13046,6 +13093,11 @@ function openPriceImport(){
   if(ack) ack.checked=false;
   const submit=document.getElementById('pi-submit');
   if(submit) submit.disabled=true;
+  // Reset the lot-validation gate banner — it only re-appears if the
+  // server blocks this import (412). Starts permissive so the flag-off
+  // and already-validated cases never see it.
+  _piGateClean=true; _piGateAid='';
+  const g=document.getElementById('pi-validate-gate'); if(g) g.style.display='none';
   piPopulateTypes();   // fill the snapshot report dropdown
   showModal('price-import-modal');
 }
@@ -13125,10 +13177,229 @@ async function piOpenInTab(){
     setTimeout(()=>{try{URL.revokeObjectURL(url);}catch(_){}},60000);
   });
 }
+// Lot-validation gate state for the Price Import modal. _piGateClean is
+// true unless the server has just told us (412) the picked trade still
+// needs validation; _piGateAid is the auction the gate banner's "Validate
+// Lots →" button should open. Both reset every time the modal opens.
+let _piGateClean = true, _piGateAid = '';
 function piAckChanged(){
   const ack=document.getElementById('pi-ack');
   const submit=document.getElementById('pi-submit');
-  if(submit) submit.disabled=!(ack && ack.checked);
+  // Import is allowed only when snapshots are acknowledged AND the
+  // lot-validation gate is clean (or the feature is off / not yet tripped).
+  if(submit) submit.disabled=!(ack && ack.checked && _piGateClean);
+}
+
+// ── Validate Entered Lots ─────────────────────────────────
+// Opened from the Lot Entry toolbar ("✅ Validate Lots") and from the
+// Price Import gate banner. Shows a reconciliation + the flagged lots
+// grouped by seller, with hard errors (block) and warnings (acknowledge).
+// Confirming stamps the gate that doPriceImport() checks.
+let _lvData=null, _lvAid=null;
+async function openLotValidate(aid){
+  // Lot Entry passes its own le-auction; the Price Import banner passes
+  // the trade the server resolved. Whatever opened the modal is the
+  // auction every action in it (confirm, fix-seller) operates on.
+  if(!aid){ alert('Pick a trade first.'); return; }
+  _lvAid = aid;
+  _lvData=null;
+  document.getElementById('lv-subtitle').textContent='';
+  document.getElementById('lv-body').innerHTML='<div style="padding:24px;text-align:center;color:var(--text2)">Loading…</div>';
+  document.getElementById('lv-ack-wrap').style.display='none';
+  document.getElementById('lv-ack').checked=false;
+  document.getElementById('lv-confirm').disabled=true;
+  showModal('lot-validate-modal');
+  try{
+    const d=await j('/api/auctions/'+aid+'/validate-lots');
+    _lvData=d;
+    renderLotValidate(d);
+  }catch(e){
+    document.getElementById('lv-body').innerHTML='<div style="padding:16px;color:#b91c1c">Could not load validation: '+esc(e.message||'error')+'</div>';
+  }
+}
+function renderLotValidate(d){
+  const sub=document.getElementById('lv-subtitle');
+  sub.innerHTML='Trade '+esc(String(d.ano||''))+(d.date?(' · '+fmtD(d.date)):'')+' — '+(d.totals?d.totals.lots:0)+' lot(s) entered'
+    +'<span style="display:block;margin-top:2px;color:var(--text2);font-size:11px">Tip: use "Fix in Lot Entry →" on a flagged seller to filter Recent Entries to their lots and correct them.</span>';
+  const rc=d.reconciliation||{};
+  const errs=d.errors||[], warns=d.warnings||[];
+  const lotNum=(s)=>{const m=String(s).match(/\d+/);return m?parseInt(m[0],10):0;};
+  // One card per FLAGGED lot — Lot · Branch · Bags · Qty, red (error) or
+  // amber (warning) background with the issue title(s) as badges.
+  const lotRow=(e)=>{
+    const l=e.lot;
+    const isErr=e.severity==='error';
+    const bg=isErr?'#FEE2E2':'#FEF3C7';
+    const bd=isErr?'#DC2626':'#F59E0B';
+    const lotColor=isErr?'#7F1D1D':'#7C2D12';
+    const badges=e.titles.map(t=>'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;margin:2px 4px 0 0;background:'+(t.severity==='error'?'#DC2626':'#F59E0B')+';color:#fff">'+esc(t.title)+'</span>').join('');
+    const meta=[esc(l.branch||''),(l.bags!=null?esc(String(l.bags))+' bags':''),(Number(l.qty||0).toFixed(3)+' kg')].filter(Boolean).join(' · ');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin-bottom:6px;background:'+bg+';border:1px solid '+bd+';border-radius:8px">'+
+      '<div style="font-family:monospace;font-weight:800;color:'+lotColor+';min-width:48px;text-align:center">#'+esc(String(l.lot_no))+'</div>'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-size:11px;color:var(--text2)">'+meta+'</div>'+
+        '<div>'+badges+'</div>'+
+      '</div>'+
+    '</div>';
+  };
+  let h='';
+  // Reconciliation summary — the "tally"
+  h+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">';
+  const stat=(label,val,color)=>'<div style="flex:1;min-width:110px;background:var(--green-bg);border:1px solid #C5E3D2;border-radius:8px;padding:8px 10px"><div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px">'+label+'</div><div style="font-size:18px;font-weight:800;color:'+(color||'var(--green)')+'">'+val+'</div></div>';
+  h+=stat('Total lots',rc.totalLots!=null?rc.totalLots:(d.totals?d.totals.lots:0));
+  h+=stat('In Dealer List',rc.dealerListLots!=null?rc.dealerListLots:'—');
+  h+=stat('Excluded (no GSTIN)',rc.excludedLots!=null?rc.excludedLots:'—', rc.excludedLots>0?'#b45309':undefined);
+  h+=stat('Total bags',d.totals?d.totals.bags:0);
+  h+=stat('Total qty',d.totals?(Number(d.totals.qty).toFixed(3)):0);
+  h+='</div>';
+  if(rc.excludedLots>0){
+    h+='<div style="font-size:11.5px;color:#7C2D12;background:#FEF3C7;border:1px solid #F59E0B;border-radius:6px;padding:8px 10px;margin-bottom:14px">'+rc.excludedLots+' lot(s) belong to sellers with no GSTIN and will NOT appear in the Dealer List (this is the count gap to expect).</div>';
+  }
+  // Aggregate one entry per flagged lot, collecting all its issue titles.
+  const lotMap=new Map();
+  const addIssue=(lots,title,severity)=>{
+    (lots||[]).forEach(l=>{
+      let e=lotMap.get(l.id);
+      if(!e){ e={lot:l,titles:[],severity:'warn'}; lotMap.set(l.id,e); }
+      e.titles.push({title,severity});
+      if(severity==='error') e.severity='error';
+    });
+  };
+  errs.forEach(er=>addIssue(er.lots, er.title||er.type, 'error'));
+  warns.forEach(w=>addIssue(w.lots, w.title||w.type, 'warn'));
+  const rows=Array.from(lotMap.values());
+  const errLots=rows.filter(r=>r.severity==='error').length;
+  // Group the flagged lots BY SELLER, errors first then by lot number.
+  const groups=new Map();
+  rows.forEach(e=>{
+    const nm=String(e.lot.name||'(no seller)').trim()||'(no seller)';
+    if(!groups.has(nm)) groups.set(nm,[]);
+    groups.get(nm).push(e);
+  });
+  groups.forEach(arr=>arr.sort((a,b)=>{
+    if(a.severity!==b.severity) return a.severity==='error'?-1:1;
+    return lotNum(a.lot.lot_no)-lotNum(b.lot.lot_no);
+  }));
+  const sellerGroups=Array.from(groups.entries()).sort((a,b)=>{
+    const ae=a[1].some(x=>x.severity==='error'), be=b[1].some(x=>x.severity==='error');
+    if(ae!==be) return ae?-1:1;
+    return a[0].localeCompare(b[0]);
+  });
+  if(rows.length){
+    h+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px">'
+      +'<span style="font-weight:700;font-size:13px;color:'+(errLots?'#7F1D1D':'#7C2D12')+'">'
+        +(errLots?'🚫':'⚠')+' Records needing attention ('+rows.length+' lot'+(rows.length>1?'s':'')+' · '+sellerGroups.length+' seller'+(sellerGroups.length>1?'s':'')+')'
+        +(errLots?' — '+errLots+' must fix before import':' — acknowledge to proceed')
+      +'</span>'
+      +'<a href="#" onclick="lvToggleAllGroups(true);return false" style="font-size:11px;color:var(--green);margin-left:auto">Expand all</a>'
+      +'<a href="#" onclick="lvToggleAllGroups(false);return false" style="font-size:11px;color:var(--text2)">Collapse all</a>'
+      +'</div>';
+    h+='<div>';
+    sellerGroups.forEach(([nm,arr],gi)=>{
+      const hasErr=arr.some(x=>x.severity==='error');
+      const gid='lv-grp-'+gi;
+      // Distinct issue titles for this seller, shown as small badges on the
+      // (collapsed) heading so the operator sees what's wrong without expanding.
+      const titleMap=new Map();
+      arr.forEach(e=>e.titles.forEach(t=>{ if(!titleMap.has(t.title)||t.severity==='error') titleMap.set(t.title,t.severity); }));
+      const sumBadges=Array.from(titleMap.entries()).map(([t,sev])=>'<span style="font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:9px;margin-left:4px;background:'+(sev==='error'?'#DC2626':'#F59E0B')+';color:#fff">'+esc(t)+'</span>').join('');
+      const nmAttr=esc(nm).replace(/'/g,"\\'");
+      h+='<div style="display:flex;align-items:center;gap:9px;margin:8px 0 0;padding:7px 8px;background:rgba(0,0,0,.03);border-radius:6px">'
+        +'<div onclick="lvToggleGroup(\''+gid+'\',this)" title="Show / hide this seller’s lots" style="flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+          +'<span class="lv-caret" style="font-size:10px;color:var(--text3);width:10px;flex-shrink:0">▸</span>'
+          +'<span style="font-weight:700;font-size:12.5px;color:'+(hasErr?'#7F1D1D':'var(--text)')+'">'+esc(nm)+'</span>'
+          +'<span style="font-weight:400;color:var(--text2);font-size:11px">— '+arr.length+' lot'+(arr.length>1?'s':'')+'</span>'
+          +sumBadges
+        +'</div>'
+        +(nm!=='(no seller)'?('<a href="#" onclick="lvFixSeller(\''+nmAttr+'\');return false" style="flex-shrink:0;font-size:11px;font-weight:700;color:#2563eb;white-space:nowrap">Fix in Lot Entry →</a>'):'')
+      +'</div>';
+      h+='<div id="'+gid+'" style="display:none;padding:4px 0 2px 26px">'+arr.map(lotRow).join('')+'</div>';
+    });
+    h+='</div>';
+  }else{
+    h+='<div style="background:#DCFCE7;border:1px solid #16A34A;border-radius:8px;padding:12px 14px;font-weight:700;color:#166534;font-size:13px">✓ No issues found — all lots tally and every seller has full details.</div>';
+  }
+  document.getElementById('lv-body').innerHTML=h;
+  // Acknowledge UI: only meaningful when there are no hard errors.
+  const ackWrap=document.getElementById('lv-ack-wrap');
+  const ackLabel=document.getElementById('lv-ack-label');
+  const ack=document.getElementById('lv-ack');
+  const confirmBtn=document.getElementById('lv-confirm');
+  if(errs.length){
+    ackWrap.style.display='none';
+    confirmBtn.disabled=true;
+    confirmBtn.textContent='Fix errors to continue';
+  }else{
+    confirmBtn.textContent='Mark Validated';
+    if(warns.length){
+      const total=warns.reduce((s,w)=>s+(w.count||0),0);
+      ackLabel.textContent='I confirm these '+total+' flagged lot(s) are intentional';
+      ackWrap.style.display='flex';
+      ack.checked=false;
+      confirmBtn.disabled=true;
+    }else{
+      ackWrap.style.display='none';
+      confirmBtn.disabled=false;
+    }
+  }
+}
+// Collapse / expand a single seller's lot cards.
+function lvToggleGroup(id, headEl){
+  const box=document.getElementById(id);
+  if(!box) return;
+  const open = box.style.display==='none';
+  box.style.display = open ? 'block' : 'none';
+  const caret = headEl && headEl.querySelector('.lv-caret');
+  if(caret) caret.textContent = open ? '▾' : '▸';
+}
+function lvToggleAllGroups(open){
+  document.querySelectorAll('#lv-body [id^="lv-grp-"]').forEach(box=>{ box.style.display = open ? 'block' : 'none'; });
+  document.querySelectorAll('#lv-body .lv-caret').forEach(c=>{ c.textContent = open ? '▾' : '▸'; });
+}
+// Jump to Lot Entry on the validated trade and filter Recent Entries to
+// this seller's lots (reuses the existing single-seller search box), so
+// the operator can open each flagged lot's edit form and correct it.
+function lvFixSeller(name){
+  const aid=_lvAid;
+  hideModal('lot-validate-modal');
+  if(window._currentTab!=='lotentry') go('lotentry');
+  const sel=document.getElementById('le-auction');
+  if(sel && aid && String(sel.value)!==String(aid) && sel.querySelector('option[value="'+aid+'"]')){
+    sel.value=String(aid);
+    if(typeof leOnAuctionChange==='function'){ try{ leOnAuctionChange(); }catch(_){} }
+  }
+  const sb=document.getElementById('le-recent-search');
+  if(sb){
+    sb.value=name;
+    _le.recentSearch=name;
+    _le.recentPage=1;
+    if(typeof loadLeRecent==='function'){ try{ loadLeRecent(); }catch(_){} }
+  }
+  setTimeout(()=>{ const c=document.getElementById('le-recent-card'); if(c) c.scrollIntoView({behavior:'smooth',block:'start'}); },80);
+}
+function lvAckChanged(){
+  const ack=document.getElementById('lv-ack');
+  const confirmBtn=document.getElementById('lv-confirm');
+  const errs=_lvData&&_lvData.errors?_lvData.errors.length:0;
+  confirmBtn.disabled=!(ack && ack.checked && !errs);
+}
+async function confirmLotValidate(){
+  const aid=_lvAid;
+  if(!aid) return;
+  const btn=document.getElementById('lv-confirm');
+  btn.disabled=true;btn.textContent='Saving…';
+  try{
+    await j('/api/auctions/'+aid+'/validate-lots/confirm',{method:'POST'});
+    toast('✓ Lots validated — price import unlocked');
+    hideModal('lot-validate-modal');
+    // If the picked trade matches the Price Import gate, clear it.
+    if(String(_piGateAid)===String(aid)){ _piGateClean=true; const g=document.getElementById('pi-validate-gate'); if(g) g.style.display='none'; piAckChanged(); }
+  }catch(e){
+    btn.disabled=false;btn.textContent='Mark Validated';
+    alert((e&&e.message)||'Could not validate');
+    // Re-render the SAME trade in case errors appeared since load.
+    openLotValidate(aid);
+  }
 }
 // Quick-download for the "before trade" snapshot reports surfaced inside
 // the Price Import reminder banner. Uses the topbar's shared trade pick
@@ -13162,7 +13433,22 @@ async function doPriceImport(){
     if(dt)fd.append('date',dt);
     const r=await fetch(B+'/api/auctions/import',{method:'POST',headers:{'Authorization':'Bearer '+T},body:fd});
     const d=await r.json();
-    if(!r.ok)throw new Error(d.error||'Import failed');
+    if(!r.ok){
+      // Lot-validation gate (412, flag_lot_validation) — guide the operator
+      // to validate the trade's entered lots before importing prices.
+      if(r.status===412 && d.gate==='lot_validation'){
+        _piGateClean=false;
+        _piGateAid=d.auctionId||'';
+        const g=document.getElementById('pi-validate-gate');
+        const m=document.getElementById('pi-validate-gate-msg');
+        if(m) m.textContent=d.detail||d.error||'Validate entered lots first';
+        if(g) g.style.display='block';
+        btn.disabled=false;btn.textContent='Import Prices';
+        piAckChanged();
+        return;
+      }
+      throw new Error(d.error||'Import failed');
+    }
 
     hideModal('price-import-modal');
     fileInput.value='';

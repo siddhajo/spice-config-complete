@@ -101,7 +101,8 @@ function wrapText(doc, text, maxWidth) {
 
 function readSetting(db, key, fallback) {
   try {
-    const r = db.get('SELECT value FROM company_settings WHERE key = ?', [key]);
+    const r = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?',
+      [key, require('./company-config').modeForKey(db, key)]);
     return (r && r.value) ? String(r.value) : (fallback || '');
   } catch (_) { return fallback || ''; }
 }

@@ -43,7 +43,8 @@ function _sumKey(rows, key) {
 // after the operator toggles it.
 function _isUsernameShown(db) {
   try {
-    const r = db.get(`SELECT value FROM company_settings WHERE key = 'show_username'`);
+    const r = db.get(`SELECT value FROM company_settings WHERE key = 'show_username' AND business_mode = ?`,
+      [require('./company-config').getActiveMode(db)]);
     return r && String(r.value || '').toLowerCase() === 'true';
   } catch (_) {
     return false;
@@ -57,7 +58,7 @@ function _isUsernameShown(db) {
 function _termAuction(db, plural) {
   let mode = 'e-Auction';
   try {
-    const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode'`);
+    const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'`);
     if (r && r.value) mode = String(r.value);
   } catch (_) {}
   const isTrade = (mode === 'e-Trade');
@@ -327,7 +328,7 @@ function getBranchComparison(db) {
   // Mode-aware via the auctions.mode column.
   let modeFilter = '';
   try {
-    const m = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode'`);
+    const m = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'`);
     const mode = m && m.value ? String(m.value).trim() : '';
     if (mode) modeFilter = ` AND (a.mode = '${mode.replace(/'/g, "''")}' OR a.mode IS NULL OR a.mode = '')`;
   } catch (_) { /* no mode filter when settings missing */ }

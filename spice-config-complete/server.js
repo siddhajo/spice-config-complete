@@ -13,7 +13,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
-const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund } = require('./company-config');
+const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund, exportSettingsBundle, importSettingsBundle } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
@@ -1141,10 +1141,12 @@ app.post('/api/admin/preset', (req, res) => {
 
   // Upsert both keys. INSERT OR REPLACE pattern because tenant_preset /
   // preset_config don't live in the settings DEFAULTS.
+  // tenant_preset / preset_config are install-global (GLOBAL_KEYS) — stored
+  // once under the '*' sentinel. PK is composite (key, business_mode) now.
   const stmt = db.prepare(
-    `INSERT INTO company_settings (key, value, category, label, field_type)
-     VALUES (?, ?, 'branding', ?, 'text')
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    `INSERT INTO company_settings (key, business_mode, value, category, label, field_type)
+     VALUES (?, '*', ?, 'branding', ?, 'text')
+     ON CONFLICT(key, business_mode) DO UPDATE SET value = excluded.value`
   );
   stmt.run('tenant_preset', slug, 'Tenant preset');
   stmt.run('preset_config', finalConfig ? JSON.stringify(finalConfig) : '', 'Tenant preset config (JSON)');
@@ -1275,11 +1277,15 @@ app.get('/api/company-settings/logo/:which', requireView, (req, res) => {
 });
 
 app.get('/api/company-settings/export', requireExport, (req, res) => {
+  // Per-mode bundle so a backup round-trips BOTH modes (global + e-Trade +
+  // e-Auction), not just the active one.
   res.setHeader('Content-Disposition', 'attachment; filename="company-settings.json"');
-  res.json(getSettingsFlat(getDb()));
+  res.json(exportSettingsBundle(getDb()));
 });
 app.post('/api/company-settings/import', requireSettingsWrite, (req, res) => {
-  const count = updateSettings(getDb(), req.body.settings || {});
+  // Accepts the per-mode bundle or a legacy flat object (→ active mode).
+  const count = importSettingsBundle(getDb(), req.body.settings || {});
+  try { syncSampleRefund(getDb()); } catch (_) {}
   invalidateDateFmtCache();
   try { require('./date-format').invalidateDateFormatCache(); } catch (_) {}
   res.json({ success: true, imported: count });
@@ -3319,7 +3325,7 @@ app.get('/api/buyers/template', requireExport, async (req, res) => {
 //                             e-Auction data never bleed into each other.
 function currentBusinessMode(db) {
   try {
-    const row = db.get("SELECT value FROM company_settings WHERE key = 'business_mode'");
+    const row = db.get("SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'");
     return row && row.value ? String(row.value) : '';
   } catch (_) { return ''; }
 }
@@ -3931,7 +3937,7 @@ app.get('/api/auctions/:id/next-lot/:branch', requireViewOrLotEntry, (req, res) 
 });
 
 // ── Import Auction + Lots from XLS/XLSX (replaces APPA.PRG) ──
-app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), async (req, res) => {
+app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), requireLotsValidatedForPriceImport, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const workbook = XLSX.readFile(req.file.path);
@@ -4366,6 +4372,7 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
     [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
+  lvClearGate(_db, l.auction_id);   // new lot → trade must be re-validated before price import
   // Seller name for a readable audit trail (already resolved above).
   let _traderName = _name || (_seller ? _seller.name : '');
   auditLog(req, 'create', 'lot', _ins && _ins.lastInsertRowid, {
@@ -4478,7 +4485,7 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
       );
     }
   }
-  if (_pcRow && _pcRow.auction_id) pcClearGate(db, _pcRow.auction_id);
+  if (_pcRow && _pcRow.auction_id) { pcClearGate(db, _pcRow.auction_id); lvClearGate(db, _pcRow.auction_id); }
   // Audit the edit with a compact before→after diff so the admin can see
   // exactly which fields changed (and who changed them, from which app).
   const _after = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
@@ -4518,7 +4525,7 @@ app.delete('/api/lots/:id', requireDelete, (req, res) => {
   // readable record (lot_no, qty, branch) of what was deleted.
   const _row = db.get('SELECT auction_id, lot_no, qty, branch FROM lots WHERE id = ?', [req.params.id]);
   db.run('DELETE FROM lots WHERE id = ?', [req.params.id]);
-  if (_row && _row.auction_id) pcClearGate(db, _row.auction_id);
+  if (_row && _row.auction_id) { pcClearGate(db, _row.auction_id); lvClearGate(db, _row.auction_id); }
   if (_row) auditLog(req, 'delete', 'lot', parseInt(req.params.id, 10), {
     lot_no: _row.lot_no, qty: Number(_row.qty) || 0, branch: _row.branch || '', auction_id: _row.auction_id,
   });
@@ -4588,7 +4595,7 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   );
   // Stale price-check for every affected trade.
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
-  for (const r of _aids) pcClearGate(db, r.auction_id);
+  for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -4633,7 +4640,7 @@ app.post('/api/lots/bulk-grade', requireLotWrite, (req, res) => {
     recalced++;
   }
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
-  for (const r of _aids) pcClearGate(db, r.auction_id);
+  for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -4661,7 +4668,7 @@ app.post('/api/lots/bulk-delete', requireDelete, (req, res) => {
   // Grab the lot numbers before deletion for a readable audit summary.
   const _delRows = db.all(`SELECT lot_no FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   db.run(`DELETE FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
-  for (const r of _aids) pcClearGate(db, r.auction_id);
+  for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
   auditLog(req, 'bulk-delete', 'lot', null, {
     count: part.allowedIds.length,
     lot_nos: _delRows.map(r => r.lot_no).slice(0, 50),
@@ -5190,6 +5197,240 @@ function pcGateState(db, auctionId) {
   if (!row.price_check_first_passed_at) return 'never';
   return row.price_checked_at ? 'clean' : 'stale';
 }
+
+// ══════════════════════════════════════════════════════════════
+// LOT VALIDATION GATE — pre-price-import "validate entered lots"
+// ══════════════════════════════════════════════════════════════
+// Sits on the OTHER side of the workflow from price-check: it guards
+// PRICE IMPORT, not the post-import generate actions. The incident it
+// prevents: a seller entered with no GSTIN silently drops out of
+// GSTIN-keyed reports (Dealer List), so the Lots screen and the Dealer
+// List disagree on lot count. This validates the ENTERED lots and forces
+// the operator to see (and acknowledge) those gaps before importing prices.
+//
+// Gate states (lvGateState):
+//   'off'   — flag_lot_validation disabled → no-op, never blocks
+//   'never' — not validated since the last lot change → 412 block
+//   'clean' — validated (errors=0, warnings acknowledged), no edits since
+//
+// lots_validated_at is stamped on a clean confirm and cleared by ANY lot
+// insert/edit/delete — re-validation is required after every change (it's
+// one cheap click), which is stricter than the price-check gate's
+// stale-allowed behaviour, on purpose.
+function lvFlagOn(db) {
+  try {
+    const cfg = getSettingsFlat(db || getDb());
+    return String(cfg.flag_lot_validation || '').toLowerCase() === 'true';
+  } catch (_) { return false; }
+}
+function lvStampGate(db, auctionId) {
+  if (!auctionId || !lvFlagOn(db)) return;
+  db.run(`UPDATE auctions SET lots_validated_at = datetime('now','localtime') WHERE id = ?`, [auctionId]);
+}
+function lvClearGate(db, auctionId) {
+  if (!auctionId || !lvFlagOn(db)) return;
+  db.run(`UPDATE auctions SET lots_validated_at = '' WHERE id = ?`, [auctionId]);
+}
+function lvGateState(db, auctionId) {
+  if (!auctionId)    return 'never';
+  if (!lvFlagOn(db)) return 'off';
+  const row = db.get('SELECT lots_validated_at FROM auctions WHERE id = ?', [auctionId]);
+  if (!row) return 'never';
+  return row.lots_validated_at ? 'clean' : 'never';
+}
+
+// Clean a stored GSTIN the same way the Dealer List does, so the
+// validation's "will this lot appear in the Dealer List?" verdict matches
+// the report exactly. Storage is inconsistent: "GSTIN.<15>", "gstin <15>",
+// bare 15-char, etc. A valid GSTIN cleans to length 15.
+function cleanGstin(cr) {
+  let s = String(cr == null ? '' : cr).trim();
+  if (s.slice(0, 5).toLowerCase() === 'gstin') {
+    s = s.slice(5).replace(/^[.\s:-]+/, '');
+  }
+  return s.trim().toUpperCase();
+}
+const hasValidGstin = (cr) => cleanGstin(cr).length === 15;
+
+// Pure, read-only: build the validation report for one auction.
+// Returns { ok, errors[], warnings[], reconciliation, totals }.
+//   errors   — block import (duplicate lot numbers, lots with no seller)
+//   warnings — acknowledge to proceed (missing GSTIN / bank / PAN / phone)
+function validateAuctionLots(db, auctionId) {
+  const lots = db.all(
+    `SELECT id, lot_no, trader_id, bank_id, name, cr, pan, tel, branch,
+            litre, COALESCE(bags,0) AS bags, COALESCE(qty,0) AS qty
+       FROM lots WHERE auction_id = ?`,
+    [auctionId]
+  );
+  // Trader IDs that actually have a bank account on file — one query,
+  // O(1) lookup. A lot's payment routes via lots.bank_id or the trader's
+  // default bank, so "no bank" = the trader has zero trader_banks rows.
+  const tradersWithBank = new Set(
+    db.all(`SELECT DISTINCT trader_id FROM trader_banks`).map(r => r.trader_id)
+  );
+
+  // Display projection — the fields the UI shows for each flagged lot.
+  const disp = (l) => ({
+    id: l.id, lot_no: l.lot_no, name: l.name || '', branch: l.branch || '',
+    bags: l.bags, litre: l.litre || '', qty: l.qty, trader_id: l.trader_id || null,
+  });
+
+  const errors = [];
+  const warnings = [];
+
+  // ── Duplicate lot numbers (padding-insensitive: "1" === "001") ──
+  const byKey = new Map();
+  for (const l of lots) {
+    const p = parseLotNo(l.lot_no);
+    const key = p ? p.prefix + ':' + p.num : String(l.lot_no).trim().toUpperCase();
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(l);
+  }
+  for (const [, group] of byKey) {
+    if (group.length > 1) {
+      errors.push({
+        type: 'duplicate_lot',
+        title: 'Duplicate lot',
+        message: `Lot #${group[0].lot_no} entered ${group.length} times`,
+        lots: group.map(disp),
+      });
+    }
+  }
+
+  // ── Lots with no seller (blocks: every lot must have a seller) ──
+  const noSeller = lots.filter(l => !l.trader_id || !String(l.name || '').trim());
+  if (noSeller.length) {
+    errors.push({
+      type: 'no_seller',
+      title: 'No seller',
+      message: `${noSeller.length} lot(s) have no seller linked`,
+      lots: noSeller.map(disp),
+    });
+  }
+
+  // ── Warnings — missing seller details (acknowledge to proceed) ──
+  const pushWarn = (type, title, label, predicate) => {
+    const hit = lots.filter(predicate);
+    if (hit.length) {
+      warnings.push({ type, title, label, count: hit.length, lots: hit.map(disp) });
+    }
+  };
+  pushWarn('no_gstin', 'No GSTIN',       'Seller has no GSTIN (excluded from Dealer List)', l => !hasValidGstin(l.cr));
+  pushWarn('no_bank',  'No bank account', 'Seller has no bank account on file',             l => l.trader_id && !tradersWithBank.has(l.trader_id));
+  pushWarn('no_pan',   'No PAN',          'Seller has no PAN',                              l => !String(l.pan || '').trim());
+  pushWarn('no_phone', 'No phone',        'Seller has no phone number',                     l => !String(l.tel || '').trim());
+
+  // ── Reconciliation (the "tally") ──────────────────────────────
+  const totalLots = lots.length;
+  const totalBags = lots.reduce((s, l) => s + Number(l.bags || 0), 0);
+  const totalQty  = Math.round(lots.reduce((s, l) => s + Number(l.qty || 0), 0) * 1000) / 1000;
+  const gstinLots = lots.filter(l => hasValidGstin(l.cr)).length;
+
+  // Per-seller breakdown (grouped by trader_id, falling back to name)
+  const sellerMap = new Map();
+  for (const l of lots) {
+    const key = l.trader_id != null ? 't' + l.trader_id : 'n:' + String(l.name || '').trim().toUpperCase();
+    if (!sellerMap.has(key)) {
+      sellerMap.set(key, { name: l.name || '(no name)', hasGstin: hasValidGstin(l.cr), lots: 0, bags: 0, qty: 0 });
+    }
+    const s = sellerMap.get(key);
+    s.lots += 1; s.bags += Number(l.bags || 0); s.qty += Number(l.qty || 0);
+  }
+  const sellers = Array.from(sellerMap.values())
+    .map(s => ({ ...s, qty: Math.round(s.qty * 1000) / 1000 }))
+    .sort((a, b) => Number(a.hasGstin) - Number(b.hasGstin) || a.name.localeCompare(b.name));
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    totals: { lots: totalLots, bags: totalBags, qty: totalQty },
+    reconciliation: {
+      totalLots,
+      dealerListLots: gstinLots,            // appear in the Dealer List
+      excludedLots: totalLots - gstinLots,  // the gap — non-GSTIN sellers
+      sellerCount: sellers.length,
+      sellers,
+    },
+  };
+}
+
+// ── LOT VALIDATION ENDPOINTS ──────────────────────────────────
+// Read-only validation report for the auction's entered lots. Does NOT
+// stamp the gate — the operator confirms separately (below) once they've
+// reviewed errors + acknowledged warnings.
+app.get('/api/auctions/:id/validate-lots', requireViewOrLotEntry, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid auction id' });
+  const db = getDb();
+  const auc = db.get('SELECT id, ano, date FROM auctions WHERE id = ?', [id]);
+  if (!auc) return res.status(404).json({ error: 'auction not found' });
+  const report = validateAuctionLots(db, id);
+  res.json({
+    auctionId: id, ano: auc.ano, date: auc.date,
+    flagOn: lvFlagOn(db),
+    state: lvGateState(db, id),   // 'off' | 'never' | 'clean'
+    ...report,
+  });
+});
+
+// Confirm validation → stamp the gate. Refuses if there are still hard
+// errors; warnings are acknowledged implicitly by confirming (the UI only
+// enables this after the operator ticks the box).
+app.post('/api/auctions/:id/validate-lots/confirm', requireLotWrite, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid auction id' });
+  const db = getDb();
+  const auc = db.get('SELECT id FROM auctions WHERE id = ?', [id]);
+  if (!auc) return res.status(404).json({ error: 'auction not found' });
+  const report = validateAuctionLots(db, id);
+  if (!report.ok) {
+    return res.status(409).json({
+      error: 'Cannot validate — unresolved errors remain',
+      detail: 'Fix all errors (duplicate lots, lots with no seller) before marking the trade validated.',
+      ...report,
+      state: lvGateState(db, id),
+    });
+  }
+  lvStampGate(db, id);
+  res.json({ success: true, state: lvGateState(db, id), ...report });
+});
+
+// Express middleware: block PRICE IMPORT until the trade's entered lots
+// have been validated. Only gates mode='price' (the price import) —
+// mode='full' (initial lot import) passes through, since that's the very
+// step that CREATES the lots to validate. Resolves the target auction from
+// auction_id (preferred) or ano+date. MUST be mounted AFTER upload.single
+// so req.body is populated.
+function requireLotsValidatedForPriceImport(req, res, next) {
+  const db = getDb();
+  if (!lvFlagOn(db)) return next();
+  if (String((req.body && req.body.mode) || '') !== 'price') return next();
+  let aid = req.body.auction_id ? parseInt(req.body.auction_id, 10) : null;
+  if (!aid && req.body.ano) {
+    const d = normalizeDate(req.body.date);
+    const auc = d
+      ? db.get('SELECT id FROM auctions WHERE ano = ? AND date = ?', [req.body.ano, d])
+      : db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC LIMIT 1', [req.body.ano]);
+    if (auc) aid = auc.id;
+  }
+  if (!aid) {
+    return res.status(412).json({
+      error: 'Validate entered lots first',
+      detail: 'Pick the specific trade (ANO + date) so its entered lots can be validated before price import.',
+      gate: 'lot_validation',
+    });
+  }
+  if (lvGateState(db, aid) === 'clean') return next();
+  return res.status(412).json({
+    error: 'Validate entered lots first',
+    detail: 'Open Lot Entry → Validate Lots, resolve all errors and acknowledge the warnings, then import prices.',
+    auctionId: aid,
+    gate: 'lot_validation',
+  });
+}
+
 // Compute "gate-ready" from a verify summary. We use the same lenient
 // rule as the sibling: a verify counts as fully reconciled when no
 // fixable code rows remain (CODE Δ + DB BLANK = 0). File-blank codes
@@ -11855,7 +12096,7 @@ app.get('/api/reports/summary-pdf/:id', (req, res, next) => {
     // reports.js's private helper.
     let nounMode = 'e-Auction';
     try {
-      const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode'`);
+      const r = db.get(`SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'`);
       if (r && r.value) nounMode = String(r.value);
     } catch (_) {}
     const noun = (nounMode === 'e-Trade') ? 'Trade' : 'Auction';

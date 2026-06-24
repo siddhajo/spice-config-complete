@@ -414,6 +414,14 @@ async function initDb() {
     end_time TEXT,
     price_checked_at TEXT DEFAULT '',
     price_check_first_passed_at TEXT DEFAULT '',
+    -- Stamped by /api/auctions/:id/validate-lots/confirm when the operator
+    -- has validated the ENTERED lots (no duplicate lot numbers, every lot
+    -- has a seller) AND acknowledged any warnings (sellers missing GSTIN /
+    -- bank / PAN / phone). Acts as the green-light gate for PRICE IMPORT
+    -- (auctions/import mode='price'). Auto-cleared by any endpoint that
+    -- inserts/edits/deletes a lot, so re-validation is required after every
+    -- change. Gated by the flag_lot_validation flag.
+    lots_validated_at TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
@@ -856,6 +864,9 @@ async function initDb() {
     // so the gate doesn't drop to 'never' for previously-verified data.
     "ALTER TABLE auctions ADD COLUMN price_checked_at TEXT DEFAULT ''",
     "ALTER TABLE auctions ADD COLUMN price_check_first_passed_at TEXT DEFAULT ''",
+    // Lot-validation gate (flag_lot_validation) — stamped on a clean
+    // "Validate Entered Lots" confirm, cleared by any lot insert/edit/delete.
+    "ALTER TABLE auctions ADD COLUMN lots_validated_at TEXT DEFAULT ''",
     // Additional charge row + per-invoice lorry number. See invoices
     // CREATE TABLE comment for what they carry.
     "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",

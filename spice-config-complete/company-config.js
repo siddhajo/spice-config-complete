@@ -200,6 +200,11 @@ const DEFAULTS = [
   { key: 'flag_set_buyer',      value: 'true',  category: 'flags',     label: 'Lots \u2192 Set Buyer (bulk action)',       type: 'boolean' },
   { key: 'flag_print_purchase', value: 'true',  category: 'flags',     label: 'Print Selected Purchase (ASP / Kerala)', type: 'boolean' },
   { key: 'flag_price_check',    value: 'false', category: 'flags',     label: 'Price Check + transaction gate',         type: 'boolean' },
+  // flag_lot_validation defaults OFF — when ON, price import (mode='price')
+  // is blocked until the trade's entered lots pass "Validate Entered Lots".
+  // Off by default so existing multi-trade price imports keep working until
+  // the operator opts in.
+  { key: 'flag_lot_validation', value: 'false', category: 'flags',     label: 'Validate lots before price import',      type: 'boolean' },
 
   // ── BOOKING LIMITS & ALERTS ────────────────────────────────
   // When flag_booking_limit is ON, every lot save recomputes the seller's
@@ -455,22 +460,117 @@ const CATEGORIES = {
   spice_board:{ order: 14, title: 'Spice Board Reports',   icon: '🌶', description: 'Statutory cardamom-auction reports. Place values entered below populate the Place of Auction dropdown on the FORM-D report.' },
 };
 
+// ── Per-mode settings model ───────────────────────────────────────────
+// company_settings is split per business mode: every setting has one row
+// per mode (business_mode = 'e-Trade' | 'e-Auction'), EXCEPT the keys in
+// GLOBAL_KEYS, which are stored once under the '*' sentinel and shared by
+// both modes. GLOBAL_KEYS holds the mode selector itself (you can't choose
+// the mode from inside a mode) plus install-wide infra/branding keys.
+const GLOBAL_MODE = '*';
+const MODES = ['e-Trade', 'e-Auction'];
+const GLOBAL_KEYS = new Set(['business_mode', 'business_state', 'tenant_preset', 'preset_config']);
+
+// Mode-appropriate seed split. A key listed here for mode M is NOT shown in
+// (and does NOT belong to) mode M, so on first install it is seeded ONLY into
+// the OTHER mode. MUST be kept in sync with public/index.html `_MODE_HIDE_KEYS`
+// (search there for the matching comment). Keys not listed here are seeded
+// into BOTH modes with the current value copied.
+const MODE_HIDE_KEYS = {
+  'e-Auction': ['deduction1','deduction2','asp_profit_pooler','asp_profit_dealer','isp_profit_pooler','isp_profit_dealer','refund',
+                'deduction1_inclusive','flag_inter_transport','flag_inter_insurance','flag_local_transport','flag_local_insurance',
+                'dealer_days','addl_charge_name','addl_charge_value',
+                'inv_prefix_sister','flag_sister','flag_disc_gst','flag_discount_in_prate',
+                'tally_company_name','tally_state_code','tally_home_state','tally_inv_prefix',
+                'bank_tn_name','bank_tn_acct','bank_tn_ifsc'],
+  'e-Trade':   ['commission','hpc','sb_refund',
+                'flag_crop_receipt','flag_reserved_price','flag_price_list_mapping',
+                'tally_commission_auction'],
+};
+
+// Which modes a given key should be seeded into (mode-appropriate split).
+function _seedModesFor(key) {
+  if (GLOBAL_KEYS.has(key)) return [GLOBAL_MODE];
+  return MODES.filter(m => !(MODE_HIDE_KEYS[m] || []).includes(key));
+}
+
+// Resolve the active business mode from the global ('*') row. Always read
+// globally so it is never affected by the per-mode split.
+function _activeMode(db) {
+  try {
+    const r = db.prepare("SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = ?").get(GLOBAL_MODE);
+    return (r && r.value) || 'e-Trade';
+  } catch (_) { return 'e-Trade'; }
+}
+
+// One-time rebuild: an existing single-PK company_settings table (key TEXT
+// PRIMARY KEY) is rebuilt into the composite-PK (key, business_mode) shape,
+// duplicating each row into both modes (or the split-appropriate mode) and
+// keeping GLOBAL_KEYS under '*'. Guarded via schema_meta so it runs once.
+function migrateSettingsPerMode(db) {
+  db.exec("CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT)");
+  const done = db.prepare("SELECT value FROM schema_meta WHERE key = ?").get('settings_per_mode_v1');
+  if (done) return;
+  const cols = db.all('PRAGMA table_info(company_settings)');
+  const hasMode = cols.some(c => c.name === 'business_mode');
+  if (!hasMode) {
+    db.exec(`
+      CREATE TABLE company_settings__new (
+        key           TEXT NOT NULL,
+        business_mode TEXT NOT NULL DEFAULT '*',
+        value         TEXT NOT NULL DEFAULT '',
+        category      TEXT NOT NULL DEFAULT 'company',
+        label         TEXT NOT NULL DEFAULT '',
+        field_type    TEXT NOT NULL DEFAULT 'text',
+        PRIMARY KEY (key, business_mode)
+      );
+    `);
+    const old = db.all('SELECT key, value, category, label, field_type FROM company_settings');
+    const ins = db.prepare(
+      `INSERT OR IGNORE INTO company_settings__new
+         (key, business_mode, value, category, label, field_type) VALUES (?, ?, ?, ?, ?, ?)`
+    );
+    const copy = db.transaction(() => {
+      for (const r of old) {
+        for (const m of _seedModesFor(r.key)) {
+          ins.run(r.key, m, r.value, r.category, r.label, r.field_type);
+        }
+      }
+    });
+    copy();
+    db.exec('DROP TABLE company_settings');
+    db.exec('ALTER TABLE company_settings__new RENAME TO company_settings');
+    console.log('Migrated company_settings → per-mode (e-Trade / e-Auction split applied)');
+  }
+  db.run('INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)',
+    ['settings_per_mode_v1', new Date().toISOString()]);
+}
+
 function initCompanySettings(db) {
+  // Fresh DBs get the composite-PK schema directly; existing single-PK
+  // installs are rebuilt by migrateSettingsPerMode (guarded, runs once).
   db.exec(`
     CREATE TABLE IF NOT EXISTS company_settings (
-      key TEXT PRIMARY KEY,
+      key TEXT NOT NULL,
+      business_mode TEXT NOT NULL DEFAULT '*',
       value TEXT NOT NULL DEFAULT '',
       category TEXT NOT NULL DEFAULT 'company',
       label TEXT NOT NULL DEFAULT '',
-      field_type TEXT NOT NULL DEFAULT 'text'
+      field_type TEXT NOT NULL DEFAULT 'text',
+      PRIMARY KEY (key, business_mode)
     );
   `);
+  migrateSettingsPerMode(db);
 
+  // Seed defaults into the appropriate mode(s): globals once under '*',
+  // per-mode keys into both modes (or the split-appropriate mode).
   const insert = db.prepare(
-    'INSERT OR IGNORE INTO company_settings (key, value, category, label, field_type) VALUES (?, ?, ?, ?, ?)'
+    'INSERT OR IGNORE INTO company_settings (key, business_mode, value, category, label, field_type) VALUES (?, ?, ?, ?, ?, ?)'
   );
+  const seedKey = (key, value, category, label, type) => {
+    for (const m of _seedModesFor(key)) insert.run(key, m, value, category, label, type);
+  };
   const seed = db.transaction(() => {
-    for (const d of DEFAULTS) insert.run(d.key, d.value, d.category, d.label, d.type);
+    for (const d of DEFAULTS) seedKey(d.key, d.value, d.category, d.label, d.type);
   });
   seed();
 
@@ -545,18 +645,22 @@ function initCompanySettings(db) {
   //     falls back to the dealer DN discount ledger (tally_dn_discount)
   //     when blank.
   try {
-    const seedNew = db.prepare(
-      'INSERT OR IGNORE INTO company_settings (key, value, category, label, field_type) VALUES (?, ?, ?, ?, ?)'
+    const seedNewIns = db.prepare(
+      'INSERT OR IGNORE INTO company_settings (key, business_mode, value, category, label, field_type) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    seedNew.run('flag_debit_note_planter', 'true', 'flags', 'Debit Notes — Planter Module', 'boolean');
-    seedNew.run('tally_dnp_discount', 'Commission-Planter', 'tally', 'Planter Debit Note Discount Ledger', 'text');
+    // Seed each new key into the mode(s) it belongs to (mode-appropriate split).
+    const seedNew = (key, value, category, label, type) => {
+      for (const m of _seedModesFor(key)) seedNewIns.run(key, m, value, category, label, type);
+    };
+    seedNew('flag_debit_note_planter', 'true', 'flags', 'Debit Notes — Planter Module', 'boolean');
+    seedNew('tally_dnp_discount', 'Commission-Planter', 'tally', 'Planter Debit Note Discount Ledger', 'text');
     // flag_bos_purchase_bill — Bills of Supply: Purchase Bill (ON, default)
     // vs Commission Bill (OFF) mode for the Bills tab. Default ON so
     // upgraded installs keep the existing purchase-bill surfaces.
-    seedNew.run('flag_bos_purchase_bill', 'true', 'flags', 'Bills of Supply: Purchase Bill (off = Commission Bill)', 'boolean');
+    seedNew('flag_bos_purchase_bill', 'true', 'flags', 'Bills of Supply: Purchase Bill (off = Commission Bill)', 'boolean');
     // flag_eauc_dispatch — e-Auction sales invoices: show the "Dispatch From"
     // block (sourced from the single company's own address). Default OFF.
-    seedNew.run('flag_eauc_dispatch', 'false', 'flags', 'Show Dispatch Address (e-Auction)', 'boolean');
+    seedNew('flag_eauc_dispatch', 'false', 'flags', 'Show Dispatch Address (e-Auction)', 'boolean');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs
@@ -569,7 +673,8 @@ function initCompanySettings(db) {
 }
 
 function getSetting(db, key) {
-  const r = db.prepare('SELECT value FROM company_settings WHERE key = ?').get(key);
+  const mode = GLOBAL_KEYS.has(key) ? GLOBAL_MODE : _activeMode(db);
+  const r = db.prepare('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?').get(key, mode);
   return r ? r.value : null;
   // ── Presets (ISP / ASP) for the "Company" category ───────────────────
   // Two named snapshots of the 8 fields in category='company' (logo,
@@ -679,7 +784,12 @@ function getSettingNum(db, key) {
 }
 
 function getAllSettings(db) {
-  const rows = db.prepare('SELECT key, value, category, label, field_type FROM company_settings ORDER BY rowid').all();
+  // Active mode's rows + the global ('*') controls, so the Settings UI shows
+  // this mode's values alongside the mode/state selectors.
+  const mode = _activeMode(db);
+  const rows = db.prepare(
+    "SELECT key, value, category, label, field_type FROM company_settings WHERE business_mode = ? OR business_mode = ? ORDER BY rowid"
+  ).all(mode, GLOBAL_MODE);
   const grouped = {};
   for (const r of rows) {
     if (!grouped[r.category]) grouped[r.category] = [];
@@ -689,17 +799,28 @@ function getAllSettings(db) {
 }
 
 function updateSettings(db, settings) {
-  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ?');
+  // Scope writes to the active mode, captured once up front so a PUT that
+  // also flips business_mode still writes the other fields to the
+  // pre-switch mode. Global keys are written to the '*' row.
+  const mode = _activeMode(db);
+  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ? AND business_mode = ?');
   const batch = db.transaction((items) => {
     let n = 0;
-    for (const [k, v] of Object.entries(items)) { upd.run(String(v), k); n++; }
+    for (const [k, v] of Object.entries(items)) {
+      const m = GLOBAL_KEYS.has(k) ? GLOBAL_MODE : mode;
+      upd.run(String(v), k, m);
+      n++;
+    }
     return n;
   });
   return batch(settings);
 }
 
 function getSettingsFlat(db) {
-  const rows = db.prepare('SELECT key, value, field_type FROM company_settings').all();
+  const mode = _activeMode(db);
+  const rows = db.prepare(
+    'SELECT key, value, field_type FROM company_settings WHERE business_mode = ? OR business_mode = ?'
+  ).all(mode, GLOBAL_MODE);
   const flat = {};
   for (const r of rows) {
     if (r.field_type === 'boolean') flat[r.key] = r.value === 'true';
@@ -718,6 +839,40 @@ function getSettingsFlat(db) {
   // based on business_state + business_mode. Presets are edit-time only
   // and stored in company_presets; the UI shows the active preset.
   return flat;
+}
+
+// Export ALL settings as a per-mode bundle so a backup round-trips both
+// modes (not just the active one): { global:{}, 'e-Trade':{}, 'e-Auction':{} }.
+function exportSettingsBundle(db) {
+  const rows = db.prepare('SELECT key, value, business_mode FROM company_settings').all();
+  const out = { global: {}, 'e-Trade': {}, 'e-Auction': {} };
+  for (const r of rows) {
+    if (r.business_mode === GLOBAL_MODE) out.global[r.key] = r.value;
+    else if (out[r.business_mode]) out[r.business_mode][r.key] = r.value;
+  }
+  return out;
+}
+
+// Import a settings payload. Accepts either the per-mode bundle produced by
+// exportSettingsBundle (restored section-by-section to its mode) or a legacy
+// flat { key: value } object (applied to the active mode via updateSettings).
+// Returns the number of keys written.
+function importSettingsBundle(db, payload) {
+  const p = payload || {};
+  const isBundle = p.global || p['e-Trade'] || p['e-Auction'];
+  if (!isBundle) return updateSettings(db, p);
+  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ? AND business_mode = ?');
+  const apply = (obj, mode, counter) => {
+    for (const [k, v] of Object.entries(obj || {})) { upd.run(String(v), k, mode); counter.n++; }
+  };
+  const counter = { n: 0 };
+  const batch = db.transaction(() => {
+    apply(p.global, GLOBAL_MODE, counter);
+    apply(p['e-Trade'], 'e-Trade', counter);
+    apply(p['e-Auction'], 'e-Auction', counter);
+  });
+  batch();
+  return counter.n;
 }
 
 // ── Preset helpers ─────────────────────────────────────────────────────
@@ -851,14 +1006,24 @@ function getGSTRates(db) {
 // Called after every settings write so an edit to the source reflects in the
 // other two places. Returns the propagated value (or null when no source).
 function syncSampleRefund(db) {
-  const mode = getSetting(db, 'business_mode') || 'e-Trade';
+  const mode = _activeMode(db);
   const srcKey = (mode === 'e-Auction') ? 'sb_refund' : 'refund';
-  const row = db.prepare('SELECT value FROM company_settings WHERE key = ?').get(srcKey);
+  const row = db.prepare('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?').get(srcKey, mode);
   if (!row || row.value == null || row.value === '') return null;
-  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ?');
-  upd.run(String(row.value), 'tally_sample_kgs');
-  upd.run(String(row.value), 'sample_weight');
+  const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ? AND business_mode = ?');
+  upd.run(String(row.value), 'tally_sample_kgs', mode);
+  upd.run(String(row.value), 'sample_weight', mode);
   return String(row.value);
 }
 
-module.exports = { DEFAULTS, CATEGORIES, initCompanySettings, getSetting, getSettingBool, getSettingNum, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getActivePresetCode, setActivePresetCode, getPreset, getAllPresets, savePreset, syncSampleRefund };
+// Resolve the active business mode from the global ('*') row. Exported for
+// consumers that read company_settings with raw SQL (mobile-bridge, reports)
+// and must scope per-mode reads to the same active mode.
+function getActiveMode(db) { return _activeMode(db); }
+
+// The business_mode value a raw `WHERE key=? AND business_mode=?` read should
+// use for a given key: '*' for GLOBAL_KEYS, the active mode otherwise. This is
+// the single source of truth for consumers outside this module.
+function modeForKey(db, key) { return GLOBAL_KEYS.has(key) ? GLOBAL_MODE : _activeMode(db); }
+
+module.exports = { DEFAULTS, CATEGORIES, initCompanySettings, getSetting, getSettingBool, getSettingNum, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getActivePresetCode, setActivePresetCode, getPreset, getAllPresets, savePreset, syncSampleRefund, getActiveMode, modeForKey, GLOBAL_MODE, exportSettingsBundle, importSettingsBundle };

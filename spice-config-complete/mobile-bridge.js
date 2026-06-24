@@ -56,8 +56,9 @@ const { makeMaskers } = require('./mask-fields');
 // Pull the receipt-relevant settings from spice-config's company_settings.
 // Field names match what the PWA renderer reads off cfg.
 function getReceiptConfig(db) {
+  const { modeForKey } = require('./company-config');
   const get = (key, fb = '') => {
-    const r = db.get('SELECT value FROM company_settings WHERE key = ?', [key]);
+    const r = db.get('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?', [key, modeForKey(db, key)]);
     return r ? r.value : fb;
   };
   const getBool = (key, fb = false) => {
@@ -539,9 +540,10 @@ function mountMobile(app, deps) {
     const db = getDb();
     const type = String(req.query.type || '').toLowerCase();
 
-    // Helper: read a single setting
+    // Helper: read a single setting (scoped to the active mode; globals use '*')
+    const { modeForKey } = require('./company-config');
     const get = (key, fallback = '') => {
-      const r = db.get(`SELECT value FROM company_settings WHERE key = ?`, [key]);
+      const r = db.get(`SELECT value FROM company_settings WHERE key = ? AND business_mode = ?`, [key, modeForKey(db, key)]);
       return r ? r.value : fallback;
     };
     const getNum  = (key, fallback = 0) => { const v = parseFloat(get(key, '')); return isNaN(v) ? fallback : v; };
@@ -551,11 +553,12 @@ function mountMobile(app, deps) {
       return v === 'true' || v === '1';
     };
 
-    // Branch list — keys br1..br9, blank values dropped
+    // Branch list — keys br1..br9, blank values dropped (active mode only)
     const brRows = db.all(
       `SELECT key, value FROM company_settings
-       WHERE category = 'branches' AND key LIKE 'br_'
-       ORDER BY key`
+       WHERE category = 'branches' AND key LIKE 'br_' AND business_mode = ?
+       ORDER BY key`,
+      [require('./company-config').getActiveMode(db)]
     );
     const branches = brRows
       .filter(r => r.value && String(r.value).trim())
@@ -634,7 +637,7 @@ function mountMobile(app, deps) {
   app.get('/api/mobile/auctions', requireAuth, (_req, res) => {
     try {
       const db = getDb();
-      const modeRow = db.get("SELECT value FROM company_settings WHERE key = 'business_mode'");
+      const modeRow = db.get("SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'");
       const mode = modeRow && modeRow.value ? String(modeRow.value) : '';
       const whereSql = mode
         ? `WHERE (auctions.mode = ? OR auctions.mode IS NULL OR auctions.mode = '')`
