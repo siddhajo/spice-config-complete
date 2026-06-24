@@ -2362,6 +2362,18 @@ function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
   const hsnCardamom = billData.hsnCardamom || cfg.hsn_cardamom || '09083120';
   const hsnCommission = billData.hsnCommission || '996111';
 
+  // Draw one centered header line, shrinking the font (down to minSize)
+  // until it fits within W so a long company name / address / CIN never
+  // wraps to a second line and overprints the row below it.
+  const drawCenteredFit = (text, yPos, font, baseSize, minSize) => {
+    const s = String(text == null ? '' : text);
+    let size = baseSize;
+    doc.font(font).fontSize(size);
+    while (size > minSize && doc.widthOfString(s) > W - 6) { size -= 0.25; doc.fontSize(size); }
+    doc.text(s, x0, yPos, { width: W, align: 'center', lineBreak: false });
+    doc.fontSize(baseSize);
+  };
+
   // ── "ORIGINAL/DUPLICATE/TRIPLICATE" tag (top-right, above outer border) ──
   doc.font('Helvetica').fontSize(7.5).fillColor('#000');
   doc.text('ORIGINAL/DUPLICATE/TRIPLICATE', x0, y, { width: W - 4, align: 'right' });
@@ -2371,8 +2383,7 @@ function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
 
   // ── Company header block ──
   y += 4;
-  doc.font('Helvetica-Bold').fontSize(11);
-  doc.text((co.name || '').toUpperCase(), x0, y, { width: W, align: 'center', lineBreak: false });
+  drawCenteredFit((co.name || '').toUpperCase(), y, 'Helvetica-Bold', 11, 8);
   y += 13;
 
   // REGD OFFICE line: assemble from whichever address fields the company
@@ -2394,20 +2405,18 @@ function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
     // bake one into their address line.
     const alreadyHasPrefix = /^\s*REGD\s+OFFICE\s*:/i.test(addrJoined);
     const regdLine = alreadyHasPrefix ? regdBody : ('REGD OFFICE:' + regdBody);
-    doc.text(regdLine, x0, y, { width: W, align: 'center', lineBreak: false });
+    drawCenteredFit(regdLine, y, 'Helvetica', 8, 6);
     y += 10;
   }
   const idLine = co.cinLabel
     ? { label: co.cinLabel, value: co.cinValue || '' }
     : { label: 'CIN', value: cfg.cin || '' };
-  doc.text(`${idLine.label}:${idLine.value}   PAN:${co.pan || cfg.pan || ''}`,
-    x0, y, { width: W, align: 'center', lineBreak: false });
+  drawCenteredFit(`${idLine.label}:${idLine.value}   PAN:${co.pan || cfg.pan || ''}`, y, 'Helvetica', 8, 6);
   y += 10;
-  doc.text(`GSTIN:${co.gstin || ''}   SBL:${co.sbl || cfg.sbl || ''}`,
-    x0, y, { width: W, align: 'center', lineBreak: false });
+  drawCenteredFit(`GSTIN:${co.gstin || ''}   SBL:${co.sbl || cfg.sbl || ''}`, y, 'Helvetica', 8, 6);
   y += 10;
   if (co.email) {
-    doc.text('e-Mail ID:' + co.email, x0, y, { width: W, align: 'center', lineBreak: false });
+    drawCenteredFit('e-Mail ID:' + co.email, y, 'Helvetica', 8, 6);
     y += 10;
   }
   y += 4;
@@ -2423,7 +2432,7 @@ function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
   doc.text('COMMISSION BILL', x0, y, { width: W, align: 'center' });
   y += 14;
   doc.font('Helvetica').fontSize(8);
-  doc.text('[ MEMORANDAM OF CARDAMOM SOLD THROUGH ' + (cfg.short_name || co.short || co.name || 'COMPANY') + ' ]',
+  doc.text('[ MEMORANDAM OF CARDAMOM SOLD THROUGH ' + (co.short || co.name || 'COMPANY') + ' ]',
     x0, y, { width: W, align: 'center' });
   y += 14;
 
@@ -2736,7 +2745,7 @@ function generateCommissionBoSPDF(billData, cfg, billNo, externalDoc) {
 
   // ── "for COMPANY" + signatures ──
   doc.font('Helvetica-Bold').fontSize(9);
-  doc.text('for ' + (cfg.short_name || co.short || co.name || 'COMPANY'), x0, y, { width: W - 6, align: 'right' });
+  doc.text('for ' + (co.short || co.name || 'COMPANY'), x0, y, { width: W - 6, align: 'right' });
   y += 30;
   doc.font('Helvetica').fontSize(8);
   doc.text('Signature of Seller', x0 + 6, y);
