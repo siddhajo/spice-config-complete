@@ -3854,11 +3854,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="needs-invoice-write btn btn-g" id="btn-gen-bill-one" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="showModal('gen-bill-modal')">+ Generate Bill</button>
             <button class="needs-invoice-write btn btn-a" id="btn-gen-bill-all" data-gen-doctype="bills" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenAllModal('bills')">⚡ Generate for All Agri Sellers</button>
             <button class="needs-admin btn" data-gen-admin-unlock="bills" style="display:none !important;height:38px;padding:0 14px;background:#FEF3C7;color:#7C2D12;border:1px solid #F59E0B;font-weight:600" onclick="adminAllowRegeneration('bills')" title="Admin: clear the lock so the operator can generate bills again for this trade. One-shot — the lock re-engages after the next successful generate.">🔓 Allow regeneration</button>
-            <button class="btn btn-o" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenCommissionBillModal()" title="Generate Commission Bill (Format 2) — one consolidated seller-wise report for the selected auction">+ Commission Bill (F2)</button>
+            <button class="btn btn-o feat-bos-commission" style="height:38px;padding:0 16px;font-weight:600" onclick="openGenCommissionBillModal()" title="Generate Commission Bill (Format 2) — one consolidated seller-wise report for the selected auction">+ Commission Bill (F2)</button>
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button class="btn feat-bos-purchase-bill" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedCommissionBoS()" title="Print Commission Bill (Memorandum) for all ticked bills">🖨 Print Selected</button>
+            <button class="btn feat-bos-purchase-bill" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedBills()" title="Print all ticked bills (old Bill-of-Supply format)">🖨 Print Selected</button>
             <button class="btn btn-o feat-bos-commission" style="height:38px;padding:0 16px;font-weight:600" onclick="printSelectedCommissionBoS()" title="Print Commission Bill (Memorandum) for all ticked bills — one A4 page per lot, matches IMCPC reference format">🧾 Commission Bill Selected</button>
           </div>
 
@@ -9728,18 +9728,22 @@ function applyFeatureFlags(){
   // Price List Mapping tab. Gated by business_mode === 'e-Auction' on
   // top of the flag, so it only shows in e-Auction mode.
   setFlag('data-feat-price-list-mapping', isEAuc && lookupFlag('flag_price_list_mapping'));
-  // Sidebar module toggles — independent of business mode.
+  // Sidebar module toggles. Bills of Supply is independent of business
+  // mode; both Debit Notes streams are e-Auction-only (AND'ed with isEAuc
+  // like Crop Receipt / Reserved Price above), so they vanish in e-Trade.
   setFlag('data-feat-bills',          lookupFlag('flag_bills'));
-  setFlag('data-feat-debit-notes',    lookupFlag('flag_debit_notes'));
-  setFlag('data-feat-debit-note-planter', lookupFlag('flag_debit_note_planter'));
-  // Bills of Supply — Purchase Bill vs Commission Bill. Default ON
-  // (Purchase Bill) when the setting is missing (older installs that
-  // pre-date the flag) so the standard purchase-bill/PDF surfaces show
-  // out of the box; OFF swaps in the "🧾 Commission Bill Selected"
-  // toolbar button + the per-row Commission-Bill download icon.
-  const _bosFlag = flagsArr.find(x => x && x.key === 'flag_bos_purchase_bill');
-  const bosPurchaseBillOn = !_bosFlag || String(_bosFlag.value).toLowerCase() === 'true';
-  setFlag('data-feat-bos-purchase-bill', bosPurchaseBillOn);
+  setFlag('data-feat-debit-notes',    isEAuc && lookupFlag('flag_debit_notes'));
+  setFlag('data-feat-debit-note-planter', isEAuc && lookupFlag('flag_debit_note_planter'));
+  // Bills of Supply — Purchase Bill vs Commission Bill is driven by
+  // BUSINESS MODE (not the manual flag_bos_purchase_bill toggle):
+  //   • e-Trade   → Purchase Bill / old Bill-of-Supply format. Shows the
+  //                 "🖨 Print Selected" button + per-row PDF icon.
+  //   • e-Auction → Commission Bill. Swaps in the "🧾 Commission Bill
+  //                 Selected" button + per-row Commission-Bill download icon.
+  // So the per-row print icon and the bulk print both emit a commission
+  // bill in e-Auction, and the legacy bill in e-Trade. (flag_bos_purchase_bill
+  // is retained in settings but no longer drives the UI.)
+  setFlag('data-feat-bos-purchase-bill', !isEAuc);
   // WhatsApp share buttons + Lots bulk "Set Buyer" — independent of mode.
   setFlag('data-feat-whatsapp',       lookupFlag('flag_whatsapp'));
   // Lots bulk actions, each gated by its own flag:
@@ -18311,10 +18315,13 @@ async function loadBills(){
         render:(b)=>`<strong>${fmtI(b.net||0,2)}</strong>` },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(b)=>
           // The Actions print icon prints the Commission Bill (BoS) in BOTH
-          // flag states (operator spec) — the purchase-bill PDF is no longer
-          // wired to a button. The two icons differ only by which feat-* class
-          // shows them; both call the commission generator.
-          iconBtn('pdf','Print Commission Bill',`downloadBillCommissionBoS(${b.id},'${encodeURIComponent(b.name||'')}','${encodeURIComponent(b.bil||'')}')`,'feat-bos-purchase-bill')
+          // Print format is driven by business mode (see applyFeatureFlags):
+          //   e-Trade   → 'pdf' icon shows (feat-bos-purchase-bill) → old
+          //               Bill-of-Supply PDF via viewBillPDF.
+          //   e-Auction → 'commission' icon shows (feat-bos-commission) →
+          //               Commission Bill via downloadBillCommissionBoS.
+          // Exactly one shows per mode; the other is hidden by CSS.
+          iconBtn('pdf','View PDF',`viewBillPDF('${b.auction_id||1}','${encodeURIComponent(b.name)}','${b.bil}')`,'feat-bos-purchase-bill')
           + iconBtn('commission','Download Commission Bill',`downloadBillCommissionBoS(${b.id},'${encodeURIComponent(b.name||'')}','${encodeURIComponent(b.bil||'')}')`,'feat-bos-commission')
           + iconBtn('whatsapp','Send via WhatsApp',`whatsappBill('${b.auction_id||1}','${encodeURIComponent(b.name)}','${encodeURIComponent(b.bil||'')}',${Number(b.net)||0},'${esc(b.ano||'')}')`)
           + iconBtn('edit','Edit bill',`openBillEdit(${JSON.stringify(b).replace(/"/g,'&quot;')})`)
