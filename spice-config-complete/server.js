@@ -4390,7 +4390,10 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   try {
     grade2Alert = runGrade2ShareCheck(_db, req, { auctionId: l.auction_id, branch: l.branch || '' });
   } catch (_) {}
-  res.json({ success: true, booking_alert: bookingAlert, grade2_alert: grade2Alert });
+  // Return the created lot id so callers can act on it immediately — the
+  // mobile lot-entry "🖨 This Lot" / Undo buttons read d.lot.id right after
+  // a save (printing/deleting fail silently without it).
+  res.json({ success: true, lot: { id: _ins && _ins.lastInsertRowid, lot_no: l.lot_no }, booking_alert: bookingAlert, grade2_alert: grade2Alert });
 });
 
 // Returns true if `req.user` has the admin role. Admin bypasses the
@@ -5316,7 +5319,9 @@ function validateAuctionLots(db, auctionId) {
       warnings.push({ type, title, label, count: hit.length, lots: hit.map(disp) });
     }
   };
-  pushWarn('no_gstin', 'No GSTIN',       'Seller has no GSTIN (excluded from Dealer List)', l => !hasValidGstin(l.cr));
+  // Flag ONLY when the GSTIN column is blank/empty — a present-but-nonstandard
+  // GSTIN (e.g. not exactly 15 chars) is left alone, per the operator's request.
+  pushWarn('no_gstin', 'No GSTIN',       'Seller has no GSTIN (excluded from Dealer List)', l => !cleanGstin(l.cr));
   pushWarn('no_bank',  'No bank account', 'Seller has no bank account on file',             l => l.trader_id && !tradersWithBank.has(l.trader_id));
   pushWarn('no_pan',   'No PAN',          'Seller has no PAN',                              l => !String(l.pan || '').trim());
   pushWarn('no_phone', 'No phone',        'Seller has no phone number',                     l => !String(l.tel || '').trim());

@@ -9704,6 +9704,25 @@ function getCurrentBusinessState(){
   return f ? f.value : 'TAMIL NADU';
 }
 
+// Single source of truth for a buyer's effective sale type (Local vs
+// Inter-state). The buyer's GSTIN state-code (first 2 digits) vs the business
+// state decides L/I; the stored b.sale / b.default_sale is ignored for L/I so
+// the buyers list, the edit form, the details view and the invoice buyer
+// filter can never disagree. Explicit statuses (E/W/N) aren't derivable from a
+// GSTIN, so the stored value is honoured for those; with no GSTIN we also fall
+// back to whatever was stored.
+//   accepts either a buyers-list row (b.sale) or an eligible-buyer row (b.default_sale)
+function deriveBuyerSale(b){
+  if (!b) return '';
+  const stored = String((b.sale != null ? b.sale : b.default_sale) || '').trim().toUpperCase();
+  if (stored === 'E' || stored === 'W' || stored === 'N') return stored;
+  const gstState = String(b.gstin || '').slice(0, 2);
+  if (!gstState) return stored;
+  const bizState = String(getCurrentBusinessState() || '').toUpperCase();
+  const bizCode = (bizState === 'KERALA') ? '32' : '33';
+  return (gstState === bizCode) ? 'L' : 'I';
+}
+
 // Returns the logo/company code ("ISP" or "ASP") that represents which
 // company is ACTIVELY issuing invoices/doing calculations.
 // Mirrors server-side effectiveCompany(): Kerala → sister company (ASP) in
@@ -12270,28 +12289,21 @@ async function searchBuyers(q, opts){
       { key:'_place', label:'Place · State', sort:'text',
         value:(b)=>[b.pla,b.state].filter(Boolean).join(' · ') },
       { key:'sale', label:'Sale', sort:'text',
-        // Derive sale type dynamically from buyer's GSTIN state code vs the
-        // business state: same state → Local, otherwise → Inter-state.
-        //   TN (business) + GSTIN starting 33 → L
-        //   KL (business) + GSTIN starting 32 → L
-        //   anything else                     → I
-        // Stored default_sale (b.sale) is ignored in favor of live derivation.
-        value:(b)=>{
-          const gstState = String(b.gstin || '').slice(0, 2);
-          if (!gstState) return '';
-          const bizState = String(getCurrentBusinessState() || '').toUpperCase();
-          const bizCode = (bizState === 'KERALA') ? '32' : '33';
-          return (gstState === bizCode) ? 'L' : 'I';
-        },
+        // Sale type is derived from the buyer's GSTIN state code via the shared
+        // deriveBuyerSale() helper so this column, the edit form, the details
+        // view and the invoice buyer filter always agree.
+        value:(b)=> deriveBuyerSale(b),
         render:(b)=>{
-          const gstState = String(b.gstin || '').slice(0, 2);
-          if (!gstState) return '<span style="color:var(--text3)">—</span>';
-          const bizState = String(getCurrentBusinessState() || '').toUpperCase();
-          const bizCode = (bizState === 'KERALA') ? '32' : '33';
-          const isLocal = (gstState === bizCode);
-          const label = isLocal ? 'Local' : 'Inter-state';
-          const color = isLocal ? 'var(--green)' : 'var(--spice-saffron)';
-          const bg    = isLocal ? 'var(--green-bg)' : 'var(--spice-saffron-lt)';
+          const s = deriveBuyerSale(b);
+          if (!s) return '<span style="color:var(--text3)">—</span>';
+          const map = {
+            L: ['Local',       'var(--green)',         'var(--green-bg)'],
+            I: ['Inter-state', 'var(--spice-saffron)', 'var(--spice-saffron-lt)'],
+            E: ['Export',      'var(--spice-saffron)', 'var(--spice-saffron-lt)'],
+            W: ['Withdrawn',   'var(--text2)',         '#f1f5f9'],
+            N: ['N/A',         'var(--text2)',         '#f1f5f9'],
+          };
+          const [label, color, bg] = map[s] || [s, 'var(--text2)', '#f1f5f9'];
           return `<span style="display:inline-block;padding:2px 8px;background:${bg};color:${color};border-radius:10px;font-size:11px;font-weight:700">${label}</span>`;
         } },
       { key:'_actions', label:'Actions', sortable:false, searchable:false, render:(b)=>
@@ -12311,7 +12323,7 @@ function viewBuyerDetails(b){
   const consigneeAddress=[b.cadd1].filter(Boolean).join(', ');
   let html='';
   html+=section('Identity',[kv('Buyer Code',b.buyer),kv('Code (short alias)',b.code),kv('Trade Name',b.buyer1),kv('PAN',b.pan)]);
-  html+=section('Registration',[kv('GSTIN',b.gstin),kv('TI',b.ti),kv('Sale Type',saleMap[b.sale]||b.sale)]);
+  html+=section('Registration',[kv('GSTIN',b.gstin),kv('TI',b.ti),kv('Sale Type',saleMap[deriveBuyerSale(b)]||deriveBuyerSale(b))]);
   html+=section('Contact',[kv('Phone',b.tel)]);
   html+=section('Billing Address',[kv('Address',fullAddress),kv('Place',b.pla),kv('PIN',b.pin),kv('State',b.state),kv('State Code',b.st_code)]);
   html+=section('Consignee (Ship-to)',[kv('Name',b.cbuyer1),kv('GSTIN',b.cgstin),kv('Address',consigneeAddress),kv('Place',b.cpla),kv('PIN',b.cpin),kv('State',b.cstate),kv('State Code',b.cst_code)]);
@@ -12331,6 +12343,10 @@ function openBuyerEdit(b){
   document.getElementById('buyer-modal-title').textContent='Edit Buyer';
   document.getElementById('b-id').value=b.id;
   B_FIELDS.forEach(f=>{const el=document.getElementById(B_IDS[f]);if(el)el.value=b[f]||''});
+  // Show the GSTIN-derived sale type (matches the buyers list), not the stale
+  // stored b.sale — saving then persists the corrected value.
+  const saleEl=document.getElementById('b-sale');
+  if(saleEl){const ds=deriveBuyerSale(b);if(ds)saleEl.value=ds}
   showModal('buyer-modal');
 }
 // Clone: pre-fill all fields from an existing buyer. The primary key
@@ -13634,11 +13650,13 @@ async function loadInvEligibleBuyers(){
   if(!aid){list.innerHTML='<div style="color:var(--text3);font-size:12px;padding:10px;text-align:center">Select an auction first</div>';return}
   try{
     const all=await j(`/api/invoices/eligible-buyers/${aid}`);
-    // Hard filter by selected Sale Type:
-    //  - If buyer has a default_sale, it MUST match the selected type
-    //  - If buyer has no default_sale, include it (user can still invoice them)
+    // Hard filter by selected Sale Type, using the SAME GSTIN-derived value as
+    // the Buyers list (deriveBuyerSale) — the endpoint returns b.gstin. Filtering
+    // on the stale stored default_sale used to reverse the list (a Local buyer
+    // stored as "I" was hidden under Local and shown under Inter-state).
+    //  - If the buyer's sale type can't be determined, include it (user can still invoice them).
     const buyers = saleType
-      ? all.filter(b => !b.default_sale || String(b.default_sale).trim() === saleType)
+      ? all.filter(b => { const ds = deriveBuyerSale(b); return !ds || ds === saleType; })
       : all;
     if(!all.length){
       list.innerHTML='<div style="color:var(--amber);font-size:12px;padding:10px;text-align:center">⚠ No buyers have lots in this auction.</div>';
@@ -13651,7 +13669,7 @@ async function loadInvEligibleBuyers(){
       return;
     }
     const rows=buyers.map(b=>{
-      const bSale=(b.default_sale||'').trim();
+      const bSale=deriveBuyerSale(b);
       const amount=Number(b.total_amount||0);
       const saleBadge=bSale?`<span style="font-size:10px;color:var(--text3);background:var(--green-bg);padding:1px 6px;border-radius:8px;margin-left:4px">${bSale}</span>`:'';
       // Show: CODE (small, distinct) · BUYER_CODE · TRADE_NAME
@@ -14671,7 +14689,10 @@ async function loadLots(opts){
   const discGst = (_sdata.flags || []).find(f => f.key === 'flag_disc_gst');
   const discGstOn = discGst ? String(discGst.value).toLowerCase() === 'true' : false;
   const filteredTradeCols = activePreset === 'ISP' ? tradeCols : tradeCols.filter(c => c.key !== 'pqty');
-  const filteredTaxCols   = discGstOn ? taxCols : taxCols.filter(c => !['cgst','sgst','igst'].includes(c.key));
+  // e-Auction always shows CGST/SGST/IGST (the advance-tax split on each lot);
+  // e-Trade shows them only when "Discount includes GST" is on (otherwise zero).
+  const showGstCols       = isAuction || discGstOn;
+  const filteredTaxCols   = showGstCols ? taxCols : taxCols.filter(c => !['cgst','sgst','igst'].includes(c.key));
   // Selection column — checkbox per row + master in the header.
   // Drives the bulk action buttons in the toolbar (Set Buyer, Set
   // Grade 1, Lock, Delete). The master checkbox toggles all visible
@@ -15610,6 +15631,9 @@ async function loadInvoices(opts){
 
   // Paginate the table render only — KPIs above already used the full arr.
   const _invSlice = applyClientSidePagination(_invoicesPager, 'invoices-pager', gotoInvoicesPage, arr);
+  // Bags column is e-Auction only (invoices.bag = SUM of the invoiced lots' bags).
+  const _invIsAuction = (typeof getCurrentBusinessMode === 'function')
+    && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-auction';
   DataTable.mount('invoices-list', _invSlice, {
     emptyState: { icon: 'invoices', title: "No invoices yet", body: "Once you have calculated lots for a buyer, use Generate Invoice to create one." },
     columns: [
@@ -15656,6 +15680,7 @@ async function loadInvoices(opts){
       { key:'_buyer', label:'Trade Name', sort:'text',
         value:(i)=>i.buyer1||i.buyer,
         render:(i)=>esc(i.buyer1||i.buyer) },
+      ...(_invIsAuction ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       // Charge breakdown — gunny, transport (stored in pava_hc), insurance (ins).

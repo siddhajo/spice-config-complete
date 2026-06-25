@@ -67,7 +67,11 @@ function getReceiptConfig(db) {
     return v === 'true' || v === '1';
   };
   return {
-    appTitle:     get('trade_name', 'Spice Auction'),
+    // Receipts use the sister-company (ASP) branding — same source as the
+    // mobile app title (s_short_name, see /api/config 'title') and the ASP
+    // logo above. The legacy 'trade_name' resolves to "IDEAL SPICES" on this
+    // tenant, which printed the wrong company name on the slip.
+    appTitle:     get('s_short_name', 'AMAZING SPICE PARK PVT LTD'),
     showUser:     getBool('show_username', false),
     // Real masking policy keys (the old code read a non-existent 'acct_mask'
     // with the wrong mode vocabulary, so masking never applied). Defaults
