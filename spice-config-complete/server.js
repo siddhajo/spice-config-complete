@@ -6232,6 +6232,45 @@ app.get('/api/invoices', requireView, (req, res) => {
       }
     }
   }
+  // Resolve the e-Way Bill distance for each ISP (Tamil Nadu) invoice so the
+  // main list can display it. Mirrors /api/invoices/distances: a per-invoice
+  // override (invoices.distance_km) wins; otherwise the saved route value
+  // keyed by (dispatch PIN ↔ buyer PIN). Without this, route-resolved
+  // invoices show blank in the list — the value lives in route_distances,
+  // not invoices.distance_km (which saving a route actively clears). ASP /
+  // Kerala invoices carry no distance.
+  try {
+    const dispatchPin = getDispatchPin(db);
+    const routes = {};
+    try {
+      const allRoutes = db.all(
+        `SELECT from_pin, to_pin, km FROM route_distances WHERE from_pin = ? OR to_pin = ?`,
+        [dispatchPin, dispatchPin]
+      );
+      for (const r of allRoutes) {
+        const other = r.from_pin === dispatchPin ? r.to_pin : r.from_pin;
+        routes[String(other).trim()] = r.km;
+      }
+    } catch (e) { /* route_distances may not exist on very old DBs */ }
+    const buyerCodes = [...new Set(rows.map(r => r.buyer).filter(Boolean))];
+    const pinByBuyer = new Map();
+    if (buyerCodes.length) {
+      const ph = buyerCodes.map(() => '?').join(',');
+      const brows = db.all(`SELECT buyer, pin FROM buyers WHERE buyer IN (${ph})`, buyerCodes);
+      for (const b of brows) pinByBuyer.set(b.buyer, b.pin);
+    }
+    for (const r of rows) {
+      r.resolved_km = null;
+      if (String(r.state || '').toUpperCase() === 'KERALA') continue;
+      if (r.distance_km != null && r.distance_km !== '') {
+        r.resolved_km = r.distance_km;
+      } else {
+        const pin = pinByBuyer.get(r.buyer);
+        const km = pin != null ? routes[String(pin).trim()] : null;
+        if (km != null) r.resolved_km = km;
+      }
+    }
+  } catch (e) { /* non-fatal: list still renders without resolved distances */ }
   res.json(rows);
 });
 
@@ -7148,7 +7187,13 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
   const s = invoice.summary;
   db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',invoice.seller.name,invoice.seller.address||'',
+    // Stamp the BUSINESS-CONTEXT state (TAMIL NADU=ISP, KERALA=ASP), not the
+    // auction's physical state — mirrors the sales-invoice generate (see the
+    // invoiceState line above). In e-Trade the purchases list filters rows by
+    // the active business state, so a purchase generated while in KERALA must
+    // be stamped KERALA or it vanishes from the list ("generated but not
+    // showing"). stateForRecord still returns business_state for e-Auction.
+    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
      invoice.seller.place||'',invoice.seller.cr||'',String(invoiceNo),s.totalQty,s.totalPuramt,
      s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
   res.json({ success: true, invoice: s });
@@ -7206,7 +7251,9 @@ app.post('/api/purchases/generate-all/:auctionId', requireInvoiceWrite, (req, re
       const invoNo = String(nextNo);
       db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',invoice.seller.name,invoice.seller.address||'',
+        // Stamp the business-context state (see single-generate note above) so
+        // KERALA/ASP purchases stay visible in the KERALA list.
+        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
          invoice.seller.place||'',invoice.seller.cr||'',invoNo,s.totalQty,s.totalPuramt,
          s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
       results.push({ seller: row.name, invoiceNo: invoNo, grandTotal: s.grandTotal });
@@ -7503,7 +7550,7 @@ app.post('/api/bills/generate/:auctionId', requireInvoiceWrite, (req, res) => {
   const s = bill.summary;
   db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',auction.crop_type||'ASP',
+    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
      parseInt(billNo),bill.seller.name,bill.seller.address||'',bill.seller.place||'',
      bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
      s.totalQty,s.totalPuramt,0,s.netAmount]);
@@ -7549,7 +7596,7 @@ app.post('/api/bills/generate-all/:auctionId', requireInvoiceWrite, (req, res) =
       const s = bill.summary;
       db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, auction.state||''),'',auction.crop_type||'ASP',
+        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
          nextNo,bill.seller.name,bill.seller.address||'',bill.seller.place||'',
          bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
          s.totalQty,s.totalPuramt,0,s.netAmount]);

@@ -15897,6 +15897,28 @@ async function loadInvoices(opts){
   // Bags column is e-Auction only (invoices.bag = SUM of the invoiced lots' bags).
   const _invIsAuction = (typeof getCurrentBusinessMode === 'function')
     && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-auction';
+  // e-Trade adds an "ASP Inv#" column: each ISP (Tamil Nadu) sale carries the
+  // cross-referenced ASP (Kerala) invoice number, hydrated server-side onto
+  // invoices.asp_invo. Meaningless in e-Auction (no ASP↔ISP mirror), so the
+  // column only shows in e-Trade.
+  const _invIsETrade = (typeof getCurrentBusinessMode === 'function')
+    && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-trade';
+  // ISP company name for the ASP-context Trade Name override (below). In
+  // ASP (Kerala + e-Trade) the invoice bills ISP, so the list — like the PDF
+  // BILL-TO — must read the ISP company name, not the external buyer's. Pull
+  // it from in-memory settings (_sdata.company), mirroring effectiveBrandName.
+  const _ispTradeName = (() => {
+    try {
+      const arr = (window._sdata && _sdata.company) || [];
+      const f = arr.find(x => x && x.key === 'short_name') || arr.find(x => x && x.key === 'trade_name');
+      return (f && String(f.value || '').trim()) || '';
+    } catch (_) { return ''; }
+  })();
+  // True for a row that is an ASP→ISP transfer invoice (e-Trade + state KERALA).
+  // e-Auction KERALA rows are NOT ASP invoices, so they keep the external buyer.
+  const _invRowIsASP = (i) => _invIsETrade && String(i.state || '').toUpperCase() === 'KERALA';
+  // The Trade Name shown in the list, ASP-aware.
+  const _invTradeName = (i) => (_invRowIsASP(i) && _ispTradeName) ? _ispTradeName : (i.buyer1 || i.buyer);
   DataTable.mount('invoices-list', _invSlice, {
     emptyState: { icon: 'invoices', title: "No invoices yet", body: "Once you have calculated lots for a buyer, use Generate Invoice to create one." },
     columns: [
@@ -15923,6 +15945,14 @@ async function loadInvoices(opts){
       { key:'invo', label:'Inv#', sort:'text',
         // Bold + dark green to make the primary identifier pop in a wide row
         render:(i)=>`<strong style="color:var(--spice-cardamom-dk);font-weight:700">${esc(i.invo)}</strong>` },
+      // ASP Inv# (e-Trade only) — the paired ASP/Kerala invoice number for this
+      // ISP sale, hydrated server-side onto invoices.asp_invo. Blank for ASP
+      // rows themselves (it would just duplicate Inv#) → muted em-dash.
+      ...(_invIsETrade ? [{ key:'asp_invo', label:'ASP Inv#', sort:'text',
+        value:(i)=>i.asp_invo||'',
+        render:(i)=> i.asp_invo
+          ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.asp_invo)}</span>`
+          : '<span style="color:var(--text3)">—</span>' }] : []),
       // Lorry / vehicle no — populated via bulk Set Lorry No. Empty rows
       // show a muted em-dash so the column doesn't read as a layout bug.
       // Monospace because plate numbers (TN66H1234) read better in a
@@ -15931,18 +15961,24 @@ async function loadInvoices(opts){
         render:(i)=> i.lorry_no
           ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.lorry_no)}</span>`
           : '<span style="color:var(--text3)">—</span>' },
-      // Distance (e-Way Bill km) — stored per-invoice as distance_km.
+      // Distance (e-Way Bill km) — resolved server-side: per-invoice override
+      // (distance_km) wins, else the saved route value (resolved_km).
       { key:'distance_km', label:'Distance', sort:'number', numeric:true,
-        render:(i)=> (i.distance_km != null && i.distance_km !== '' && Number(i.distance_km) > 0)
-          ? `<span style="color:var(--spice-text-main)">${fmtI(Number(i.distance_km),0)} km</span>`
-          : '<span style="color:var(--text3)">—</span>' },
+        value:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km; return Number(km)||0; },
+        render:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km;
+          return (km != null && km !== '' && Number(km) > 0)
+          ? `<span style="color:var(--spice-text-main)">${fmtI(Number(km),0)} km</span>`
+          : '<span style="color:var(--text3)">—</span>'; } },
       // Buyer code (invoices.buyer) shown before the trade name.
       { key:'_code', label:'Code', sort:'text',
         value:(i)=>i.buyer||'',
         render:(i)=> i.buyer ? esc(i.buyer) : '<span style="color:var(--text3)">—</span>' },
       { key:'_buyer', label:'Trade Name', sort:'text',
-        value:(i)=>i.buyer1||i.buyer,
-        render:(i)=>esc(i.buyer1||i.buyer) },
+        // ASP context (Kerala + e-Trade) bills ISP, so show the ISP company
+        // name here — matching the invoice PDF's BILL-TO. Other rows show the
+        // external buyer's trade name.
+        value:(i)=>_invTradeName(i),
+        render:(i)=>esc(_invTradeName(i)) },
       ...(_invIsAuction ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
