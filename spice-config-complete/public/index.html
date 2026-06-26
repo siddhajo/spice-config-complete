@@ -3243,7 +3243,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button id="lot-bulk-buyer" class="needs-lot-write btn feat-set-buyer" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="lotBulkSetBuyer()" title="Set the buyer code on every ticked lot — auto-fills the trade name + sale type from the Buyers master">👤 Set Buyer <span id="lot-bulk-buyer-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-grade" class="needs-lot-write btn feat-disc-in-prate" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#fff;font-weight:600" onclick="lotBulkSetGrade1()" title="Set the grade column on every ticked lot to '1' and recalculate">🏷 Set Grade 1 <span id="lot-bulk-grade-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-lock" class="needs-lot-write btn" style="display:none !important;height:38px;padding:0 14px;background:#1f2937;color:#fff;font-weight:600" onclick="lotBulkLock()" title="Lock the ticked lots — they become uneditable for non-admins. Admin can unlock.">🔒 Lock Selected <span id="lot-bulk-lock-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
-            <button id="lot-bulk-unlock" class="needs-admin btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-saffron);color:#1f2937;font-weight:600;border:1px solid #b8860b" onclick="lotBulkUnlock()" title="Unlock the ticked lots — admin only. Lots become editable again.">🔓 Unlock Selected <span id="lot-bulk-unlock-count" style="margin-left:4px;background:rgba(0,0,0,.18);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <button id="lot-bulk-unlock" class="needs-admin btn" style="display:none !important;height:38px;padding:0 14px;background:var(--spice-turmeric);color:#1f2937;font-weight:700;border:1px solid var(--spice-turmeric)" onclick="lotBulkUnlock()" title="Unlock the ticked lots — admin only. Lots become editable again.">🔓 Unlock Selected <span id="lot-bulk-unlock-count" style="margin-left:4px;background:rgba(0,0,0,.18);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
             <button id="lot-bulk-del" class="needs-delete btn" style="display:none !important;height:38px;padding:0 14px;background:#c0392b;color:#fff;font-weight:600" onclick="lotBulkDelete()" title="Delete the ticked lots (locked rows are skipped for non-admins)">🗑 Delete Selected <span id="lot-bulk-del-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
           </div>
 
@@ -5379,6 +5379,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   </div>
   <div id="gi-hint" style="font-size:11px;color:var(--text3);padding:4px 0"></div>
   <div class="fg"><label>Starting Invoice No <span style="color:var(--text3);font-weight:400">— auto-increments for each selected buyer</span></label><input id="gi-invno" type="number" placeholder="e.g. 6"></div>
+  <div class="fg"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;margin:0"><input type="checkbox" id="gi-include-ti" checked style="width:auto;margin:0;flex:0 0 auto"> <span>Include Transport &amp; Insurance <span style="color:var(--text3);font-size:11px">— untick to bill only Cardamom + Gunny; T&amp;I become ₹0 and are hidden on the PDF and in Tally</span></span></label></div>
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('gen-inv-modal')">Cancel</button>
     <button class="btn btn-a" onclick="previewInvoice('sales')">Preview</button>
@@ -5419,6 +5420,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <input id="ga-start" type="number" placeholder="e.g. 100">
     <div style="font-size:11px;color:var(--text3);margin-top:4px">Each generated invoice increments by 1 from here</div>
   </div>
+  <div class="fg" id="gen-all-ti-wrap" style="display:none"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:400;margin:0"><input type="checkbox" id="ga-include-ti" checked style="width:auto;margin:0;flex:0 0 auto"> <span>Include Transport &amp; Insurance <span style="color:var(--text3);font-size:11px">— untick to bill only Cardamom + Gunny; T&amp;I become ₹0 and are hidden on the PDF and in Tally</span></span></label></div>
   <div id="ga-preview" style="font-size:12px;color:var(--text2);background:var(--green-bg);border:1px solid var(--green-border);border-radius:8px;padding:10px;margin:6px 0;display:none"></div>
   <div id="ga-diag" style="display:none;font-size:11px;background:#F1F5F9;border:1px solid #ddd;border-radius:6px;padding:10px;margin:6px 0;max-height:300px;overflow:auto;font-family:monospace"></div>
   <div class="actions">
@@ -13744,6 +13746,8 @@ async function openGenAllModal(kind){
   document.getElementById('gen-all-title').textContent=titles[kind];
   document.getElementById('gen-all-desc').textContent=descs[kind];
   document.getElementById('gen-all-sale-wrap').style.display=kind==='invoices'?'block':'none';
+  const tiWrap=document.getElementById('gen-all-ti-wrap');
+  if(tiWrap){tiWrap.style.display=kind==='invoices'?'block':'none';const ti=document.getElementById('ga-include-ti');if(ti)ti.checked=true}
   document.getElementById('ga-start').value='';
   if(document.getElementById('ga-sale'))document.getElementById('ga-sale').value='';
   document.getElementById('ga-preview').style.display='none';
@@ -13831,7 +13835,7 @@ async function doGenerateAll(){
   if(!start||parseInt(start)<1){alert('Enter a starting number (positive integer)');return}
   const body={};
   if(kind==='bills')body.startBillNo=start;
-  else{body.startInvoiceNo=start;if(kind==='invoices')body.saleType=document.getElementById('ga-sale').value||''}
+  else{body.startInvoiceNo=start;if(kind==='invoices'){body.saleType=document.getElementById('ga-sale').value||'';body.includeTransportInsurance=document.getElementById('ga-include-ti')?.checked!==false}}
   const routeMap={invoices:'invoices/generate-all',purchases:'purchases/generate-all',bills:'bills/generate-all'};
   const submitBtn=document.getElementById('ga-submit');
   submitBtn.disabled=true;submitBtn.textContent='Generating…';
@@ -15416,6 +15420,8 @@ async function generateInvoice(){
   const checked=Array.from(list?.querySelectorAll('.gi-cb:checked')||[]);
   if(!checked.length){alert('Select at least one buyer');return}
   const buyers=checked.map(cb=>cb.value);
+  // Per-invoice Transport & Insurance switch (applies to every selected buyer)
+  const includeTI=document.getElementById('gi-include-ti')?.checked!==false;
 
   // Single buyer: keep old behavior (immediate feedback, quick)
   if(buyers.length===1){
@@ -15425,7 +15431,7 @@ async function generateInvoice(){
         const r=await fetch(B+`/api/invoices/generate/${aid}`,{
           method:'POST',
           headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
-          body:JSON.stringify({saleType,buyerCode,invoiceNo:String(startInvNo)})});
+          body:JSON.stringify({saleType,buyerCode,invoiceNo:String(startInvNo),includeTransportInsurance:includeTI})});
         const d=await r.json();
         if(!r.ok)throw new Error(d.error||'Failed to generate invoice');
         hideModal('gen-inv-modal');
@@ -15448,7 +15454,7 @@ async function generateInvoice(){
           const r=await fetch(B+`/api/invoices/generate/${aid}`,{
             method:'POST',
             headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
-            body:JSON.stringify({saleType,buyerCode,invoiceNo:invNo})});
+            body:JSON.stringify({saleType,buyerCode,invoiceNo:invNo,includeTransportInsurance:includeTI})});
           const d=await r.json();
           if(!r.ok)throw new Error(d.error||'Generation failed');
           results.success.push({buyerCode,invNo,total:Number(d.invoice.grandTotal)});
@@ -24030,7 +24036,7 @@ async function previewInvoice(type){
     if(checked.length>1){
       if(!await appConfirm(`Preview shows ONE buyer at a time. Showing "${checked[0].value}".\n\nContinue?`))return;
     }
-    body={saleType:document.getElementById('gi-sale').value,buyerCode:checked[0].value,type:'sales'};
+    body={saleType:document.getElementById('gi-sale').value,buyerCode:checked[0].value,type:'sales',includeTransportInsurance:document.getElementById('gi-include-ti')?.checked!==false};
   }else if(type==='purchase'){
     aid=document.getElementById('pur-auction').value;
     body={buyerCode:document.getElementById('gp-seller').value.trim(),type:'purchase'};

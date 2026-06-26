@@ -714,15 +714,34 @@ app.post('/api/active-auction', requireView, (req, res) => {
 });
 
 // ── Favourite trade (mobile default) ──────────────────────────────
-// A single "favourite" trade, stored separately from active_auction_id so
-// it is fully decoupled from the desktop global trade selector. The mobile
+// A "favourite" trade, stored separately from active_auction_id so it is
+// fully decoupled from the desktop global trade selector. The mobile
 // lot-entry app defaults to THIS trade (see mobile-bridge.js
 // /api/mobile/favourite-trade), so switching the desktop global picker
 // never changes what the mobile app shows.
+//
+// The favourite is scoped PER business mode (key `favourite_auction_id:<mode>`)
+// so e-Trade and e-Auction each keep their own default. Without this, a single
+// global favourite pointing at an e-Trade trade (esp. legacy trades with a
+// null `mode`, which pass the mobile mode filter) would surface as the default
+// in e-Auction mode too — the phone would open the wrong trade. Reads fall
+// back to the legacy global key so favourites set before this change keep
+// working until re-starred in their mode.
+function favouriteTradeKey(db) {
+  const row = db.get("SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'");
+  const mode = row && row.value ? String(row.value) : '';
+  return mode ? `favourite_auction_id:${mode}` : 'favourite_auction_id';
+}
 app.get('/api/favourite-trade', requireView, (req, res) => {
   const db = getDb();
   db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
-  const row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+  const key = favouriteTradeKey(db);
+  let row = db.get("SELECT value FROM app_state WHERE key = ?", [key]);
+  // Legacy fallback: honour the pre-per-mode global favourite if no
+  // mode-specific one has been set yet.
+  if ((!row || !row.value) && key !== 'favourite_auction_id') {
+    row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+  }
   const aid = row && row.value ? parseInt(row.value, 10) : null;
   res.json({ auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
 });
@@ -731,10 +750,11 @@ app.post('/api/favourite-trade', requireAuctionWrite, (req, res) => {
   const aid = parseInt(raw, 10);
   const db = getDb();
   db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+  const key = favouriteTradeKey(db);
   // null / 0 / missing clears the favourite (mobile falls back to its picker).
   db.run(
-    `INSERT OR REPLACE INTO app_state (key, value) VALUES ('favourite_auction_id', ?)`,
-    [Number.isFinite(aid) && aid > 0 ? String(aid) : '']
+    `INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)`,
+    [key, Number.isFinite(aid) && aid > 0 ? String(aid) : '']
   );
   res.json({ success: true, auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
 });
@@ -5948,11 +5968,12 @@ app.get('/api/invoices', requireView, (req, res) => {
   // recorded on its lots. Multiple distinct asp_invos are concatenated
   // (rare — usually one ASP invoice maps 1:1 to one ISP invoice for the
   // same buyer/auction). Empty for ASP invoices themselves.
-  const aspStmt = db.prepare(
-    `SELECT DISTINCT asp_invo FROM lots
-     WHERE auction_id = ? AND buyer = ? AND invo = ?
-       AND asp_invo IS NOT NULL AND asp_invo != ''`
-  );
+  // Resolve the lots-side ASP links in ONE query instead of one-per-row.
+  // This used to run a prepared SELECT per invoice (up to 500 round-trips
+  // through sql.js on a hot list). Now: pick the rows that still need
+  // hydration, scan lots for their auctions once, and map back in memory.
+  // Same semantics — distinct, non-empty asp_invo values, comma-joined.
+  const needHydrate = [];
   for (const r of rows) {
     // For ASP invoices (state contains "Kerala"), the asp_invo column
     // would just be a copy of `invo` — show blank instead of duplicating.
@@ -5963,8 +5984,31 @@ app.get('/api/invoices', requireView, (req, res) => {
     // GENERATED invoices have it blank here and keep the link on their
     // lots, so fall back to hydrating from lots.asp_invo.
     if (r.asp_invo && String(r.asp_invo).trim()) continue;
-    const aspRows = aspStmt.all(r.auction_id, r.buyer, r.invo);
-    r.asp_invo = aspRows.map(x => x.asp_invo).filter(Boolean).join(', ');
+    r.asp_invo = '';
+    needHydrate.push(r);
+  }
+  if (needHydrate.length) {
+    const auctionIds = [...new Set(needHydrate.map(r => r.auction_id).filter(v => v != null))];
+    if (auctionIds.length) {
+      const ph = auctionIds.map(() => '?').join(',');
+      const lotRows = db.all(
+        `SELECT auction_id, buyer, invo, asp_invo FROM lots
+         WHERE auction_id IN (${ph})
+           AND asp_invo IS NOT NULL AND asp_invo != ''`,
+        auctionIds
+      );
+      const byKey = new Map();
+      for (const lr of lotRows) {
+        const key = `${lr.auction_id}|${lr.buyer}|${lr.invo}`;
+        let set = byKey.get(key);
+        if (!set) { set = new Set(); byKey.set(key, set); }
+        if (lr.asp_invo) set.add(lr.asp_invo);
+      }
+      for (const r of needHydrate) {
+        const set = byKey.get(`${r.auction_id}|${r.buyer}|${r.invo}`);
+        if (set) r.asp_invo = [...set].join(', ');
+      }
+    }
   }
   res.json(rows);
 });
@@ -5996,7 +6040,10 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   const _gen = _checkGenerationGate(db, 'invoices', auctionIdForGate);
   if (!_gen.allowed) return res.status(412).json(_gen.error);
   const { saleType, buyerCode, invoiceNo } = req.body;
-  
+  // Per-invoice Transport & Insurance switch — default ON when omitted, so
+  // older clients / API callers keep the prior behaviour.
+  const includeTI = req.body.includeTransportInsurance !== false;
+
   if (!saleType || !buyerCode || !invoiceNo) {
     return res.status(400).json({ error: 'saleType, buyerCode, and invoiceNo are required' });
   }
@@ -6009,7 +6056,7 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
       [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]);
   }
   
-  const invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg);
+  const invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg, { includeTI });
   if (!invoice) return res.status(404).json({ error: `No lots found for buyer "${buyerCode}" in this auction. Make sure lots have this buyer code assigned.` });
   
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [req.params.auctionId]);
@@ -6021,12 +6068,12 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
   // Idempotent (re)generation — clear any prior matching row(s) first.
   clearPriorSalesInvoice(db, req.params.auctionId, buyerCode, invoiceState, invoice.saleType);
-  db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot,inc_ti)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,String(invoiceNo),buyerCode,invoice.buyer.buyer1||'',
      invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
-     s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal]);
-  
+     s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal,includeTI ? 1 : 0]);
+
   // Update lots with sale type and invoice number.
   // Workflow trace:
   //   - In Kerala (ASP) context: set `invo` AND `asp_invo` to the new ASP
@@ -6189,7 +6236,10 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
   const _gen = _checkGenerationGate(db, 'invoices', auctionIdForGate);
   if (!_gen.allowed) return res.status(412).json(_gen.error);
   const { startInvoiceNo, saleType } = req.body;
-  
+  // Per-invoice Transport & Insurance switch — applies to every invoice in
+  // the batch. Defaults ON when omitted.
+  const includeTI = req.body.includeTransportInsurance !== false;
+
   let nextNo = parseInt(startInvoiceNo);
   if (!nextNo || nextNo < 1) return res.status(400).json({ error: 'startInvoiceNo must be a positive integer' });
   
@@ -6235,7 +6285,7 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
   for (const row of buyers) {
     const useSaleType = saleType || row.default_sale || 'L';
     try {
-      const invoice = buildSalesInvoice(db, req.params.auctionId, row.buyer, useSaleType, cfg);
+      const invoice = buildSalesInvoice(db, req.params.auctionId, row.buyer, useSaleType, cfg, { includeTI });
       if (!invoice) { errors.push({ buyer: row.buyer, error: 'No matching lots' }); continue; }
       const s = invoice.summary;
       const invoNo = String(nextNo);
@@ -6243,11 +6293,11 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
       const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
       // Idempotent (re)generation — clear any prior matching row(s) first.
       clearPriorSalesInvoice(db, req.params.auctionId, row.buyer, invoiceState, invoice.saleType);
-      db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot,inc_ti)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,invoNo,row.buyer,invoice.buyer.buyer1||'',
          invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
-         s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal]);
+         s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal,includeTI ? 1 : 0]);
       // ASP-aware lot update: see single-invoice handler above for rationale.
       const isASPStateBulk = String(cfg.business_state || '').toUpperCase() === 'KERALA';
       for (const li of invoice.lineItems) {
@@ -6444,7 +6494,7 @@ app.get('/api/invoices/pdf/:id', requireView, async (req, res) => {
 
     // Try to rebuild fresh from lots (gives line-item detail), fall back to stored summary
     let invoice = stored.auction_id
-      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
+      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', includeTI: stored.inc_ti !== 0 })
       : null;
 
     // Defensive: even when lots exist, if buyer lookup missed, enrich from stored invoice fields
@@ -6553,7 +6603,7 @@ app.get('/api/invoices/purchase-pdf/:id', requireView, async (req, res) => {
     // bills using ASP's Qty / P_Rate / PurAmt (this is the ISPL-side
     // print of the ASP sale).
     let invoice = stored.auction_id
-      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true })
+      ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true, includeTI: stored.inc_ti !== 0 })
       : null;
 
     const enrichBuyer = (buyer) => {
@@ -6647,7 +6697,7 @@ app.post('/api/invoices/pdf-bulk', requireView, async (req, res) => {
       const stored = db.get('SELECT * FROM invoices WHERE id=?', [id]);
       if (!stored) continue; // silently skip missing IDs
       let invoice = stored.auction_id
-        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA' })
+        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', includeTI: stored.inc_ti !== 0 })
         : null;
       if (invoice) {
         invoice.buyer = enrichBuyer(invoice.buyer, stored);
@@ -6750,7 +6800,7 @@ app.post('/api/invoices/purchase-pdf-bulk', requireView, async (req, res) => {
       // purchaseView bills using ASP's Qty / P_Rate / PurAmt — matches
       // the single purchase-view endpoint.
       let invoice = stored.auction_id
-        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true })
+        ? buildSalesInvoice(db, stored.auction_id, stored.buyer, stored.sale, cfg, { aspInvoice: String(stored.state || '').toUpperCase() === 'KERALA', purchaseView: true, includeTI: stored.inc_ti !== 0 })
         : null;
       if (invoice) {
         invoice.buyer = enrichBuyer(invoice.buyer, stored);
@@ -8894,7 +8944,9 @@ app.get('/api/exports/individual-register', requireExport, async (req, res) => {
 app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
   const db = getDb(); const cfg = getSettingsFlat(db);
   const { saleType, buyerCode, type } = req.body;
-  
+  // Per-invoice Transport & Insurance switch — preview mirrors generation.
+  const includeTI = req.body.includeTransportInsurance !== false;
+
   // Auto-calculate any uncalculated lots first (read-only would be better but we need the data)
   const uncalc = db.all(`SELECT * FROM lots WHERE auction_id = ? AND amount > 0 AND (puramt IS NULL OR puramt = 0)`, [req.params.auctionId]);
   for (const lot of uncalc) {
@@ -8910,9 +8962,9 @@ app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
     invoice = buildAgriBill(db, req.params.auctionId, buyerCode, cfg);
     if (invoice && invoice.error) return res.status(404).json({ error: invoice.error });
   } else {
-    invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg);
+    invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg, { includeTI });
   }
-  
+
   if (!invoice) return res.status(404).json({ error: 'No data found' });
   res.json({ preview: true, invoice });
 });

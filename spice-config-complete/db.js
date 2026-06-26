@@ -539,6 +539,11 @@ async function initDb() {
     addl_chg REAL DEFAULT 0,
     addl_name TEXT DEFAULT '',
     lorry_no TEXT,
+    -- Per-invoice Transport & Insurance switch. 1 = include (default), 0 =
+    -- exclude (Transport & Insurance forced to 0 → dropped from taxable
+    -- value, GST, the PDF rows and the Tally ledgers). Operator-set in the
+    -- Generate Sales Invoice modal.
+    inc_ti INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
@@ -752,6 +757,18 @@ async function initDb() {
     // lock lookups (which are scoped by auction_id), so this index is
     // narrow and only pays off for "show locked rows across the DB."
     'CREATE INDEX IF NOT EXISTS idx_lots_locked ON lots(locked_at)',
+    // Composite for the (auction_id, buyer) tuple — the single hottest lots
+    // lookup. buildSalesInvoice, the per-lot invoice-stamp loops, and the
+    // sales-list ASP hydration all filter on both columns; the two
+    // single-column indexes above can only satisfy one side, leaving an
+    // in-memory scan of every lot in the auction. This covers both.
+    'CREATE INDEX IF NOT EXISTS idx_lots_auction_buyer ON lots(auction_id, buyer)',
+    // The document tables are scanned/deleted by auction_id on every
+    // generate, reprint-list, revert and delete-all. Without these, each
+    // is a full table scan that grows with the whole season's history.
+    'CREATE INDEX IF NOT EXISTS idx_invoices_auction ON invoices(auction_id)',
+    'CREATE INDEX IF NOT EXISTS idx_purchases_auction ON purchases(auction_id)',
+    'CREATE INDEX IF NOT EXISTS idx_bills_auction ON bills(auction_id)',
     // FK child-side index. SQLite auto-indexes the parent (traders.id
     // is PK) but NOT the child column, so DELETE FROM traders triggers
     // a full scan of trader_banks per row to check for orphans. Without
@@ -872,6 +889,12 @@ async function initDb() {
     "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",
     "ALTER TABLE invoices ADD COLUMN addl_name TEXT DEFAULT ''",
     "ALTER TABLE invoices ADD COLUMN lorry_no TEXT",
+    // Per-invoice Transport & Insurance toggle. 1 = include (default,
+    // preserves prior behavior — T&I billed per the rate rules); 0 =
+    // exclude (force Transport & Insurance to 0 so they drop out of the
+    // taxable value, GST, PDF rows and Tally ledgers). Set by the operator
+    // in the Generate Sales Invoice modal. Pre-migration rows default to 1.
+    "ALTER TABLE invoices ADD COLUMN inc_ti INTEGER DEFAULT 1",
     // e-Auction Reserved Price — bid floor per lot, typed by the
     // operator at entry time. Persisted regardless of the
     // flag_reserved_price toggle (so flipping the flag later doesn't

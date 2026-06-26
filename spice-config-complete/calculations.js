@@ -448,14 +448,11 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
     });
   }
 
-  // e-Auction LOCAL sales bill ONLY the cardamom — no Gunny, Transport or
-  // Insurance line (per operator spec). hideTI below suppresses Transport/
-  // Insurance for this case; gunny is zeroed here so it drops out of the
-  // taxable value, GST and the PDF row. e-Trade (ISP/ASP) billing is
-  // unaffected — only e-Auction local invoices change.
-  const hideLocalCharges = isEAuction && (_est === 'L');
-  // Gunny cost (HSN: jute bags)
-  const gunnyCost = hideLocalCharges ? 0 : totalBags * (cfg.gunny_rate || 165);
+  // Gunny cost (HSN: jute bags). Always billed for every sale type and
+  // business mode, INCLUDING e-Auction LOCAL sales — those carry a Gunny
+  // line even though their Transport/Insurance is still suppressed (see
+  // hideTI below). Gunny feeds the taxable value, GST and the PDF row.
+  const gunnyCost = totalBags * (cfg.gunny_rate || 165);
 
   // Transport & Insurance rates depend on sale type:
   //   L (Local)        → local_transport / local_insurance
@@ -487,11 +484,17 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   // rows from the PDF — see invoice-pdf.js hideTransportInsurance.
   // Transport/Insurance suppression:
   //   - ISP e-Trade INTER-state ('I'): buyer covers freight (original rule).
-  //   - e-Auction LOCAL ('L'): local auction invoices bill only cardamom
-  //     (see hideLocalCharges above). e-Auction interstate KEEPS them.
+  //   - e-Auction LOCAL ('L'): local auction invoices bill Cardamom + Gunny
+  //     but no Transport/Insurance. e-Auction interstate KEEPS them.
   // ASP suppression is handled separately via `isASP` in the rate calc below.
   const hideTI = (!isASP && !isEAuction && _est === 'I')
               || (isEAuction && _est === 'L');
+  // Per-invoice Transport & Insurance switch (opts.includeTI). Defaults ON
+  // so existing/generated invoices are unchanged. When the operator turns
+  // it OFF for an invoice, force both charges to 0 — same effect as hideTI,
+  // but driven by the stored per-invoice flag so it persists across reprints
+  // and flows into the Tally export (which reads the stored zeros).
+  const includeTI = opts.includeTI !== false;
   // Per-component enable flags from Rates & Charges. When the matching flag
   // is OFF the rate is forced to 0, so the component drops out of the taxable
   // value, GST, and PDF entirely. Blank/legacy values default to ON.
@@ -504,10 +507,10 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
   const useLocalInsurance = flagOn('flag_local_insurance', true);
   const useInterTransport = flagOn('flag_inter_transport', true);
   const useInterInsurance = flagOn('flag_inter_insurance', true);
-  const transportRate = isASP || hideTI ? 0 : (useLocalRates
+  const transportRate = isASP || hideTI || !includeTI ? 0 : (useLocalRates
     ? (useLocalTransport ? pickRate(cfg.local_transport, cfg.transport, 2.5) : 0)
     : (useInterTransport ? pickRate(cfg.transport, 2.5) : 0));
-  const insuranceRate = isASP || hideTI ? 0 : (useLocalRates
+  const insuranceRate = isASP || hideTI || !includeTI ? 0 : (useLocalRates
     ? (useLocalInsurance ? pickRate(cfg.local_insurance, cfg.insurance, 0.75) : 0)
     : (useInterInsurance ? pickRate(cfg.insurance, 0.75) : 0));
 
