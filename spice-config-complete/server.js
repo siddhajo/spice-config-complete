@@ -3704,10 +3704,11 @@ app.get('/api/auctions/:id/allocations', requireView, (req, res) => {
   const db = getDb();
   const rows = db.all(
     `SELECT id, branch, start_lot, end_lot FROM lot_allocations
-     WHERE auction_id = ? ORDER BY branch, id`,
+     WHERE auction_id = ? ORDER BY branch, CAST(start_lot AS INTEGER), start_lot`,
     [parseInt(req.params.id, 10)]
   );
-  res.json({ allocations: rows });
+  const a = db.get('SELECT main_branch FROM auctions WHERE id = ?', [parseInt(req.params.id, 10)]) || {};
+  res.json({ allocations: rows, main_branch: a.main_branch || '' });
 });
 
 // POST /api/auctions/:id/allocations — bulk-replace. Body: { allocations: [{branch, start_lot, end_lot}, ...] }.
@@ -3784,6 +3785,14 @@ app.post('/api/auctions/:id/allocations', requireAuctionWrite, (req, res) => {
         [auctionId, r.branch, r.startLot, r.endLot]
       );
     }
+    // Persist the operator's choice of main/holding depot (P12). Only
+    // accept it when it names a branch that's actually in the allocation
+    // set, otherwise clear it (a stale main branch would break Close Depot).
+    if (req.body.main_branch !== undefined) {
+      const mainBranch = String(req.body.main_branch || '').trim().toUpperCase();
+      const known = mainBranch && ranges.some(r => r.branch === mainBranch);
+      db.run('UPDATE auctions SET main_branch = ? WHERE id = ?', [known ? mainBranch : '', auctionId]);
+    }
     res.json({ success: true, saved: ranges.length });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -3812,7 +3821,7 @@ app.get('/api/auctions/:id/allocation-stats', requireView, (req, res) => {
   }
   const rows = db.all(
     `SELECT id, branch, start_lot, end_lot FROM lot_allocations
-     WHERE auction_id = ? ORDER BY branch, id`,
+     WHERE auction_id = ? ORDER BY branch, CAST(start_lot AS INTEGER), start_lot`,
     [auctionId]
   );
   // Group ranges by branch. Each branch's `ranges` array carries the
@@ -3857,7 +3866,94 @@ app.get('/api/auctions/:id/allocation-stats', requireView, (req, res) => {
       lots,
     });
   }
-  res.json({ stats: Array.from(byBranch.values()) });
+  const a = db.get('SELECT main_branch FROM auctions WHERE id = ?', [auctionId]) || {};
+  res.json({ stats: Array.from(byBranch.values()), main_branch: a.main_branch || '' });
+});
+
+// POST /api/auctions/:id/close-depot — "close" a depot for the day and
+// push its remaining UN-BOOKED lots back to the trade's main depot so
+// they can be re-allocated elsewhere (P12). Body: { branch }.
+//   • Booked lots (already have a seller) STAY in the closed depot.
+//   • Free (allocated-but-unentered) lots move to main_branch.
+//   • The closed depot is left holding only its booked lots (or nothing).
+// Requires a main_branch to be configured and different from the branch
+// being closed. Lot numbers stay globally unique across branches because
+// the moved lots were exclusive to the closed depot to begin with.
+app.post('/api/auctions/:id/close-depot', requireAuctionWrite, (req, res) => {
+  const auctionId = parseInt(req.params.id, 10);
+  const branch = String(req.body.branch || '').trim().toUpperCase();
+  const db = getDb();
+  try {
+    if (!branch) return res.status(400).json({ error: 'branch is required' });
+    const a = db.get('SELECT main_branch FROM auctions WHERE id = ?', [auctionId]) || {};
+    const main = String(a.main_branch || '').trim().toUpperCase();
+    if (!main)            return res.status(400).json({ error: 'No main depot is set for this trade. Pick a main depot in Edit Allocations first.' });
+    if (main === branch)  return res.status(400).json({ error: 'This depot is the main depot — it can’t be closed into itself.' });
+
+    // Enumerate every lot currently allocated to the closing branch.
+    const branchRanges = db.all(
+      `SELECT id, start_lot, end_lot FROM lot_allocations WHERE auction_id = ? AND UPPER(branch) = ?`,
+      [auctionId, branch]
+    );
+    if (!branchRanges.length) return res.status(400).json({ error: `${branch} has no allocated lots to close.` });
+    let allLots = [];
+    for (const r of branchRanges) {
+      try { allLots = allLots.concat(enumerateRange(r.start_lot, r.end_lot)); } catch (_) {}
+    }
+    // Which of those are booked (a saved lot exists)?
+    const bookedRows = db.all(
+      `SELECT lot_no FROM lots WHERE auction_id = ? AND UPPER(branch) = ?`,
+      [auctionId, branch]
+    );
+    const bookedSet = new Set(bookedRows.map(r => String(r.lot_no || '').trim()));
+    const freeLots  = allLots.filter(l => !bookedSet.has(l));
+    if (!freeLots.length) {
+      return res.status(400).json({ error: `All lots in ${branch} are already booked — nothing to push to ${main}.` });
+    }
+    const keepLots = allLots.filter(l => bookedSet.has(l));
+
+    // Collapse a sorted lot list into contiguous {start,end} chunks,
+    // preserving prefix + zero-padding via parse/buildLotNo.
+    const toChunks = (lots) => {
+      const sorted = lots.slice().sort((x, y) => {
+        const px = parseLotNo(x), py = parseLotNo(y);
+        if (px && py && px.prefix === py.prefix) return px.num - py.num;
+        return String(x).localeCompare(String(y));
+      });
+      const chunks = [];
+      if (!sorted.length) return chunks;
+      let chunk = [sorted[0]];
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = parseLotNo(chunk[chunk.length - 1]);
+        const curr = parseLotNo(sorted[i]);
+        if (prev && curr && prev.prefix === curr.prefix && curr.num === prev.num + 1) chunk.push(sorted[i]);
+        else { chunks.push(chunk); chunk = [sorted[i]]; }
+      }
+      chunks.push(chunk);
+      return chunks;
+    };
+
+    // Rebuild the closed branch to cover only its booked lots, then add
+    // the freed lots onto the main depot.
+    db.run('DELETE FROM lot_allocations WHERE auction_id = ? AND UPPER(branch) = ?', [auctionId, branch]);
+    for (const ch of toChunks(keepLots)) {
+      db.run('INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+        [auctionId, branch, ch[0], ch[ch.length - 1]]);
+    }
+    for (const ch of toChunks(freeLots)) {
+      db.run('INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+        [auctionId, main, ch[0], ch[ch.length - 1]]);
+    }
+    res.json({
+      success: true,
+      message: `Closed ${branch}: ${keepLots.length} booked lot(s) kept, ${freeLots.length} free lot(s) moved to ${main}.`,
+      moved: freeLots.length,
+      kept: keepLots.length,
+      main_branch: main,
+    });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // POST /api/auctions/:id/reassign-lots — move the unused [start..end]

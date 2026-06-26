@@ -4800,8 +4800,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <input type="number" id="le-wwg" step="0.001" min="0" placeholder="0.000" oninput="leCalcNetFromGunny()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
           </div>
           <div>
-            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Gunny Wt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— default × bags</span></div>
-            <input type="number" id="le-gunny-wt" readonly placeholder="0.000" title="Total gunny weight = default gunny weight × bags" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text3);font-weight:600">
+            <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Gunny Wt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— default × bags · editable</span></div>
+            <input type="number" id="le-gunny-wt" step="0.001" min="0" placeholder="0.000" oninput="leOnGunnyWtInput()" title="Total gunny (tare) weight. Defaults to default gunny weight × bags — type to override; Net Wt recalculates." style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:600">
           </div>
         </div>
 
@@ -4812,11 +4812,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Sample Wt</div>
-            <input type="number" id="le-sample" step="0.001" min="0" placeholder="0.000" oninput="leCalcGross()" readonly style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text3)">
+            <input type="number" id="le-sample" step="0.001" min="0" placeholder="0.000" oninput="leCalcGross()" readonly tabindex="-1" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--text3)">
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Gross Wt</div>
-            <input type="number" id="le-gross" readonly style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--green);font-weight:700">
+            <input type="number" id="le-gross" readonly tabindex="-1" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--bg);color:var(--green);font-weight:700">
           </div>
         </div>
 
@@ -5080,7 +5080,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label>Aadhar</label><input id="t-aadhar"></div>
     <div class="fg"><label>Address</label><input id="t-padd"></div>
     <div class="fg"><label>Place</label><input id="t-ppla"></div>
-    <div class="fg"><label>State</label><input id="t-pstate"></div>
+    <div class="fg"><label>State</label><input id="t-pstate" oninput="leSyncStateCode('t-pstate','t-pstcode')"></div>
     <div class="fg"><label>State Code</label><input id="t-pstcode"></div>
     <div class="fg"><label>PIN</label><input id="t-pin"></div>
   </div>
@@ -5120,7 +5120,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label>Address 2</label><input id="b-add2"></div>
     <div class="fg"><label>Place</label><input id="b-pla"></div>
     <div class="fg"><label>PIN</label><input id="b-pin"></div>
-    <div class="fg"><label>State</label><input id="b-state"></div>
+    <div class="fg"><label>State</label><input id="b-state" oninput="leSyncStateCode('b-state','b-stcode')"></div>
     <div class="fg"><label>State Code</label><input id="b-stcode"></div>
     <div class="fg"><label>PAN</label><input id="b-pan"></div>
     <div class="fg"><label>Phone</label><input id="b-tel"></div>
@@ -5226,6 +5226,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       Click any <b>free</b> chip to mark it for deletion. <b>Used</b> (entered) chips are locked.
       To add a new range, use <b style="color:var(--green)">+ Add Branch</b>.
     </p>
+
+    <!-- Main depot + Close depot controls (P12). Populated by
+         renderAllocMainBar() from the branches present in the allocations. -->
+    <div id="alloc-main-bar" style="display:none;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px">★ Main depot</span>
+        <select id="alloc-main-select" onchange="_allocMainBranch=this.value;renderAllocMainBar()" style="height:30px;padding:0 10px;border:1.5px solid #BBF7D0;border-radius:6px;font-size:12px;background:#fff;text-transform:uppercase"></select>
+        <span style="font-size:11px;color:var(--text3)">Closing a depot pushes its remaining <b>free</b> lots here so they can be re-allocated.</span>
+      </div>
+      <div id="alloc-close-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
+    </div>
 
     <!-- Per-range cards (rendered by renderAllocEditCards) -->
     <div id="alloc-edit-cards"></div>
@@ -6429,7 +6440,35 @@ if (document.readyState === 'loading') {
 } else {
   initSummaryPanels();
 }
-function showModal(id){document.getElementById(id).classList.add('show')}
+// GST state → state-code map for the common spice-belt states. Used to
+// auto-fill the State Code box when an operator types the State by hand
+// (the GST lookup already fills it when a GSTIN is fetched). P8 — e.g.
+// Kerala is always 32, Tamil Nadu 33.
+const GST_STATE_CODES = {
+  'KERALA':'32','TAMIL NADU':'33','TAMILNADU':'33','KARNATAKA':'29',
+  'ANDHRA PRADESH':'37','TELANGANA':'36','PUDUCHERRY':'34','PONDICHERRY':'34'
+};
+function leSyncStateCode(stateId, codeId){
+  const st = (document.getElementById(stateId)?.value || '').trim().toUpperCase();
+  const code = GST_STATE_CODES[st];
+  const codeEl = document.getElementById(codeId);
+  if (codeEl && code) codeEl.value = code;
+}
+
+function showModal(id){
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('show');
+  // P5 — drop the cursor straight into the first editable field so the
+  // operator can type immediately instead of clicking. Skips read-only /
+  // disabled / hidden / button inputs.
+  setTimeout(() => {
+    const first = el.querySelector(
+      'input:not([type=hidden]):not([readonly]):not([disabled]):not([type=button]):not([type=submit]), select:not([disabled]), textarea:not([readonly]):not([disabled])'
+    );
+    if (first) { try { first.focus(); if (first.select) first.select(); } catch(_){} }
+  }, 60);
+}
 function hideModal(id){document.getElementById(id).classList.remove('show')}
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
 // ── Indian number formatter (lakhs grouping) ──────────────────
@@ -12720,6 +12759,61 @@ let _raSelected     = new Set();          // selected lot_no's in Reassign tile 
 let _allocMarked    = new Set();          // lots marked-for-delete in Edit cards (key: branch::lot)
 let _allocHidden    = new Set();          // collapsed cards (key: branch::start-end)
 let _addLotsCtx     = null;               // { aid, source: 'alloc' } — set when add-lots-modal opens
+let _allocMainBranch = '';                // chosen main/holding depot for this trade (P12)
+
+// Render the Main-depot picker + per-branch "Close depot" buttons (P12).
+// Driven off the branches currently present in _raAllocStats so it always
+// matches what's on screen.
+function renderAllocMainBar(){
+  const bar = document.getElementById('alloc-main-bar');
+  const sel = document.getElementById('alloc-main-select');
+  const btnHost = document.getElementById('alloc-close-buttons');
+  if (!bar || !sel || !btnHost) return;
+  const branches = Array.from(new Set((_raAllocStats || []).map(s => String(s.branch || '').trim().toUpperCase()).filter(Boolean)));
+  if (branches.length < 2) { bar.style.display = 'none'; return; }
+  bar.style.display = 'block';
+  // Keep the chosen main only if it's still a real branch.
+  if (_allocMainBranch && !branches.includes(_allocMainBranch)) _allocMainBranch = '';
+  sel.innerHTML = '<option value="">— none —</option>' +
+    branches.map(b => `<option value="${esc(b)}"${b === _allocMainBranch ? ' selected' : ''}>${esc(b)}</option>`).join('');
+  // Close buttons for every branch except the main. Disabled until a main
+  // is picked (and the operator saves it — see closeDepot's guard).
+  btnHost.innerHTML = branches.filter(b => b !== _allocMainBranch).map(b => {
+    const s = (_raAllocStats || []).find(x => String(x.branch).toUpperCase() === b) || {};
+    const free = (s.total || 0) - (s.used || 0);
+    const dis  = (!_allocMainBranch || free <= 0);
+    const title = !_allocMainBranch ? 'Pick a main depot first' : (free <= 0 ? 'No free lots to push' : `Push ${free} free lot(s) to ${_allocMainBranch}`);
+    return `<button type="button" class="btn btn-o" ${dis ? 'disabled' : ''} title="${esc(title)}" style="height:26px;padding:0 12px;font-size:11px;font-weight:600${dis ? ';opacity:.5;cursor:not-allowed' : ''}" onclick="closeDepot('${esc(b)}')">⏏ Close ${esc(b)} (${free} free)</button>`;
+  }).join('') || '<span style="font-size:11px;color:var(--text3)">Pick a main depot to enable closing the others.</span>';
+}
+
+// Close a depot: push its free lots to the main depot (P12). Requires the
+// main depot to already be saved on the server, so if the operator changed
+// it in this session we save the allocation set first.
+async function closeDepot(branch){
+  if (!_allocEditAuctionId) return;
+  if (!_allocMainBranch) { showErr('Pick a main depot first.'); return; }
+  if (!await appConfirm(`Close ${branch}?\n\nIts entered (booked) lots stay put; its remaining free lots move to ${_allocMainBranch} so they can be re-allocated.`)) return;
+  try {
+    // Persist current allocations + main branch so the server-side
+    // close-depot sees the same main depot the operator just chose.
+    await saveAllocations({ silent: true });
+    const r = await j(`/api/auctions/${_allocEditAuctionId}/close-depot`, {
+      method: 'POST', body: JSON.stringify({ branch })
+    });
+    toast(r.message || `Closed ${branch}`);
+    // Reload fresh stats into both views.
+    const statsData = await j(`/api/auctions/${_allocEditAuctionId}/allocation-stats`);
+    _raAllocStats = statsData.stats || [];
+    _allocMainBranch = String(statsData.main_branch || '').toUpperCase();
+    _raSelected.clear(); _allocMarked.clear();
+    renderReassignTiles();
+    renderAllocEditCards(_raAllocStats);
+    renderAllocMainBar();
+  } catch (e) {
+    showErr(e.message || 'Close depot failed');
+  }
+}
 
 function _allocCardKey(branch, range){ return `${branch}::${range.start}-${range.end}`; }
 function _allocMarkKey(branch, lot)  { return `${branch}::${lot}`; }
@@ -13003,9 +13097,11 @@ async function saveQuickAddLots(){
       try {
         const statsData = await j(`/api/auctions/${ctx.aid}/allocation-stats`);
         _raAllocStats = statsData.stats || [];
+        _allocMainBranch = String(statsData.main_branch || _allocMainBranch || '').toUpperCase();
         _raSelected.clear();
         renderReassignTiles();
         renderAllocEditCards(_raAllocStats);
+        renderAllocMainBar();
       } catch (_) {}
     }
     if (typeof loadAuctions === 'function') loadAuctions();
@@ -13073,11 +13169,13 @@ async function openAllocModal(auctionId, ano){
     // Snapshot stats + reset all per-modal-session state so leftover
     // marks / selections from a previous trade don't bleed across.
     _raAllocStats = stats;
+    _allocMainBranch = String(statsData.main_branch || '').toUpperCase();
     _raSelected.clear();
     _allocMarked.clear();
     _allocHidden.clear();
     renderReassignTiles();
     renderAllocEditCards(stats);
+    renderAllocMainBar();
     showModal('alloc-modal');
   } catch (e) {
     toast(e.message || 'Failed to load allocations');
@@ -13125,9 +13223,11 @@ async function executeReassign(){
     // Refresh modal in place — both views share _raAllocStats.
     const statsData = await j(`/api/auctions/${_allocEditAuctionId}/allocation-stats`);
     _raAllocStats = statsData.stats || [];
+    _allocMainBranch = String(statsData.main_branch || _allocMainBranch || '').toUpperCase();
     _raSelected.clear();
     renderReassignTiles();
     renderAllocEditCards(_raAllocStats);
+    renderAllocMainBar();
     document.getElementById('ra-start').value = '';
     document.getElementById('ra-end').value = '';
     loadReassignPreview();
@@ -13138,7 +13238,8 @@ async function executeReassign(){
   }
 }
 
-async function saveAllocations(){
+async function saveAllocations(opts){
+  const silent = !!(opts && opts.silent);   // called from closeDepot — persist quietly, keep modal open
   const errEl = document.getElementById('alloc-err');
   errEl.style.display = 'none';
   if (!_raAllocStats || !_raAllocStats.length) {
@@ -13182,12 +13283,13 @@ async function saveAllocations(){
     return;
   }
   const droppedCt = _allocMarked.size;
-  if (droppedCt && !await appConfirm(`Delete ${droppedCt} marked lot${droppedCt === 1 ? '' : 's'} from the allocations?`)) return;
+  if (!silent && droppedCt && !await appConfirm(`Delete ${droppedCt} marked lot${droppedCt === 1 ? '' : 's'} from the allocations?`)) return;
   try {
     await j(`/api/auctions/${_allocEditAuctionId}/allocations`, {
       method: 'POST',
-      body: JSON.stringify({ allocations: next })
+      body: JSON.stringify({ allocations: next, main_branch: _allocMainBranch })
     });
+    if (silent) return;   // closeDepot drives its own refresh + toast
     hideModal('alloc-modal');
     toast(droppedCt
       ? `Deleted ${droppedCt} lot${droppedCt === 1 ? '' : 's'} · allocations saved ✓`
@@ -13196,6 +13298,7 @@ async function saveAllocations(){
   } catch (e) {
     errEl.textContent = e.message || 'Failed to save';
     errEl.style.display = 'block';
+    if (silent) throw e;   // let closeDepot surface the failure
   }
 }
 
@@ -21992,8 +22095,13 @@ function lePickSeller(t){
   document.getElementById('le-grade').value = grade;
   // Auto-suggest the next lot number for the current branch + auction.
   // Keeps fields blank in edit mode so we don't clobber an existing lot
-  // number being edited.
-  if (!_le.editingLotId) leAutoSuggestLotNo();
+  // number being edited. Also skip if the operator already picked/typed a
+  // lot number (e.g. tapped a specific free lot tile before picking the
+  // seller) — otherwise the suggestion would reset their choice to the
+  // lowest free lot (e.g. "001").
+  const lotEl = document.getElementById('le-lotno');
+  const hasLotNo = !!(lotEl && lotEl.value.trim());
+  if (!_le.editingLotId && !hasLotNo) leAutoSuggestLotNo();
   // Focus lot no field next so the user can confirm/correct the suggestion
   setTimeout(() => document.getElementById('le-lotno').focus(), 50);
 }
@@ -22129,6 +22237,8 @@ function leApplyExtraFields(){
     if (gunnyOn) {
       // Net Wt is derived from Weight w/ Gunny — lock it and de-emphasise.
       qty.readOnly = true;
+      // Skip it in the Tab order while read-only (P13).
+      qty.tabIndex = -1;
       qty.style.background = 'var(--bg)';
       qty.style.color = 'var(--text3)';
       qty.style.borderColor = 'var(--border)';
@@ -22136,6 +22246,7 @@ function leApplyExtraFields(){
       leSeedGunnyWt();
     } else {
       qty.readOnly = false;
+      qty.removeAttribute('tabindex');
       qty.style.background = '';
       qty.style.color = 'var(--green)';
       qty.style.borderColor = 'var(--green)';
@@ -22143,9 +22254,10 @@ function leApplyExtraFields(){
   }
 }
 
-// Recompute and write the read-only Gunny Wt = default gunny weight ×
-// bags. Pulled out so both leApplyExtraFields and the derivation can
-// refresh it without duplicating the formula.
+// Seed the Gunny Wt field with the DEFAULT tare = default gunny weight ×
+// bags. Writes the default into the (now editable) field — called on form
+// load, reset, and when bags change. The operator can then type over it;
+// see leGunnyTare()/leOnGunnyWtInput().
 function leSeedGunnyWt(){
   const bags = parseInt(document.getElementById('le-bags').value, 10) || 0;
   const tare = (Number(_le.gunnyWeight) || 0) * bags;
@@ -22154,13 +22266,20 @@ function leSeedGunnyWt(){
   return tare;
 }
 
-// Auto-derive Net = Weight w/ Gunny − (default gunny weight × bags).
-// Runs when Weight w/ Gunny changes. Guarded on wwg > 0 so a blank
-// W/Gunny never wipes a Net Wt already loaded into the form (e.g. when
-// editing an existing lot).
+// The tare actually used by the Net derivation: read straight from the
+// Gunny Wt field so an operator override is respected. (P7 — Gunny Wt is
+// editable; whatever's in the box is the tare, default or hand-typed.)
+function leGunnyTare(){
+  return parseFloat(document.getElementById('le-gunny-wt').value) || 0;
+}
+
+// Auto-derive Net = Weight w/ Gunny − Gunny Wt (tare). Runs when Weight
+// w/ Gunny OR Gunny Wt changes. Reads the tare from the field (NOT a
+// reseed) so a manual Gunny Wt override isn't wiped. Guarded on wwg > 0 so
+// a blank W/Gunny never clobbers a Net Wt already loaded (e.g. on edit).
 function leCalcNetFromGunny(){
   const wwg = parseFloat(document.getElementById('le-wwg').value) || 0;
-  const tare = leSeedGunnyWt();
+  const tare = leGunnyTare();
   if (wwg > 0) {
     const net = Math.max(0, wwg - tare);
     document.getElementById('le-qty').value = net.toFixed(3);
@@ -22168,10 +22287,18 @@ function leCalcNetFromGunny(){
   }
 }
 
-// Bags changed → re-derive Net only when the gunny-tare workflow is on
-// (gunny_weight > 0), so the default operator-typed Net flow is untouched
-// when no tare is configured.
+// Bags changed → re-seed the default Gunny Wt, then re-derive Net. Only
+// when the gunny-tare workflow is on (gunny_weight > 0), so the plain
+// operator-typed Net flow is untouched when no tare is configured.
+// Changing bags resets a manual Gunny override back to the default (bags
+// drive the default; operators set bags first, then tweak gunny if at all).
 function leOnBagsInput(){
+  if ((Number(_le.gunnyWeight) || 0) > 0) { leSeedGunnyWt(); leCalcNetFromGunny(); }
+}
+
+// Operator edited Gunny Wt directly → re-derive Net from W/Gunny using the
+// new tare.
+function leOnGunnyWtInput(){
   if ((Number(_le.gunnyWeight) || 0) > 0) leCalcNetFromGunny();
 }
 
@@ -22298,6 +22425,7 @@ async function leSaveLot(){
     _le.editingLotId = null;
     document.getElementById('le-edit-banner').style.display = 'none';
     document.getElementById('le-save-btn-label').textContent = 'Save & Next';
+    leSetLotNoLocked(false);   // re-open Lot No for the next fresh entry (P15)
     // Keep seller, clear lot-specific fields, focus lot no for the next
     // entry. Matches the PWA's resetFormKeepSeller flow. Litre + sample
     // get pre-filled from the configured defaults so the user only types
@@ -22366,6 +22494,28 @@ function leResetForm(){
   _le.editingLotId = null;
   document.getElementById('le-edit-banner').style.display = 'none';
   document.getElementById('le-save-btn-label').textContent = 'Save & Next';
+  leSetLotNoLocked(false);
+}
+
+// Lock/unlock the Lot No field. When editing an existing lot the lot
+// number is fixed — operators may correct every other field but not the
+// lot number itself (changing it would effectively re-key the row and is
+// a common source of accidental duplicates). New entries keep it open.
+function leSetLotNoLocked(locked){
+  const el = document.getElementById('le-lotno');
+  if (!el) return;
+  el.readOnly = !!locked;
+  if (locked) {
+    el.tabIndex = -1;
+    el.title = 'Lot number can’t be changed while editing. Delete and re-add the lot to change it.';
+    el.style.background = 'var(--bg)';
+    el.style.color = 'var(--text3)';
+  } else {
+    el.removeAttribute('tabindex');
+    el.title = '';
+    el.style.background = '';
+    el.style.color = '';
+  }
 }
 
 // Begin editing an existing lot. Loads the lot into the form, picks the
@@ -22400,6 +22550,7 @@ async function leEditLot(lotId){
   document.getElementById('le-edit-banner').style.display = 'flex';
   document.getElementById('le-save-btn-label').textContent = 'Update Lot';
   document.getElementById('le-lotno').value  = lot.lot_no || '';
+  leSetLotNoLocked(true);   // lot number is fixed while editing (P15)
   document.getElementById('le-grade').value  = lot.grade || '1';
   document.getElementById('le-bags').value   = lot.bags ?? '';
   document.getElementById('le-litre').value  = lot.litre ?? '';

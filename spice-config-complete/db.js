@@ -422,6 +422,11 @@ async function initDb() {
     -- inserts/edits/deletes a lot, so re-validation is required after every
     -- change. Gated by the flag_lot_validation flag.
     lots_validated_at TEXT DEFAULT '',
+    -- The "main" / holding depot for this trade. When a depot is closed
+    -- for the day (its lot entry is done), its remaining UN-booked lots
+    -- are pushed back here so they can be re-allocated to other depots.
+    -- Chosen by the operator when configuring branch allocations.
+    main_branch TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
@@ -884,6 +889,8 @@ async function initDb() {
     // Lot-validation gate (flag_lot_validation) — stamped on a clean
     // "Validate Entered Lots" confirm, cleared by any lot insert/edit/delete.
     "ALTER TABLE auctions ADD COLUMN lots_validated_at TEXT DEFAULT ''",
+    // Main/holding depot per trade — target for "Close depot" lot pushback.
+    "ALTER TABLE auctions ADD COLUMN main_branch TEXT DEFAULT ''",
     // Additional charge row + per-invoice lorry number. See invoices
     // CREATE TABLE comment for what they carry.
     "ALTER TABLE invoices ADD COLUMN addl_chg REAL DEFAULT 0",
