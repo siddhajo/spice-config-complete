@@ -15917,8 +15917,13 @@ async function loadInvoices(opts){
   // True for a row that is an ASP→ISP transfer invoice (e-Trade + state KERALA).
   // e-Auction KERALA rows are NOT ASP invoices, so they keep the external buyer.
   const _invRowIsASP = (i) => _invIsETrade && String(i.state || '').toUpperCase() === 'KERALA';
-  // The Trade Name shown in the list, ASP-aware.
-  const _invTradeName = (i) => (_invRowIsASP(i) && _ispTradeName) ? _ispTradeName : (i.buyer1 || i.buyer);
+  // The Trade Name shown in the list, ASP-aware. For ASP rows we NEVER fall
+  // back to the external buyer — mirror the PDF BILL-TO chain exactly
+  // (short_name → trade_name → literal) so a not-yet-loaded _sdata can't make
+  // it silently revert to the external buyer's name.
+  const _invTradeName = (i) => _invRowIsASP(i)
+    ? (_ispTradeName || 'IDEAL SPICES PRIVATE LIMITED')
+    : (i.buyer1 || i.buyer);
   DataTable.mount('invoices-list', _invSlice, {
     emptyState: { icon: 'invoices', title: "No invoices yet", body: "Once you have calculated lots for a buyer, use Generate Invoice to create one." },
     columns: [
