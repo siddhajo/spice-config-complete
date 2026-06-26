@@ -1859,6 +1859,66 @@ app.get('/api/admin/audit-log', requireView, (req, res) => {
   }
 });
 
+// GET /api/admin/audit-log/export — download the activity feed as a CSV
+// file. Honors the SAME filters and business-mode scoping as the read
+// route above, but returns ALL matching rows (not paginated) so the file
+// is a complete export of what the card is showing. Distinct exact path,
+// so it never collides with the '/api/admin/audit-log' route. requireView
+// for parity with the read route — the lot-entry card (entity=lot) is
+// operator-visible; the app-wide download is admin-only by virtue of
+// living in the admin-only Backup tab.
+app.get('/api/admin/audit-log/export', requireView, (req, res) => {
+  try {
+    const db = getDb();
+    const where = [];
+    const params = [];
+    if (req.query.entity) { where.push('entity = ?'); params.push(String(req.query.entity)); }
+    if (req.query.action) { where.push('action = ?'); params.push(String(req.query.action)); }
+    if (req.query.user)   { where.push('user_id = ?'); params.push(String(req.query.user)); }
+    const _mode = currentBusinessMode(db);
+    if (_mode) {
+      const resolved =
+        `COALESCE(
+           (SELECT a.mode FROM auctions a WHERE a.id = json_extract(audit_log.details, '$.auction_id')),
+           (SELECT a2.mode FROM auctions a2 JOIN lots l ON l.auction_id = a2.id WHERE l.id = audit_log.entity_id)
+         )`;
+      where.push(`(entity != 'lot' OR ${resolved} = ? OR ${resolved} IS NULL OR ${resolved} = '')`);
+      params.push(_mode);
+    }
+    const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+    const rows = db.all(
+      `SELECT id, user_id, action, entity, entity_id, details, created_at
+         FROM audit_log ${whereSql} ORDER BY id DESC`,
+      params
+    );
+    // CSV: quote any field containing comma/quote/newline; double inner quotes.
+    const esc = (v) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [['When', 'User', 'From', 'Action', 'Area', 'Entity ID', 'Details'].join(',')];
+    for (const r of rows) {
+      let d = {};
+      try { d = r.details ? JSON.parse(r.details) : {}; } catch (_) { d = { raw: r.details }; }
+      const device = d.device || '';
+      const rest = Object.assign({}, d); delete rest.device;
+      const detailStr = Object.keys(rest).length ? JSON.stringify(rest) : '';
+      lines.push([
+        esc(r.created_at), esc(r.user_id), esc(device), esc(r.action),
+        esc(r.entity), esc(r.entity_id), esc(detailStr)
+      ].join(','));
+    }
+    const csv = '﻿' + lines.join('\r\n');   // UTF-8 BOM so Excel opens it cleanly
+    const scope = req.query.entity === 'lot' ? 'lot-activity' : 'app-activity';
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${scope}-log-${stamp}.csv"`);
+    res.send(csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // DELETE /api/admin/audit-log — clear the activity feed (admin only).
 app.delete('/api/admin/audit-log', requireAdmin, (req, res) => {
   try {

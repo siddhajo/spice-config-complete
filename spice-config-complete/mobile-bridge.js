@@ -66,12 +66,18 @@ function getReceiptConfig(db) {
     if (!v) return fb;
     return v === 'true' || v === '1';
   };
+  // Company short name printed atop the lot receipt — state-aware, from
+  // Settings → Lot Entry Defaults (mirrors the desktop slip). Kerala lots
+  // print the ASP short name ("ASPPL"), Tamil Nadu the ISP short name
+  // ("ISPPL"). Blank falls back to the mobile app title (s_short_name).
+  const isKL = String(get('business_state', '')).toUpperCase().includes('KERALA');
+  const lotShortName = String(isKL ? get('lot_receipt_short_name_kl', '')
+                                   : get('lot_receipt_short_name_tn', '')).trim();
   return {
-    // Receipts use the sister-company (ASP) branding — same source as the
-    // mobile app title (s_short_name, see /api/config 'title') and the ASP
-    // logo above. The legacy 'trade_name' resolves to "IDEAL SPICES" on this
-    // tenant, which printed the wrong company name on the slip.
-    appTitle:     get('s_short_name', 'AMAZING SPICE PARK PVT LTD'),
+    // Receipt header name. Prefers the lot-receipt short name above; the
+    // legacy 'trade_name' resolved to "IDEAL SPICES" on this tenant, which
+    // printed the wrong company name on the slip.
+    appTitle:     lotShortName || get('s_short_name', 'AMAZING SPICE PARK PVT LTD'),
     showUser:     getBool('show_username', false),
     // Real masking policy keys (the old code read a non-existent 'acct_mask'
     // with the wrong mode vocabulary, so masking never applied). Defaults
@@ -132,14 +138,8 @@ function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo, pageW)
   const m = 10;
   const pw = pageW || 180;
   const w = pw - 2 * m;
-  const logoSz = Math.round(28 * (w / 160));
-  const logoPath = getLogoPath();
-  if (logoPath) {
-    try {
-      doc.image(logoPath, (pw - logoSz) / 2, doc.y, { width: logoSz, height: logoSz });
-      doc.y += logoSz + 2;
-    } catch (e) {}
-  }
+  // Compact slip prints no logo (lot entry is done from ASP and the slip is
+  // kept text-only per spec) — header starts straight at the company name.
   doc.font('Helvetica-Bold').fontSize(10).text(appTitle, m, doc.y, { width: w, align: 'center' });
   doc.fontSize(7.5).text((branch || '') + ' BRANCH', m, doc.y, { width: w, align: 'center' });
   doc.moveDown(0.2);
@@ -290,8 +290,11 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
   doc.moveDown(0.2);
   doc.moveTo(m, doc.y).lineTo(m + w, doc.y).lineWidth(0.4).stroke(); doc.moveDown(0.2);
 
-  const cols = [28, 28, 50, 54].map(c => c * sc);
-  const hdrs = [lb('lot_no','Lot#'), lb('bags','Bags'), lb('net_wt','Net'), lb('gross_wt','Gross')];
+  // Lot#/Bags/Net/Sample/Gross — sample + gross both print on the compact
+  // slip (per spec) just like the full slip. Column widths sum to 160 at the
+  // default 180pt page (× sc when the configured paper width differs).
+  const cols = [26, 24, 38, 36, 36].map(c => c * sc);
+  const hdrs = [lb('lot_no','Lot#'), lb('bags','Bags'), lb('net_wt','Net'), lb('sample_wt','Smp'), lb('gross_wt','Gross')];
 
   const hdrY = doc.y;
   doc.font('Helvetica-Bold').fontSize(6.5);
@@ -301,27 +304,31 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
   doc.moveTo(m, doc.y).lineTo(m + w, doc.y).lineWidth(0.3).stroke(); doc.moveDown(0.15);
 
   doc.font('Helvetica').fontSize(7);
-  let totalQty = 0, totalGross = 0, totalBags = 0;
+  let totalQty = 0, totalGross = 0, totalBags = 0, totalSample = 0;
   sellerLots.forEach(l => {
     const ry = doc.y;
     cx = m;
+    const sw = Number(l.sample_weight) || cfg.sampleWeight || 0;
     const rowData = [
       l.lot_no, l.bags,
       Number(l.qty).toFixed(3),
+      sw ? sw.toFixed(3) : '',
       l.gross_weight != null ? Number(l.gross_weight).toFixed(3) : '',
     ];
     rowData.forEach((v, i) => { doc.text(String(v), cx, ry, { width: cols[i], align: 'center' }); cx += cols[i]; });
     doc.y = ry + 11;
-    totalQty   += Number(l.qty) || 0;
-    totalGross += Number(l.gross_weight) || 0;
-    totalBags  += Number(l.bags) || 0;
+    totalQty    += Number(l.qty) || 0;
+    totalGross  += Number(l.gross_weight) || 0;
+    totalBags   += Number(l.bags) || 0;
+    totalSample += sw;
   });
 
   doc.moveTo(m, doc.y).lineTo(m + w, doc.y).lineWidth(0.4).stroke(); doc.moveDown(0.15);
 
-  const sumCols = [40, 40, 40, 40].map(c => c * sc);
-  const sumHdrs = ['Lots', lb('bags','Bags'), lb('net_wt','Net'), lb('gross_wt','Gross')];
+  const sumCols = [32, 32, 32, 32, 32].map(c => c * sc);
+  const sumHdrs = ['Lots', lb('bags','Bags'), lb('net_wt','Net'), lb('sample_wt','Smp'), lb('gross_wt','Gross')];
   const sumVals = [String(sellerLots.length), String(totalBags), totalQty.toFixed(3),
+                   totalSample ? totalSample.toFixed(3) : '-',
                    totalGross ? totalGross.toFixed(3) : '-'];
   const sHdrY = doc.y;
   doc.font('Helvetica-Bold').fontSize(6.5);
@@ -748,7 +755,18 @@ function mountMobile(app, deps) {
   app.get('/api/mobile/favourite-trade', requireAuth, (_req, res) => {
     try {
       const db = getDb();
-      const row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+      // Favourite is scoped per business mode (favourite_auction_id:<mode>) so
+      // e-Trade and e-Auction keep separate defaults — otherwise an e-Trade
+      // favourite (esp. legacy null-mode trades that pass the mode filter)
+      // would open as the default in e-Auction mode. Falls back to the legacy
+      // global key for favourites set before this change.
+      const modeRow = db.get("SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'");
+      const mode = modeRow && modeRow.value ? String(modeRow.value) : '';
+      const key = mode ? `favourite_auction_id:${mode}` : 'favourite_auction_id';
+      let row = db.get("SELECT value FROM app_state WHERE key = ?", [key]);
+      if ((!row || !row.value) && key !== 'favourite_auction_id') {
+        row = db.get("SELECT value FROM app_state WHERE key = 'favourite_auction_id'");
+      }
       const aid = row && row.value ? parseInt(row.value, 10) : null;
       res.json({ auctionId: Number.isFinite(aid) && aid > 0 ? aid : null });
     } catch (e) {

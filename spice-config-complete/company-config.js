@@ -411,6 +411,13 @@ const DEFAULTS = [
   // print @page size and the WhatsApp/mobile PDF slip all match the paper.
   // Height is always automatic — receipts grow down the continuous roll.
   { key: 'lot_receipt_width_mm', value: '', category: 'lot_entry', label: 'Lot Receipt Paper Width (mm; blank = default. e.g. 58 for HOP-HL58 thermal)', type: 'number' },
+  // Company short name printed at the top of lot receipts (compact + detailed,
+  // desktop + mobile). State-aware: Kerala lots print the ASP short name and
+  // Tamil Nadu lots the ISP short name. Blank falls back to the legacy
+  // nickname / trade-name chain. Lot entry is normally done from ASP (Kerala),
+  // so the Kerala value is the one that prints in practice.
+  { key: 'lot_receipt_short_name_kl', value: 'ASPPL', category: 'lot_entry', label: 'Lot Receipt Company Short Name — Kerala (e.g. ASPPL)', type: 'text' },
+  { key: 'lot_receipt_short_name_tn', value: 'ISPPL', category: 'lot_entry', label: 'Lot Receipt Company Short Name — Tamil Nadu (e.g. ISPPL)', type: 'text' },
 
   // ── SPICE BOARD REPORTS ───────────────────────────────────
   // Statutory cardamom-auction reports submitted to the Spices Board.
@@ -676,6 +683,10 @@ function initCompanySettings(db) {
     // roll width (e.g. 58 for a HOP-HL58) so slips print edge-to-edge
     // instead of scaling onto A4.
     seedNew('lot_receipt_width_mm', '', 'lot_entry', 'Lot Receipt Paper Width (mm; blank = default. e.g. 58 for HOP-HL58 thermal)', 'number');
+    // lot_receipt_short_name_kl / _tn — company short name printed atop lot
+    // receipts (state-aware). Defaults ASPPL (Kerala) / ISPPL (Tamil Nadu).
+    seedNew('lot_receipt_short_name_kl', 'ASPPL', 'lot_entry', 'Lot Receipt Company Short Name — Kerala (e.g. ASPPL)', 'text');
+    seedNew('lot_receipt_short_name_tn', 'ISPPL', 'lot_entry', 'Lot Receipt Company Short Name — Tamil Nadu (e.g. ISPPL)', 'text');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs

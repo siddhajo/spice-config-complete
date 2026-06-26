@@ -2983,6 +2983,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="bulk-delete">Bulk deleted</option>
           </select>
           <button class="btn btn-o" onclick="appAuditPage=1;loadAppAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
+          <button class="btn btn-o" onclick="downloadAuditLog('app')" style="height:32px;padding:0 14px;font-size:12px;font-weight:600" title="Download the whole-app activity log as a CSV file (Excel)">⬇ Download</button>
           <button class="btn needs-admin" onclick="clearAppAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
         </h2>
         <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin:0 0 12px">
@@ -4916,6 +4917,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="bulk-delete">Bulk deleted</option>
           </select>
           <button class="btn btn-o" onclick="event.stopPropagation();auditPage=1;loadAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
+          <button class="btn btn-o" onclick="event.stopPropagation();downloadAuditLog('lot')" style="height:32px;padding:0 14px;font-size:12px;font-weight:600" title="Download this lot activity log as a CSV file (Excel)">⬇ Download</button>
           <button class="btn needs-admin" onclick="event.stopPropagation();clearAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
         </div>
         <div class="le-collapse-body" style="padding:0 20px 16px">
@@ -12183,6 +12185,46 @@ async function clearAuditLog(){
     auditPage = 1; loadAuditLog();
     if (typeof toast === 'function') toast('Lot activity log cleared.');
   } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
+}
+
+// ── Download activity log as CSV ─────────────────────────────
+// Shared by both cards. scope 'lot' → the lot-entry Activity Log
+// (entity=lot + its action filter); scope 'app' → the whole-app
+// App Activity Log (all entities + its action filter). Streams the
+// CSV via fetch (so the Bearer token is sent) and saves it through a
+// temporary object URL, mirroring downloadDbBackup().
+async function downloadAuditLog(scope){
+  try {
+    const qs = [];
+    if (scope === 'lot') {
+      qs.push('entity=lot');
+      const a = (document.getElementById('audit-action-filter') || {}).value || '';
+      if (a) qs.push('action=' + encodeURIComponent(a));
+    } else {
+      const a = (document.getElementById('app-audit-action') || {}).value || '';
+      if (a) qs.push('action=' + encodeURIComponent(a));
+    }
+    const url = B + '/api/admin/audit-log/export' + (qs.length ? ('?' + qs.join('&')) : '');
+    const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) {
+      let err = 'Download failed';
+      try { const j = await r.json(); err = j.error || err; } catch (_) {}
+      if (typeof toast === 'function') toast(err); else alert(err);
+      return;
+    }
+    let filename = (scope === 'lot' ? 'lot-activity-log' : 'app-activity-log') + '.csv';
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    if (m) filename = m[1];
+    const blob = await r.blob();
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = u; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(u), 5000);
+    if (typeof toast === 'function') toast('Downloaded ' + filename);
+  } catch (e) {
+    if (typeof toast === 'function') toast('Download failed: ' + e.message); else alert('Download failed: ' + e.message);
+  }
 }
 
 // ── App Activity Log (whole-app audit feed) ──────────────────
@@ -23842,10 +23884,15 @@ function leBuildReceiptHtml(format, lots, ctx) {
   const pin    = isKerala ? (cfg.kl_pin      || cfg.tn_pin      || '') : (cfg.tn_pin      || '');
   const gstin  = isKerala ? (cfg.kl_gstin    || cfg.tn_gstin    || '') : (cfg.tn_gstin    || '');
   const branch = isKerala ? (cfg.kl_branch   || cfg.tn_branch   || '') : (cfg.tn_branch   || '');
-  // Nickname — short identifier from Settings → Company → Nickname.
-  // Falls back to trade name / short name when blank, so receipts print
-  // a sensible header on installs that haven't filled it in yet.
-  const nickname  = String(cfg.praman_company || '').trim()
+  // Company short name printed on the lot receipt — state-aware, from
+  // Settings → Lot Entry Defaults. Kerala lots print the ASP short name
+  // ("ASPPL"), Tamil Nadu the ISP short name ("ISPPL"). Falls back to the
+  // legacy nickname (Settings → Company) / trade name / short name chain
+  // when the field is blank, so older installs still get a sensible header.
+  const lotShortName = String(isKerala ? (cfg.lot_receipt_short_name_kl || '')
+                                       : (cfg.lot_receipt_short_name_tn || '')).trim();
+  const nickname  = lotShortName
+                 || String(cfg.praman_company || '').trim()
                  || cfg.trade_name || cfg.short_name || '';
   const tradeName = nickname;
   const shortName = nickname;
@@ -24001,12 +24048,14 @@ function leBuildDetailedHtml(p) {
         <td>${escapeHtml(l.lot_no || '')}</td>
         <td style="text-align:right">${escapeHtml(String(l.bags || 0))}</td>
         <td style="text-align:right">${Number(l.qty || 0).toFixed(3)}</td>
+        <td style="text-align:right">${Number(l.sample_wt || 0).toFixed(3)}</td>
         <td style="text-align:right">${Number(l.gross_wt || 0).toFixed(3)}</td>
       </tr>`;
     }).join('');
-    const totalBags  = g.lots.reduce((s, l) => s + (parseInt(l.bags, 10) || 0), 0);
-    const totalQty   = g.lots.reduce((s, l) => s + (Number(l.qty)        || 0), 0);
-    const totalGross = g.lots.reduce((s, l) => s + (Number(l.gross_wt)   || 0), 0);
+    const totalBags   = g.lots.reduce((s, l) => s + (parseInt(l.bags, 10) || 0), 0);
+    const totalQty    = g.lots.reduce((s, l) => s + (Number(l.qty)        || 0), 0);
+    const totalSample = g.lots.reduce((s, l) => s + (Number(l.sample_wt)  || 0), 0);
+    const totalGross  = g.lots.reduce((s, l) => s + (Number(l.gross_wt)   || 0), 0);
     return `
     <section class="receipt">
       <header>
@@ -24034,10 +24083,10 @@ function leBuildDetailedHtml(p) {
         ${ifsc ? `<tr><td class="lbl">IFSC</td><td style="font-family:monospace">${escapeHtml(ifsc)}</td></tr>` : ''}
       </table>
       <table class="lot-table">
-        <thead><tr><th>Lot</th><th style="text-align:right">Bag</th><th style="text-align:right">Qty</th><th style="text-align:right">Gross Wt</th></tr></thead>
+        <thead><tr><th>Lot</th><th style="text-align:right">Bag</th><th style="text-align:right">Qty</th><th style="text-align:right">Sample Wt</th><th style="text-align:right">Gross Wt</th></tr></thead>
         <tbody>${lotRows}</tbody>
         <tfoot>
-          <tr><td colspan="4" class="summary"><b>${g.lots.length} lot(s) | ${totalBags} Bag | Qty: ${totalQty.toFixed(3)} | Gross Wt: ${totalGross.toFixed(3)}</b></td></tr>
+          <tr><td colspan="5" class="summary"><b>${g.lots.length} lot(s) | ${totalBags} Bag | Qty: ${totalQty.toFixed(3)} | Sample Wt: ${totalSample.toFixed(3)} | Gross Wt: ${totalGross.toFixed(3)}</b></td></tr>
         </tfoot>
       </table>
       <div class="thanks">** THANK YOU **</div>
