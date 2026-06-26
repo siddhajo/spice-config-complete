@@ -2963,6 +2963,37 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
       </div>
 
+      <!-- ── App Activity Log (whole-app audit feed) ───────────
+           Admin-only, app-wide companion to the lot-entry Activity
+           Log. Surfaces audit_log across ALL areas (invoices,
+           sellers, buyers, users, settings, lots…) from both the
+           desktop UI and the mobile PWA. Lives in this admin-only
+           Backup tab so cross-entity activity isn't exposed to
+           operators / field staff (who only see the lot-scoped
+           Activity Log inside the Lot Entry tab). -->
+      <div class="card" id="app-audit-card">
+        <h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>🛡</span><span>App Activity Log</span>
+          <span style="flex:1"></span>
+          <select id="app-audit-action" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit">
+            <option value="">All actions</option>
+            <option value="create">Created</option>
+            <option value="edit">Edited</option>
+            <option value="delete">Deleted</option>
+            <option value="bulk-delete">Bulk deleted</option>
+          </select>
+          <button class="btn btn-o" onclick="appAuditPage=1;loadAppAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
+          <button class="btn needs-admin" onclick="clearAppAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D">Clear</button>
+        </h2>
+        <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin:0 0 12px">
+          Every create / edit / delete across the whole app — the office desktop and the field-staff mobile app — including invoices, sellers, buyers, users and settings.
+        </div>
+        <div id="app-audit-host" style="overflow:auto;max-height:460px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
+          <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load app activity.</div>
+        </div>
+        <div id="app-audit-pager" style="display:none;align-items:center;justify-content:center;gap:8px;margin-top:10px"></div>
+      </div>
+
     </div>
 
     <!-- USERS -->
@@ -12151,6 +12182,87 @@ async function clearAuditLog(){
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
     auditPage = 1; loadAuditLog();
     if (typeof toast === 'function') toast('Lot activity log cleared.');
+  } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
+}
+
+// ── App Activity Log (whole-app audit feed) ──────────────────
+// Admin-only viewer (Backup tab) over /api/admin/audit-log with NO
+// entity filter — so it shows every area (lots, invoices, sellers,
+// buyers, users, settings…) captured from the desktop UI and the
+// mobile PWA. The lot-entry card above is the lot-scoped view; this
+// is the cross-entity superset. Reuses the _audit* render helpers.
+let appAuditPage = 1;
+function _appAuditDetails(d, action){
+  if (!d || typeof d !== 'object') return '—';
+  // Rich rows (explicit auditLog calls) carry domain fields → reuse the
+  // lot-style renderer. Generic rows (from the capture middleware) carry
+  // {method, path} → show the request that changed state.
+  const hasRich = d.trader || d.qty != null || d.changes || d.lot_nos || d.count != null;
+  if (hasRich) return _auditDetails(d, action);
+  if (d.method || d.path) {
+    return '<code>'+_auditEsc(d.method||'')+'</code> <code style="word-break:break-all">'+_auditEsc(d.path||'')+'</code>';
+  }
+  return _auditDetails(d, action);
+}
+async function loadAppAuditLog(){
+  const host = document.getElementById('app-audit-host');
+  if (!host) return;
+  const action = (document.getElementById('app-audit-action') || {}).value || '';
+  host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Loading…</div>';
+  try {
+    const qs = 'limit=50&page='+appAuditPage+(action ? '&action='+encodeURIComponent(action) : '');
+    const r = await fetch(B + '/api/admin/audit-log?'+qs, { headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed to load app activity'); }
+    const data = await r.json();
+    const logs = data.logs || [];
+    const pager = document.getElementById('app-audit-pager');
+    if (!logs.length) {
+      host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">No app activity recorded yet.</div>';
+      if (pager) pager.style.display = 'none';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--bg,#F3F4F6)">' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap">When</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">User</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">From</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Action</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Area</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Details</th></tr></thead><tbody>';
+    for (const lg of logs) {
+      const d = lg.details || {};
+      const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
+      const area = _auditEsc(lg.entity || '—') + (lg.entity_id != null ? ' <span style="color:var(--spice-text-mute)">#'+_auditEsc(lg.entity_id)+'</span>' : '');
+      html += '<tr>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(lg.created_at||'')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap">'+area+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-size:11.5px">'+_appAuditDetails(d, lg.action)+'</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
+    const tp = data.totalPages || 1;
+    if (pager && tp > 1) {
+      pager.style.display = 'flex';
+      pager.innerHTML =
+        '<button class="btn btn-o" '+(appAuditPage<=1?'disabled':'')+' onclick="appAuditPage=Math.max(1,appAuditPage-1);loadAppAuditLog()" style="height:30px;padding:0 12px;font-size:12px">‹ Prev</button>' +
+        '<span style="font-size:12px;color:var(--spice-text-mute)">Page '+data.page+' of '+tp+' · '+data.total+' entries</span>' +
+        '<button class="btn btn-o" '+(appAuditPage>=tp?'disabled':'')+' onclick="appAuditPage=Math.min('+tp+',appAuditPage+1);loadAppAuditLog()" style="height:30px;padding:0 12px;font-size:12px">Next ›</button>';
+    } else if (pager) { pager.style.display = 'none'; }
+  } catch (e) {
+    host.innerHTML = '<div style="padding:12px;color:#7F1D1D">'+_auditEsc(e.message || String(e))+'</div>';
+  }
+}
+async function clearAppAuditLog(){
+  if (!await appConfirm('Clear the ENTIRE activity log?\n\nThis removes all recorded activity across the whole app — every area, desktop and mobile, including the lot-entry Activity Log (they share one log). Your actual records (lots, invoices, sellers…) are NOT affected. This cannot be undone.')) return;
+  try {
+    const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
+    appAuditPage = 1; loadAppAuditLog();
+    if (typeof toast === 'function') toast('Activity log cleared.');
   } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
 }
 

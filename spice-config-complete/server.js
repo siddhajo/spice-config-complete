@@ -64,6 +64,58 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// ══════════════════════════════════════════════════════════════
+// APP-WIDE AUDIT CAPTURE (desktop + mobile)
+// ══════════════════════════════════════════════════════════════
+// Records every state-changing request (POST/PUT/PATCH/DELETE) from BOTH
+// the desktop UI and the mobile PWA into audit_log, giving the admin
+// console a complete "who did what, from which app" trail — not just the
+// hand-instrumented lot-entry actions.
+//
+// Why a global middleware that logs from res.on('finish'):
+//   • Auth is applied per-route (requireAuth/requirePermission), so req.user
+//     is NOT set when this middleware runs. By the time the response
+//     finishes, the route's auth has populated req.user and the final
+//     status code is known — so we read both there.
+//   • Mobile shares this same `app` (mountMobile below), so one middleware
+//     covers desktop and mobile without per-route edits.
+//
+// This is a SAFETY NET layered under the richer, explicit auditLog() calls:
+// those set req._audited, so we skip them here and avoid double rows. The
+// SKIP regex drops noise that is either non-mutating (print/export), or
+// already recorded elsewhere (auth → login_history), or self-referential
+// (the audit-log routes). Best-effort: it must never break the request.
+const AUDIT_SKIP_RE = /\/(login|logout|refresh|me)\b|\/auth\/|\/audit-log\b|\/print|\/export|\/status\b|\/logo\b/i;
+function auditEntityFromPath(p) {
+  // /api/lots/123 → lot ; /api/debit-notes → debit-note ; /api/admin/users → user
+  const m = String(p || '').match(/^\/api\/(?:admin\/|system\/)?([a-z][a-z0-9-]*)/i);
+  if (!m) return 'other';
+  let seg = m[1].toLowerCase();
+  if (seg.endsWith('ies')) seg = seg.slice(0, -3) + 'y';
+  else if (seg.endsWith('s')) seg = seg.slice(0, -1);
+  return seg;
+}
+app.use((req, res, next) => {
+  const method = req.method;
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  if (AUDIT_SKIP_RE.test(req.path)) return next();
+  res.on('finish', () => {
+    try {
+      if (req._audited) return;            // a richer explicit auditLog() already wrote a row
+      if (!req.user) return;               // unauthenticated / failed auth — nothing to attribute
+      if (res.statusCode >= 400) return;   // request errored out → no state change to record
+      const action = method === 'DELETE' ? 'delete'
+                   : (method === 'PUT' || method === 'PATCH') ? 'edit'
+                   : 'create';
+      const idMatch = req.path.match(/\/(\d+)(?:\/|$)/);
+      auditLog(req, action, auditEntityFromPath(req.path), idMatch ? idMatch[1] : null, {
+        method, path: req.path, status: res.statusCode
+      });
+    } catch (_) { /* audit capture must never break the response */ }
+  });
+  next();
+});
+
 // Health check — used by the Electron wrapper to wait until the server
 // is ready to accept requests before loading the window URL. Returns a
 // minimal 200 with no auth required.
@@ -1717,6 +1769,11 @@ app.get('/api/admin/delete-log', requireDeleteAll, (req, res) => {
 // phone lot-entry from a desktop one. `details` is any JSON-able object
 // describing the change (lot_no, qty, trader, field diff, …).
 function auditLog(req, action, entity, entityId, details) {
+  // Mark the request as explicitly audited so the global capture middleware
+  // (registered near the top of this file) does NOT also write a coarse row
+  // for it — the rich call here wins. Set outside the try so a failed insert
+  // still suppresses the duplicate.
+  if (req) req._audited = true;
   try {
     const db = getDb();
     const username = (req && req.user && req.user.username) || 'system';
