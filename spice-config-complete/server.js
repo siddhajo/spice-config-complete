@@ -3733,14 +3733,23 @@ app.post('/api/auctions/:id/allocations', requireAuctionWrite, (req, res) => {
       const lots = enumerateRange(startLot, endLot);   // throws on bad data
       return { branch, startLot, endLot, lots };
     });
-    // Overlap check within each branch
-    const byBranch = new Map();
+    // Overlap check. A lot number must belong to exactly ONE branch
+    // within a trade — that is the whole point of allocations (so two
+    // field-staff users in different depots can't both enter the same
+    // lot). So we track every lot number GLOBALLY and reject both:
+    //   • the same lot twice within one branch ("two ranges"), and
+    //   • the same lot across two different branches ("two depots").
+    const lotOwner = new Map();   // lot_no → branch that already claimed it
     for (const r of ranges) {
-      if (!byBranch.has(r.branch)) byBranch.set(r.branch, new Set());
-      const seen = byBranch.get(r.branch);
       for (const lot of r.lots) {
-        if (seen.has(lot)) throw new Error(`Overlap in ${r.branch}: lot ${lot} appears in two ranges`);
-        seen.add(lot);
+        const prev = lotOwner.get(lot);
+        if (prev !== undefined) {
+          if (prev === r.branch) {
+            throw new Error(`Overlap in ${r.branch}: lot ${lot} appears in two ranges`);
+          }
+          throw new Error(`Lot ${lot} is allocated to both ${prev} and ${r.branch} — each lot number can belong to only one branch in a trade`);
+        }
+        lotOwner.set(lot, r.branch);
       }
     }
     // Build set of lot_no values across the NEW allocations so we can
