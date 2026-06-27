@@ -12580,7 +12580,9 @@ app.get('/api/reports/summary-pdf/:id', (req, res, next) => {
     } catch (_) {}
     const noun = (nounMode === 'e-Trade') ? 'Trade' : 'Auction';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${noun}Summary_${id}.pdf"`);
+    // Suffix with the human-facing trade/auction number (ano), never the
+    // opaque DB id.
+    res.setHeader('Content-Disposition', `inline; filename="${noun}Summary_${anoForFilename(db, id)}.pdf"`);
     res.send(pdf);
   } catch (e) {
     if (e && e.status === 404) return res.status(404).json({ error: e.message });

@@ -14026,6 +14026,35 @@ const _GLOBAL_AID_TARGETS = [
 let _globalAidList = [];   // [{id, ano, date, lot_count, mode}]
 let _globalAidSyncing = false; // re-entry guard so change-events don't loop
 
+// Map an auction's DB id (the value carried by every per-tab <select> and the
+// global picker) to its human-facing trade/auction number (ano) for download
+// filenames. Export file names must read as the TRADE NUMBER the user knows
+// (e.g. "CPA_12.xlsx" where 12 is the ano), never the opaque DB id. Mirrors
+// the server's anoForFilename(): sanitises to filename-safe chars and falls
+// back to the raw id only if the auction can't be resolved, so a filename is
+// always produced.
+function anoForAid(aid){
+  const key = String(aid == null ? '' : aid).trim();
+  if (!key) return '';
+  let ano = '';
+  try {
+    const a = (_globalAidList || []).find(x => String(x.id) === key);
+    if (a && a.ano != null) ano = String(a.ano);
+  } catch (_) {}
+  if (!ano) {
+    // Fallback: parse the ano out of the matching option text in any known
+    // auction <select> (built as "#<ano> · …" or "<ano> — …").
+    try {
+      for (const id of (_GLOBAL_AID_TARGETS.concat(['global-aid']))) {
+        const opt = document.querySelector(`#${id} option[value="${key}"]`);
+        if (opt) { const m = String(opt.textContent || '').match(/#?\s*([\w.\-\/]+)/); if (m) { ano = m[1]; break; } }
+      }
+    } catch (_) {}
+  }
+  const safe = String(ano || key).replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '');
+  return safe || key;
+}
+
 // Restore from localStorage. Called once on first load + after every
 // fresh /api/auctions fetch.
 function _restoreGlobalAid(){
@@ -14403,7 +14432,7 @@ async function previewLorry(type){
     const w=window.open(url,'_blank');
     if(!w||w.closed){
       // Popup blocked — fall back to a download the user can open.
-      const a=document.createElement('a');a.href=url;a.download=`${type}_${aid}.pdf`;a.click();
+      const a=document.createElement('a');a.href=url;a.download=`${type}_${anoForAid(aid)}.pdf`;a.click();
     }
     // Give the new tab time to load the blob before revoking the URL.
     setTimeout(()=>URL.revokeObjectURL(url),60000);
@@ -14423,7 +14452,7 @@ async function downloadLorry(type,format){
     }
     const blob=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-    a.download=`${type}_${aid}.${format}`;a.click();
+    a.download=`${type}_${anoForAid(aid)}.${format}`;a.click();
     URL.revokeObjectURL(a.href);
   });
 }
@@ -14541,7 +14570,7 @@ async function sbDownload(format){
     const blob = await r.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${t}_${sbAuctionId()}.${format}`;
+    a.download = `${t}_${anoForAid(sbAuctionId())}.${format}`;
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -19053,7 +19082,7 @@ async function exportType(type,format,aidArg){format=format||'xlsx';
       return;
     }
     const blob=await r.blob();
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${type}_${aid}.${format}`;a.click();
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${type}_${anoForAid(aid)}.${format}`;a.click();
   });
 }
 
@@ -20131,7 +20160,7 @@ async function tallyDownload(type){
     }
     const blob=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-    a.download=`Tally_${label.replace(/\s/g,'')}_${aid}.xml`;a.click();
+    a.download=`Tally_${label.replace(/\s/g,'')}_${anoForAid(aid)}.xml`;a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),5000);
     toast(`Downloaded Tally ${label} XML`);
   });
@@ -20253,7 +20282,7 @@ async function tallyDownloadParty(kind,partyName){
     const blob=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
     const safeName=partyName.replace(/[^a-zA-Z0-9]/g,'_').slice(0,40);
-    a.download=`Tally_PartyLedger_${kind}_${safeName}_${aid}.xml`;a.click();
+    a.download=`Tally_PartyLedger_${kind}_${safeName}_${anoForAid(aid)}.xml`;a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),5000);
     toast(`Downloaded ledger for ${partyName}`);
   });
@@ -20412,7 +20441,7 @@ async function tallyDownloadPartyVoucher(type,partyName){
     const blob=await r.blob();
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
     const safeName=partyName.replace(/[^a-zA-Z0-9]/g,'_').slice(0,40);
-    a.download=`Tally_${type}_${safeName}_${aid}.xml`;a.click();
+    a.download=`Tally_${type}_${safeName}_${anoForAid(aid)}.xml`;a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),5000);
     toast(`Downloaded ${TALLY_LABELS[type]||type} voucher for ${partyName}`);
   });
@@ -20498,7 +20527,7 @@ async function tallyDownloadInvoice(type,partyName,invoice,sale){
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);
     const safeName=String(partyName).replace(/[^a-zA-Z0-9]/g,'_').slice(0,30);
     const safeVno=String(invoice).replace(/[^a-zA-Z0-9]/g,'_').slice(0,20);
-    a.download=`Tally_${type}_Inv${safeVno}_${safeName}_${aid}.xml`;a.click();
+    a.download=`Tally_${type}_Inv${safeVno}_${safeName}_${anoForAid(aid)}.xml`;a.click();
     setTimeout(()=>URL.revokeObjectURL(a.href),5000);
     toast(`Downloaded voucher for invoice ${invoice}`);
   });
