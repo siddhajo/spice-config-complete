@@ -682,6 +682,10 @@ function mountMobile(app, deps) {
       // bags) and showExtraLotFields to reveal the Weight-w/-Gunny +
       // Gunny Wt pair AND the Crop Receipt / Reserved Price inputs.
       gunnyWeight:        getNum('gunny_weight', 0),
+      // Gunny Wt (tare) is operator-overridable in e-Trade — mirrors the
+      // desktop lot-entry field. In e-Auction it stays read-only (tare =
+      // gunny × bags), so the mobile keeps deriving it automatically.
+      gunnyEditable:      !isEAuc,
       showExtraLotFields: getBool('show_extra_lot_fields', false),
       // PWA defaults — surfaced here for completeness; not currently
       // backed by spice-config settings, so static-ish values are fine.

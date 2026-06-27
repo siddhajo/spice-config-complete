@@ -329,7 +329,7 @@ select:focus{border-color:var(--green)}
              bags); Net Wt below auto-derives as W/Gunny − Gunny Wt. -->
         <div id="le-gunny-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
           <div><div class="elb">W/ GUNNY</div><input type="text" id="le-wwg" placeholder="0.000" inputmode="decimal" class="ein" oninput="sanitizeDec(this);calcNetFromGunny()"></div>
-          <div><div class="elb">GUNNY WT</div><input type="text" id="le-gunny-wt" readonly class="ein" style="background:var(--bg);color:var(--text3);font-weight:600" title="Total gunny weight = default gunny weight × bags"></div>
+          <div><div class="elb">GUNNY WT</div><input type="text" id="le-gunny-wt" inputmode="decimal" class="ein" style="background:var(--bg);color:var(--text3);font-weight:600" oninput="sanitizeDec(this);onGunnyWtInput()" title="Total gunny (tare) weight. Defaults to gunny weight × bags; in e-Trade type to override — Net Wt recalculates."></div>
         </div>
 
         <!-- Net + Sample + Gross -->
@@ -482,7 +482,7 @@ select:focus{border-color:var(--green)}
     <!-- Weight w/ Gunny + total Gunny Wt — shown only when the
          "Show Extra Lot Fields" setting is on. Quantity below derives as
          W/Gunny − (default gunny weight × bags); Gunny Wt is read-only. -->
-    <div id="ed-gunny-wrap" class="fr" style="display:none;margin-top:8px"><div><div class="lb">W/ GUNNY</div><input type="text" id="ed-wwg" inputmode="decimal" placeholder="0.000" oninput="sanitizeDec(this);calcEditNetFromGunny()"></div><div><div class="lb">GUNNY WT</div><input type="text" id="ed-gunny-wt" readonly style="background:var(--bg);color:var(--text3);font-weight:600" title="Total gunny weight = default gunny weight × bags"></div></div>
+    <div id="ed-gunny-wrap" class="fr" style="display:none;margin-top:8px"><div><div class="lb">W/ GUNNY</div><input type="text" id="ed-wwg" inputmode="decimal" placeholder="0.000" oninput="sanitizeDec(this);calcEditNetFromGunny()"></div><div><div class="lb">GUNNY WT</div><input type="text" id="ed-gunny-wt" inputmode="decimal" style="background:var(--bg);color:var(--text3);font-weight:600" oninput="sanitizeDec(this);onEditGunnyWtInput()" title="Total gunny (tare) weight. Defaults to gunny weight × bags; in e-Trade type to override — Net Wt recalculates."></div></div>
     <div class="lb">QUANTITY (KG)</div><input type="text" id="ed-qty" inputmode="decimal" class="qi" oninput="sanitizeDec(this);calcEditGross()">
     <div class="fr" style="margin-top:8px"><div><div class="lb">SAMPLE WT</div><input type="text" id="ed-sample" inputmode="decimal" oninput="sanitizeDec(this);calcEditGross()" readonly style="background:var(--bg);color:var(--text3)"></div><div><div class="lb">GROSS WT</div><input type="text" id="ed-gross" readonly style="background:var(--bg);color:var(--green);font-weight:700"></div></div>
     <!-- e-Auction extras (mirror of entry form). Visibility synced
@@ -566,6 +566,9 @@ let cfgShowCropReceipt=false, cfgShowReservedPrice=false;
 // Gunny Wt pair + read-only Net Wt are a SEPARATE workflow, gated purely
 // by whether a per-bag gunny tare is set (cfgGunnyWeight > 0).
 let cfgGunnyWeight=0, cfgShowExtraFields=false;
+// e-Trade lets the operator override the auto-derived Gunny Wt (tare);
+// e-Auction keeps it read-only. Server-driven via /api/config.gunnyEditable.
+let cfgGunnyEditable=false;
 
 // Toggle the entry-form + edit-modal e-Auction rows + their two cells.
 // Each cell wraps its own .display so the outer row can stay flex when
@@ -594,16 +597,23 @@ function applyEAuctionVisibility(){
   // modal so a partial edit recomputes the gross-of-gunny value the same
   // way as a fresh entry.
   var gunnyOn=(Number(cfgGunnyWeight)||0)>0;
+  // e-Trade lets the operator override the tare; e-Auction keeps it derived.
+  var gwEditable=gunnyOn&&!!cfgGunnyEditable;
   var gwrap=document.getElementById('le-gunny-wrap');
   if(gwrap) gwrap.style.display=gunnyOn?'grid':'none';
   var qtyEl=document.getElementById('le-qty');
   if(qtyEl){
     if(gunnyOn){
-      // Seed the read-only Gunny Wt with the current tare so it's never
-      // stale when the row first appears.
+      // Seed the Gunny Wt with the current default tare so it's never stale
+      // when the row first appears. In e-Trade it's editable from here.
       var bags=parseInt(document.getElementById('le-bags').value,10)||0;
       var gwEl=document.getElementById('le-gunny-wt');
-      if(gwEl){var tare=(Number(cfgGunnyWeight)||0)*bags;gwEl.value=tare>0?tare.toFixed(3):'0.000';}
+      if(gwEl){
+        var tare=(Number(cfgGunnyWeight)||0)*bags;gwEl.value=tare>0?tare.toFixed(3):'0.000';
+        gwEl.readOnly=!gwEditable;
+        gwEl.style.background=gwEditable?'':'var(--bg)';
+        gwEl.style.color=gwEditable?'':'var(--text3)';
+      }
       qtyEl.readOnly=true;qtyEl.style.background='var(--bg)';
     }else{
       qtyEl.readOnly=false;qtyEl.style.background='';
@@ -618,7 +628,12 @@ function applyEAuctionVisibility(){
     if(gunnyOn){
       var eb=parseInt(document.getElementById('ed-bags').value,10)||0;
       var egwEl=document.getElementById('ed-gunny-wt');
-      if(egwEl){var et=(Number(cfgGunnyWeight)||0)*eb;egwEl.value=et>0?et.toFixed(3):'0.000';}
+      if(egwEl){
+        var et=(Number(cfgGunnyWeight)||0)*eb;egwEl.value=et>0?et.toFixed(3):'0.000';
+        egwEl.readOnly=!gwEditable;
+        egwEl.style.background=gwEditable?'':'var(--bg)';
+        egwEl.style.color=gwEditable?'':'var(--text3)';
+      }
       edQtyEl.readOnly=true;edQtyEl.style.background='var(--bg)';
     }else{
       edQtyEl.readOnly=false;edQtyEl.style.background='';
@@ -636,35 +651,50 @@ function edSeedGunnyWt(){
   if(gw) gw.value=tare>0?tare.toFixed(3):'0.000';
   return tare;
 }
+function edGunnyTare(){ return parseFloat(document.getElementById('ed-gunny-wt').value)||0; }
 function calcEditNetFromGunny(){
+  // e-Auction: tare tracks bags, so reseed it. e-Trade: respect a typed
+  // override — read the tare straight from the (editable) field.
+  if(!cfgGunnyEditable) edSeedGunnyWt();
   var wwg=parseFloat(document.getElementById('ed-wwg').value)||0;
-  var tare=edSeedGunnyWt();
+  var tare=edGunnyTare();
   if(wwg>0){
     document.getElementById('ed-qty').value=Math.max(0,wwg-tare).toFixed(3);
     calcEditGross();
   }
 }
-function onEditBagsInput(){ if((Number(cfgGunnyWeight)||0)>0) calcEditNetFromGunny(); }
+// Bags change resets the tare to the default (bags drive it) then re-derives.
+function onEditBagsInput(){ if((Number(cfgGunnyWeight)||0)>0){ edSeedGunnyWt(); calcEditNetFromGunny(); } }
+// Operator edited Gunny Wt directly (e-Trade only) → re-derive Net.
+function onEditGunnyWtInput(){ if(cfgGunnyEditable&&(Number(cfgGunnyWeight)||0)>0) calcEditNetFromGunny(); }
 
-// Auto-derive Net = Weight-w/-Gunny − (default gunny weight × bags).
-// Re-runs whenever W/Gunny changes and whenever Bags changes (via
-// onBagsInput) because the tare depends on bags. Guarded on wwg>0 so a
-// blank W/Gunny never wipes an already-typed Net Wt.
-function calcNetFromGunny(){
-  var wwg=parseFloat(document.getElementById('le-wwg').value)||0;
+// Seed the entry-form Gunny Wt with the default tare = gunny × bags.
+function seedGunnyWt(){
   var bags=parseInt(document.getElementById('le-bags').value,10)||0;
   var tare=bags*(Number(cfgGunnyWeight)||0);
   var gwEl=document.getElementById('le-gunny-wt');
   if(gwEl) gwEl.value=tare>0?tare.toFixed(3):'0.000';
+  return tare;
+}
+function gunnyTare(){ return parseFloat(document.getElementById('le-gunny-wt').value)||0; }
+// Auto-derive Net = Weight-w/-Gunny − tare. The tare defaults to gunny ×
+// bags; in e-Trade (cfgGunnyEditable) the operator can override it, so we
+// read it from the field instead of reseeding. Guarded on wwg>0 so a blank
+// W/Gunny never wipes an already-typed Net Wt.
+function calcNetFromGunny(){
+  if(!cfgGunnyEditable) seedGunnyWt();
+  var wwg=parseFloat(document.getElementById('le-wwg').value)||0;
+  var tare=gunnyTare();
   if(wwg>0){
-    var net=Math.max(0,wwg-tare);
-    document.getElementById('le-qty').value=net.toFixed(3);
+    document.getElementById('le-qty').value=Math.max(0,wwg-tare).toFixed(3);
     calcGrossWeight();
   }
 }
-// Bags changed → re-derive Net only when extra fields are active, so the
-// legacy operator-typed Net flow is untouched when the toggle is off.
-function onBagsInput(){ if((Number(cfgGunnyWeight)||0)>0) calcNetFromGunny(); }
+// Bags changed → reset the tare to the default, then re-derive Net (only
+// when the gunny-tare workflow is on; the legacy typed-Net flow is untouched).
+function onBagsInput(){ if((Number(cfgGunnyWeight)||0)>0){ seedGunnyWt(); calcNetFromGunny(); } }
+// Operator edited Gunny Wt directly (e-Trade only) → re-derive Net.
+function onGunnyWtInput(){ if(cfgGunnyEditable&&(Number(cfgGunnyWeight)||0)>0) calcNetFromGunny(); }
 
 // Crop-receipt auto-increment helper. Preserves the input's
 // zero-padding width: "01208" → "01209". Any non-digit prefix is
@@ -715,6 +745,7 @@ async function refreshConfig(){
     if(d.showCropReceipt!=cfgShowCropReceipt){cfgShowCropReceipt=!!d.showCropReceipt;changed=true}
     if(d.showReservedPrice!=cfgShowReservedPrice){cfgShowReservedPrice=!!d.showReservedPrice;changed=true}
     if(d.gunnyWeight!=cfgGunnyWeight){cfgGunnyWeight=d.gunnyWeight||0;changed=true}
+    if(d.gunnyEditable!=cfgGunnyEditable){cfgGunnyEditable=!!d.gunnyEditable;changed=true}
     if(d.showExtraLotFields!=cfgShowExtraFields){cfgShowExtraFields=!!d.showExtraLotFields;changed=true}
     if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
     if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
@@ -746,9 +777,9 @@ function applyLabels(){
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -836,7 +867,7 @@ async function loadAvailableTrades(){
 
 async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select a trade</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
 // Reload config for sample weight + moisture + e-Auction extras
-try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgShowExtraFields=!!cd.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
+try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgGunnyEditable=!!cd.gunnyEditable;cfgShowExtraFields=!!cd.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
 await loadStats();goLots()}
 
 var allocStats=null;
