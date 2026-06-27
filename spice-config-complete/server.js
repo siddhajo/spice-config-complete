@@ -782,6 +782,28 @@ app.delete('/api/me/sessions/:tokenSuffix', requireView, (req, res) => {
 // Mounting here also serves /mobile (the PWA) and the /api/auth/*,
 // /api/config, /api/lots (query form), /api/logo, and receipt-print
 // routes the PWA's app.html depends on.
+// Sellers (traders) import template. MUST be registered BEFORE mountMobile,
+// because the mobile bridge defines `/api/traders/:id` (returns "Seller not
+// found") which would otherwise capture `/api/traders/template` as :id='template'
+// and 404 the download. Buyers/auctions have no such mobile :id route, so their
+// templates work regardless of order — this one needs to come first.
+app.get('/api/traders/template', requireExport, async (req, res) => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Sellers');
+  ws.columns = ['NAME','CR','PAN','TEL','AADHAR','PADD','PPLA','PIN','PSTATE','PST_CODE','IFSC','ACCTNUM','HOLDER_NAME']
+    .map(h => ({ header: h, key: h.toLowerCase(), width: 18 }));
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
+  // Add one sample row
+  ws.addRow({ name: 'SAMPLE SELLER', cr: 'CR.12345', pan: 'ABCDE1234F', tel: '9876543210',
+    aadhar: '', padd: '123 MAIN STREET', ppla: 'BODINAYAKANUR', pin: '625582',
+    pstate: 'TAMIL NADU', pst_code: '33', ifsc: 'FDRL0001073', acctnum: '1234567890', holder_name: 'SAMPLE SELLER' });
+  const buf = await wb.xlsx.writeBuffer();
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="sellers-template.xlsx"');
+  res.send(Buffer.from(buf));
+});
+
 const { mountMobile } = require('./mobile-bridge');
 mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS, auditLog });
 
@@ -3262,22 +3284,8 @@ app.post('/api/traders/import', requireTraderWrite, upload.single('file'), async
 });
 
 // ── Download Seller template XLSX ────────────────────────────
-app.get('/api/traders/template', requireExport, async (req, res) => {
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Sellers');
-  ws.columns = ['NAME','CR','PAN','TEL','AADHAR','PADD','PPLA','PIN','PSTATE','PST_CODE','IFSC','ACCTNUM','HOLDER_NAME']
-    .map(h => ({ header: h, key: h.toLowerCase(), width: 18 }));
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
-  // Add one sample row
-  ws.addRow({ name: 'SAMPLE SELLER', cr: 'CR.12345', pan: 'ABCDE1234F', tel: '9876543210',
-    aadhar: '', padd: '123 MAIN STREET', ppla: 'BODINAYAKANUR', pin: '625582',
-    pstate: 'TAMIL NADU', pst_code: '33', ifsc: 'FDRL0001073', acctnum: '1234567890', holder_name: 'SAMPLE SELLER' });
-  const buf = await wb.xlsx.writeBuffer();
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="sellers-template.xlsx"');
-  res.send(Buffer.from(buf));
-});
+// NOTE: GET /api/traders/template is registered earlier (just before
+// mountMobile) so it isn't shadowed by the mobile bridge's /api/traders/:id.
 
 // ══════════════════════════════════════════════════════════════
 // BUYERS (SBL.DBF — dealers/traders)
