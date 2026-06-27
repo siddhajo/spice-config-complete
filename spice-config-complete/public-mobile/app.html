@@ -407,6 +407,7 @@ select:focus{border-color:var(--green)}
       <button type="button" class="sx-clear" id="ml-search-clear" aria-label="Clear search">✕</button>
     </div></div>
     <div id="ml-actions" style="display:none;margin-bottom:8px;gap:6px;align-items:center;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:5px;height:30px;padding:0 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;user-select:none" title="Select / clear all listed lots"><input type="checkbox" id="ml-select-all" onchange="toggleAllMyLots(this.checked)" style="width:16px;height:16px">Select all</label>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">🖨 Print selected</button>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">🖨 Print all by seller</button>
       <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">🗑 Delete Selected</button>
@@ -1337,7 +1338,10 @@ function filterMyLots(q){if(!q||q.length<2){renderMyLots(allMyLots);return}const
 function renderMyLots(lots){const list=document.getElementById('ml-list');if(!lots.length){list.innerHTML='<div class="lot-empty">No lots found</div>';return}
 list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';return`<div class="lot-card"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span></label><span style="font-size:10px;color:var(--text3)">${l.user_id} · ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> · ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
 
-function updateMySelCount(){const checked=document.querySelectorAll('.ml-cb:checked').length;const bar=document.getElementById('ml-actions');const cnt=document.getElementById('ml-sel-count');const hasLots=allMyLots&&allMyLots.length>0;bar.style.display=hasLots?'flex':'none';cnt.textContent=checked>0?checked+' selected':''}
+// Select / clear every listed lot's checkbox (respects the active search
+// filter — renderMyLots rebuilds the DOM, so .ml-cb = currently shown lots).
+function toggleAllMyLots(on){document.querySelectorAll('.ml-cb').forEach(cb=>{cb.checked=on});updateMySelCount()}
+function updateMySelCount(){const boxes=document.querySelectorAll('.ml-cb');const checked=document.querySelectorAll('.ml-cb:checked').length;const bar=document.getElementById('ml-actions');const cnt=document.getElementById('ml-sel-count');const hasLots=allMyLots&&allMyLots.length>0;bar.style.display=hasLots?'flex':'none';cnt.textContent=checked>0?checked+' selected':'';const sa=document.getElementById('ml-select-all');if(sa){sa.checked=boxes.length>0&&checked===boxes.length;sa.indeterminate=checked>0&&checked<boxes.length}}
 
 async function printSelectedMyLots(){var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(cb=>parseInt(cb.value));if(!ids.length){toast('Select lots to print',true);return}printAndClose(B+'/api/lots/print-batch?ids='+ids.join(',')+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt())}
 
@@ -1491,11 +1495,12 @@ async function deleteSelectedMyLots(){
   var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(cb=>parseInt(cb.value));
   if(!ids.length){toast('Select at least one lot',true);return}
   if(!confirm('Delete '+ids.length+' selected lot(s)? This cannot be undone.'))return;
-  var ok=0,fail=0;
+  var ok=0,fail=0,denied=false;
   for(var i=0;i<ids.length;i++){
-    try{var r=await fetch(B+'/api/lots/'+ids[i],{method:'DELETE',headers:ah()});if(r.ok)ok++;else fail++}catch(e){fail++}
+    try{var r=await fetch(B+'/api/lots/'+ids[i],{method:'DELETE',headers:ah()});if(r.ok)ok++;else{fail++;if(r.status===403)denied=true}}catch(e){fail++}
   }
-  toast(ok+' deleted'+(fail?' · '+fail+' failed':''),fail>0);
+  if(ok===0&&denied){toast("No permission to delete. Ask an admin to grant Delete access.",true)}
+  else{toast(ok+' deleted'+(fail?' · '+fail+' failed':''),fail>0)}
   loadMyLots();await loadStats();updUI();
 }
 
@@ -1799,10 +1804,20 @@ deleteLot = async function(id, lotNo) {
     } catch (e) {}
   }
   try {
-    await fetch(B + '/api/lots/' + id, { method: 'DELETE', headers: ah() });
+    var r = await fetch(B + '/api/lots/' + id, { method: 'DELETE', headers: ah() });
+    if (!r.ok) {
+      // Don't silently swallow the failure — the most common case is an
+      // operator without the 'delete' capability (server returns 403). Show
+      // the real reason so the button never just "does nothing".
+      var msg = 'Delete failed';
+      try { var d = await r.json(); if (d && d.error) msg = d.error; } catch (e) {}
+      if (r.status === 403) msg = "No permission to delete. Ask an admin to grant Delete access.";
+      toast(msg, true);
+      return;
+    }
     toast('Lot #' + lotNo + ' deleted', false);
     loadMyLots(); await loadStats(); updUI();
-  } catch (e) {}
+  } catch (e) { toast('Could not connect', true); }
 };
 
 function showUndoHistory() {

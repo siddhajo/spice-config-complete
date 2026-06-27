@@ -359,6 +359,37 @@ function userHas(role, capability) {
   return perms.has(capability);
 }
 
+// Capabilities an admin may grant to an INDIVIDUAL user on top of their
+// role's defaults (Settings → User Management → per-user permission boxes).
+// Deliberately narrow: high-blast-radius caps (delete_all, user_manage) are
+// NOT grantable per-user — promote the user to a higher role for those.
+const GRANTABLE_EXTRA_PERMISSIONS = ['delete', 'settings_write'];
+
+// Parse a user's per-user grants (CSV on users.extra_permissions) into a Set,
+// dropping anything off the grantable allowlist so a stale/hand-edited value
+// can never escalate beyond what the UI can grant.
+function userExtraPermissions(user) {
+  const set = new Set();
+  for (const c of String((user && user.extra_permissions) || '').split(',').map(s => s.trim()).filter(Boolean)) {
+    if (GRANTABLE_EXTRA_PERMISSIONS.includes(c)) set.add(c);
+  }
+  return set;
+}
+
+// Effective capabilities = role defaults ∪ per-user grants. Single source of
+// truth for both the request gate (requirePermission) and the permission list
+// handed to the client at login / me.
+function effectivePermissions(user) {
+  const perms = new Set(ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS.viewer);
+  for (const c of userExtraPermissions(user)) perms.add(c);
+  return perms;
+}
+
+// Effective check for a single capability: role default OR per-user grant.
+function userCan(user, capability) {
+  return userHas(user.role, capability) || userExtraPermissions(user).has(capability);
+}
+
 // Middleware factory: returns an Express middleware that requires the
 // authenticated user to have a specific capability.
 //
@@ -374,7 +405,7 @@ function requirePermission(capability) {
     requireAuth(req, res, (err) => {
       if (err) return next(err);
       if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-      if (!userHas(req.user.role, capability)) {
+      if (!userCan(req.user, capability)) {
         return res.status(403).json({
           error: `Your role (${req.user.role}) does not allow this action`,
           required: capability,
@@ -395,7 +426,7 @@ function requireAnyPermission(...capabilities) {
     requireAuth(req, res, (err) => {
       if (err) return next(err);
       if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-      const hasAny = capabilities.some(c => userHas(req.user.role, c));
+      const hasAny = capabilities.some(c => userCan(req.user, c));
       if (!hasAny) {
         return res.status(403).json({
           error: `Your role (${req.user.role}) does not allow this action`,
@@ -466,7 +497,7 @@ app.post('/api/login', async (req, res) => {
   db.run(`DELETE FROM sessions WHERE last_used_at < datetime('now','-30 days')`);
   // Return the user's capabilities array so the client can hide buttons
   // they're not allowed to use. Server still validates every request.
-  const permissions = Array.from(ROLE_PERMISSIONS[user.role] || ROLE_PERMISSIONS.viewer);
+  const permissions = Array.from(effectivePermissions(user));
   res.json({ token, role: user.role, username: user.username, permissions });
 });
 app.post('/api/logout', (req, res) => {
@@ -475,7 +506,7 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 app.get('/api/me', requireView, (req, res) => {
-  const permissions = Array.from(ROLE_PERMISSIONS[req.user.role] || ROLE_PERMISSIONS.viewer);
+  const permissions = Array.from(effectivePermissions(req.user));
   res.json({ username: req.user.username, role: req.user.role, permissions });
 });
 
@@ -588,12 +619,39 @@ app.post('/api/license/admin/set-expiry', (req, res) => {
 app.get('/api/users', requireUserManage, (req, res) => {
   const db = getDb();
   const users = db.all(`
-    SELECT u.id, u.username, u.role, u.created_at,
+    SELECT u.id, u.username, u.role, u.created_at, u.extra_permissions,
       (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) as active_sessions,
       (SELECT MAX(last_used_at) FROM sessions s WHERE s.user_id = u.id) as last_active
     FROM users u ORDER BY u.id ASC
   `);
-  res.json(users);
+  // Expose the grantable allowlist alongside each user's current grants so the
+  // client renders exactly the boxes the server will accept (no drift).
+  res.json(users.map(u => ({
+    ...u,
+    extra_permissions: Array.from(userExtraPermissions(u)),
+    grantable_permissions: GRANTABLE_EXTRA_PERMISSIONS,
+  })));
+});
+
+// Set a user's per-user extra permission grants (Settings → User Management
+// → permission checkboxes). Body: { permissions: ['delete', ...] }. Only the
+// grantable allowlist is honoured; anything else is dropped. Admin-only (same
+// gate as role changes). Takes effect on the user's next request — no re-login
+// needed for server enforcement; the client refreshes its own perm list via
+// /api/me. Role defaults are NOT stored here, only the extras on top.
+app.put('/api/users/:id/permissions', requireUserManage, (req, res) => {
+  const db = getDb();
+  const target = db.get('SELECT id, username, role FROM users WHERE id = ?', [req.params.id]);
+  if (!target) return res.status(404).json({ error: 'User not found' });
+  const requested = Array.isArray(req.body && req.body.permissions) ? req.body.permissions : [];
+  // Keep only allowlisted caps the role doesn't ALREADY grant (storing a cap
+  // the role covers would be redundant and confusing in the UI).
+  const clean = [...new Set(requested
+    .map(c => String(c || '').trim())
+    .filter(c => GRANTABLE_EXTRA_PERMISSIONS.includes(c))
+    .filter(c => !userHas(target.role, c)))];
+  db.run('UPDATE users SET extra_permissions = ? WHERE id = ?', [clean.join(','), target.id]);
+  res.json({ success: true, username: target.username, extra_permissions: clean });
 });
 
 app.post('/api/users', requireUserManage, async (req, res) => {
@@ -3956,96 +4014,126 @@ app.post('/api/auctions/:id/close-depot', requireAuctionWrite, (req, res) => {
   }
 });
 
-// POST /api/auctions/:id/reassign-lots — move the unused [start..end]
-// range from one branch to another. Body: { from_branch, to_branch,
-// start_lot, end_lot }. Refuses to move a range that has saved lots
-// (use the Edit panel + manual lot deletion for that). The source
-// branch's covering range is split around the moved range; the dest
-// branch gains a new range (or extends an existing one).
+// Group a list of lot numbers into contiguous chunks (same prefix +
+// sequential num). Input is sorted first so callers can pass an
+// arbitrary/disjoint selection. Returns an array of {start,end} pairs.
+function chunkLots(lots) {
+  const parsed = lots
+    .map(l => ({ lot: String(l || '').trim(), p: parseLotNo(l) }))
+    .filter(x => x.p)
+    .sort((a, b) => a.p.prefix === b.p.prefix ? a.p.num - b.p.num : a.p.prefix.localeCompare(b.p.prefix));
+  const chunks = [];
+  if (!parsed.length) return chunks;
+  let chunk = [parsed[0]];
+  for (let i = 1; i < parsed.length; i++) {
+    const prev = chunk[chunk.length - 1].p;
+    const curr = parsed[i].p;
+    if (prev.prefix === curr.prefix && curr.num === prev.num + 1) chunk.push(parsed[i]);
+    else { chunks.push(chunk); chunk = [parsed[i]]; }
+  }
+  chunks.push(chunk);
+  return chunks.map(ch => ({ start: ch[0].lot, end: ch[ch.length - 1].lot }));
+}
+
+// POST /api/auctions/:id/reassign-lots — move unused lots from one
+// branch to another. Body accepts EITHER:
+//   • { from_branch, to_branch, lots: ["001","002","090",...] } — an
+//     explicit (possibly disjoint, multi-range) selection, or
+//   • { from_branch, to_branch, start_lot, end_lot } — a contiguous
+//     range (legacy/typed-fallback form).
+// Refuses to move any lot that already has a saved seller. Every moving
+// lot must currently be allocated to the FROM branch. Source ranges are
+// split around the removed lots; the dest branch gains new range(s)
+// covering the moved lots (collapsed into contiguous chunks).
 app.post('/api/auctions/:id/reassign-lots', requireAuctionWrite, (req, res) => {
   const auctionId = parseInt(req.params.id, 10);
   const fromBranch = String(req.body.from_branch || '').trim().toUpperCase();
   const toBranch   = String(req.body.to_branch || '').trim().toUpperCase();
-  const startLot   = String(req.body.start_lot || '').trim();
-  const endLot     = String(req.body.end_lot || '').trim();
   if (!fromBranch || !toBranch) return res.status(400).json({ error: 'from_branch and to_branch required' });
   if (fromBranch === toBranch)  return res.status(400).json({ error: 'FROM and TO branches must differ' });
-  if (!startLot || !endLot)     return res.status(400).json({ error: 'start_lot and end_lot required' });
   const db = getDb();
   try {
-    const moving = enumerateRange(startLot, endLot);     // throws on bad input
+    // Resolve the moving lot set from whichever body form was sent.
+    let moving;
+    if (Array.isArray(req.body.lots) && req.body.lots.length) {
+      moving = Array.from(new Set(req.body.lots.map(l => String(l || '').trim()).filter(Boolean)));
+      const bad = moving.filter(l => !parseLotNo(l));
+      if (bad.length) throw new Error(`Invalid lot number(s): ${bad.slice(0, 6).join(', ')}`);
+    } else {
+      const startLot = String(req.body.start_lot || '').trim();
+      const endLot   = String(req.body.end_lot || '').trim();
+      if (!startLot || !endLot) return res.status(400).json({ error: 'Provide lots[] or start_lot/end_lot' });
+      moving = enumerateRange(startLot, endLot);          // throws on bad input
+    }
+    if (!moving.length) return res.status(400).json({ error: 'No lots selected to reassign' });
     const movingSet = new Set(moving);
-    // Refuse to move a range that's booked.
+
+    // Refuse to move any lot that's booked (has a saved seller).
     const booked = db.all(
       `SELECT lot_no FROM lots WHERE auction_id = ? AND UPPER(branch) = ?`,
       [auctionId, fromBranch]
     ).filter(r => movingSet.has(String(r.lot_no || '').trim()));
     if (booked.length) {
       return res.status(400).json({
-        error: `Cannot reassign — ${booked.length} lot(s) in this range already have sellers. Delete those lots first.`,
+        error: `Cannot reassign — ${booked.length} selected lot(s) already have sellers. Delete those lots first.`,
         bookedLots: booked.map(r => r.lot_no),
       });
     }
-    // Load FROM branch's covering allocation. We need to find the
-    // single range that contains ALL of [start..end]. If no single
-    // range covers it, we refuse — multi-range reassign would split
-    // the responsibility and isn't worth the complexity.
+
+    // Load all FROM-branch ranges and enumerate their lots so we can
+    // (a) verify every moving lot belongs to FROM and (b) split the
+    // ranges around the removed lots. Unlike the old single-range
+    // version, the selection may span several FROM ranges.
     const fromRanges = db.all(
       `SELECT id, start_lot, end_lot FROM lot_allocations
        WHERE auction_id = ? AND UPPER(branch) = ?`,
       [auctionId, fromBranch]
     );
-    let host = null;
-    let hostLots = null;
+    const fromLotSet = new Set();
+    const lotsByRangeId = new Map();
     for (const r of fromRanges) {
-      try {
-        const lots = enumerateRange(r.start_lot, r.end_lot);
-        if (moving.every(l => lots.includes(l))) { host = r; hostLots = lots; break; }
-      } catch (_) {}
+      let lots = [];
+      try { lots = enumerateRange(r.start_lot, r.end_lot); } catch (_) {}
+      lotsByRangeId.set(r.id, lots);
+      lots.forEach(l => fromLotSet.add(l));
     }
-    if (!host) {
-      return res.status(400).json({ error: `No allocation on ${fromBranch} covers the range ${startLot}-${endLot}` });
+    const notCovered = moving.filter(l => !fromLotSet.has(l));
+    if (notCovered.length) {
+      return res.status(400).json({
+        error: `${notCovered.length} selected lot(s) are not allocated to ${fromBranch}: ${notCovered.slice(0, 6).join(', ')}${notCovered.length > 6 ? ', …' : ''}`,
+      });
     }
-    // Split the host range around the moved chunk:
-    //   leftover = hostLots − moving
-    //   then collapse consecutive lots into sub-ranges.
-    const movedSet = new Set(moving);
-    const keep = hostLots.filter(l => !movedSet.has(l));
-    // Group `keep` into contiguous chunks (using the same enumeration
-    // logic so we preserve prefix + padding).
-    const chunks = [];
-    if (keep.length) {
-      let chunk = [keep[0]];
-      for (let i = 1; i < keep.length; i++) {
-        const prev = parseLotNo(chunk[chunk.length - 1]);
-        const curr = parseLotNo(keep[i]);
-        if (prev && curr && prev.prefix === curr.prefix && (curr.num === prev.num + 1)) {
-          chunk.push(keep[i]);
-        } else {
-          chunks.push(chunk);
-          chunk = [keep[i]];
-        }
+
+    // Apply. For each FROM range that loses lots, delete it and re-insert
+    // the surviving contiguous chunks. Untouched ranges are left alone.
+    let leftoverChunks = 0;
+    for (const r of fromRanges) {
+      const lots = lotsByRangeId.get(r.id) || [];
+      if (!lots.some(l => movingSet.has(l))) continue;     // untouched range
+      db.run('DELETE FROM lot_allocations WHERE id = ?', [r.id]);
+      const keep = lots.filter(l => !movingSet.has(l));
+      for (const ch of chunkLots(keep)) {
+        db.run(
+          'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
+          [auctionId, fromBranch, ch.start, ch.end]
+        );
+        leftoverChunks++;
       }
-      chunks.push(chunk);
     }
-    // Apply: delete the host range, insert the leftover chunks, insert
-    // the moved range under the dest branch.
-    db.run('DELETE FROM lot_allocations WHERE id = ?', [host.id]);
-    for (const ch of chunks) {
+    // Dest branch gains the moved lots, collapsed into contiguous ranges.
+    const destChunks = chunkLots(moving);
+    for (const ch of destChunks) {
       db.run(
         'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
-        [auctionId, fromBranch, ch[0], ch[ch.length - 1]]
+        [auctionId, toBranch, ch.start, ch.end]
       );
     }
-    db.run(
-      'INSERT INTO lot_allocations (auction_id, branch, start_lot, end_lot) VALUES (?,?,?,?)',
-      [auctionId, toBranch, startLot, endLot]
-    );
     res.json({
       success: true,
       message: `Moved ${moving.length} lot(s) from ${fromBranch} to ${toBranch}`,
       moved: moving.length,
-      leftoverChunks: chunks.length,
+      destRanges: destChunks.length,
+      leftoverChunks,
     });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -6694,53 +6782,113 @@ app.delete('/api/invoices/:id', requireDelete, (req, res) => {
   res.json({ success: true, invoiceId: Number(req.params.id), lotsFreed });
 });
 
+// ── Context-scoped revert ─────────────────────────────────────────────
+// Sales invoices are split by business STATE (KERALA=ASP, TAMIL NADU=ISP) and
+// isolated by business MODE through the parent auction. Reverts must stay
+// inside the active context so an ISP "Revert All" never deletes the paired
+// ASP invoices (and vice versa), and the SHARED lots' ASP↔ISP links are
+// cleared only on the side being reverted.
+//   • ISP (state ≠ KERALA): the invoice number lives on lots.invo — clear
+//     sale + invo, leave lots.asp_invo (the ASP link) intact.
+//   • ASP (state = KERALA):  the number lives on lots.asp_invo — clear it, and
+//     clear lots.invo too only where it still equals asp_invo (no ISP invoice
+//     has been layered on top yet).
+function _invoiceContext(db) {
+  const cfg = getSettingsFlat(db);
+  const state = String(cfg.business_state || 'TAMIL NADU').toUpperCase();
+  const isKerala = state === 'KERALA';
+  return {
+    isKerala,
+    mode: currentBusinessMode(db),
+    // SQL fragment matching invoices.state to the active business state.
+    stateSql: isKerala
+      ? "UPPER(state) = 'KERALA'"
+      : "UPPER(state) IN ('TAMIL NADU','TAMILNADU','TN')",
+  };
+}
+// Free the lot-side link for ONE invoice, on its correct (ASP/ISP) side.
+// Returns the freed lot count. Does not delete the invoice row.
+function _freeLotsForInvoice(db, inv) {
+  if (!inv.auction_id) return 0;
+  const isKerala = String(inv.state || '').toUpperCase() === 'KERALA';
+  if (isKerala) {
+    const affected = db.all(
+      'SELECT lot_no FROM lots WHERE auction_id=? AND buyer=? AND asp_invo=?',
+      [inv.auction_id, inv.buyer, inv.invo]
+    );
+    db.run("UPDATE lots SET invo='' WHERE auction_id=? AND buyer=? AND asp_invo=? AND invo=asp_invo",
+      [inv.auction_id, inv.buyer, inv.invo]);
+    db.run("UPDATE lots SET asp_invo='' WHERE auction_id=? AND buyer=? AND asp_invo=?",
+      [inv.auction_id, inv.buyer, inv.invo]);
+    return affected.length;
+  }
+  const affected = db.all(
+    'SELECT lot_no FROM lots WHERE auction_id=? AND sale=? AND invo=? AND buyer=?',
+    [inv.auction_id, inv.sale, inv.invo, inv.buyer]
+  );
+  db.run("UPDATE lots SET sale='', invo='' WHERE auction_id=? AND sale=? AND invo=? AND buyer=?",
+    [inv.auction_id, inv.sale, inv.invo, inv.buyer]);
+  return affected.length;
+}
+
 // Explicit revert route (same effect as DELETE but returns richer info)
 app.post('/api/invoices/:id/revert', requireInvoiceRevert, (req, res) => {
   const db = getDb();
   const inv = db.get('SELECT * FROM invoices WHERE id=?', [req.params.id]);
   if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-  let lotsFreed = 0;
-  if (inv.auction_id) {
-    const affected = db.all(
-      'SELECT lot_no FROM lots WHERE auction_id=? AND sale=? AND invo=? AND buyer=?',
-      [inv.auction_id, inv.sale, inv.invo, inv.buyer]
-    );
-    lotsFreed = affected.length;
-    db.run(`UPDATE lots SET sale='', invo='' WHERE auction_id=? AND sale=? AND invo=? AND buyer=?`,
-      [inv.auction_id, inv.sale, inv.invo, inv.buyer]);
-    db.run('DELETE FROM invoices WHERE id=?', [req.params.id]);
-    return res.json({
-      success: true,
-      invoice: { sale: inv.sale, invo: inv.invo, buyer: inv.buyer, buyer1: inv.buyer1 },
-      lotsFreed,
-      lots: affected.map(r => r.lot_no),
+  // Scope to the active business context. The revert button only appears on
+  // in-context rows, so this guards against API misuse or a stale list after a
+  // context switch — and stops an ISP-context revert from clearing ASP links.
+  const ctx = _invoiceContext(db);
+  const invIsKerala = String(inv.state || '').toUpperCase() === 'KERALA';
+  const stateMatches = ctx.isKerala === invIsKerala;
+  const aucMode = inv.auction_id
+    ? String((db.get('SELECT mode FROM auctions WHERE id=?', [inv.auction_id]) || {}).mode || '')
+    : '';
+  const modeMatches = !ctx.mode || aucMode === ctx.mode;
+  if (!stateMatches || !modeMatches) {
+    return res.status(409).json({
+      error: `This invoice belongs to a different business context (state ${inv.state || '—'}`
+           + `${aucMode ? `, mode ${aucMode}` : ''}). Switch context to revert it.`,
     });
   }
+  const lotsFreed = _freeLotsForInvoice(db, inv);
   db.run('DELETE FROM invoices WHERE id=?', [req.params.id]);
-  res.json({ success: true, lotsFreed: 0 });
+  res.json({
+    success: true,
+    invoice: { sale: inv.sale, invo: inv.invo, buyer: inv.buyer, buyer1: inv.buyer1 },
+    lotsFreed,
+  });
 });
 
-// Bulk revert: revert ALL invoices in an auction
+// Bulk revert: revert all invoices in an auction WITHIN the active context.
+// Mirrors the list the user sees — only the current state + mode's invoices
+// are reverted; the paired other-context invoices are left untouched.
 app.post('/api/invoices/revert-all/:auctionId', requireInvoiceRevert, (req, res) => {
   const db = getDb();
   const aid = req.params.auctionId;
-  const invoices = db.all('SELECT * FROM invoices WHERE auction_id = ?', [aid]);
-  let lotsFreed = 0;
-  for (const inv of invoices) {
-    const n = db.get('SELECT COUNT(*) as c FROM lots WHERE auction_id=? AND sale=? AND invo=? AND buyer=?',
-      [inv.auction_id, inv.sale, inv.invo, inv.buyer]).c;
-    lotsFreed += n;
-    db.run(`UPDATE lots SET sale='', invo='' WHERE auction_id=? AND sale=? AND invo=? AND buyer=?`,
-      [inv.auction_id, inv.sale, inv.invo, inv.buyer]);
+  const ctx = _invoiceContext(db);
+  // Mode guard: if this auction isn't in the active mode, there is nothing to
+  // revert here — and we must NOT touch its lots.
+  const aucMode = String((db.get('SELECT mode FROM auctions WHERE id=?', [aid]) || {}).mode || '');
+  if (ctx.mode && aucMode !== ctx.mode) {
+    return res.json({ success: true, invoicesReverted: 0, lotsFreed: 0 });
   }
-  db.run('DELETE FROM invoices WHERE auction_id = ?', [aid]);
-  // Safety net: clear any orphan invo values from lots in this auction
-  const orphan = db.get(
-    `SELECT COUNT(*) as c FROM lots WHERE auction_id = ? AND invo IS NOT NULL AND invo != ''`, [aid]
-  ).c;
-  if (orphan) {
-    db.run(`UPDATE lots SET sale='', invo='' WHERE auction_id = ?`, [aid]);
-    lotsFreed += orphan;
+  const invoices = db.all(`SELECT * FROM invoices WHERE auction_id = ? AND ${ctx.stateSql}`, [aid]);
+  let lotsFreed = 0;
+  for (const inv of invoices) lotsFreed += _freeLotsForInvoice(db, inv);
+  const ids = invoices.map(i => i.id);
+  if (ids.length) {
+    db.run(`DELETE FROM invoices WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  }
+  // Context-scoped orphan safety net — clear any leftover lot link on the
+  // ACTIVE side only, never the other context's link.
+  if (ctx.isKerala) {
+    db.run("UPDATE lots SET invo='' WHERE auction_id=? AND COALESCE(asp_invo,'')!='' AND invo=asp_invo", [aid]);
+    db.run("UPDATE lots SET asp_invo='' WHERE auction_id=? AND COALESCE(asp_invo,'')!=''", [aid]);
+  } else {
+    // ISP side: clear any remaining ISP invo (an invo that isn't the ASP number).
+    db.run("UPDATE lots SET sale='', invo='' WHERE auction_id=? AND COALESCE(invo,'')!='' AND invo<>COALESCE(asp_invo,'')", [aid]);
   }
   res.json({ success: true, invoicesReverted: invoices.length, lotsFreed });
 });
@@ -10140,7 +10288,7 @@ app.get('/api/dbf-exports/list', requireExport, (req, res) => {
       auctionFilter: !!def.auctionFilter,
       dateFilter: !!def.dateFilter,
       master: !!def.master,
-      xlsx: !!def.xlsxFn,
+      xlsx: !!def.xlsx || !!def.xlsxFn,
     };
   }
   res.json(list);
@@ -10179,6 +10327,15 @@ app.get('/api/dbf-exports/:type', requireExport, async (req, res) => {
       filters.to = to;
     }
 
+    // Filename suffix shared by every download format: the trade no (ano)
+    // for auction-wise exports, the date range for date-wise. Empty for
+    // master data. e.g. CPA1_12.dbf / CPA1_12.xlsx (ano 12),
+    // INV_2026-04-01_to_2026-04-30.xlsx. Auction-wise names use the
+    // human-facing ano, never the opaque id.
+    let suffix = '';
+    if (anoForName) suffix = `_${anoForName}`;
+    else if (filters.from) suffix = `_${filters.from}_to_${filters.to}`;
+
     // Preview path — generate the real DBF buffer, then parse it back into a
     // row matrix (array-of-arrays; first row = field names) for an on-screen
     // HTML table on the Exports screen. SheetJS reads .dbf natively, so the
@@ -10197,27 +10354,22 @@ app.get('/api/dbf-exports/:type', requireExport, async (req, res) => {
       });
     }
 
-    // XLSX path — master data only (sellers/buyers).
+    // XLSX path — available for every module. Master data uses its
+    // hand-tuned spreadsheet (friendly headers); transactional modules
+    // reuse their .dbf field/record shape via the exporter's 'xlsx' mode.
     if (format === 'xlsx') {
-      if (!def.xlsxFn) return res.status(400).json({ error: 'XLSX format not supported for this export' });
-      const buffer = await def.xlsxFn(db);
+      if (!def.xlsx && !def.xlsxFn) return res.status(400).json({ error: 'XLSX format not supported for this export' });
+      const buffer = def.xlsxFn ? await def.xlsxFn(db) : await def.fn(db, filters, 'xlsx');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${def.name}.xlsx"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${def.name}${suffix}.xlsx"`);
       return res.send(Buffer.from(buffer));
     }
 
     // DBF path. Master exporters take only (db); transactional take filters.
     const buffer = def.master ? await def.fn(db) : await def.fn(db, filters);
 
-    // Build filename: CPA1_12.dbf (ano 12), INV_2026-04-01_to_2026-04-30.dbf,
-    // NAM.dbf. Auction-wise names use the human-facing ano, never the id.
-    let filename = def.name;
-    if (anoForName) filename += `_${anoForName}`;
-    else if (filters.from) filename += `_${filters.from}_to_${filters.to}`;
-    filename += '.dbf';
-
     res.setHeader('Content-Type', 'application/x-dbase');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${def.name}${suffix}.dbf"`);
     res.send(buffer);
   } catch(e) {
     console.error('DBF export error:', e);

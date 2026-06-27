@@ -94,6 +94,28 @@ async function writeXlsxBuffer(sheetName, columns, records) {
 }
 
 /**
+ * Emit the SAME field/record shape that backs a .dbf as a plain .xlsx, so
+ * every DBF export is also downloadable as a spreadsheet. Headers are the
+ * DBF field names; numeric fields keep their native number type (the records
+ * are already keyed by field name, with numbers for N fields).
+ */
+async function writeXlsxFromFields(sheetName, fields, records) {
+  const columns = fields.map(f => ({
+    header: f.name,
+    key: f.name,
+    width: Math.min(40, Math.max(10, (f.size || 12) + 2)),
+  }));
+  return writeXlsxBuffer(sheetName, columns, records);
+}
+
+// Route a built field/record set to the requested output format ('dbf' | 'xlsx').
+function emitExport(format, sheetName, fields, records) {
+  return format === 'xlsx'
+    ? writeXlsxFromFields(sheetName, fields, records)
+    : writeDbfBuffer(fields, records);
+}
+
+/**
  * Create a DBF file and write records to it
  * Returns a Buffer containing the DBF file contents
  */
@@ -113,7 +135,7 @@ async function writeDbfBuffer(fields, records) {
 // ── LOTS (CPA1.DBF structure) ─────────────────────────────────
 // Accepts either a bare auctionId (legacy) or a filter object. Auction-wise
 // filters on lots.auction_id; date-wise filters on the parent auction's date.
-async function exportLotsDbf(db, filters) {
+async function exportLotsDbf(db, filters, format = 'dbf') {
   filters = normFilters(filters);
   let where = '1=1';
   const params = [];
@@ -210,11 +232,11 @@ async function exportLotsDbf(db, filters) {
     BALANCE: num(r.balance, 2),
   }));
 
-  return writeDbfBuffer(fields, records);
+  return emitExport(format, 'Lots', fields, records);
 }
 
 // ── SALES INVOICES (INV.DBF structure) ────────────────────────
-async function exportInvoicesDbf(db, filters = {}) {
+async function exportInvoicesDbf(db, filters = {}, format = 'dbf') {
   const w = anoDateWhere(filters);
   const rows = db.all(`SELECT * FROM invoices WHERE ${w.sql} ORDER BY date, sale, invo`, w.params);
 
@@ -266,11 +288,11 @@ async function exportInvoicesDbf(db, filters = {}) {
     TOT: num(r.tot, 2),
   }));
 
-  return writeDbfBuffer(fields, records);
+  return emitExport(format, 'Sales Invoices', fields, records);
 }
 
 // ── PURCHASES (PURCHASE.DBF structure) ────────────────────────
-async function exportPurchasesDbf(db, filters = {}) {
+async function exportPurchasesDbf(db, filters = {}, format = 'dbf') {
   const w = anoDateWhere(filters);
   const rows = db.all(`SELECT * FROM purchases WHERE ${w.sql} ORDER BY date, invo`, w.params);
 
@@ -314,11 +336,11 @@ async function exportPurchasesDbf(db, filters = {}) {
     TDS: num(r.tds, 2),
   }));
 
-  return writeDbfBuffer(fields, records);
+  return emitExport(format, 'Purchases', fields, records);
 }
 
 // ── BILLS of SUPPLY (BILL.DBF structure) ──────────────────────
-async function exportBillsDbf(db, filters = {}) {
+async function exportBillsDbf(db, filters = {}, format = 'dbf') {
   const w = anoDateWhere(filters);
   const rows = db.all(`SELECT * FROM bills WHERE ${w.sql} ORDER BY date, bil`, w.params);
 
@@ -362,7 +384,7 @@ async function exportBillsDbf(db, filters = {}) {
     NET: num(r.net, 2),
   }));
 
-  return writeDbfBuffer(fields, records);
+  return emitExport(format, 'Bills of Supply', fields, records);
 }
 
 // ── TRADERS / SELLERS (NAM.DBF structure) ─────────────────────
@@ -499,7 +521,7 @@ async function exportBuyersXlsx(db) {
 }
 
 // ── DEBIT NOTES ───────────────────────────────────────────────
-async function exportDebitNotesDbf(db, filters = {}) {
+async function exportDebitNotesDbf(db, filters = {}, format = 'dbf') {
   const w = anoDateWhere(filters);
   const rows = db.all(`SELECT * FROM debit_notes WHERE ${w.sql} ORDER BY date, note_no`, w.params);
 
@@ -529,7 +551,7 @@ async function exportDebitNotesDbf(db, filters = {}) {
     TOTAL: num(r.total, 2),
   }));
 
-  return writeDbfBuffer(fields, records);
+  return emitExport(format, 'Debit Notes', fields, records);
 }
 
 // ── Registry for easy routing ─────────────────────────────────
@@ -537,17 +559,19 @@ async function exportDebitNotesDbf(db, filters = {}) {
 //   auctionFilter  → can be narrowed to one trade/auction
 //   dateFilter     → can be narrowed to a date range
 //   master         → master data (no transactional filter)
-//   xlsxFn         → also exportable as .xlsx (master data only here)
+//   xlsx           → also exportable as .xlsx. Transactional modules reuse
+//                    their .dbf field/record shape (fn called with format
+//                    'xlsx'); master modules use a hand-tuned xlsxFn instead.
 // Transactional modules carry BOTH auctionFilter and dateFilter so the
 // user can export either trade/auction-wise or date-wise.
 const DBF_EXPORTS = {
-  lots:         { fn: exportLotsDbf,        name: 'CPA1',     auctionFilter: true, dateFilter: true, label: 'Lots (CPA1.DBF)' },
-  invoices:     { fn: exportInvoicesDbf,    name: 'INV',      auctionFilter: true, dateFilter: true, label: 'Sales Invoices (INV.DBF)' },
-  purchases:    { fn: exportPurchasesDbf,   name: 'PURCHASE', auctionFilter: true, dateFilter: true, label: 'Purchases (PURCHASE.DBF)' },
-  bills:        { fn: exportBillsDbf,       name: 'BILL',     auctionFilter: true, dateFilter: true, label: 'Bills of Supply (BILL.DBF)' },
-  debit_notes:  { fn: exportDebitNotesDbf,  name: 'DEBIT',    auctionFilter: true, dateFilter: true, label: 'Debit Notes' },
-  traders:      { fn: exportTradersDbf,     name: 'NAM',      master: true, xlsxFn: exportTradersXlsx, label: 'Sellers (NAM.DBF)' },
-  buyers:       { fn: exportBuyersDbf,      name: 'SBL',      master: true, xlsxFn: exportBuyersXlsx, label: 'Buyers (SBL.DBF)' },
+  lots:         { fn: exportLotsDbf,        name: 'CPA1',     auctionFilter: true, dateFilter: true, xlsx: true, label: 'Lots (CPA1.DBF)' },
+  invoices:     { fn: exportInvoicesDbf,    name: 'INV',      auctionFilter: true, dateFilter: true, xlsx: true, label: 'Sales Invoices (INV.DBF)' },
+  purchases:    { fn: exportPurchasesDbf,   name: 'PURCHASE', auctionFilter: true, dateFilter: true, xlsx: true, label: 'Purchases (PURCHASE.DBF)' },
+  bills:        { fn: exportBillsDbf,       name: 'BILL',     auctionFilter: true, dateFilter: true, xlsx: true, label: 'Bills of Supply (BILL.DBF)' },
+  debit_notes:  { fn: exportDebitNotesDbf,  name: 'DEBIT',    auctionFilter: true, dateFilter: true, xlsx: true, label: 'Debit Notes' },
+  traders:      { fn: exportTradersDbf,     name: 'NAM',      master: true, xlsx: true, xlsxFn: exportTradersXlsx, label: 'Sellers (NAM.DBF)' },
+  buyers:       { fn: exportBuyersDbf,      name: 'SBL',      master: true, xlsx: true, xlsxFn: exportBuyersXlsx, label: 'Buyers (SBL.DBF)' },
 };
 
 module.exports = {

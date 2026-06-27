@@ -798,6 +798,11 @@ async function initDb() {
     'ALTER TABLE bills ADD COLUMN auction_id INTEGER',
     'ALTER TABLE debit_notes ADD COLUMN auction_id INTEGER',
     'ALTER TABLE debit_notes_planter ADD COLUMN auction_id INTEGER',
+    // Per-user extra permission grants (CSV of capability names) layered on
+    // top of the user's role defaults — see GRANTABLE_EXTRA_PERMISSIONS in
+    // server.js. Lets an admin give one operator e.g. delete/settings_write
+    // without changing the whole role.
+    "ALTER TABLE users ADD COLUMN extra_permissions TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN code TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN cadd2 TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN email TEXT DEFAULT ''",

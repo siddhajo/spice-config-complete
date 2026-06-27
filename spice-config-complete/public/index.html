@@ -3116,6 +3116,20 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       </div>
     </div></div>
 
+    <!-- Extra Permissions Modal — grant a single user capabilities on top of
+         their role (e.g. let one operator delete records) without promoting
+         the whole role. Server allowlist: GRANTABLE_EXTRA_PERMISSIONS. -->
+    <div class="modal-bg" id="perms-modal"><div class="modal">
+      <h2>Extra Permissions</h2>
+      <p style="font-size:13px;color:var(--spice-text-mute);margin-bottom:14px">Grant <strong id="perms-username"></strong> capabilities on top of their role. Takes effect on their next action — they don't need to sign out.</p>
+      <input type="hidden" id="perms-user-id">
+      <div id="perms-checkboxes" style="display:flex;flex-direction:column;gap:10px;margin-bottom:6px"></div>
+      <div class="actions">
+        <button class="btn btn-o" onclick="hideModal('perms-modal')">Cancel</button>
+        <button class="btn btn-g" onclick="doSavePerms()">Save Permissions</button>
+      </div>
+    </div></div>
+
     <!-- SELLERS -->
     <div class="tc" id="tc-traders">
       <div class="card">
@@ -5261,7 +5275,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
   <!-- Reassign panel — tile grid + FROM/TO selectors -->
   <div id="alloc-panel-reassign" style="display:none">
-    <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Move unused lot numbers from one branch to another. Click tiles to select. Booked lots (with sellers) cannot be reassigned.</p>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:12px">Move unused lot numbers from one branch to another. <b>Click</b> a tile to toggle it, or <b>drag</b> across tiles to select a whole range — drag again elsewhere to add another range (e.g. 001-010 <i>and</i> 090-100). Booked lots (with sellers) cannot be reassigned.</p>
     <div id="alloc-reassign-status" style="margin-bottom:14px"></div>
 
     <!-- Tile legend so the user knows what each color means at a glance -->
@@ -5273,7 +5287,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     </div>
 
     <!-- Tile grid — grouped by branch, scrollable when content overflows -->
-    <div id="ra-tile-grid" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff;margin-bottom:12px"></div>
+    <div id="ra-tile-grid" style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff;margin-bottom:8px"></div>
+    <div id="ra-selsummary" style="font-size:11.5px;color:var(--text2);margin-bottom:12px;min-height:14px"></div>
 
     <div style="background:#fff8f0;border:1px solid #f0d8c0;border-radius:10px;padding:14px">
       <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end;margin-bottom:10px">
@@ -9361,6 +9376,10 @@ async function loadUsers(){
   // Load users list
   try{
     const users = await j('/api/users');
+    // Cache by id so the per-user Permissions modal can read the current
+    // grants + the server's grantable allowlist without a second fetch.
+    window._usersById = {};
+    for (const u of users) window._usersById[u.id] = u;
     DataTable.mount('users-list', users, {
       emptyState: { icon: 'traders', title: "No users yet", body: "Create logins so each person on your team can use their own credentials." },
       columns: [
@@ -9394,6 +9413,7 @@ async function loadUsers(){
             // Three actions: Change Role, Reset PW, Delete (delete hidden for self).
             // Compact buttons sized 32px tall for tight vertical density.
             return `<button class="btn btn-o" style="height:32px;font-size:12px;padding:0 10px" onclick="openChangeRoleModal(${u.id},'${esc(u.username)}','${esc(u.role||'viewer')}')" title="Promote or demote this user">Role</button>`
+              + ` <button class="btn btn-o" style="height:32px;font-size:12px;padding:0 10px;margin-left:4px" onclick="openPermsModal(${u.id})" title="Grant extra capabilities (e.g. delete) on top of this user's role">Perms</button>`
               + ` <button class="btn btn-o" style="height:32px;font-size:12px;padding:0 10px;margin-left:4px" onclick="openResetPwModal(${u.id},'${esc(u.username)}')">Reset PW</button>`
               + (isMe ? '' : ` <button class="btn btn-r" style="height:32px;font-size:12px;padding:0 10px;margin-left:4px" onclick="deleteUser(${u.id},'${esc(u.username)}')">Delete</button>`);
           } }
@@ -9512,6 +9532,62 @@ async function doChangeRole(){
     const r = await j(`/api/users/${id}/role`, { method:'PUT', body:JSON.stringify({ role }) });
     toast(`Role updated to ${r.role || role}`);
     hideModal('change-role-modal');
+    loadUsers();
+  }catch(e){showError(e)}
+}
+// ── Extra Permissions ─────────────────────────────────────
+// Grant a single user capabilities on top of their role (e.g. let one
+// operator delete records) without promoting the whole role. The server
+// returns each user's current grants + the grantable allowlist; we render
+// a checkbox per grantable capability. Caps the user's role ALREADY covers
+// are shown ticked + disabled ("granted by role") so it's clear they apply.
+const PERM_LABELS = {
+  delete:         { label:'Delete records', hint:'Delete individual lots, invoices, bills, debit notes, etc.' },
+  settings_write: { label:'Edit settings',  hint:'Edit company settings — rates, charges, addresses, feature flags.' },
+  delete_all:     { label:'Bulk Delete All',hint:'Wipe an entire table at once.' },
+  invoice_revert: { label:'Revert invoices',hint:'Undo / regenerate sales & purchase invoices.' },
+};
+// Which grantable caps each role already includes — keeps the modal honest
+// about what a grant actually adds. Mirrors ROLE_PERMISSIONS in server.js
+// for the grantable subset only.
+const ROLE_BASE_CAPS = {
+  viewer:   [],
+  lot_entry:[],
+  operator: [],
+  manager:  ['settings_write','invoice_revert'],
+  admin:    ['delete','settings_write','delete_all','invoice_revert'],
+};
+function openPermsModal(id){
+  const u = (window._usersById || {})[id];
+  if (!u) { showError(new Error('User not found — refresh the list')); return; }
+  document.getElementById('perms-user-id').value = id;
+  document.getElementById('perms-username').textContent = u.username;
+  const grantable = Array.isArray(u.grantable_permissions) && u.grantable_permissions.length
+    ? u.grantable_permissions : ['delete','settings_write'];
+  const current = new Set(Array.isArray(u.extra_permissions) ? u.extra_permissions : []);
+  const roleCaps = new Set(ROLE_BASE_CAPS[(u.role==='user'?'viewer':u.role)] || []);
+  const box = document.getElementById('perms-checkboxes');
+  box.innerHTML = grantable.map(cap => {
+    const meta = PERM_LABELS[cap] || { label:cap, hint:'' };
+    const byRole = roleCaps.has(cap);
+    const checked = byRole || current.has(cap);
+    return `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:8px;cursor:${byRole?'not-allowed':'pointer'};opacity:${byRole?'.6':'1'}">
+      <input type="checkbox" class="perm-cb" value="${esc(cap)}" ${checked?'checked':''} ${byRole?'disabled':''} style="width:16px;height:16px;margin-top:1px">
+      <span><strong style="font-size:13px">${esc(meta.label)}</strong>${byRole?' <span style="font-size:11px;color:var(--spice-text-hint)">(granted by role)</span>':''}<br><span style="font-size:11.5px;color:var(--spice-text-mute)">${esc(meta.hint)}</span></span>
+    </label>`;
+  }).join('') || '<p style="font-size:13px;color:var(--spice-text-mute)">No grantable permissions configured.</p>';
+  showModal('perms-modal');
+}
+async function doSavePerms(){
+  const id = document.getElementById('perms-user-id').value;
+  // Only the enabled (not role-covered) boxes are real grants; disabled ones
+  // are role defaults and the server drops them anyway.
+  const permissions = Array.from(document.querySelectorAll('#perms-checkboxes .perm-cb'))
+    .filter(cb => cb.checked && !cb.disabled).map(cb => cb.value);
+  try{
+    await j(`/api/users/${id}/permissions`, { method:'PUT', body:JSON.stringify({ permissions }) });
+    toast('Permissions updated');
+    hideModal('perms-modal');
     loadUsers();
   }catch(e){showError(e)}
 }
@@ -12818,7 +12894,7 @@ async function closeDepot(branch){
 function _allocCardKey(branch, range){ return `${branch}::${range.start}-${range.end}`; }
 function _allocMarkKey(branch, lot)  { return `${branch}::${lot}`; }
 
-// ── Edit Allocations: per-range cards with lot chips ────────────
+// ── Edit Allocations: one consolidated card per BRANCH ──────────
 function renderAllocEditCards(stats){
   const host = document.getElementById('alloc-edit-cards');
   if (!host) return;
@@ -12827,24 +12903,27 @@ function renderAllocEditCards(stats){
     _updateAllocMarkedCount();
     return;
   }
-  // Flatten into per-range cards — one card per allocation row.
-  const cards = [];
-  for (const s of stats) {
-    for (const r of (s.ranges || [])) cards.push({ branch: s.branch, range: r });
-  }
-  // Stable sort: by branch, then by numeric start lot.
-  cards.sort((a, b) => {
-    const bn = String(a.branch).localeCompare(String(b.branch));
-    if (bn) return bn;
-    const am = String(a.range.start).match(/(\d+)$/);
-    const bm = String(b.range.start).match(/(\d+)$/);
-    return (am ? +am[1] : 0) - (bm ? +bm[1] : 0);
-  });
+  // One card per BRANCH (not per range). A branch whose allocation is
+  // split into several ranges (e.g. 21-50, 71-90, 101-110) shows as a
+  // single consolidated chip list, sorted by lot number, with the
+  // underlying ranges summarised in the header. Marks/saves still work
+  // off (branch, lot) keys, so the constituent ranges are preserved on
+  // save — only the display is unified.
+  const branches = stats.slice().sort((a, b) => String(a.branch).localeCompare(String(b.branch)));
 
-  host.innerHTML = cards.map(({ branch, range }) => {
-    const cardKey = _allocCardKey(branch, range);
-    const hidden  = _allocHidden.has(cardKey);
-    const lots    = range.lots || [];
+  host.innerHTML = branches.map((s) => {
+    const branch  = s.branch;
+    const hidden  = _allocHidden.has(branch);
+    // Flatten every range's lots into one list, sorted by prefix+num.
+    const lots = [];
+    for (const r of (s.ranges || [])) for (const l of (r.lots || [])) lots.push(l);
+    lots.sort((a, b) => {
+      const am = String(a.lot).match(/^(\D*)(\d+)$/), bm = String(b.lot).match(/^(\D*)(\d+)$/);
+      const ap = am ? am[1] : '', bp = bm ? bm[1] : '';
+      if (ap !== bp) return ap.localeCompare(bp);
+      return (am ? +am[2] : 0) - (bm ? +bm[2] : 0);
+    });
+    const rangeSummary = (s.ranges || []).map(r => `${r.start}–${r.end}`).join(', ');
     const usedCt  = lots.filter(l => l.used).length;
     const free    = lots.filter(l => !l.used);
     const marked  = free.filter(l => _allocMarked.has(_allocMarkKey(branch, l.lot))).length;
@@ -12874,17 +12953,17 @@ function renderAllocEditCards(stats){
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${hidden ? '0' : '10px'};flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
           <span style="font-size:13px;font-weight:700;color:var(--green);letter-spacing:.3px">${esc(branch)}</span>
-          <span style="font-family:monospace;font-size:13px;color:var(--text2);font-weight:600">${esc(range.start)}–${esc(range.end)}</span>
+          <span style="font-family:monospace;font-size:12px;color:var(--text3);font-weight:600" title="Allocated ranges">${esc(rangeSummary)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text3)">
           <span>${usedCt} used · ${free.length - marked} free${marked ? ` · <b style="color:#16a34a">${marked} marked</b>` : ''} · keeping ${keeping}</span>
-          <button type="button" class="btn btn-o" style="height:24px;padding:0 10px;font-size:11px;font-weight:600" onclick="_allocToggleHide('${esc(cardKey)}')">${hidden ? 'Show' : 'Hide'}</button>
+          <button type="button" class="btn btn-o" style="height:24px;padding:0 10px;font-size:11px;font-weight:600" onclick="_allocToggleHide('${esc(branch)}')">${hidden ? 'Show' : 'Hide'}</button>
         </div>
       </div>
       ${hidden ? '' : `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${chips || '<span style="font-size:11px;color:var(--text3)">empty range</span>'}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button type="button" class="btn btn-o" style="height:26px;padding:0 12px;font-size:11px;font-weight:600" onclick="_allocMarkAllFree('${esc(branch)}','${esc(range.start)}','${esc(range.end)}')">Mark all free for delete</button>
-        <button type="button" class="btn btn-o" style="height:26px;padding:0 12px;font-size:11px;font-weight:600" onclick="_allocClearMarks('${esc(branch)}','${esc(range.start)}','${esc(range.end)}')">Clear marks</button>
+        <button type="button" class="btn btn-o" style="height:26px;padding:0 12px;font-size:11px;font-weight:600" onclick="_allocMarkAllFreeBranch('${esc(branch)}')">Mark all free for delete</button>
+        <button type="button" class="btn btn-o" style="height:26px;padding:0 12px;font-size:11px;font-weight:600" onclick="_allocClearMarksBranch('${esc(branch)}')">Clear marks</button>
       </div>`}
     </div>`;
   }).join('');
@@ -12908,20 +12987,18 @@ function _allocToggleHide(cardKey){
   else _allocHidden.add(cardKey);
   renderAllocEditCards(_raAllocStats);
 }
-function _allocMarkAllFree(branch, rStart, rEnd){
+// Branch-level mark/clear — operate across every range of the branch
+// (the card is now consolidated per branch).
+function _allocMarkAllFreeBranch(branch){
   const s = (_raAllocStats || []).find(x => x.branch === branch);
   if (!s) return;
-  const r = (s.ranges || []).find(x => x.start === rStart && x.end === rEnd);
-  if (!r) return;
-  for (const l of (r.lots || [])) if (!l.used) _allocMarked.add(_allocMarkKey(branch, l.lot));
+  for (const r of (s.ranges || [])) for (const l of (r.lots || [])) if (!l.used) _allocMarked.add(_allocMarkKey(branch, l.lot));
   renderAllocEditCards(_raAllocStats);
 }
-function _allocClearMarks(branch, rStart, rEnd){
+function _allocClearMarksBranch(branch){
   const s = (_raAllocStats || []).find(x => x.branch === branch);
   if (!s) return;
-  const r = (s.ranges || []).find(x => x.start === rStart && x.end === rEnd);
-  if (!r) return;
-  for (const l of (r.lots || [])) _allocMarked.delete(_allocMarkKey(branch, l.lot));
+  for (const r of (s.ranges || [])) for (const l of (r.lots || [])) _allocMarked.delete(_allocMarkKey(branch, l.lot));
   renderAllocEditCards(_raAllocStats);
 }
 
@@ -12957,15 +13034,70 @@ function renderReassignTiles(){
         const selected = _raSelected.has(t.lot);
         const dis = (t.state === 'booked');
         const tip = t.booked ? `Booked: ${t.seller || '—'}` : 'Free for reassign';
-        html += `<div title="${esc(tip)}" data-lot="${esc(t.lot)}" data-branch="${esc(branch)}" data-state="${esc(t.state)}" ${dis?'':`onclick="raToggleTile(this)"`} style="${stateStyle(t.state, selected)};padding:4px 6px;border-radius:4px;font-size:11px;font-family:monospace;min-width:42px;text-align:center;${dis?'opacity:.85':'cursor:pointer'};user-select:none">${esc(t.lot)}</div>`;
+        const handlers = dis ? '' : ` onmousedown="raTileMouseDown(event,this)" onmouseover="raTileMouseOver(event,this)" onclick="raToggleTile(this)"`;
+        html += `<div title="${esc(tip)}" data-lot="${esc(t.lot)}" data-branch="${esc(branch)}" data-state="${esc(t.state)}"${handlers} style="${stateStyle(t.state, selected)};padding:4px 6px;border-radius:4px;font-size:11px;font-family:monospace;min-width:42px;text-align:center;${dis?'opacity:.85':'cursor:pointer'};user-select:none">${esc(t.lot)}</div>`;
       }
     }
     html += `</div></div>`;
   }
   grid.innerHTML = html;
   updateRangeInputsFromSelection();
+  updateSelectionSummary();
 }
+
+// ── Drag-to-select on the Reassign tile grid ───────────────────────
+// Mouse drag selects a contiguous run of tiles within ONE branch and
+// ADDS it to the existing selection, so the user can build up several
+// disjoint ranges (e.g. 001-010 then 090-100) and reassign them in one
+// go. A plain click (no drag) still toggles a single tile.
+let _raDrag = null;   // { branch, anchor, base:Set } while a drag is live
+
+function raTileMouseDown(e, el){
+  if (e.button !== 0) return;                 // left button only
+  const branch = el.getAttribute('data-branch');
+  const lot    = el.getAttribute('data-lot');
+  if (!lot) return;
+  // A drag/click in a different branch switches FROM and clears the
+  // selection — multi-branch reassign isn't supported.
+  const fromSel = document.getElementById('ra-from');
+  if (fromSel.value && fromSel.value !== branch) _raSelected.clear();
+  if (fromSel.value !== branch) { fromSel.value = branch; loadReassignPreview(); }
+  _raDrag = { branch, anchor: lot, base: new Set(_raSelected), moved: false };
+  e.preventDefault();   // stop the browser starting a text selection
+}
+function raTileMouseOver(e, el){
+  if (!_raDrag) return;
+  if (!(e.buttons & 1)) { _raDrag = null; return; }   // button already released
+  if (el.getAttribute('data-branch') !== _raDrag.branch) return;
+  const lot = el.getAttribute('data-lot');
+  if (lot === _raDrag.anchor) return;
+  _raDrag.moved = true;
+  _raApplyDragRange(lot);
+}
+// Build (base ∪ [anchor..current]) over the FROM branch's tile order,
+// skipping booked tiles, then re-render.
+function _raApplyDragRange(curLot){
+  const s = (_raAllocStats || []).find(x => x.branch === _raDrag.branch);
+  if (!s) return;
+  const ordered = [];
+  for (const r of (s.ranges || [])) for (const t of (r.lots || [])) ordered.push(t);
+  const ia = ordered.findIndex(t => t.lot === _raDrag.anchor);
+  const ib = ordered.findIndex(t => t.lot === curLot);
+  if (ia < 0 || ib < 0) return;
+  const lo = Math.min(ia, ib), hi = Math.max(ia, ib);
+  _raSelected = new Set(_raDrag.base);
+  for (let i = lo; i <= hi; i++) {
+    if (ordered[i].state !== 'booked') _raSelected.add(ordered[i].lot);
+  }
+  renderReassignTiles();
+}
+// End any live drag on mouse-up anywhere. A drag that moved across tiles
+// ends here (no click fires because down/up are on different elements);
+// a no-move press falls through to raToggleTile's click toggle.
+document.addEventListener('mouseup', () => { _raDrag = null; });
+
 function raToggleTile(el){
+  if (_raDrag && _raDrag.moved) return;   // tail click after a drag — ignore
   const lot = el.getAttribute('data-lot');
   const branch = el.getAttribute('data-branch');
   if (!lot) return;
@@ -12981,14 +13113,46 @@ function raToggleTile(el){
   else _raSelected.add(lot);
   renderReassignTiles();
 }
+// Collapse the current selection into contiguous "001-010, 090-100"
+// chunks (same prefix, sequential). Used for the summary + confirm text.
+function _raChunkSummary(lots){
+  const parsed = (lots || []).map(l => {
+    const m = String(l).match(/^(\D*)(\d+)$/);
+    return m ? { lot: l, prefix: m[1] || '', num: parseInt(m[2], 10) } : null;
+  }).filter(Boolean).sort((a, b) => a.prefix === b.prefix ? a.num - b.num : a.prefix.localeCompare(b.prefix));
+  if (!parsed.length) return '';
+  const out = [];
+  let chunk = [parsed[0]];
+  for (let i = 1; i < parsed.length; i++) {
+    const prev = chunk[chunk.length - 1];
+    if (parsed[i].prefix === prev.prefix && parsed[i].num === prev.num + 1) chunk.push(parsed[i]);
+    else { out.push(chunk); chunk = [parsed[i]]; }
+  }
+  out.push(chunk);
+  return out.map(ch => ch.length === 1 ? ch[0].lot : `${ch[0].lot}-${ch[ch.length - 1].lot}`).join(', ');
+}
+// Show the live selection beneath the tile grid so the user can see
+// exactly which (possibly disjoint) lots will be reassigned.
+function updateSelectionSummary(){
+  const el = document.getElementById('ra-selsummary');
+  if (!el) return;
+  const n = _raSelected.size;
+  el.innerHTML = n
+    ? `<b>${n} lot${n === 1 ? '' : 's'} selected:</b> <span style="font-family:monospace">${esc(_raChunkSummary(Array.from(_raSelected)))}</span>`
+    : '<span style="color:var(--text3)">No lots selected — click or drag tiles above.</span>';
+}
 // Sync start/end inputs from current selection — gives the user a
-// typed-range fallback while keeping tiles as the primary picker.
+// typed-range fallback while keeping tiles as the primary picker. When
+// the selection is a single contiguous run the inputs mirror it; for a
+// disjoint selection they are cleared (the tile selection is authoritative).
 function updateRangeInputsFromSelection(){
   const startEl = document.getElementById('ra-start');
   const endEl   = document.getElementById('ra-end');
   if (!startEl || !endEl) return;
   const sel = Array.from(_raSelected);
   if (!sel.length) { startEl.value = ''; endEl.value = ''; return; }
+  const summary = _raChunkSummary(sel);
+  if (summary.includes(',')) { startEl.value = ''; endEl.value = ''; return; }  // disjoint → don't mislead
   const parsed = sel.map(l => {
     const m = l.match(/^(\D*)(\d+)$/);
     return m ? { lot: l, prefix: m[1] || '', num: parseInt(m[2], 10), padLen: m[2].length } : null;
@@ -13208,13 +13372,27 @@ async function executeReassign(){
   if (!from)  return showErr('Select FROM branch');
   if (!to)    return showErr('Select TO branch');
   if (from === to) return showErr('FROM and TO must be different');
-  if (!start || !end) return showErr('Enter start and end lot numbers');
-  if (!await appConfirm(`Reassign lots ${start}-${end} from ${from} to ${to}?`)) return;
+
+  // Prefer the tile selection (supports disjoint/multi-range). Fall back
+  // to the typed start/end inputs when nothing is selected on the tiles.
+  const lots = Array.from(_raSelected);
+  let body, summary;
+  if (lots.length) {
+    body = { from_branch: from, to_branch: to, lots };
+    summary = _raChunkSummary(lots);
+  } else if (start && end) {
+    body = { from_branch: from, to_branch: to, start_lot: start, end_lot: end };
+    summary = `${start}-${end}`;
+  } else {
+    return showErr('Select lots to reassign (click or drag the tiles) or enter a start/end range');
+  }
+  const countTxt = lots.length ? `${lots.length} lot${lots.length === 1 ? '' : 's'} ` : '';
+  if (!await appConfirm(`Reassign ${countTxt}(${summary}) from ${from} to ${to}?`)) return;
 
   try {
     const d = await j(`/api/auctions/${_allocEditAuctionId}/reassign-lots`, {
       method: 'POST',
-      body: JSON.stringify({ from_branch: from, to_branch: to, start_lot: start, end_lot: end })
+      body: JSON.stringify(body)
     });
     errEl.style.display = 'block';
     errEl.style.background = '#dcfce7';
@@ -15903,6 +16081,12 @@ async function loadInvoices(opts){
   // column only shows in e-Trade.
   const _invIsETrade = (typeof getCurrentBusinessMode === 'function')
     && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-trade';
+  // ASP context = Kerala + e-Trade. The list then shows only ASP→ISP transfer
+  // invoices, which don't carry a cross-ref ASP#, an e-Way lorry/distance, or
+  // separately-billed transport/insurance (those are absorbed / ISP-side).
+  // Hide those columns so the ASP view stays clean.
+  const _invIsASPContext = _invIsETrade
+    && String((typeof getCurrentBusinessState === 'function' ? getCurrentBusinessState() : '') || '').toUpperCase() === 'KERALA';
   // ISP company name for the ASP-context Trade Name override (below). In
   // ASP (Kerala + e-Trade) the invoice bills ISP, so the list — like the PDF
   // BILL-TO — must read the ISP company name, not the external buyer's. Pull
@@ -15953,7 +16137,7 @@ async function loadInvoices(opts){
       // ASP Inv# (e-Trade only) — the paired ASP/Kerala invoice number for this
       // ISP sale, hydrated server-side onto invoices.asp_invo. Blank for ASP
       // rows themselves (it would just duplicate Inv#) → muted em-dash.
-      ...(_invIsETrade ? [{ key:'asp_invo', label:'ASP Inv#', sort:'text',
+      ...(_invIsETrade && !_invIsASPContext ? [{ key:'asp_invo', label:'ASP Inv#', sort:'text',
         value:(i)=>i.asp_invo||'',
         render:(i)=> i.asp_invo
           ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.asp_invo)}</span>`
@@ -15962,18 +16146,18 @@ async function loadInvoices(opts){
       // show a muted em-dash so the column doesn't read as a layout bug.
       // Monospace because plate numbers (TN66H1234) read better in a
       // mono face when scanning down the column.
-      { key:'lorry_no', label:'Lorry', sort:'text',
+      ...(!_invIsASPContext ? [{ key:'lorry_no', label:'Lorry', sort:'text',
         render:(i)=> i.lorry_no
           ? `<span style="font-family:monospace;font-weight:600;color:var(--spice-text-main)">${esc(i.lorry_no)}</span>`
-          : '<span style="color:var(--text3)">—</span>' },
+          : '<span style="color:var(--text3)">—</span>' }] : []),
       // Distance (e-Way Bill km) — resolved server-side: per-invoice override
       // (distance_km) wins, else the saved route value (resolved_km).
-      { key:'distance_km', label:'Distance', sort:'number', numeric:true,
+      ...(!_invIsASPContext ? [{ key:'distance_km', label:'Distance', sort:'number', numeric:true,
         value:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km; return Number(km)||0; },
         render:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km;
           return (km != null && km !== '' && Number(km) > 0)
           ? `<span style="color:var(--spice-text-main)">${fmtI(Number(km),0)} km</span>`
-          : '<span style="color:var(--text3)">—</span>'; } },
+          : '<span style="color:var(--text3)">—</span>'; } }] : []),
       // Buyer code (invoices.buyer) shown before the trade name.
       { key:'_code', label:'Code', sort:'text',
         value:(i)=>i.buyer||'',
@@ -15989,8 +16173,10 @@ async function loadInvoices(opts){
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       // Charge breakdown — gunny, transport (stored in pava_hc), insurance (ins).
       { key:'gunny', label:'Gunny', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
-      { key:'pava_hc', label:'Transport', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
-      { key:'ins', label:'Insurance', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
+      // Transport (pava_hc) + Insurance — not separately billed on ASP→ISP
+      // transfers, so hidden in ASP context.
+      ...(!_invIsASPContext ? [{ key:'pava_hc', label:'Transport', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) }] : []),
+      ...(!_invIsASPContext ? [{ key:'ins', label:'Insurance', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) }] : []),
       { key:'cgst', label:'CGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'sgst', label:'SGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       { key:'igst', label:'IGST', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
@@ -18763,7 +18949,7 @@ function dbfOnTypeChange(){
     const a=document.getElementById('dbf-filter-auction'); if(a) a.style.display='none';
     const d=document.getElementById('dbf-filter-date');    if(d) d.style.display='none';
   } else { dbfSyncMode(); }
-  const xb=document.getElementById('dbf-btn-xlsx'); if(xb) xb.style.display=isMaster?'':'none'; // XLSX = master only
+  const xb=document.getElementById('dbf-btn-xlsx'); if(xb) xb.style.display=''; // XLSX available for every module
   const prev=document.getElementById('dbf-preview'); if(prev) prev.innerHTML='';
   const meta=document.getElementById('dbf-meta'); if(meta) meta.textContent='';
 }
@@ -24061,13 +24247,16 @@ function leBuildReceiptHtml(format, lots, ctx) {
   const today = new Date();
   const printedAt = today.toLocaleDateString('en-GB');
 
-  // Pick state-specific company info (TN vs KL). The lot's state field
-  // may differ from business_state when both are in play, so prefer
-  // the lot's state for the address block. EVERY field here is
-  // settings-driven (Settings → Company / Address / Integrations) — no
+  // Pick state-specific company info (TN vs KL). The receipt is issued BY
+  // the business to the seller, so the issuing company is determined by the
+  // active business_state (KERALA = ASP, else ISP) — NOT the seller/lot's
+  // physical state. This matches effectiveCompany() (PDF/WhatsApp receipt)
+  // and the mobile slip, so all three render the same header. Lot state is
+  // only a fallback when business_state is somehow blank. EVERY field here
+  // is settings-driven (Settings → Company / Address / Integrations) — no
   // hardcoded company names, codes, or fallbacks.
   const sampleLot = lots[0] || {};
-  const isKerala = String(sampleLot.state || cfg.business_state || '').toUpperCase().includes('KERALA');
+  const isKerala = String(cfg.business_state || sampleLot.state || '').toUpperCase().includes('KERALA');
   const phone  = isKerala ? (cfg.kl_phone    || cfg.tn_phone    || '') : (cfg.tn_phone    || '');
   const email  = isKerala ? (cfg.kl_email    || cfg.tn_email    || '') : (cfg.tn_email    || '');
   const addr1  = isKerala ? (cfg.kl_address1 || cfg.tn_address1 || '') : (cfg.tn_address1 || '');
