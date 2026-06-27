@@ -73,7 +73,11 @@ function getReceiptConfig(db) {
   const isKL = String(get('business_state', '')).toUpperCase().includes('KERALA');
   const lotShortName = String(isKL ? get('lot_receipt_short_name_kl', '')
                                    : get('lot_receipt_short_name_tn', '')).trim();
+  // e-Trade labels the trade/auction number "P.No" on the slip; e-Auction
+  // keeps the legacy "Trade #". Mirrors the desktop receipt.
+  const isTrade = String(get('business_mode', 'e-Trade')) === 'e-Trade';
   return {
+    tradeNoLabel: isTrade ? 'P.No ' : 'Trade #',
     // Receipt header name. Prefers the lot-receipt short name above; the
     // legacy 'trade_name' resolved to "IDEAL SPICES" on this tenant, which
     // printed the wrong company name on the slip.
@@ -100,7 +104,7 @@ function getReceiptConfig(db) {
 // header scales its fonts + row height + logo with the paper so a detailed
 // slip stays legible on a narrow roll. All scales are 1 at the default
 // 340pt page, so a full-size header is unchanged when no width is set.
-function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo, pageW) {
+function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo, pageW, tradeLabel) {
   const m = 20;
   const pw = pageW || 340;
   const w = pw - 2 * m;
@@ -123,7 +127,7 @@ function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo, pageW) {
   doc.font('Helvetica').fontSize(fs(10));
   const y0 = doc.y;
   doc.text('Date: ' + dateFmt, m, y0, { width: w / 2 });
-  doc.text('Trade #' + tradeNo, m + w / 2, y0, { width: w / 2, align: 'right' });
+  doc.text((tradeLabel || 'Trade #') + tradeNo, m + w / 2, y0, { width: w / 2, align: 'right' });
   doc.y = y0 + 16 * vs;
   doc.moveDown(0.2);
   doc.moveTo(m, doc.y).lineTo(m + w, doc.y).dash(3, { space: 3 }).lineWidth(0.5).stroke().undash();
@@ -134,7 +138,7 @@ function addReceiptHeader(doc, appTitle, branch, dateFmt, tradeNo, pageW) {
 // pageW follows the configured paper width. The compact slip keeps its
 // fonts + row heights fixed (already thermal-sized) and only widens/narrows
 // the content + logo with the paper, so its vertical extent is invariant.
-function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo, pageW) {
+function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo, pageW, tradeLabel) {
   const m = 10;
   const pw = pageW || 180;
   const w = pw - 2 * m;
@@ -147,7 +151,7 @@ function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo, pageW)
   doc.font('Helvetica').fontSize(7);
   const y0 = doc.y;
   doc.text('Date: ' + dateFmt, m, y0, { width: w / 2 });
-  doc.text('Trade #' + tradeNo, m + w / 2, y0, { width: w / 2, align: 'right' });
+  doc.text((tradeLabel || 'Trade #') + tradeNo, m + w / 2, y0, { width: w / 2, align: 'right' });
   doc.y = y0 + 10;
   doc.moveTo(m, doc.y).lineTo(m + w, doc.y).dash(2, { space: 2 }).lineWidth(0.4).stroke().undash();
   doc.moveDown(0.2);
@@ -173,7 +177,7 @@ function renderSellerReceipt(doc, sellerLots, cfg) {
   const lb = (k, d) => L[k] || d;
   const headerBranch = cfg.branch || lot.branch;
 
-  addReceiptHeader(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano, pageW);
+  addReceiptHeader(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano, pageW, cfg.tradeNoLabel);
 
   const lw = 70 * sc;
   const { maskAcct, maskIfsc } = makeMaskers({ mask_acct: cfg.acctMask, mask_ifsc: cfg.ifscMask });
@@ -266,7 +270,7 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
   const lb = (k, d) => L[k] || d;
   const headerBranch = cfg.branch || lot.branch;
 
-  addReceiptHeaderCompact(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano, pageW);
+  addReceiptHeaderCompact(doc, cfg.appTitle, headerBranch, dateFmt, lot.ano, pageW, cfg.tradeNoLabel);
 
   const lw = 32 * sc;
   const { maskAcct, maskIfsc } = makeMaskers({ mask_acct: cfg.acctMask, mask_ifsc: cfg.ifscMask });

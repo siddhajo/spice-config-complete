@@ -1116,13 +1116,26 @@ function buildAgriBill(db, auctionId, sellerName, cfg) {
   let totalQty = 0, totalPuramt = 0;
   const lineItems = [];
 
+  // A Bill of Supply documents the ISP company's purchase FROM the
+  // agriculturist, so in e-Trade it must always use the ISP-view planter
+  // numbers (isp_pqty / isp_prate / isp_puramt) — NOT the active-state view,
+  // which would show ASP internal-transfer figures when business_state is
+  // KERALA. Fall back to the legacy active columns when the isp_* dual-storage
+  // columns weren't backfilled (isp_puramt = 0). In e-Auction the isp_/asp_
+  // values are identical to the active ones, so this is a no-op there.
+  const isETrade = String(cfg.business_mode || '').toLowerCase() === 'e-trade';
+
   for (const lot of lots) {
-    totalQty += lot.pqty || lot.qty;
-    totalPuramt += lot.puramt || 0;
+    const useIsp = isETrade && Number(lot.isp_puramt) > 0;
+    const pqty   = useIsp ? lot.isp_pqty   : lot.pqty;
+    const prate  = useIsp ? lot.isp_prate  : lot.prate;
+    const puramt = useIsp ? lot.isp_puramt : lot.puramt;
+    totalQty += pqty || lot.qty;
+    totalPuramt += puramt || 0;
     lineItems.push({
-      lot: lot.lot_no, qty: lot.qty, pqty: lot.pqty,
-      price: lot.price, prate: lot.prate,
-      amount: lot.amount, puramt: lot.puramt,
+      lot: lot.lot_no, qty: lot.qty, pqty: pqty,
+      price: lot.price, prate: prate,
+      amount: lot.amount, puramt: puramt,
       com: lot.com, sertax: lot.sertax
     });
   }

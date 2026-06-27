@@ -665,6 +665,10 @@ function generateCropReceiptPDF(lot, cfg) {
 function generateLotReceiptPDF(lots, cfg, opts) {
   opts = opts || {};
   const co = effectiveCompany(cfg);
+  // e-Trade slip is a "Weight Receipt": drop Rate/Amount in favour of
+  // Sample Wt + Gross Wt, title it "WEIGHT RECEIPT", and label the number
+  // "P.No". e-Auction keeps the original lot receipt (Rate/Amount).
+  const isTrade = !!(cfg && cfg.business_mode === 'e-Trade');
   const traderName = opts.traderName || (lots[0] && lots[0].name) || '';
   const ano = opts.ano != null ? opts.ano : (lots[0] && lots[0].ano) || '';
   const dateStr = opts.date
@@ -678,7 +682,7 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   // it comes from cfg. Blank/0 keeps the legacy A4 layout below untouched.
   const widthMm = Number(opts.widthMm != null ? opts.widthMm : (cfg && cfg.lot_receipt_width_mm)) || 0;
   if (widthMm > 0) {
-    return generateLotReceiptThermalPDF({ co, lots, traderName, ano, dateStr, widthMm });
+    return generateLotReceiptThermalPDF({ co, lots, traderName, ano, dateStr, widthMm, isTrade });
   }
 
   const doc = new PDFDocument({ size: 'A4', margin: 36 });
@@ -699,11 +703,11 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   if (co.gstin) { doc.text('GSTIN: ' + co.gstin, x, y, { align: 'center', width: w }); y += 12; }
 
   doc.moveTo(x, y).lineTo(x + w, y).stroke(); y += 9;
-  doc.fontSize(12).font('Helvetica-Bold').text('LOT RECEIPT', x, y, { align: 'center', width: w });
+  doc.fontSize(12).font('Helvetica-Bold').text(isTrade ? 'WEIGHT RECEIPT' : 'LOT RECEIPT', x, y, { align: 'center', width: w });
   y += 18;
 
-  // Meta line: Trade No (left) + Date (right)
-  doc.fontSize(9).font('Helvetica-Bold').text('Trade No: ', x, y, { continued: true })
+  // Meta line: P.No / Trade No (left) + Date (right)
+  doc.fontSize(9).font('Helvetica-Bold').text(isTrade ? 'P.No: ' : 'Trade No: ', x, y, { continued: true })
      .font('Helvetica').text(String(ano || '-'));
   doc.font('Helvetica-Bold').text('Date: ', x + w - 150, y, { continued: true, width: 150 })
      .font('Helvetica').text(dateStr);
@@ -711,13 +715,14 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   doc.font('Helvetica-Bold').text('To: ', x, y, { continued: true }).font('Helvetica').text(traderName || '-');
   y += 16;
 
-  // Table columns
+  // Table columns. e-Trade swaps the last two (Rate/Amount) for the weight
+  // pair (Sample Wt / Gross Wt) — same geometry, different labels + data.
   const cols = [
     { key: 'lot',  label: 'Lot',     cx: x,        cw: 70,        align: 'left'  },
     { key: 'bags', label: 'Bags',    cx: x + 70,   cw: 70,        align: 'right' },
     { key: 'qty',  label: 'Qty (kg)',cx: x + 140,  cw: 120,       align: 'right' },
-    { key: 'rate', label: 'Rate',    cx: x + 260,  cw: 120,       align: 'right' },
-    { key: 'amt',  label: 'Amount',  cx: x + 380,  cw: w - 380,   align: 'right' },
+    { key: 'rate', label: isTrade ? 'Sample Wt' : 'Rate',   cx: x + 260,  cw: 120,       align: 'right' },
+    { key: 'amt',  label: isTrade ? 'Gross Wt'  : 'Amount', cx: x + 380,  cw: w - 380,   align: 'right' },
   ];
   const fmtN = (n, dp = 2) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
@@ -729,20 +734,21 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   };
   drawHeader();
 
-  let totBags = 0, totQty = 0, totAmt = 0;
+  let totBags = 0, totQty = 0, totAmt = 0, totSample = 0, totGross = 0;
   doc.font('Helvetica').fontSize(8);
   for (const l of lots) {
     if (y > 760) { doc.addPage(); y = 40; drawHeader(); doc.font('Helvetica').fontSize(8); }
     const bags = Number(l.bags) || 0, qty = Number(l.qty) || 0, price = Number(l.price) || 0;
     const amt = Number(l.amount) || (qty * price);
-    totBags += bags; totQty += qty; totAmt += amt;
+    const sample = Number(l.sample_wt) || 0, gross = Number(l.gross_wt) || 0;
+    totBags += bags; totQty += qty; totAmt += amt; totSample += sample; totGross += gross;
     doc.rect(x, y, w, 14).stroke();
     doc.fillColor('#000');
     doc.text(String(l.lot_no || ''), cols[0].cx + 3, y + 3, { width: cols[0].cw - 6, align: cols[0].align });
     doc.text(String(bags),           cols[1].cx + 3, y + 3, { width: cols[1].cw - 6, align: cols[1].align });
     doc.text(fmtN(qty, 3),           cols[2].cx + 3, y + 3, { width: cols[2].cw - 6, align: cols[2].align });
-    doc.text(fmtN(price),            cols[3].cx + 3, y + 3, { width: cols[3].cw - 6, align: cols[3].align });
-    doc.text(fmtN(amt),              cols[4].cx + 3, y + 3, { width: cols[4].cw - 6, align: cols[4].align });
+    doc.text(isTrade ? fmtN(sample, 3) : fmtN(price), cols[3].cx + 3, y + 3, { width: cols[3].cw - 6, align: cols[3].align });
+    doc.text(isTrade ? fmtN(gross, 3)  : fmtN(amt),   cols[4].cx + 3, y + 3, { width: cols[4].cw - 6, align: cols[4].align });
     y += 14;
   }
 
@@ -752,11 +758,12 @@ function generateLotReceiptPDF(lots, cfg, opts) {
   doc.text('Total',          cols[0].cx + 3, y + 4, { width: cols[0].cw - 6, align: 'left'  });
   doc.text(String(totBags),  cols[1].cx + 3, y + 4, { width: cols[1].cw - 6, align: 'right' });
   doc.text(fmtN(totQty, 3),  cols[2].cx + 3, y + 4, { width: cols[2].cw - 6, align: 'right' });
-  doc.text(fmtN(totAmt),     cols[4].cx + 3, y + 4, { width: cols[4].cw - 6, align: 'right' });
+  if (isTrade) doc.text(fmtN(totSample, 3), cols[3].cx + 3, y + 4, { width: cols[3].cw - 6, align: 'right' });
+  doc.text(isTrade ? fmtN(totGross, 3) : fmtN(totAmt), cols[4].cx + 3, y + 4, { width: cols[4].cw - 6, align: 'right' });
   y += 28;
 
   doc.font('Helvetica').fontSize(7).fillColor('#555')
-     .text('This is a computer-generated lot receipt.', x, y, { align: 'center', width: w });
+     .text(isTrade ? 'This is a computer-generated weight receipt.' : 'This is a computer-generated lot receipt.', x, y, { align: 'center', width: w });
 
   return new Promise((resolve) => {
     doc.on('end', () => resolve(Buffer.concat(buffers)));
@@ -774,6 +781,7 @@ function generateLotReceiptPDF(lots, cfg, opts) {
 // page (no mid-slip break that a thermal cutter would chop in half).
 function generateLotReceiptThermalPDF(p) {
   const { co, lots, traderName, ano, dateStr } = p;
+  const isTrade = !!p.isTrade;  // e-Trade → Weight Receipt (Sample/Gross, P.No)
   // mm → points (72pt = 1in). Floored so a fat-fingered tiny value can't make
   // a zero-width unprintable page.
   const pageW = Math.max(120, Math.round(p.widthMm * 72 / 25.4));
@@ -796,7 +804,7 @@ function generateLotReceiptThermalPDF(p) {
     cx: m + fr_cols.slice(0, i).reduce((s, v) => s + v, 0) * cw,
     align: i === 0 ? 'left' : 'right',
   }));
-  const labels = ['Lot', 'Bags', 'Qty', 'Rate', 'Amount'];
+  const labels = ['Lot', 'Bags', 'Qty', isTrade ? 'Sample' : 'Rate', isTrade ? 'Gross' : 'Amount'];
 
   // Pre-compute page height so the slip is one continuous page sized to fit.
   const placeLine = [co.place, co.pin].filter(Boolean).join(' - ');
@@ -829,14 +837,14 @@ function generateLotReceiptThermalPDF(p) {
 
   doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.5).stroke(); y += 5;
   doc.font('Helvetica-Bold').fontSize(metaFs)
-     .text('LOT RECEIPT', m, y, { align: 'center', width: cw });
+     .text(isTrade ? 'WEIGHT RECEIPT' : 'LOT RECEIPT', m, y, { align: 'center', width: cw });
   y += metaFs + 4;
 
   // Meta — Trade No (left half) + Date (right half) on one line, then To.
   // Two separate fixed-width cells (no `continued`) so the right-aligned date
   // can't collide with the left label.
   doc.fontSize(metaFs);
-  doc.font('Helvetica-Bold').text('Trade: ' + (ano || '-'), m, y, { width: cw / 2, align: 'left' });
+  doc.font('Helvetica-Bold').text((isTrade ? 'P.No: ' : 'Trade: ') + (ano || '-'), m, y, { width: cw / 2, align: 'left' });
   doc.text(dateStr, m + cw / 2, y, { width: cw / 2, align: 'right' });
   y += metaFs + 4;
   doc.font('Helvetica-Bold').text('To: ', m, y, { continued: true })
@@ -850,13 +858,15 @@ function generateLotReceiptThermalPDF(p) {
   doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.4).stroke(); y += 4;
 
   // Rows.
-  let totBags = 0, totQty = 0, totAmt = 0;
+  let totBags = 0, totQty = 0, totAmt = 0, totSample = 0, totGross = 0;
   doc.font('Helvetica').fontSize(tdFs);
   for (const l of lots) {
     const bags = Number(l.bags) || 0, qty = Number(l.qty) || 0, price = Number(l.price) || 0;
     const amt = Number(l.amount) || (qty * price);
-    totBags += bags; totQty += qty; totAmt += amt;
-    const row = [String(l.lot_no || ''), String(bags), fmtN(qty, 3), fmtN(price), fmtN(amt)];
+    const sample = Number(l.sample_wt) || 0, gross = Number(l.gross_wt) || 0;
+    totBags += bags; totQty += qty; totAmt += amt; totSample += sample; totGross += gross;
+    const row = [String(l.lot_no || ''), String(bags), fmtN(qty, 3),
+      isTrade ? fmtN(sample, 3) : fmtN(price), isTrade ? fmtN(gross, 3) : fmtN(amt)];
     cols.forEach((c, i) => doc.text(row[i], c.cx, y, { width: c.cw, align: c.align }));
     y += rowH;
   }
@@ -864,12 +874,14 @@ function generateLotReceiptThermalPDF(p) {
   // Totals.
   doc.moveTo(m, y).lineTo(m + cw, y).lineWidth(0.5).stroke(); y += 3;
   doc.font('Helvetica-Bold').fontSize(tdFs);
-  const totals = ['Total', String(totBags), fmtN(totQty, 3), '', fmtN(totAmt)];
+  const totals = isTrade
+    ? ['Total', String(totBags), fmtN(totQty, 3), fmtN(totSample, 3), fmtN(totGross, 3)]
+    : ['Total', String(totBags), fmtN(totQty, 3), '', fmtN(totAmt)];
   cols.forEach((c, i) => { if (totals[i] !== '') doc.text(totals[i], c.cx, y, { width: c.cw, align: c.align }); });
   y += rowH + 3;
 
   doc.font('Helvetica').fontSize(footFs).fillColor('#555')
-     .text('Computer-generated lot receipt.', m, y, { align: 'center', width: cw });
+     .text(isTrade ? 'Computer-generated weight receipt.' : 'Computer-generated lot receipt.', m, y, { align: 'center', width: cw });
 
   return new Promise((resolve) => {
     doc.on('end', () => resolve(Buffer.concat(buffers)));

@@ -7522,6 +7522,24 @@ async function loadFormulas(){
         formula: `Payable = Total PurAmt − Total Discount − GST 5%`,
       },
     ]);
+    h += card('Bill of Supply (Agriculturist — no GSTIN)', [
+      {
+        label: 'Source values — always the ISP view',
+        note: 'A Bill of Supply records the ISP company\'s purchase FROM the agriculturist, so in e-Trade it always uses the ISP-view planter figures (isp_pqty / isp_prate / isp_puramt) — even when Business State is KERALA (ASP), where the lot grid shows the ASP internal-transfer values. Only lots without a GSTIN and with Amount > 0 are billed.',
+        formula: `Qty    = Lot Qty<br>
+                P_Qty  = ISP P_Qty   ${lit('( = Lot Qty + Sample Refund )')}<br>
+                P_Rate = ISP P_Rate<br>
+                PurAmt = ISP PurAmt  ${lit('( = ISP P_Qty × ISP P_Rate )')}`,
+      },
+      {
+        label: 'Bill totals',
+        note: 'Agriculturists have no GSTIN, so a Bill of Supply carries no tax.',
+        formula: `Total Qty    = Σ ( P_Qty )<br>
+                Total PurAmt = Σ ( PurAmt )<br>
+                Net          = round( Total PurAmt )    ${lit('— when Rounding flag is ON')}<br>
+                CGST = SGST = IGST = 0`,
+      },
+    ]);
     return h;
   }
 
@@ -24187,25 +24205,39 @@ async function leConfirmPrint() {
 function leBuildReceiptText(traderName, lots, ctx) {
   const auction = ctx.auction || {};
   const company = ((ctx.cfg && (ctx.cfg.trade_name || ctx.cfg.short_name)) || 'COMPANY').toUpperCase();
+  // e-Trade WhatsApp slip is a "Weight Receipt": no rate/amount — show
+  // Sample Wt + Gross Wt instead — and the number is labelled "P.No".
+  const isTrade = (typeof getCurrentBusinessMode === 'function' ? getCurrentBusinessMode() : '') === 'e-Trade';
   const ano = auction.ano || '';
   const date = String(auction.date || '').slice(0,10).split('-').reverse().join('/');
   const fmtN = (n, dp=2) => Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:dp,maximumFractionDigits:dp});
   const lines = [];
   lines.push(`*${company}*`);
-  if (ano || date) lines.push(`Trade ${ano}${date ? '  '+date : ''}`);
+  if (isTrade) lines.push('*Weight Receipt*');
+  if (ano || date) lines.push(`${isTrade ? 'P.No ' : 'Trade '}${ano}${date ? '  '+date : ''}`);
   lines.push(`To: ${traderName || ''}`);
   lines.push('');
-  let totBags = 0, totQty = 0, totAmt = 0;
+  let totBags = 0, totQty = 0, totAmt = 0, totSample = 0, totGross = 0;
   for (const l of lots) {
     const bags = Number(l.bags) || 0;
     const qty  = Number(l.qty)  || 0;
     const price = Number(l.price) || 0;
     const amt = Number(l.amount) || (qty * price);
-    totBags += bags; totQty += qty; totAmt += amt;
-    lines.push(`Lot ${l.lot_no}: ${bags} bag · ${fmtN(qty,3)} kg · ₹${fmtN(price)} = ₹${fmtN(amt)}`);
+    const sample = Number(l.sample_wt) || 0;
+    const gross  = Number(l.gross_wt)  || 0;
+    totBags += bags; totQty += qty; totAmt += amt; totSample += sample; totGross += gross;
+    if (isTrade) {
+      lines.push(`Lot ${l.lot_no}: ${bags} bag · ${fmtN(qty,3)} kg · Sample ${fmtN(sample,3)} · Gross ${fmtN(gross,3)}`);
+    } else {
+      lines.push(`Lot ${l.lot_no}: ${bags} bag · ${fmtN(qty,3)} kg · ₹${fmtN(price)} = ₹${fmtN(amt)}`);
+    }
   }
   lines.push('');
-  lines.push(`Total: ${totBags} bag · ${fmtN(totQty,3)} kg · ₹${fmtN(totAmt)}`);
+  if (isTrade) {
+    lines.push(`Total: ${totBags} bag · ${fmtN(totQty,3)} kg · Sample ${fmtN(totSample,3)} · Gross ${fmtN(totGross,3)}`);
+  } else {
+    lines.push(`Total: ${totBags} bag · ${fmtN(totQty,3)} kg · ₹${fmtN(totAmt)}`);
+  }
   return lines.join('\n');
 }
 
@@ -24316,9 +24348,12 @@ function leBuildReceiptHtml(format, lots, ctx) {
   const pan       = cfg.pan       || '';
   const fssai     = cfg.fssai     || '';
   const sbl       = cfg.sbl       || '';
-  // Logo: served by /logo-ispl.png — the upload widget writes to the same
-  // path. Cache-bust on print so a freshly-uploaded logo shows immediately.
-  const logoUrl = `/logo-ispl.png?t=${Date.now()}`;
+  // Logo: state-aware, matching the company name/address above and
+  // effectiveCompany() used by the PDF/WhatsApp receipt. Kerala lots print
+  // the ASP logo (/logo-asp.png), Tamil Nadu the ISP logo (/logo-ispl.png).
+  // The upload widget writes to these same fixed paths. Cache-bust on print
+  // so a freshly-uploaded logo shows immediately.
+  const logoUrl = `/logo-${isKerala ? 'asp' : 'ispl'}.png?t=${Date.now()}`;
 
   const dateStr = (auction.date || '').split('T')[0] || printedAt;
   const ano = auction.ano || '?';
@@ -24331,10 +24366,13 @@ function leBuildReceiptHtml(format, lots, ctx) {
   // narrow roll (e.g. 58mm HOP-HL58) prints edge-to-edge instead of being
   // scaled onto an A4 sheet. 0 / blank keeps each format's built-in default.
   const paperWidthMm = parseFloat(cfg.lot_receipt_width_mm) || 0;
+  // e-Trade calls the trade/auction number "P.No" on the receipt; e-Auction
+  // keeps the auction terminology. Mode is read live from the settings.
+  const isTrade = (typeof getCurrentBusinessMode === 'function' ? getCurrentBusinessMode() : '') === 'e-Trade';
   if (format === 'compact') {
-    return leBuildCompactHtml({ groups, co, dateStr, ano, printedAt, paperWidthMm, escapeHtml });
+    return leBuildCompactHtml({ groups, co, dateStr, ano, printedAt, paperWidthMm, escapeHtml, isTrade });
   }
-  return leBuildDetailedHtml({ groups, co, dateStr, ano, printedAt, traderInfo, paperWidthMm, escapeHtml });
+  return leBuildDetailedHtml({ groups, co, dateStr, ano, printedAt, traderInfo, paperWidthMm, escapeHtml, isTrade });
 }
 
 function leGroupLotsByTrader(lots) {
@@ -24368,7 +24406,7 @@ function leBuildCompactHtml(p) {
   //   • GSTIN (state-aware; resolved upstream in leBuildReceiptHtml)
   // Address / phone / email / PAN / FSSAI / SBL are intentionally omitted
   // — those still print on the full tax invoice PDF.
-  const { groups, co, dateStr, ano, printedAt, escapeHtml } = p;
+  const { groups, co, dateStr, ano, printedAt, escapeHtml, isTrade } = p;
   const { nickname, gstin } = co;
   const sections = groups.map(g => {
     const lotRows = g.lots.map((l, i) => {
@@ -24396,7 +24434,7 @@ function leBuildCompactHtml(p) {
       ${g.branch ? `<div class="sub">${escapeHtml(g.branch.toUpperCase())}</div>` : ''}
       ${gstin ? `<div class="sub">GSTIN: ${escapeHtml(gstin)}</div>` : ''}
       <div class="planter">Planter: <b>${escapeHtml(g.name || '—')}</b></div>
-      <div class="meta">Auction: ${escapeHtml(String(ano))}&nbsp;&nbsp;Date: ${escapeHtml(dateStr)}</div>
+      <div class="meta">${isTrade ? 'P.No' : 'Auction'}: ${escapeHtml(String(ano))}&nbsp;&nbsp;Date: ${escapeHtml(dateStr)}</div>
       <table class="rows">
         <thead><tr><th>S.No</th><th>Lots</th><th>Bags</th><th>Weight(kg)</th></tr></thead>
         <tbody>${lotRows}${sampleRow}</tbody>
@@ -24447,7 +24485,7 @@ function leBuildCompactHtml(p) {
 // Mirrors the modern ASPPL Spice e-Trade format reviewed by dad,
 // with Grade / Litre / Sample Wt columns DROPPED per his red marks.
 function leBuildDetailedHtml(p) {
-  const { groups, co, dateStr, ano, printedAt, traderInfo, escapeHtml } = p;
+  const { groups, co, dateStr, ano, printedAt, traderInfo, escapeHtml, isTrade } = p;
   // Detailed slip header keeps it minimal: company name + branch + GSTIN.
   // Address / contact / PAN / FSSAI / SBL are intentionally omitted to
   // keep the 60mm slip uncluttered — those fields still appear on the
@@ -24489,7 +24527,7 @@ function leBuildDetailedHtml(p) {
       </header>
       <div class="dateline">
         <span>Date: <b>${escapeHtml(dateStr)}</b></span>
-        <span>Trade #${escapeHtml(String(ano))}</span>
+        <span>${isTrade ? 'P.No ' : 'Trade #'}${escapeHtml(String(ano))}</span>
       </div>
       <hr class="dashed">
       <table class="meta-table">
