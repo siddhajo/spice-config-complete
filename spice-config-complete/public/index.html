@@ -6049,7 +6049,7 @@ function updateSyncIndicator(){
     const secs = Math.round((Date.now() - lastOkAt) / 1000);
     el.innerHTML = secs < 5 ? '✓ Synced' : `✓ Synced ${secs}s ago`;
     el.className = 'sync-pill sync-ok';
-    el.title = `Last successful sync: ${new Date(lastOkAt).toLocaleTimeString()}`;
+    el.title = `Last successful sync: ${fmtIST(lastOkAt)}`;
   }
 }
 // Refresh the indicator's "Xs ago" text every 10s
@@ -6548,6 +6548,42 @@ function fmtD(v){
     }
   }
   return s;
+}
+
+// ── IST (Asia/Kolkata) time display ───────────────────────
+// Every human-facing TIME in the app is shown in IST, independent of the
+// viewer's browser timezone. Two entry points:
+//   istParts(v)  → IST wall-clock parts for an absolute instant
+//   fmtIST(v,..) → absolute instant (Date / epoch ms / ISO w/ zone) → IST
+//   fmtDT(v)     → a stored timestamp → "<user-date> HH:MM". SQLite
+//                  'localtime' strings ("YYYY-MM-DD HH:MM:SS") are already
+//                  IST wall-clock, so their parts are read as-is (no shift);
+//                  zoned/absolute inputs are converted to IST first.
+function istParts(v){
+  const d=(v instanceof Date)?v:new Date(v);
+  if(isNaN(d.getTime()))return null;
+  const f=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',
+    year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+  const p={};for(const x of f.formatToParts(d))p[x.type]=x.value;
+  return {y:p.year,mo:p.month,d:p.day,hh:p.hour==='24'?'00':p.hour,mm:p.minute};
+}
+// Absolute instant → "<user-date> HH:MM IST" (set withTime=false for date only).
+function fmtIST(v,withTime){
+  if(v===null||v===undefined||v==='')return '';
+  const p=istParts(v);
+  if(!p)return String(v);
+  const dt=fmtD(`${p.y}-${p.mo}-${p.d}`);
+  return withTime===false ? dt : `${dt} ${p.hh}:${p.mm} IST`;
+}
+// Stored timestamp → "<user-date> HH:MM". Naive localtime read as-is.
+function fmtDT(v){
+  if(v===null||v===undefined||v==='')return '';
+  const s=String(v).trim();
+  const naive=s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+  if(naive && !/[zZ]|[+\-]\d{2}:?\d{2}$/.test(s)) return fmtD(naive[1])+' '+naive[2]+':'+naive[3];
+  const p=istParts(s);
+  if(!p)return s;
+  return fmtD(`${p.y}-${p.mo}-${p.d}`)+' '+p.hh+':'+p.mm;
 }
 
 // ── Icon helpers ──────────────────────────────────────────
@@ -8131,9 +8167,9 @@ async function loadStats(auctionId){
   const kg = n => (n||0).toFixed(0)+' kg';
   const kgK = n => { const v = (n||0)/1000; return v>=1 ? v.toFixed(1)+'T' : Math.round(n||0)+' kg'; };
   const now = new Date();
-  const hour = now.getHours();
+  const hour = Number((istParts(now)||{}).hh ?? now.getHours());
   const greet = hour<12 ? 'Good morning' : hour<17 ? 'Good afternoon' : 'Good evening';
-  const today = now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const today = now.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
   // KPI deltas
   const revDelta = K.lastMonthRevenue > 0
@@ -9429,8 +9465,8 @@ async function loadUsers(){
       const device = s.device_label || detectDevice(navigator.userAgent);
       return `<tr${s.is_current?' style="background:var(--spice-cardamom-lt)"':''}>
         <td>${s.is_current?'📱 <strong>This device</strong>':'💻 '+esc(device||'Unknown device')}</td>
-        <td style="color:var(--spice-text-mute);font-size:12px">${s.created_at?fmtD(s.created_at.substring(0,10))+' '+s.created_at.substring(11,16):'—'}</td>
-        <td style="color:var(--spice-text-mute);font-size:12px">${s.last_used_at?fmtD(s.last_used_at.substring(0,10))+' '+s.last_used_at.substring(11,16):'—'}</td>
+        <td style="color:var(--spice-text-mute);font-size:12px">${s.created_at?fmtDT(s.created_at):'—'}</td>
+        <td style="color:var(--spice-text-mute);font-size:12px">${s.last_used_at?fmtDT(s.last_used_at):'—'}</td>
         <td style="font-family:monospace;font-size:11px;color:var(--spice-text-hint)">${esc(s.token)}</td>
         <td>${s.is_current
           ? '<span style="color:var(--spice-text-hint);font-size:12px">— current —</span>'
@@ -10263,7 +10299,7 @@ async function _renderGstApiStatus(){
   }
   if (s.last_checked_at) {
     const t = new Date(s.last_checked_at);
-    const when = isNaN(t.getTime()) ? esc(s.last_checked_at) : t.toLocaleString();
+    const when = isNaN(t.getTime()) ? esc(s.last_checked_at) : fmtIST(t);
     rows.push(['Last refreshed', `<span style="color:var(--text3)">${esc(when)}</span>`]);
   }
   // Warning thresholds — surfaced so the operator knows when the badge
@@ -12041,7 +12077,7 @@ function _renderBackupList(backups){
   }
   host.innerHTML = backups.map(b => {
     const kb = (b.size / 1024).toFixed(0);
-    const when = b.mtime ? new Date(b.mtime).toLocaleString() : '';
+    const when = b.mtime ? fmtIST(b.mtime) : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border)">
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(b.name)}">${esc(b.name)}</span>
       <span style="color:var(--text3);font-size:11.5px;white-space:nowrap">${esc(when)}</span>
@@ -12187,7 +12223,7 @@ async function loadDeleteLog(){
       const bp = rw.backup_path || '';
       const bpName = bp ? bp.split(/[\\/]/).pop() : '—';
       html += '<tr>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid #FEE2E2;white-space:nowrap">' + _esc(rw.created_at || '') + '</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid #FEE2E2;white-space:nowrap">' + _esc(fmtDT(rw.created_at)) + '</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid #FEE2E2">' + _esc(rw.username || '—') + '</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid #FEE2E2"><code>' + _esc(rw.resource || '') + '</code></td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid #FEE2E2;text-align:right;font-family:monospace;font-weight:700">' + (rw.deleted_count || 0) + '</td>' +
@@ -12270,7 +12306,7 @@ async function loadAuditLog(){
       const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
       const lotNo = (d.lot_no != null && d.lot_no !== '') ? '#'+_auditEsc(d.lot_no) : '—';
       html += '<tr>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(lg.created_at||'')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(fmtDT(lg.created_at))+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
@@ -12391,7 +12427,7 @@ async function loadAppAuditLog(){
       const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
       const area = _auditEsc(lg.entity || '—') + (lg.entity_id != null ? ' <span style="color:var(--spice-text-mute)">#'+_auditEsc(lg.entity_id)+'</span>' : '');
       html += '<tr>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(lg.created_at||'')+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(fmtDT(lg.created_at))+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
@@ -25478,7 +25514,7 @@ async function impLoadHistory(){
       cache: 'no-store',
     });
     const rows = await r.json();
-    const stamp = new Date().toLocaleTimeString();
+    const _ip = istParts(new Date()); const stamp = _ip ? `${_ip.hh}:${_ip.mm} IST` : '';
     if (!Array.isArray(rows) || !rows.length) {
       box.innerHTML = '<i>No imports yet.</i> <span style="color:#999;font-size:11px">(loaded at '+stamp+')</span>';
       return;
@@ -25498,7 +25534,7 @@ async function impLoadHistory(){
     rows.forEach(r => {
       let action;
       if (r.undone_at) {
-        action = '<span style="color:#888;font-style:italic" title="Rolled back at '+_escImp(r.undone_at)+'">⏶ Undone</span>';
+        action = '<span style="color:#888;font-style:italic" title="Rolled back at '+_escImp(fmtDT(r.undone_at))+'">⏶ Undone</span>';
       } else if (r.undoable) {
         action = '<button class="btn" style="height:24px;padding:0 10px;font-size:11px;font-weight:600;background:#7F1D1D;color:#fff;border-color:#7F1D1D" '+
           'onclick="impUndo('+r.id+', '+JSON.stringify(r.filename||'').replace(/"/g,'&quot;')+', '+JSON.stringify(r.module||'').replace(/"/g,'&quot;')+', '+(r.inserted_count||0)+')" '+
@@ -25511,7 +25547,7 @@ async function impLoadHistory(){
         action = '<span style="color:#bbb" title="No rows were inserted by this run">—</span>';
       }
       h += '<tr'+(r.undone_at?' style="opacity:.55"':'')+'>'+
-        '<td style="padding:3px 6px;border:1px solid #eee;white-space:nowrap">'+_escImp(r.created_at||'')+'</td>'+
+        '<td style="padding:3px 6px;border:1px solid #eee;white-space:nowrap">'+_escImp(fmtDT(r.created_at))+'</td>'+
         '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.username||'')+'</td>'+
         '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.module||'')+'</td>'+
         '<td style="padding:3px 6px;border:1px solid #eee">'+_escImp(r.filename||'')+'</td>'+

@@ -53,4 +53,42 @@ function todayLocalISO() {
   return `${y}-${m}-${day}`;
 }
 
-module.exports = { fmtDate, getDateFormat, invalidateDateFormatCache, todayLocalISO };
+// ── IST (Asia/Kolkata) time helpers ──────────────────────────────
+// All human-facing TIME display in the app is shown in IST regardless of
+// the server's own system timezone, so a report generated on a UTC host
+// still reads the wall-clock the (Indian) users expect.
+
+// Break a Date down into IST wall-clock parts. Uses Intl so the offset
+// (incl. the :30) is handled correctly without hard-coding +5:30.
+function istParts(d) {
+  d = d || new Date();
+  const f = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false, weekday: 'short',
+  });
+  const p = {};
+  for (const part of f.formatToParts(d)) p[part.type] = part.value;
+  const WD = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    y: p.year, m: p.month, d: p.day,
+    hh: p.hour === '24' ? '00' : p.hour, mm: p.minute, ss: p.second,
+    weekday: WD[p.weekday],
+  };
+}
+
+// "HH:MM" 24-hour wall-clock in IST — for matching scheduled times.
+function istHHMM(d) {
+  const p = istParts(d);
+  return `${p.hh}:${p.mm}`;
+}
+
+// Full date+time in IST, date part following the user's chosen format,
+// suffixed " IST". For report footers / "Generated:" stamps.
+function nowIST(d) {
+  const p = istParts(d);
+  return `${fmtDate(`${p.y}-${p.m}-${p.d}`)} ${p.hh}:${p.mm} IST`;
+}
+
+module.exports = { fmtDate, getDateFormat, invalidateDateFormatCache, todayLocalISO, istParts, istHHMM, nowIST };

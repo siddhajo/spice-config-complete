@@ -1800,7 +1800,7 @@ deleteLot = async function(id, lotNo) {
       var r = await fetch(B + '/api/lots?auction_id=' + aid + '&branch=' + encodeURIComponent(br), { headers: ah() });
       var d = await r.json();
       var lot = (d.lots || []).find(function(l) { return l.id === id; });
-      if (lot) { undoHistory.push({ lot: lot, deletedAt: new Date().toLocaleString('en-IN'), deletedBy: user }); saveUndoHistory(); }
+      if (lot) { undoHistory.push({ lot: lot, deletedAt: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST', deletedBy: user }); saveUndoHistory(); }
     } catch (e) {}
   }
   try {

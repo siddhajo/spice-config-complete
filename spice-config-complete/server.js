@@ -1562,14 +1562,15 @@ function backupScheduleTick() {
   try {
     const s = readBackupSchedule(db);
     if (!s.enabled) return;
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const hhmm = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    // Match the user's scheduled time against IST wall-clock, not the
+    // server's own timezone, so "14:30" means 14:30 IST everywhere.
+    const p = require('./date-format').istParts();
+    const hhmm = `${p.hh}:${p.mm}`;
     if (hhmm !== s.time) return;
-    if (s.freq === 'weekly' && now.getDay() !== s.weekday) return;
+    if (s.freq === 'weekly' && p.weekday !== s.weekday) return;
     // One snapshot per scheduled minute — survives multiple ticks in the
     // same minute and a restart within that minute.
-    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${hhmm}`;
+    const stamp = `${p.y}-${p.m}-${p.d}T${hhmm}`;
     if (s.lastRun === stamp) return;
     db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
     db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('backup_last_run', ?)`, [stamp]);
@@ -9630,7 +9631,7 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
     doc.text(totByKey[c.k], c.x + 2, y + 6, { width: c.w - 4, align: 'right' });
   }
   y += 30;
-  doc.font('Helvetica').fontSize(9).text(`Generated: ${new Date().toLocaleString('en-IN')}`, PAGE_L, y, { width: PAGE_W, align: 'right' });
+  doc.font('Helvetica').fontSize(9).text(`Generated: ${require('./date-format').nowIST()}`, PAGE_L, y, { width: PAGE_W, align: 'right' });
   return tPay;
 }
 
@@ -9852,7 +9853,7 @@ function _renderTaxStatement(doc, cfg, data) {
   y += 14;
   doc.text(`Net of TDS: Rs. ${fmt(T.total - T.tds)}`, PAGE_L, y, { width: PAGE_W });
   y += 18;
-  doc.fontSize(8).fillColor('#666').text(`Generated: ${new Date().toLocaleString('en-IN')}. This statement is a summary of purchase invoices and bills of supply issued by ${company}.`, PAGE_L, y, { width: PAGE_W });
+  doc.fontSize(8).fillColor('#666').text(`Generated: ${require('./date-format').nowIST()}. This statement is a summary of purchase invoices and bills of supply issued by ${company}.`, PAGE_L, y, { width: PAGE_W });
 }
 
 function _taxStatementToBuffer(db, cfg, opts) {
