@@ -358,7 +358,10 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
       y += rowH;
       return;
     }
-    if (i % 2 === 1) doc.rect(m, y, usableW, rowH).fill('#F7F5F2');
+    // Inset the zebra fill's top edge by the rule width so it never paints
+    // over the previous row's bottom separator (which sits at this row's top
+    // y). Without the inset, every shaded row hides the rule above it.
+    if (i % 2 === 1) doc.rect(m, y + 0.5, usableW, rowH - 0.5).fill('#F7F5F2');
     const BASE = 7.5;
     const LINE_H = 10;
     const PAD_TOP = 3;

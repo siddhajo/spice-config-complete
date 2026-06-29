@@ -492,7 +492,9 @@ async function generateTradeSummaryPDF(db, auctionId, branchFilter) {
         doc.addPage();
         y = m;
       }
-      if (r % 2 === 1) doc.rect(m, y, usableW, rowH).fill('#F9FAFB');
+      // Inset the fill's top edge by the rule width so it doesn't paint over
+      // the previous row's separator (drawn at this row's top y).
+      if (r % 2 === 1) doc.rect(m, y + 0.5, usableW, rowH - 0.5).fill('#F9FAFB');
       doc.fillColor('#111827');
       let dx = m;
       for (let i = 0; i < rows[r].length; i++) {

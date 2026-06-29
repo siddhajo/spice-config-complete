@@ -202,8 +202,18 @@ async function lotSlipPdf(db, auctionId, _cfg, extra) {
     let ry = BODY_TOP + HEAD_H;
     const tblTop = BODY_TOP;
 
+    // Pass 1 — zebra fills first. Drawing every fill before any rule keeps
+    // the row separators visible: otherwise a shaded row's fill paints over
+    // the bottom rule of the (unshaded) row above it, so every other line
+    // disappears.
+    let fy = ry;
     sliceRows.forEach((r, i) => {
-      if (i % 2 === 1) doc.rect(xOrigin, ry, halfW, ROW_H).fill('#F7F5F2');
+      if (i % 2 === 1) doc.rect(xOrigin, fy, halfW, ROW_H).fill('#F7F5F2');
+      fy += ROW_H;
+    });
+
+    // Pass 2 — cell text + horizontal separators, drawn on top of the fills.
+    sliceRows.forEach((r, i) => {
       doc.fillColor('#000').font('Helvetica').fontSize(9);
       const cells = [
         String(r.lot),
@@ -388,8 +398,17 @@ async function carbonSlipPdf(db, auctionId, _cfg, extra, opts) {
     let ry = BODY_TOP + HEAD_H;
     const tblTop = BODY_TOP;
 
+    // Pass 1 — zebra fills first, so the per-row separators below stay
+    // visible (a shaded row's fill would otherwise paint over the bottom
+    // rule of the unshaded row above it, hiding every other line).
+    let fy = ry;
     sliceRows.forEach((r, i) => {
-      if (i % 2 === 1) doc.rect(xOrigin, ry, halfW, ROW_H).fill('#F7F5F2');
+      if (i % 2 === 1) doc.rect(xOrigin, fy, halfW, ROW_H).fill('#F7F5F2');
+      fy += ROW_H;
+    });
+
+    // Pass 2 — cell text + horizontal separators, drawn on top of the fills.
+    sliceRows.forEach((r, i) => {
       doc.fillColor('#000');
       let cx = xOrigin;
       cols.forEach((c, ci) => {
@@ -711,7 +730,9 @@ async function collectionPdf(db, auctionId) {
       finishPage(); doc.addPage(); drawTopHeader(); drawColHeader();
     }
     startSegment();
-    if (idx % 2 === 1) doc.rect(m, y, usableW, rowH).fill('#F7F5F2');
+    // Inset the fill's top edge by the rule width so it doesn't paint over
+    // the previous row's separator (drawn at this row's top y).
+    if (idx % 2 === 1) doc.rect(m, y + 0.5, usableW, rowH - 0.5).fill('#F7F5F2');
     doc.fillColor('#000').font('Helvetica').fontSize(9);
 
     cells.forEach((v, ci) => {
@@ -1201,7 +1222,9 @@ async function tradeReportPdf(db, auctionId) {
 
     ensureRoom(rowH);
     startSegment();
-    if (idx % 2 === 1) doc.rect(m, y, usableW, rowH).fill('#F7F5F2');
+    // Inset the fill's top edge by the rule width so it doesn't paint over
+    // the previous row's separator (drawn at this row's top y).
+    if (idx % 2 === 1) doc.rect(m, y + 0.5, usableW, rowH - 0.5).fill('#F7F5F2');
     doc.fillColor('#000').font('Helvetica').fontSize(8.5);
 
     cells.forEach((v, ci) => {

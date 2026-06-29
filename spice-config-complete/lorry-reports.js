@@ -289,8 +289,17 @@ async function lotSlipCodePdf(db, auctionId) {
   function drawHalfRows(xOrigin, sliceRows, isLastPage) {
     let ry = BODY_TOP + HEAD_H;
     const tblTop = BODY_TOP;
+    // Pass 1 — zebra fills first, so the per-row separators below stay
+    // visible (a shaded row's fill would otherwise paint over the bottom
+    // rule of the unshaded row above it, hiding every other line).
+    let fy = ry;
     sliceRows.forEach((r, i) => {
-      if (i % 2 === 1) doc.rect(xOrigin, ry, halfW, ROW_H).fill('#F7F5F2');
+      if (i % 2 === 1) doc.rect(xOrigin, fy, halfW, ROW_H).fill('#F7F5F2');
+      fy += ROW_H;
+    });
+
+    // Pass 2 — cell text + horizontal separators, drawn on top of the fills.
+    sliceRows.forEach((r, i) => {
       doc.fillColor('#000').font('Helvetica').fontSize(8);
       const cells = [
         String(r.lot),
@@ -527,7 +536,9 @@ async function truckListPdf(db, auctionId) {
     y += HEAD_H;
   }
   function drawRow(r, idx) {
-    if (idx % 2 === 1) doc.rect(m, y, usableW, ROW_H).fill('#F7F5F2');
+    // Inset the fill's top edge by the rule width so it doesn't paint over
+    // the previous row's separator (drawn at this row's top y).
+    if (idx % 2 === 1) doc.rect(m, y + 0.5, usableW, ROW_H - 0.5).fill('#F7F5F2');
     doc.fillColor('#000').font('Helvetica').fontSize(10);
     doc.text(String(idx + 1),     colX[0] + 4, y + 5, { width: colW[0] - 8, align: 'center', lineBreak: false });
     doc.text(String(r.lot_count), colX[1] + 4, y + 5, { width: colW[1] - 8, align: 'center', lineBreak: false });
@@ -940,7 +951,9 @@ async function buyerLotLorryPdf(db, auctionId) {
   }
 
   function drawLotRow(lt, idx) {
-    if (idx % 2 === 1) doc.rect(m, y, usableW, ROW_H).fill('#F7F5F2');
+    // Inset the fill's top edge by the rule width so it doesn't paint over
+    // the previous row's separator (drawn at this row's top y).
+    if (idx % 2 === 1) doc.rect(m, y + 0.5, usableW, ROW_H - 0.5).fill('#F7F5F2');
     doc.fillColor('#000').font('Helvetica').fontSize(8.5);
     const cells = [
       String(idx + 1),         // SL.NO — restarts at 1 within each buyer
