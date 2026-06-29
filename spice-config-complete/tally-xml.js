@@ -2223,7 +2223,7 @@ function buildSalesIspRows(db, auctionId, cfg) {
     FROM invoices i
     LEFT JOIN buyers b ON b.buyer = i.buyer
     WHERE i.auction_id = ? AND ${ISP_STATE_SQL}
-    ORDER BY i.buyer, i.sale, CAST(i.invo AS INTEGER), i.id
+    ORDER BY CAST(i.invo AS INTEGER), i.sale, i.id
   `);
   const raw = stmt.all(auctionId);
 
@@ -2357,6 +2357,9 @@ function buildSalesIspRows(db, auctionId, cfg) {
         amount: Number(l.amount || 0),
       })),
       distance,
+      // Vehicle number for the e-way bill (<VEHICLENUMBER> / <BASICSHIPVESSELNO>).
+      // Stored on invoices.lorry_no via the bulk "Set Lorry No" action.
+      vehicleNo: r.lorry_no || '',
       // Aggregates straight from the (single) invoice row — already
       // pre-summed by the invoice writer in server.js.
       amounttot: r2(r.amount || 0),
@@ -2393,7 +2396,7 @@ function buildSalesAspRows(db, auctionId, cfg) {
     SELECT i.*
     FROM invoices i
     WHERE i.auction_id = ? AND ${ASP_STATE_SQL}
-    ORDER BY i.buyer, i.sale, CAST(i.invo AS INTEGER), i.id
+    ORDER BY CAST(i.invo AS INTEGER), i.sale, i.id
   `);
   const raw = stmt.all(auctionId);
 
@@ -2494,7 +2497,7 @@ function buildSalesRows(db, auctionId, cfg) {
     FROM invoices i
     LEFT JOIN buyers b ON b.buyer = i.buyer
     WHERE i.auction_id = ?
-    ORDER BY i.buyer, i.sale, i.invo, i.id
+    ORDER BY CAST(i.invo AS INTEGER), i.sale, i.id
   `);
   const raw = stmt.all(auctionId);
 
@@ -2571,7 +2574,7 @@ function buildRDPurchaseRows(db, auctionId, cfg) {
     FROM purchases p
     WHERE p.auction_id = ?
       AND (UPPER(COALESCE(p.gstin,'')) LIKE 'GSTIN%' OR p.gstin GLOB '[0-9][0-9]*')
-    ORDER BY p.invo, p.id
+    ORDER BY CAST(p.invo AS INTEGER), p.id
   `);
   const rawAll = stmt.all(auctionId);
 
@@ -2651,7 +2654,7 @@ function buildURDPurchaseRows(db, auctionId, cfg) {
     SELECT * FROM bills WHERE ano IN (
       SELECT ano FROM auctions WHERE id = ?
     )
-    ORDER BY bil, id
+    ORDER BY CAST(bil AS INTEGER), id
   `);
   const rawAll = stmt.all(auctionId);
 
@@ -2731,7 +2734,7 @@ function buildDebitNoteRows(db, auctionId, cfg) {
   const a = db.prepare('SELECT ano FROM auctions WHERE id = ?').get(auctionId);
   if (!a) return [];
   const stmt = db.prepare(`
-    SELECT * FROM debit_notes WHERE ano = ? ORDER BY id
+    SELECT * FROM debit_notes WHERE ano = ? ORDER BY CAST(note_no AS INTEGER), id
   `);
   const raw = stmt.all(a.ano);
   return raw.map((d) => {
@@ -2778,7 +2781,7 @@ function buildDebitNotePlanterRows(db, auctionId, cfg) {
   const a = db.prepare('SELECT ano FROM auctions WHERE id = ?').get(auctionId);
   if (!a) return [];
   const raw = db.prepare(`
-    SELECT * FROM debit_notes_planter WHERE ano = ? ORDER BY id
+    SELECT * FROM debit_notes_planter WHERE ano = ? ORDER BY CAST(note_no AS INTEGER), id
   `).all(a.ano);
 
   // Pull the matching bill-of-supply row (address / place / PAN) for each
