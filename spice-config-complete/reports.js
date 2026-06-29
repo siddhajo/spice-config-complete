@@ -504,6 +504,9 @@ async function generateTradeSummaryPDF(db, auctionId, branchFilter) {
           });
         dx += widths[i];
       }
+      // Horizontal rule under every row so the striped table reads as fully ruled.
+      doc.moveTo(m, y + rowH).lineTo(m + usableW, y + rowH)
+         .lineWidth(0.4).strokeColor('#D1D5DB').stroke();
       y += rowH;
     }
     y += 6;

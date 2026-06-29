@@ -10,6 +10,7 @@ const {
   getCompanyHeader, writeXlsxCompanyHeader, xlsxNumFmtForHeader,
 } = require('./report-formatters');
 const { fmtDate: fmtUserDate } = require('./date-format');
+const { getSettingsFlat } = require('./company-config');
 
 // Build an XLSX buffer with a unified brand band on top and Indian-format
 // numeric columns. `opts.title` is the report title shown in the middle of
@@ -24,12 +25,20 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
   ws.columns = columns.map(c => ({ key: c.key, width: c.width || 15 }));
 
   // Brand band: logo + name + address (left), title (middle), meta (right).
-  const header = opts.companyHeader || getCompanyHeader(opts.db);
-  const startRow = writeXlsxCompanyHeader(wb, ws, header, {
-    colCount: columns.length,
-    title: opts.title || sheetName,
-    metaLines: opts.metaLines || [],
-  });
+  // `opts.noBrandBand` produces a bare sheet — no logo, no company/title/meta
+  // rows — with the column headers on row 1. Used where the caller wants a
+  // plain data grid (e.g. e-Trade Tamil Nadu Price List (Before)).
+  let startRow;
+  if (opts.noBrandBand) {
+    startRow = 1;
+  } else {
+    const header = opts.companyHeader || getCompanyHeader(opts.db);
+    startRow = writeXlsxCompanyHeader(wb, ws, header, {
+      colCount: columns.length,
+      title: opts.title || sheetName,
+      metaLines: opts.metaLines || [],
+    });
+  }
 
   // Column-header row (right after the brand band, with the spacer row).
   const headerRow = ws.getRow(startRow);
@@ -46,6 +55,12 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
   // Apply Indian-format numFmt to each numeric column. We do this on the
   // worksheet column object so every data row picks it up automatically.
   columns.forEach((c, i) => {
+    // `c.text` forces the column to stay textual (e.g. zero-padded lot
+    // numbers like "007") — apply Excel's text format and skip numerics.
+    if (c.text) {
+      ws.getColumn(i + 1).numFmt = '@';
+      return;
+    }
     const fmt = xlsxNumFmtForHeader(c.header);
     if (fmt) {
       const colObj = ws.getColumn(i + 1);
@@ -62,8 +77,10 @@ async function createExcelBuffer(sheetName, columns, rows, opts) {
     const dataRow = ws.addRow({});
     columns.forEach((c, i) => {
       let v = rowObj[c.key];
-      // Coerce string-numbers to numbers so Excel applies the numFmt.
-      if (typeof v === 'string' && v !== '' && !isNaN(Number(v))) {
+      // Coerce string-numbers to numbers so Excel applies the numFmt — but
+      // never for `text` columns, which must keep their literal string (e.g.
+      // a zero-padded "007" lot number would otherwise collapse to 7).
+      if (!c.text && typeof v === 'string' && v !== '' && !isNaN(Number(v))) {
         const n = Number(v);
         if (!Number.isNaN(n) && xlsxNumFmtForHeader(c.header)) v = n;
       }
@@ -266,17 +283,31 @@ async function exportPriceListBefore(db, auctionId) {
   const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
   const tradeNo = a.ano || '';
   const tradeDate = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
+
+  // e-Trade / Tamil Nadu wants a bare grid: no brand band (logo + title +
+  // meta rows) and lot numbers zero-padded to 3 digits (e.g. "007").
+  const cfg = getSettingsFlat(db);
+  const bare = cfg.business_mode === 'e-Trade'
+    && String(cfg.business_state || '').toUpperCase().includes('TAMIL NADU');
+
   const rawRows = db.all(
     `SELECT lot_no as lot, bags as bag, qty,
             CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
             COALESCE(code,'') AS code
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
   );
-  const rows = rawRows.map(r => ({ trade_no: tradeNo, date: tradeDate, ...r }));
+  const padLot = (v) => {
+    const s = String(v == null ? '' : v).trim();
+    return /^\d+$/.test(s) ? s.padStart(3, '0') : s;
+  };
+  const rows = rawRows.map(r => ({
+    trade_no: tradeNo, date: tradeDate, ...r,
+    lot: bare ? padLot(r.lot) : r.lot,
+  }));
   const cols = [
     { header: 'TNO',   key: 'trade_no', width: 10 },
     { header: 'DATE',  key: 'date',     width: 12 },
-    { header: 'LOT',   key: 'lot',      width: 10 },
+    { header: 'LOT',   key: 'lot',      width: 10, text: bare },
     { header: 'BAG',   key: 'bag',      width: 8  },
     { header: 'QTY',   key: 'qty',      width: 14 },
     { header: 'PRICE', key: 'price',    width: 10 },
@@ -284,6 +315,7 @@ async function exportPriceListBefore(db, auctionId) {
   ];
   return createExcelBuffer('PriceListBefore', cols, rows, {
     db, title: 'Price List (Before)', metaLines: auctionMeta(db, auctionId),
+    noBrandBand: bare,
   });
 }
 

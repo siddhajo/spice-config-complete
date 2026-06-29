@@ -15210,11 +15210,17 @@ async function loadLots(opts){
   const activePreset = (_presets && _presets.active) || 'ISP';
   const discGst = (_sdata.flags || []).find(f => f.key === 'flag_disc_gst');
   const discGstOn = discGst ? String(discGst.value).toLowerCase() === 'true' : false;
-  const filteredTradeCols = activePreset === 'ISP' ? tradeCols : tradeCols.filter(c => c.key !== 'pqty');
+  let filteredTradeCols = activePreset === 'ISP' ? tradeCols : tradeCols.filter(c => c.key !== 'pqty');
   // e-Auction always shows CGST/SGST/IGST (the advance-tax split on each lot);
   // e-Trade shows them only when "Discount includes GST" is on (otherwise zero).
   const showGstCols       = isAuction || discGstOn;
-  const filteredTaxCols   = showGstCols ? taxCols : taxCols.filter(c => !['cgst','sgst','igst'].includes(c.key));
+  let filteredTaxCols     = showGstCols ? taxCols : taxCols.filter(c => !['cgst','sgst','igst'].includes(c.key));
+  // e-Trade + Kerala: hide the Discount (trade `refund`) and Payable (tax
+  // `balance`) columns from the Lots main list per business requirement.
+  if (!isAuction && getDefaultBusinessState() === 'KERALA') {
+    filteredTradeCols = filteredTradeCols.filter(c => c.key !== 'refund');
+    filteredTaxCols   = filteredTaxCols.filter(c => c.key !== 'balance');
+  }
   // Selection column — checkbox per row + master in the header.
   // Drives the bulk action buttons in the toolbar (Set Buyer, Set
   // Grade 1, Lock, Delete). The master checkbox toggles all visible
@@ -16239,7 +16245,7 @@ async function loadInvoices(opts){
         value:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km; return Number(km)||0; },
         render:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km;
           return (km != null && km !== '' && Number(km) > 0)
-          ? `<span style="color:var(--spice-text-main)">${fmtI(Number(km),0)} km</span>`
+          ? `<span style="color:var(--spice-text-main)">${fmtI(Number(km),0)}</span>`
           : '<span style="color:var(--text3)">—</span>'; } }] : []),
       // Buyer code (invoices.buyer) shown before the trade name.
       { key:'_code', label:'Code', sort:'text',
