@@ -747,6 +747,7 @@ async function refreshConfig(){
     if(d.gunnyWeight!=cfgGunnyWeight){cfgGunnyWeight=d.gunnyWeight||0;changed=true}
     if(d.gunnyEditable!=cfgGunnyEditable){cfgGunnyEditable=!!d.gunnyEditable;changed=true}
     if(d.showExtraLotFields!=cfgShowExtraFields){cfgShowExtraFields=!!d.showExtraLotFields;changed=true}
+    if((d.tradeNoun||'Trade')!=cfgTradeNoun){cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();var _lt=document.getElementById('le-title-text');if(_lt&&typeof tno!=='undefined'&&tno)_lt.textContent=cfgTradeNoun+' #'+tno+' — '+br;changed=true}
     if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
     if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
     if(d.labels&&JSON.stringify(d.labels)!==JSON.stringify(cfgLabels)){
@@ -771,15 +772,30 @@ async function doLogin(forceLogin){const u=document.getElementById('l-user').val
 function doLogout(){fetch(B+'/api/auth/logout',{method:'POST',headers:ah()}).catch(()=>{});token='';user='';localStorage.removeItem('sa_token');toggleMenu(true);show('s-login')}
 async function tryAutoLogin(){if(!token){loadTitle();return}try{const r=await fetch(B+'/api/auth/me',{headers:ah()});if(r.ok){const d=await r.json();user=d.user.username;userBranch=d.user.branch||'';userRole=d.user.role||'user';goSession()}else{token='';localStorage.removeItem('sa_token');loadTitle()}}catch(e){loadTitle()}}
 var cfgSampleWeight=0,cfgShowMoisture=false;
+// Noun for a trade/auction record — server sends "Auction" in e-Auction mode,
+// "Trade" otherwise. Drives the picker labels, the dropdown, the current-trade
+// banner and the lot-entry header so e-Auction never shows the word "Trade".
+var cfgTradeNoun='Trade';
+function twLower(){return (cfgTradeNoun||'Trade').toLowerCase();}
+function twA(){var n=twLower();return (/^[aeiou]/.test(n)?'an ':'a ')+n;}
+function applyTradeNoun(){
+  var n=cfgTradeNoun||'Trade';
+  var lbl=document.getElementById('ss-trade-label'); if(lbl)lbl.textContent='SELECT '+n.toUpperCase();
+  // Only reset the intro when the picker is visible — favourite-locked mode
+  // swaps this text to "Select a branch…", which we must not clobber.
+  var sel=document.getElementById('ss-trade');
+  var intro=document.getElementById('ss-intro');
+  if(intro&&(!sel||sel.style.display!=='none')) intro.textContent='Select '+twA()+' to start entering lots';
+}
 var cfgLabels={lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'};
 function applyLabels(){
   var L=cfgLabels;
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -800,12 +816,13 @@ async function loadAvailableTrades(){
         if (r.status === 403 && errBody && errBody.must_change_password) {
           sel.innerHTML = '<option value="">Change password to continue</option>';
           var info = document.getElementById('ss-trade-info');
+          var _tradesWord = twLower() + 's';
           // Inline message includes a clickable link so the user can
           // re-open the change-password modal after dismissing it.
           // Without this they'd be stuck looking at the warning with
           // no obvious way back to the form.
           if (info) {
-            info.innerHTML = 'You must change your password before loading trades. <a href="#" onclick="event.preventDefault();showChangePassword();" style="color:var(--green,#0E8A5F);font-weight:600;text-decoration:underline">Change password now →</a>';
+            info.innerHTML = 'You must change your password before loading ' + _tradesWord + '. <a href="#" onclick="event.preventDefault();showChangePassword();" style="color:var(--green,#0E8A5F);font-weight:600;text-decoration:underline">Change password now →</a>';
           }
           showChangePassword();
           // Pre-fill the error banner inside the modal so it's clear
@@ -820,7 +837,7 @@ async function loadAvailableTrades(){
     }
     var d=await r.json();
     var trades=d.auctions||[];
-    sel.innerHTML='<option value="">Select a trade...</option>';
+    sel.innerHTML='<option value="">Select '+twA()+'...</option>';
     for(var i=0;i<trades.length;i++){
       var a=trades[i];
       var ts='';
@@ -831,10 +848,10 @@ async function loadAvailableTrades(){
       opt.setAttribute('data-date',a.date);
       opt.setAttribute('data-crop',a.crop_type||'ASP');
       opt.setAttribute('data-end',a.end_time||'');
-      opt.textContent='Trade #'+a.ano+' - '+fmtDate(a.date)+' - '+(a.crop_type||'ASP')+ts;
+      opt.textContent=cfgTradeNoun+' #'+a.ano+' - '+fmtDate(a.date)+' - '+(a.crop_type||'ASP')+ts;
       sel.appendChild(opt);
     }
-    if(!trades.length) info.textContent='No trades available - ask admin to create one';
+    if(!trades.length) info.textContent='No '+twLower()+'s available - ask admin to create one';
     sel.onchange=function(){var o=sel.options[sel.selectedIndex];info.textContent=o&&o.value&&o.getAttribute('data-end')?'Ends at '+o.getAttribute('data-end'):''};
     // Default to the admin's FAVOURITE trade (the star on the desktop
     // Trades screen, shared via /api/mobile/favourite-trade). When set and
@@ -853,10 +870,10 @@ async function loadAvailableTrades(){
           sel.style.display='none';
           var intro=document.getElementById('ss-intro'); if(intro)intro.textContent='Select a branch to start entering lots';
           var tradeNo=(o?o.getAttribute('data-ano'):ad.auctionId);
-          var tradeMeta=(o?o.textContent.replace(/^Trade #\d+\s*-\s*/,''):'');
+          var tradeMeta=(o?o.textContent.replace(new RegExp('^'+cfgTradeNoun+' #\\d+\\s*-\\s*'),''):'');
           info.className='trade-set';
-          info.innerHTML='<div class="ts-label">Current trade</div>'
-            +'<div class="ts-no">Trade #'+tradeNo+'</div>'
+          info.innerHTML='<div class="ts-label">Current '+twLower()+'</div>'
+            +'<div class="ts-no">'+cfgTradeNoun+' #'+tradeNo+'</div>'
             +(tradeMeta?'<div class="ts-meta">'+tradeMeta+'</div>':'')
             +'<div class="ts-tag">★ Favourite — set in admin app</div>';
         }
@@ -865,7 +882,7 @@ async function loadAvailableTrades(){
   }catch(e){sel.innerHTML='<option value="">Error: '+e.message+'</option>';console.error('Load trades:',e)}
 }
 
-async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select a trade</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
+async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select '+twA()+'</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
 // Reload config for sample weight + moisture + e-Auction extras
 try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgGunnyEditable=!!cd.gunnyEditable;cfgShowExtraFields=!!cd.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
 await loadStats();goLots()}
@@ -1015,7 +1032,7 @@ function editRecentLot(lotId){
   openEdit(l.id,String(l.lot_no),tn,String(l.grade||''),l.bags,l.litre,l.qty,l.trader_id,l.bank_id||null);
 }
 
-function goLots(){document.getElementById('le-title-text').textContent='Trade #'+tno+' — '+br;document.getElementById('le-user').textContent=user;document.getElementById('ml-title-text').textContent='Lots — '+br;document.getElementById('ml-user').textContent=user;document.getElementById('menu-undo').style.display=userRole==='admin'?'block':'none';loadAppLogo();refreshConfig();updUI();resetForm();show('s-lots')}
+function goLots(){document.getElementById('le-title-text').textContent=cfgTradeNoun+' #'+tno+' — '+br;document.getElementById('le-user').textContent=user;document.getElementById('ml-title-text').textContent='Lots — '+br;document.getElementById('ml-user').textContent=user;document.getElementById('menu-undo').style.display=userRole==='admin'?'block':'none';loadAppLogo();refreshConfig();updUI();resetForm();show('s-lots')}
 function updUI(){updProgress()}
 function updProgress(){
   var el=document.getElementById('le-progress');if(!el)return;
@@ -1092,7 +1109,7 @@ async function loadSellerBookings(traderId){
     var d=await r.json();
     if(token!==sellerBookingsReq)return;
     var lots=(d.lots||[]).slice().sort(function(a,b){return (parseInt(a.lot_no)||0)-(parseInt(b.lot_no)||0)});
-    if(!lots.length){hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">None in this trade</span>';body.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--text3)">No prior lots booked for this seller in the current trade.</div>';return}
+    if(!lots.length){hdr.innerHTML='<span>📋 EXISTING BOOKINGS</span><span style="margin-left:auto;color:var(--text3);font-weight:600">None in this '+twLower()+'</span>';body.innerHTML='<div style="padding:10px 12px;font-size:11px;color:var(--text3)">No prior lots booked for this seller in the current '+twLower()+'.</div>';return}
     var s=d.summary||{};
     var totQty=Number(s.total_qty||0).toFixed(3);
     var totBags=s.total_bags||0;
@@ -1377,7 +1394,7 @@ function updateMySelCount(){const boxes=document.querySelectorAll('.ml-cb');cons
 async function printSelectedMyLots(){var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(cb=>parseInt(cb.value));if(!ids.length){toast('Select lots to print',true);return}printAndClose(B+'/api/lots/print-batch?ids='+ids.join(',')+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt())}
 
 async function printAllBySellerUser(){
-  if(!aid){toast('No trade selected',true);return}
+  if(!aid){toast('No '+twLower()+' selected',true);return}
   printAndClose(B+'/api/lots/print-all-sellers/'+aid+'?branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt());
 }
 

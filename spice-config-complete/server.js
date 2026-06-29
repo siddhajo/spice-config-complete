@@ -7990,12 +7990,22 @@ app.post('/api/bills/commission-bos-bulk', requireView, async (req, res) => {
 
       // Build one page-spec per lot. Each carries a single line item, that
       // lot's own commission/GST split, its purchaser, and its NETT.
+      // In e-Auction the Commission Bill (Memorandum of Cardamom Sold) shows
+      // the GROSS cardamom value (Amount = qty × price), then a separate
+      // [+] SAMPLE REFUND row and a [-] COMMISSION row. The stored `puramt`
+      // is NOT the gross value here (it's Amount + Refund after the e-Auction
+      // purchase-taxable change), so using it as cardamomCost would double the
+      // refund AND, historically, double-deduct the commission. Use lot.amount
+      // (gross) and the raw lot qty so commission is deducted exactly once.
+      const isEAuc = String(cfg.business_mode || '').toLowerCase() === 'e-auction';
       const perLot = [];
       if (lots.length) {
         for (const l of lots) {
-          const qty = Number(l.pqty || l.qty || 0);
+          const qty = isEAuc ? Number(l.qty || 0) : Number(l.pqty || l.qty || 0);
           const rate = Number(l.prate || l.price || 0);
-          const cardamomCost = Number(l.puramt || l.amount || (qty * rate));
+          const cardamomCost = isEAuc
+            ? Number(l.amount || (qty * rate))
+            : Number(l.puramt || l.amount || (qty * rate));
           const refundAmount = Number(l.refund || 0);
           const com = Number(l.com || 0), cg = Number(l.cgst || 0), sg = Number(l.sgst || 0), ig = Number(l.igst || 0);
           perLot.push({

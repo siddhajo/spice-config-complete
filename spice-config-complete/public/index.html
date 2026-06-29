@@ -7416,9 +7416,9 @@ async function loadFormulas(){
           formula: `P_Rate = Lot Price`,
         },
         {
-          label: 'Purchase Amount (PurAmt)',
-          note: 'Auction amount net of the agent\'s commission and handling charge.',
-          formula: `PurAmt = Lot Amount − Commission − Handling`,
+          label: 'Purchase Amount (PurAmt) — purchase taxable value',
+          note: 'The purchase taxable value is the auction amount plus the SB sample refund (defined below). Commission and handling are billed SEPARATELY on the Commission Bill and are NOT netted into the goods value.',
+          formula: `PurAmt = Lot Amount + SB Refund`,
         },
       ]);
       h += card('Commission & Handling (e-Auction)', [
@@ -7434,7 +7434,7 @@ async function loadFormulas(){
         },
         {
           label: 'Handling charge (HPC)',
-          note: 'A percentage of the commission, not of the amount.',
+          note: 'A percentage of the commission, not of the amount. Set Handling % to 0 to disable it — Payable then excludes handling.',
           formula: `Handling = round2( Commission × ${pill('Handling %', num('hpc', '0'))} / 100 )`,
         },
         {
@@ -7448,6 +7448,32 @@ async function loadFormulas(){
           label: 'Payable to seller (Balance)',
           note: 'Advance = Commission + Handling + CGST + SGST + IGST.',
           formula: `Payable = ( Lot Amount + SB Refund ) − ( Commission + Handling + CGST + SGST + IGST )`,
+        },
+      ]);
+      h += card('Purchase documents (e-Auction)', [
+        {
+          label: 'Purchase Invoice — registered seller (has GSTIN)',
+          note: 'The printed Quantity / Total Qty columns show the RAW Lot Qty — the sample refund is not added to the printed quantity. The Taxable Value column carries PurAmt = Lot Amount + SB Refund.',
+          formula: `Taxable Value = PurAmt = Lot Amount + SB Refund<br>
+                Intra-state:  CGST = round2( Taxable × ${pill('Goods GST/2', '(' + num('gst_goods','5') + '/2)')} / 100 ),    SGST = same<br>
+                Inter-state:  IGST = round2( Taxable × ${pill('Goods GST %', num('gst_goods','5'))} / 100 )<br>
+                Total   = Taxable + CGST + SGST + IGST   ${lit('( rounded )')}<br>
+                Payable = Total − TDS   ${lit('( 194Q — see shared card )')}`,
+        },
+        {
+          label: 'Bill of Supply — agriculturist (no GSTIN)',
+          note: 'Agriculturists are exempt, so no tax is charged. Printed Quantity shows the RAW Lot Qty; the Taxable Value column carries PurAmt = Lot Amount + SB Refund.',
+          formula: `Taxable Value = PurAmt = Lot Amount + SB Refund<br>
+                CGST = SGST = IGST = 0<br>
+                Net = round( Σ PurAmt )    ${lit('— when Rounding flag is ON')}`,
+        },
+        {
+          label: 'Commission Bill (Memorandum of Cardamom Sold)',
+          note: 'Cardamom Cost shown is the GROSS auction amount (Lot Qty × Lot Price), NOT PurAmt. The SB refund is added and the commission + its GST are deducted exactly once, so Nett equals the seller\'s Payable.',
+          formula: `Cardamom Cost = Lot Amount   ${lit('( = Lot Qty × Lot Price )')}<br>
+                [+] SB Refund<br>
+                [−] Commission   [−] CGST + SGST + IGST   ${lit('( on commission )')}<br>
+                Nett = Lot Amount + SB Refund − Commission − ( CGST + SGST + IGST )`,
         },
       ]);
       h += card('Payment summary (e-Auction — per seller, per auction)', [

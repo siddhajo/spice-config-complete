@@ -692,6 +692,10 @@ function mountMobile(app, deps) {
       pageLimit:       20,
       showUsername:    false,
       tradeTileTitle:  'Active Trade',
+      // Noun the mobile UI uses for a trade/auction record. e-Auction shows
+      // "Auction" everywhere the picker / header would otherwise say "Trade".
+      // e-Trade keeps "Trade" so that mode is untouched.
+      tradeNoun:       isEAuc ? 'Auction' : 'Trade',
       acctMask:        'none',
       labels:          {},
     });

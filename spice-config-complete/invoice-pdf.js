@@ -172,6 +172,13 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
   const x0 = MX, x1 = PAGE_W - MX, W = x1 - x0;
   let y = MX;
 
+  // e-Auction prints the RAW lot qty in the Qty/Total-Qty and Value columns
+  // (sample refund is NOT added to the printed quantity — point 5a). The
+  // Taxable Value column already carries Amount + Refund via `puramt`. In
+  // e-Trade the Total-Qty column keeps showing pqty (qty + sample refund),
+  // so this flag leaves the e-Trade layout untouched.
+  const isEAucPI = String(cfg.business_mode || '').toLowerCase() === 'e-auction';
+
   // Normalize stroke style globally so every line — whether drawn via
   // explicit moveTo/lineTo/stroke OR via rect.fill().stroke() — renders
   // with the same width and color. Prevents the "some lines look darker
@@ -443,10 +450,11 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
     const li = lineItems[i];
     stripeRow(y, lineH, i);
     doc.text(String(li.lot || '').padStart(3, '0'), colSpec[0].x, y + 2, { width: colSpec[0].w, align: 'center' });
+    const totQty = isEAucPI ? (li.qty || 0) : (li.pqty || li.qty);
     doc.text(fmtQty(li.qty), colSpec[1].x, y + 2, { width: colSpec[1].w - 3, align: 'right' });
-    doc.text(fmtQty(li.pqty || li.qty), colSpec[3].x, y + 2, { width: colSpec[3].w - 3, align: 'right' });
+    doc.text(fmtQty(totQty), colSpec[3].x, y + 2, { width: colSpec[3].w - 3, align: 'right' });
     doc.text(fmtRup(li.prate || li.price), colSpec[4].x, y + 2, { width: colSpec[4].w - 3, align: 'right' });
-    const value = (li.prate || li.price) * (li.pqty || li.qty);
+    const value = (li.prate || li.price) * totQty;
     doc.text(fmtRup(value), colSpec[5].x, y + 2, { width: colSpec[5].w - 3, align: 'right' });
     doc.text(fmtRup(li.puramt || li.amount), colSpec[7].x, y + 2, { width: colSpec[7].w - 3, align: 'right' });
     if (li.cgst) doc.text(fmtRup(li.cgst), colSpec[8].x, y + 2, { width: colSpec[8].w - 3, align: 'right' });
@@ -470,8 +478,8 @@ function generatePurchaseInvoicePDF(invoiceData, cfg, invoiceNo, externalDoc) {
   doc.font('Helvetica-Bold').fontSize(9);
   doc.text('TOTAL', colSpec[0].x, totalRowY + 2, { width: colSpec[0].w, align: 'center' });
   doc.text(fmtQty(sumKey(lineItems, 'qty')), colSpec[1].x, totalRowY + 2, { width: colSpec[1].w - 3, align: 'right' });
-  doc.text(fmtQty(sumKey(lineItems, 'pqty', 'qty')), colSpec[3].x, totalRowY + 2, { width: colSpec[3].w - 3, align: 'right' });
-  const valueSum = lineItems.reduce((s, li) => s + (li.prate || li.price) * (li.pqty || li.qty), 0);
+  doc.text(fmtQty(isEAucPI ? sumKey(lineItems, 'qty') : sumKey(lineItems, 'pqty', 'qty')), colSpec[3].x, totalRowY + 2, { width: colSpec[3].w - 3, align: 'right' });
+  const valueSum = lineItems.reduce((s, li) => s + (li.prate || li.price) * (isEAucPI ? (li.qty || 0) : (li.pqty || li.qty)), 0);
   doc.text(fmtRup(valueSum), colSpec[5].x, totalRowY + 2, { width: colSpec[5].w - 3, align: 'right' });
   const taxableSum = sumKey(lineItems, 'puramt', 'amount');
   doc.text(fmtRup(taxableSum), colSpec[7].x, totalRowY + 2, { width: colSpec[7].w - 3, align: 'right' });
@@ -2023,6 +2031,12 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
   const fmtRup = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const sumKey = (rows, primary, fallback) => rows.reduce((s, r) => s + Number(r[primary] || (fallback ? r[fallback] : 0) || 0), 0);
 
+  // e-Auction prints the RAW lot qty in the Total-Qty / Value columns (sample
+  // refund is NOT added to the printed quantity — point 5a). The Taxable Value
+  // column already carries Amount + Refund via `puramt`. e-Trade keeps showing
+  // pqty (qty + sample refund), so this leaves the e-Trade layout untouched.
+  const isEAucAB = String(cfg.business_mode || '').toLowerCase() === 'e-auction';
+
   // ── ORIGINAL/DUPLICATE/TRIPLICATE above outer border ──
   doc.fontSize(7.5).font('Helvetica').fillColor('#000');
   doc.text('ORIGINAL/DUPLICATE/TRIPLICATE', x0, y, { width: W, align: 'right' });
@@ -2274,10 +2288,11 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
     const li = rows[i];
     stripeRow(y, lineH, i);
     doc.text(String(li.lot || '').padStart(3, '0'), colSpec[0].x, y + 2, { width: colSpec[0].w, align: 'center' });
+    const abTotQty = isEAucAB ? (li.qty || 0) : (li.pqty || li.qty);
     doc.text(fmtQty(li.qty), colSpec[1].x, y + 2, { width: colSpec[1].w - 3, align: 'right' });
-    doc.text(fmtQty(li.pqty || li.qty), colSpec[3].x, y + 2, { width: colSpec[3].w - 3, align: 'right' });
+    doc.text(fmtQty(abTotQty), colSpec[3].x, y + 2, { width: colSpec[3].w - 3, align: 'right' });
     doc.text(fmtRup(li.prate || li.price), colSpec[4].x, y + 2, { width: colSpec[4].w - 3, align: 'right' });
-    doc.text(fmtRup((li.prate || li.price) * (li.pqty || li.qty)), colSpec[5].x, y + 2, { width: colSpec[5].w - 3, align: 'right' });
+    doc.text(fmtRup((li.prate || li.price) * abTotQty), colSpec[5].x, y + 2, { width: colSpec[5].w - 3, align: 'right' });
     doc.text(fmtRup(li.puramt || li.amount), colSpec[7].x, y + 2, { width: colSpec[7].w - 3, align: 'right' });
     y += lineH;
     drawnRows++;
@@ -2300,8 +2315,8 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
   doc.font('Helvetica-Bold').fontSize(9);
   doc.text('TOTAL', colSpec[0].x, totalRowY + 2, { width: colSpec[0].w, align: 'center' });
   doc.text(fmtQty(sumKey(rows, 'qty')), colSpec[1].x, totalRowY + 2, { width: colSpec[1].w - 3, align: 'right' });
-  doc.text(fmtQty(sumKey(rows, 'pqty', 'qty')), colSpec[3].x, totalRowY + 2, { width: colSpec[3].w - 3, align: 'right' });
-  const valueSum = rows.reduce((s, li) => s + (li.prate || li.price) * (li.pqty || li.qty), 0);
+  doc.text(fmtQty(isEAucAB ? sumKey(rows, 'qty') : sumKey(rows, 'pqty', 'qty')), colSpec[3].x, totalRowY + 2, { width: colSpec[3].w - 3, align: 'right' });
+  const valueSum = rows.reduce((s, li) => s + (li.prate || li.price) * (isEAucAB ? (li.qty || 0) : (li.pqty || li.qty)), 0);
   doc.text(fmtRup(valueSum), colSpec[5].x, totalRowY + 2, { width: colSpec[5].w - 3, align: 'right' });
   doc.text(fmtRup(sumKey(rows, 'puramt', 'amount')), colSpec[7].x, totalRowY + 2, { width: colSpec[7].w - 3, align: 'right' });
   y += lineH;

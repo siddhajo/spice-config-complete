@@ -114,19 +114,18 @@ function calculateLot(lot, cfg) {
     const gradeStr = String(lot.grade || '').trim();
     let prate, puramt;
     if (cfg.business_mode === 'e-Auction') {
-      // e-Auction: rate = lot.price; puramt = lot.amount - commission - handling.
-      // These numbers are state-agnostic by design (commission and handling
-      // are computed once in the main flow below). For dual-view storage
-      // both ISP and ASP currently get the same values; if rules ever
-      // diverge per state in e-Auction mode, fork here.
+      // e-Auction: rate = lot.price; the purchase TAXABLE VALUE = Amount +
+      // Refund (Amount = qty × price, Refund = price × SB Sample Refund).
+      // Commission, handling and their GST are billed SEPARATELY on the
+      // Commission Bill and are NOT netted into the goods value here — so the
+      // purchase invoice / Tally voucher tax base is the gross goods value.
+      // These numbers are state-agnostic by design; for dual-view storage both
+      // ISP and ASP get the same values. If rules ever diverge per state in
+      // e-Auction mode, fork here.
       const sbRefund  = Number(cfg.sb_refund) || 0;
-      const commPct   = Number(cfg.commission) || 0;
-      const handlingPct = Number(cfg.hpc) || 0;
       const refundAmt = Math.round((lot.price || 0) * sbRefund * 100) / 100;
-      const commAmt   = Math.round((((lot.amount || 0) + refundAmt) * commPct / 100) * 100) / 100;
-      const handling  = Math.round(commAmt * handlingPct / 100 * 100) / 100;
       prate = lot.price || 0;
-      puramt = (lot.amount || 0) - commAmt - handling;
+      puramt = Math.round(((lot.amount || 0) + refundAmt) * 100) / 100;
     } else {
       // e-Trade: deduction-based, with different deduction sources per state.
       //   ISP (TN)  → cfg.deduction1 / cfg.deduction2
