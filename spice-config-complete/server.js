@@ -4665,6 +4665,12 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
 
 app.post('/api/lots', requireLotWrite, (req, res) => {
   const l = req.body;
+  // The mobile PWA posts PWA-style weight keys (sample_weight / gross_weight);
+  // the INSERT below reads sample_wt / gross_wt. Normalise so mobile-created
+  // lots persist their sample/gross weight instead of silently storing 0
+  // (which is why the desktop edit form later showed sample = 0).
+  if (l.sample_weight !== undefined && l.sample_wt === undefined) l.sample_wt = l.sample_weight;
+  if (l.gross_weight  !== undefined && l.gross_wt  === undefined) l.gross_wt  = l.gross_weight;
   // reserved_price is persisted unconditionally — server doesn't gate
   // on flag_reserved_price because flipping the flag later mustn't
   // wipe values that the operator already entered. UI hides the input
@@ -4760,6 +4766,14 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
     });
   }
   const l = req.body; const sets = []; const vals = [];
+  // The mobile PWA posts PWA-style weight keys (sample_weight / gross_weight)
+  // while the lots table columns are sample_wt / gross_wt. Normalise so the
+  // generic column-update loop below doesn't emit `SET sample_weight=?` for a
+  // column that doesn't exist — SQLite rejects it and the mobile edit fails
+  // with a bare "Failed". (Desktop already sends the sample_wt/gross_wt names.)
+  if (l.sample_weight !== undefined && l.sample_wt === undefined) l.sample_wt = l.sample_weight;
+  if (l.gross_weight  !== undefined && l.gross_wt  === undefined) l.gross_wt  = l.gross_weight;
+  delete l.sample_weight; delete l.gross_weight;
   // Withdrawn lots (code='WD') carry no sale: force the price (and amount)
   // to 0 so every derived figure recomputes to 0. Done server-side so all
   // edit paths (modal, inline, future bulk) behave identically. The code is
@@ -4789,13 +4803,19 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
       }
     }
   }
+  // Only update real lots columns. Skipping unknown keys guards against a
+  // client sending a field that isn't a column (which would make the
+  // UPDATE throw and surface as a failed save).
+  const _lotCols = new Set(db.all('PRAGMA table_info(lots)').map(c => c.name));
   for (const [k,v] of Object.entries(l)) {
     // `locked_at` / `locked_by` are managed by the lock/unlock
     // endpoints — never let the generic update slot rewrite them.
-    if (k !== 'id' && k !== 'auction_id' && k !== 'created_at' && k !== 'locked_at' && k !== 'locked_by') {
+    if (k !== 'id' && k !== 'auction_id' && k !== 'created_at' && k !== 'locked_at' && k !== 'locked_by'
+        && _lotCols.has(k)) {
       sets.push(`${k}=?`); vals.push(v);
     }
   }
+  if (!sets.length) return res.status(400).json({ error: 'No updatable fields supplied' });
   vals.push(req.params.id);
   // Capture the row BEFORE the write — auction_id drops the price-check
   // gate to 'stale' (re-surfacing the lots-tab banner) and the full

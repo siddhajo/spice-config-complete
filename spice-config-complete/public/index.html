@@ -22871,7 +22871,16 @@ async function leEditLot(lotId){
   document.getElementById('le-bags').value   = lot.bags ?? '';
   document.getElementById('le-litre').value  = lot.litre ?? '';
   document.getElementById('le-qty').value    = lot.qty ?? '';
-  document.getElementById('le-sample').value = lot.sample_wt ?? (_le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000');
+  // Show the lot's stored sample weight; fall back to the configured default
+  // when it's 0/blank (matches the mobile edit modal). Sample weight is a
+  // fixed per-trade default, so a stored 0 — e.g. on lots created before the
+  // weight was persisted — should still surface the configured value.
+  {
+    const _lotSample = Number(lot.sample_wt);
+    document.getElementById('le-sample').value = (Number.isFinite(_lotSample) && _lotSample > 0)
+      ? _lotSample.toFixed(3)
+      : (_le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000');
+  }
   // Weight w/ Gunny isn't stored (Net Wt is derive-only), so clear any
   // stale value from a prior entry and refresh the read-only Gunny Wt
   // for this lot's bag count. Net Wt keeps the stored value — leave it
