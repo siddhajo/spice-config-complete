@@ -948,10 +948,12 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
          FROM lots WHERE auction_id = ? ORDER BY branch, name`, [auctionId]);
 
     case 'dealer_list':
+      // Pre-trade roster — must not depend on `amount` (unset until prices are
+      // imported). Mirrors the XLSX exportDealerList query. See exports.js.
       return db.all(
         `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
           COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
-         FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND amount > 0
+         FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
          GROUP BY state, name, cr ORDER BY name`, [auctionId]);
 
     case 'sales_taxes':

@@ -604,10 +604,14 @@ async function exportCollection(db, auctionId) {
 
 // ── Export Type 8: Dealer List ────────────────────────────────
 async function exportDealerList(db, auctionId) {
+  // Registered-dealer roster: a pre-trade export, so it must NOT depend on
+  // `amount` (lots carry no price/amount until prices are imported — see
+  // exportPriceListBefore). Filtering on amount>0 made the pre-trade Dealer
+  // List come back empty. Qualify on GSTIN presence + a real (qty>0) lot.
   const rows = db.all(
-    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin, 
+    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
       COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
-     FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND amount > 0
+     FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
      GROUP BY state, name, cr ORDER BY state, name`, [auctionId]
   );
   const cols = [
