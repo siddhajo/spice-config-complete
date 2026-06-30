@@ -1376,6 +1376,23 @@ tr:hover td{background:var(--spice-cream)}
 .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .bgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
 
+/* ── Rates & Charges change-history panel ──────────────────── */
+.rates-hist{margin-top:18px;border:1px solid var(--border);border-radius:10px;
+  background:var(--card,#fff);padding:14px 16px;min-height:64px}
+.rates-hist .rh-hint{font-size:13px;color:var(--text3)}
+.rates-hist .rh-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px}
+.rates-hist .rh-empty{font-size:13px;color:var(--text3)}
+.rates-hist .rh-table{width:100%;border-collapse:collapse;font-size:13px}
+.rates-hist .rh-table th{text-align:left;font-weight:600;color:var(--text2);
+  border-bottom:1px solid var(--border);padding:6px 10px 6px 0}
+.rates-hist .rh-table td{padding:6px 10px 6px 0;border-bottom:1px solid var(--line,#eef1f5);
+  font-variant-numeric:tabular-nums}
+.rates-hist .rh-table tr:last-child td{border-bottom:0}
+.rates-hist .rh-old{color:var(--text3);text-decoration:line-through}
+.rates-hist .rh-new{color:var(--green,#16a34a);font-weight:700}
+/* Subtle highlight on the field whose history is showing */
+.fg.rh-active input{outline:2px solid var(--green,#16a34a);outline-offset:1px}
+
 /* ── Toggle Switch (compact) ─────────────────────────────── */
 .flag-row{
   display:flex;align-items:center;justify-content:space-between;
@@ -7770,7 +7787,7 @@ async function loadFixData(){
       .fd-switch{display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;cursor:pointer;user-select:none;padding:8px 14px;border:2px solid var(--line,#d1d5db);border-radius:10px;background:var(--card,#fff)}
       .fd-switch input{width:17px;height:17px}
       .fd-switch:has(input:checked){background:#dcfce7;border-color:#16a34a;color:#15803d}
-      .fd-btn-add{background:var(--fdc);color:#fff;border:0;border-radius:10px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer}
+      .fd-btn-add{background:var(--fdc,#2563eb);color:#fff;border:0;border-radius:10px;padding:8px 16px;font-size:14px;font-weight:700;cursor:pointer}
       .fd-scroll{overflow:auto;max-height:62vh;border:1px solid var(--line,#e5e7eb);border-radius:12px}
       table.fd-grid{border-collapse:separate;border-spacing:0;width:100%;font-size:14px}
       table.fd-grid th,table.fd-grid td{border-bottom:1px solid var(--line,#e9edf2);border-right:1px solid var(--line,#eef1f5);padding:9px 12px;text-align:left;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
@@ -10736,6 +10753,9 @@ function renderSettingsPanel(){
     html+='<div class="sgrid">';
     for(const f of fields)html+=fld(f);
     html+='</div>';
+    // Rates & Charges: a change-history panel sits below the fields and
+    // fills in when the operator hovers/focuses one of the tracked rates.
+    if (ck === 'rates') { html += '<div id="rates-history-host" class="rates-hist"></div>'; }
     // WhatsApp Business config lives in a dedicated server-side table
     // (secrets never reach the browser), so it renders as its own card
     // below the standard integration fields rather than via fld().
@@ -10774,7 +10794,7 @@ function renderSettingsPanel(){
   else if (ck === 'sister') { applyPartnershipGate('s_'); _bindPartnershipListener('s_'); }
   // Rates panel: hide each rate input whose enable-flag is OFF, and bind the
   // flags so toggling re-runs the sweep live (no Save round-trip needed).
-  if (ck === 'rates') { applyRateVisibility(); _bindRateFlagListeners(); }
+  if (ck === 'rates') { applyRateVisibility(); _bindRateFlagListeners(); initRatesHistory(); }
   // After DOM paint, fetch existing logo status for preview.
   // Company tab shows the ACTIVE preset's logo (matches widget above).
   if (ck === 'company') {
@@ -10878,6 +10898,65 @@ function _bindRateFlagListeners(){
       cb.dataset._rateBound = '1';
     }
   }
+}
+
+// ── Rates & Charges change history ────────────────────────────────
+// A handful of rate/charge settings carry a server-side change trail
+// (settings_history, scoped to the active business mode). When the operator
+// hovers or focuses one of them, its history shows in the panel below the
+// section. Keep this key list in sync with HISTORY_KEYS in company-config.js.
+let _ratesHistory = {};   // { key: [ { old, new, by, at }, … ] } newest first
+const _RATE_HIST_KEYS = ['gunny_rate','transport','insurance','discount_pct','discount_days','dealer_days'];
+
+async function initRatesHistory(){
+  const host = document.getElementById('rates-history-host');
+  if(!host) return;
+  host.innerHTML = '<div class="rh-hint">Hover or click a rate field above to see how it has changed over time.</div>';
+  try{ const d = await j('/api/settings-history'); _ratesHistory = (d && d.history) || {}; }
+  catch(_){ _ratesHistory = {}; }
+  for(const key of _RATE_HIST_KEYS){
+    const input = document.querySelector(`#settings-root input[data-key="${key}"]`);
+    if(!input || input.dataset._histBound) continue;
+    const show = ()=>showRateHistory(key);
+    input.addEventListener('mouseenter', show);
+    input.addEventListener('focus', show);
+    input.dataset._histBound = '1';
+  }
+}
+
+// The field's visible label (its first text node, ignoring any help-tip glyph).
+function _ratesLabelFor(key){
+  const input = document.querySelector(`#settings-root input[data-key="${key}"]`);
+  const lab = input && input.closest('.fg') ? input.closest('.fg').querySelector('label') : null;
+  if(lab && lab.childNodes.length){ const t = lab.childNodes[0].textContent.trim(); if(t) return t; }
+  return key;
+}
+function _fmtHistVal(v){ return (v==null||v==='') ? '—' : esc(String(v)); }
+function _fmtHistWhen(s){
+  // s = "YYYY-MM-DD HH:MM:SS" (localtime) → "DD Mon YYYY, HH:MM".
+  const m = String(s||'').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if(!m) return esc(String(s||''));
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1];
+  return `${m[3]} ${mon} ${m[1]}, ${m[4]}:${m[5]}`;
+}
+function showRateHistory(key){
+  const host = document.getElementById('rates-history-host');
+  if(!host) return;
+  // Highlight the active field.
+  document.querySelectorAll('#settings-root .fg.rh-active').forEach(el=>el.classList.remove('rh-active'));
+  const input = document.querySelector(`#settings-root input[data-key="${key}"]`);
+  if(input && input.closest('.fg')) input.closest('.fg').classList.add('rh-active');
+  const label = _ratesLabelFor(key);
+  const rows = _ratesHistory[key] || [];
+  let body;
+  if(!rows.length){
+    body = `<div class="rh-empty">No changes recorded yet for <b>${esc(label)}</b>. The next time you change it and save, it'll appear here.</div>`;
+  }else{
+    body = `<table class="rh-table"><thead><tr><th>When</th><th>From</th><th>To</th><th>By</th></tr></thead><tbody>`
+      + rows.map(r=>`<tr><td>${_fmtHistWhen(r.at)}</td><td class="rh-old">${_fmtHistVal(r.old)}</td><td class="rh-new">${_fmtHistVal(r.new)}</td><td>${esc(r.by||'—')}</td></tr>`).join('')
+      + `</tbody></table>`;
+  }
+  host.innerHTML = `<div class="rh-title">📜 History — ${esc(label)}</div>${body}`;
 }
 
 // ── Logo upload widget ──────────────────────────────────────
