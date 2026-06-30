@@ -7745,7 +7745,7 @@ document.addEventListener('DOMContentLoaded', _applySpiceDevMenu);
 // locked cells greyed out, and EVERY update/delete shows the exact
 // before→after and asks for a second confirmation. Backed by the
 // whitelisted /api/data/* endpoints (admin-only, auto-backup).
-const FD = { entity:null, label:'', columns:[], rows:[], total:0, offset:0, limit:100, q:'', filters:{}, edit:false, undo:null, _t:null };
+const FD = { entity:null, label:'', columns:[], rows:[], total:0, offset:0, limit:100, q:'', filters:{}, edit:false, undo:null, _t:null, sel:new Set() };
 // A cheerful colour per section so the user always knows where they are.
 const FD_COLORS = { sellers:'#2563eb', buyers:'#0891b2', auctions:'#7c3aed', lots:'#059669',
   invoices:'#d97706', purchases:'#db2777', bills:'#0d9488', debit_notes:'#dc2626' };
@@ -7791,9 +7791,13 @@ async function loadFixData(){
       td.fd-edit:focus{outline:2px solid var(--fdc);outline-offset:-2px;caret-color:var(--fdc);background:#eff6ff;color:#111}
       td.fd-lock{color:var(--text3,#9ca3af);background:repeating-linear-gradient(45deg,transparent,transparent 6px,#0000000a 6px,#0000000a 12px)}
       td.fd-saved{background:#dcfce7!important;transition:background .5s}
-      td.fd-rowact{text-align:center}
+      td.fd-rowact{text-align:center;white-space:nowrap}
       td.fd-rowact button{border:0;background:transparent;cursor:pointer;font-size:16px;line-height:1}
       td.fd-rowact button:hover{transform:scale(1.15)}
+      .fd-rowsel,#fd-selall{width:17px;height:17px;cursor:pointer;vertical-align:middle;margin-right:4px}
+      tr.fd-hrow th .fd-sa{accent-color:#fff}
+      #fd-selbar{display:none;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:9px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;font-size:14px}
+      tr.fd-selrow{background:#eff6ff!important}
       .fd-null{color:var(--text3,#9ca3af)}
       .fd-modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;z-index:9999}
       .fd-modal{background:var(--card,#fff);color:var(--text,#111);border-radius:14px;padding:22px;max-width:460px;width:92%;box-shadow:0 20px 60px -15px rgba(0,0,0,.4)}
@@ -7820,7 +7824,7 @@ async function fdLoadCatalog(){
   }catch(e){ el.innerHTML = `<div style="color:#dc2626;font-size:13px">${esc(e.message||e)}</div>`; }
 }
 
-function fdOpen(key){ FD.entity=key; FD.offset=0; FD.q=''; FD.filters={}; FD.undo=null; fdLoadCatalog(); fdRender(); }
+function fdOpen(key){ FD.entity=key; FD.offset=0; FD.q=''; FD.filters={}; FD.undo=null; FD.sel.clear(); fdLoadCatalog(); fdRender(); }
 
 // Build the query string for the current section, search, filters & page.
 function fdQuery(){
@@ -7851,15 +7855,17 @@ async function fdRender(){
     <button id="fd-next" class="btn" onclick="FD.offset+=FD.limit;fdFetch()">›</button>
   </div>`;
   html += FD.edit
-    ? `<div style="font-size:13px;color:#b45309;margin-bottom:8px">✎ Edit mode is ON. Click a yellow cell to change it; greyed cells are locked for safety. You'll confirm every change.</div>`
+    ? `<div style="font-size:13px;color:#b45309;margin-bottom:8px">✎ Edit mode is ON. Click a yellow cell to change it; greyed cells are locked for safety. Tick the boxes on the left to change or delete several rows at once. You'll confirm every change.</div>`
     : `<div style="font-size:13px;color:#888;margin-bottom:8px">Viewing only — nothing can be changed. Switch on <b>Edit mode</b> above to add, edit or delete.</div>`;
+  html += `<div id="fd-selbar"></div>`;
   html += `<div class="fd-scroll"><table class="fd-grid"><thead>
-    <tr class="fd-hrow">${FD.edit?'<th></th>':''}${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr>
+    <tr class="fd-hrow">${FD.edit?'<th title="Select all on this page"><input type="checkbox" class="fd-sa" id="fd-selall" onchange="fdToggleAll(this.checked)"></th>':''}${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr>
     <tr class="fd-filterrow">${FD.edit?'<th></th>':''}${cols.map(c=>
       `<th><span class="fd-fwrap"><input class="fd-fcell" placeholder="filter…" value="${esc(FD.filters[c.name]||'')}" oninput="fdFilterChanged('${esc(c.name)}',this.value)"><button type="button" class="fd-fclear" title="Clear filter" onclick="fdClearFilter('${esc(c.name)}',this)">✕</button></span></th>`).join('')}</tr>
     </thead><tbody id="fd-tbody">${fdRowsHtml(d.rows)}</tbody></table></div>`;
   view.innerHTML = html;
   fdUpdateCount();
+  fdSelBar(); fdSyncSelAll();
 }
 
 // Render just the data rows (re-used when filtering/searching/paging so we
@@ -7875,8 +7881,9 @@ function fdRowsHtml(rows){
       if(FD.edit) return `<td class="fd-edit" contenteditable spellcheck="false" data-col="${esc(c.name)}" data-label="${esc(c.label)}" data-type="${c.type}" data-rowid="${rid}" data-orig="${esc(String(isNull?'':v))}" data-wasnull="${isNull?1:0}" onblur="fdCellBlur(this)">${isNull?'':esc(String(v))}</td>`;
       return `<td class="${isNull?'fd-null':''}">${isNull?'—':esc(String(v))}</td>`;
     }).join('');
-    const act = FD.edit ? `<td class="fd-rowact"><button title="Delete this record" onclick="fdDelete(${rid})">🗑</button></td>` : '';
-    return `<tr data-rowid="${rid}">${act}${tds}</tr>`;
+    const seld = FD.sel.has(rid);
+    const act = FD.edit ? `<td class="fd-rowact"><input type="checkbox" class="fd-rowsel" ${seld?'checked':''} title="Select this record" onchange="fdToggleRow(${rid},this.checked)"><button title="Delete this record" onclick="fdDelete(${rid})">🗑</button></td>` : '';
+    return `<tr data-rowid="${rid}"${seld?' class="fd-selrow"':''}>${act}${tds}</tr>`;
   }).join('');
 }
 
@@ -7885,9 +7892,10 @@ function fdRowsHtml(rows){
 async function fdFetch(){
   let d;
   try{ d = await fdQuery(); }catch(e){ toast('Search failed: '+(e.message||e)); return; }
-  FD.rows=d.rows; FD.total=d.total;
+  FD.rows=d.rows; FD.total=d.total; FD.sel.clear();
   const tb = document.getElementById('fd-tbody'); if(tb) tb.innerHTML = fdRowsHtml(d.rows);
   fdUpdateCount();
+  fdSelBar(); fdSyncSelAll();
 }
 function fdUpdateCount(){
   const from = FD.total ? FD.offset+1 : 0, to = Math.min(FD.offset+FD.limit, FD.total);
@@ -7991,7 +7999,7 @@ async function fdCellBlur(td){
   try{
     await j(`/api/data/${encodeURIComponent(FD.entity)}/${rid}`,
       { method:'PUT', body: JSON.stringify({ values:{ [col]: send } }) });
-    FD.undo = { rid, col, label, prev: wasNull ? null : orig };
+    FD.undo = { kind:'cell', rid, col, label, prev: wasNull ? null : orig };
     td.dataset.orig = text; td.dataset.wasnull = (send==null)?'1':'0';
     td.classList.add('fd-saved'); setTimeout(()=>td.classList.remove('fd-saved'),1000);
     const ub = document.getElementById('fd-undo'); if(ub) ub.disabled = false;
@@ -8002,6 +8010,20 @@ async function fdCellBlur(td){
 async function fdUndo(){
   if(!FD.undo) return;
   const u = FD.undo;
+  // Bulk undo — reverse the whole last batch update/delete via its token.
+  if(u.kind==='bulk'){
+    const ok = await fdConfirm({ title:'Undo last bulk change?',
+      body:`This reverses your last action: <b>${esc(u.label)}</b>.`+
+           `<div style="color:#b45309;font-size:13px;margin-top:8px">It restores those records to exactly how they were just before. A backup is saved first.</div>`,
+      confirmLabel:'Undo it' });
+    if(!ok) return;
+    try{
+      await j('/api/data/undo', { method:'POST', body: JSON.stringify({ token: u.token }) });
+      FD.undo = null; FD.sel.clear(); toast('Bulk change undone'); fdLoadCatalog(); fdRender();
+    }catch(e){ toast('Undo failed: '+(e.message||e)); }
+    return;
+  }
+  // Single-cell undo.
   const ok = await fdConfirm({ title:`Undo change to ${u.label}?`,
     body:`This puts <b>${esc(u.label)}</b> back to its previous value.`, confirmLabel:'Undo it' });
   if(!ok) return;
@@ -8026,8 +8048,128 @@ async function fdDelete(rid){
   if(!ok) return;
   try{
     await j(`/api/data/${encodeURIComponent(FD.entity)}/${rid}`, { method:'DELETE' });
-    FD.undo = null; toast('Record deleted — backup saved'); fdLoadCatalog(); fdRender();
+    FD.sel.delete(rid); FD.undo = null; toast('Record deleted — backup saved'); fdLoadCatalog(); fdRender();
   }catch(e){ toast('Delete failed: '+(e.message||e)); }
+}
+
+// ── Multi-row selection ─────────────────────────────────────────────
+// Tick boxes on the left in Edit mode to act on several rows at once.
+function fdToggleRow(rid,on){
+  if(on) FD.sel.add(rid); else FD.sel.delete(rid);
+  const tr = document.querySelector(`#fd-tbody tr[data-rowid="${rid}"]`);
+  if(tr) tr.classList.toggle('fd-selrow', on);
+  fdSelBar(); fdSyncSelAll();
+}
+function fdToggleAll(on){
+  FD.sel.clear();
+  if(on) FD.rows.forEach(r=>FD.sel.add(r._rowid_));
+  document.querySelectorAll('#fd-tbody tr[data-rowid]').forEach(tr=>{
+    const cb = tr.querySelector('.fd-rowsel'); if(cb) cb.checked = on;
+    tr.classList.toggle('fd-selrow', on);
+  });
+  fdSelBar();
+}
+function fdClearSel(){
+  FD.sel.clear();
+  document.querySelectorAll('#fd-tbody tr[data-rowid]').forEach(tr=>{
+    const cb = tr.querySelector('.fd-rowsel'); if(cb) cb.checked = false;
+    tr.classList.remove('fd-selrow');
+  });
+  fdSelBar(); fdSyncSelAll();
+}
+// Keep the header "select all" box in sync (checked / partial / empty).
+function fdSyncSelAll(){
+  const sa = document.getElementById('fd-selall'); if(!sa) return;
+  const some = FD.rows.some(r=>FD.sel.has(r._rowid_));
+  const all  = FD.rows.length>0 && FD.rows.every(r=>FD.sel.has(r._rowid_));
+  sa.checked = all;
+  sa.indeterminate = some && !all;
+}
+// The blue action bar that appears once one or more rows are ticked.
+function fdSelBar(){
+  const bar = document.getElementById('fd-selbar'); if(!bar) return;
+  const n = FD.sel.size;
+  if(!n){ bar.style.display='none'; bar.innerHTML=''; return; }
+  bar.style.display='flex';
+  const noun = n===1 ? FD.label.replace(/s$/,'') : FD.label.toLowerCase();
+  bar.innerHTML =
+    `<b>${n} ${noun} selected</b>`+
+    `<button class="fd-btn-add" onclick="fdBulkUpdate()">✎ Set a field…</button>`+
+    `<button class="btn" style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="fdBulkDelete()">🗑 Delete ${n}</button>`+
+    `<button class="btn" onclick="fdClearSel()">Clear</button>`;
+}
+
+// Delete every selected row in one go (one backup, one undo of the batch
+// isn't offered — recover from the automatic backup if needed).
+async function fdBulkDelete(){
+  const ids=[...FD.sel]; if(!ids.length) return;
+  const noun = ids.length===1 ? FD.label.replace(/s$/,'') : FD.label.toLowerCase();
+  const ok = await fdConfirm({
+    title:`Delete ${ids.length} ${noun}?`,
+    body:`<div style="color:#b45309;font-size:13px">This permanently removes the <b>${ids.length}</b> selected record${ids.length===1?'':'s'}. A backup is saved first, so they can be recovered if needed.</div>`,
+    confirmLabel:`Delete ${ids.length}`, danger:true
+  });
+  if(!ok) return;
+  try{
+    const r = await j(`/api/data/${encodeURIComponent(FD.entity)}/bulk-delete`,
+      { method:'POST', body: JSON.stringify({ rowids: ids }) });
+    FD.sel.clear();
+    FD.undo = r.undoToken ? { kind:'bulk', token:r.undoToken,
+      label:`deleted ${ids.length} ${ids.length===1?noun:FD.label.toLowerCase()}` } : null;
+    toast(`${ids.length} record${ids.length===1?'':'s'} deleted — backup saved`);
+    fdLoadCatalog(); fdRender();
+  }catch(e){ toast('Delete failed: '+(e.message||e)); }
+}
+
+// Set one field to the same value across every selected row.
+async function fdBulkUpdate(){
+  const ids=[...FD.sel]; if(!ids.length) return;
+  const cols = FD.columns.filter(c=>!c.locked);
+  if(!cols.length){ toast('No editable fields in this section'); return; }
+  const bg = document.createElement('div'); bg.className='fd-modal-bg';
+  bg.innerHTML = `<div class="fd-modal">
+    <strong style="font-size:17px">Change ${ids.length} record${ids.length===1?'':'s'} at once</strong>
+    <div style="font-size:13px;color:#888;margin:6px 0 14px">Pick one field and the value to put in it — it'll be applied to <b>all ${ids.length}</b> selected record${ids.length===1?'':'s'}. You'll confirm before it's saved.</div>
+    <label style="font-size:12.5px;color:var(--text3,#6b7280);display:block;margin-bottom:12px">Field to change
+      <select class="fd-in" id="fd-bu-col">${cols.map(c=>`<option value="${esc(c.name)}" data-type="${c.type}">${esc(c.label)}</option>`).join('')}</select></label>
+    <label style="font-size:12.5px;color:var(--text3,#6b7280);display:block">New value <span style="color:#9ca3af">(leave blank to clear it)</span>
+      <input class="fd-in" id="fd-bu-val" autocomplete="off"></label>
+    <div style="margin-top:18px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn" id="fd-bu-x">Cancel</button>
+      <button class="fd-btn-add" id="fd-bu-ok">Apply to ${ids.length}</button>
+    </div></div>`;
+  document.body.appendChild(bg);
+  bg.addEventListener('click', e=>{ if(e.target===bg) bg.remove(); });
+  bg.querySelector('#fd-bu-x').onclick = ()=>bg.remove();
+  bg.querySelector('#fd-bu-ok').onclick = async ()=>{
+    const selEl = bg.querySelector('#fd-bu-col');
+    const col = selEl.value;
+    const type = selEl.selectedOptions[0].dataset.type;
+    const label = (FD.columns.find(c=>c.name===col)||{}).label || col;
+    const text = bg.querySelector('#fd-bu-val').value.trim();
+    if(type==='number' && text!=='' && isNaN(Number(text.replace(/,/g,'')))){ toast(`${label} must be a number`); return; }
+    const send = text==='' ? (type==='number'?null:'') : text;
+    const newDisp = text==='' ? '(empty)' : text;
+    const ok = await fdConfirm({
+      title:`Set ${label} on ${ids.length} record${ids.length===1?'':'s'}?`,
+      body:`<div class="fd-fromto"><table>
+        <tr><td style="color:#888">Field</td><td><b>${esc(label)}</b></td></tr>
+        <tr><td style="color:#888">New value</td><td><b style="color:#2563eb">${esc(newDisp)}</b></td></tr>
+        <tr><td style="color:#888">Records</td><td><b>${ids.length}</b></td></tr></table></div>`,
+      confirmLabel:'Yes, apply it'
+    });
+    if(!ok) return;
+    try{
+      const r = await j(`/api/data/${encodeURIComponent(FD.entity)}/bulk-update`,
+        { method:'POST', body: JSON.stringify({ rowids: ids, values:{ [col]: send } }) });
+      bg.remove(); FD.sel.clear();
+      FD.undo = r.undoToken ? { kind:'bulk', token:r.undoToken,
+        label:`set ${label} on ${ids.length} record${ids.length===1?'':'s'}` } : null;
+      toast(`${label} updated on ${ids.length} record${ids.length===1?'':'s'} — backup saved`);
+      fdRender();
+    }catch(e){ toast('Could not save: '+(e.message||e)); }
+  };
+  setTimeout(()=>{ const f=bg.querySelector('#fd-bu-val'); if(f) f.focus(); }, 30);
 }
 
 function go(tab){

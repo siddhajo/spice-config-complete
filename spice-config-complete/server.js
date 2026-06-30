@@ -12707,6 +12707,21 @@ function _dataColType(sqliteType, name) {
   return /INT|REAL|NUM|DEC|FLOA|DOUB/i.test(sqliteType || '') ? 'number' : 'text';
 }
 
+// ── One-step undo for the last bulk operation ───────────────────────
+// We keep ONLY the most recent bulk update/delete in memory, stored as the
+// data needed to reverse it, so the admin can undo a mistaken batch with a
+// single click. It is deliberately cautious:
+//   • most-recent-only — a new bulk op replaces any pending undo;
+//   • single-use — consumed (cleared) the moment it's applied;
+//   • owner-only — only the user who made the change may undo it;
+//   • in-memory — lost on restart. The file snapshot taken before EVERY
+//     bulk op (_devSnapshot) remains the deeper, durable safety net.
+// The undo itself runs in one transaction and rolls back wholesale if any
+// row no longer fits (e.g. a deleted row's id was meanwhile reused).
+let _fixdataUndo = null;   // { token, userId, table, entity, kind, ... }
+let _fixdataUndoSeq = 0;
+function _newUndoToken() { _fixdataUndoSeq += 1; return `u${_fixdataUndoSeq}_${Date.now()}`; }
+
 // Catalog: the friendly menu of editable entities + row counts.
 app.get('/api/data/catalog', requireAdmin, (req, res) => {
   try {
@@ -12760,6 +12775,56 @@ app.get('/api/data/:entity', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Reverse the most recent bulk update/delete. Body: { token } — must match
+// the pending undo exactly, and only its author may run it. Applied in one
+// transaction; on any conflict the whole thing rolls back and the token is
+// kept so the deeper file backup can be used instead.
+// NOTE: registered BEFORE `POST /api/data/:entity` so "undo" isn't captured
+// as an entity name.
+app.post('/api/data/undo', requireAdmin, (req, res) => {
+  const u = _fixdataUndo;
+  if (!u || u.token !== req.body.token)
+    return res.status(409).json({ error: 'Nothing to undo — this change was already undone or replaced by a newer one.' });
+  if (u.userId !== req.user.id)
+    return res.status(403).json({ error: 'Only the person who made this change can undo it.' });
+  try {
+    const db = getDb();
+    _devSnapshot('fixdata');
+    let changes = 0;
+    if (u.kind === 'update') {
+      db.transaction(() => {
+        for (const row of u.before) {
+          changes += db.run(
+            `UPDATE "${u.table}" SET ${u.keys.map(k => `"${k}"=?`).join(',')} WHERE rowid=?`,
+            [...u.keys.map(k => row[k]), row._rowid_]).changes;
+        }
+      })();
+    } else if (u.kind === 'delete') {
+      const cols = u.realCols;
+      db.transaction(() => {
+        for (const row of u.before) {
+          changes += db.run(
+            `INSERT INTO "${u.table}" (rowid, ${cols.map(c => `"${c}"`).join(',')}) ` +
+            `VALUES (?, ${cols.map(() => '?').join(',')})`,
+            [row._rowid_, ...cols.map(c => row[c])]).changes;
+        }
+      })();
+    }
+    try {
+      db.run('INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?,?,?,?,?)',
+        [req.user.id, 'fixdata_bulk_undo', u.table, u.before.map(r => r._rowid_).join(','),
+         JSON.stringify({ kind: u.kind })]);
+    } catch (_) {}
+    _fixdataUndo = null;   // single use — consumed
+    res.json({ success: true, changes, kind: u.kind, entity: u.entity });
+  } catch (e) {
+    // Keep the token so the user can still recover via the file backup, and
+    // tell them plainly that the data shifted under the undo.
+    res.status(409).json({ error: 'Could not undo — the data changed since then. ' +
+      'Use a backup to recover if needed. (' + e.message + ')' });
+  }
+});
+
 // Add a new row. Body: { values: { col: val, … } } — only non-locked,
 // real columns are accepted; blank fields are simply omitted so the
 // table's own defaults apply.
@@ -12809,6 +12874,72 @@ app.put('/api/data/:entity/:rowid', requireAdmin, (req, res) => {
          JSON.stringify(keys.map(k => ({ field: k, to: vals[k] })))]);
     } catch (_) {}
     res.json({ success: true, changes: info.changes });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Update many rows at once — apply the SAME field values to every selected
+// row. Body: { rowids:[…], values:{ col:val, … } }. All-or-nothing: the
+// whole batch runs in one transaction so a bad value rolls everything back.
+app.post('/api/data/:entity/bulk-update', requireAdmin, (req, res) => {
+  try {
+    const def = DATA_ENTITIES[req.params.entity];
+    if (!def) return res.status(404).json({ error: 'Unknown data section' });
+    const db = getDb();
+    const real = new Set(db.all(`PRAGMA table_info("${def.table}")`).map(c => c.name));
+    const vals = req.body.values || {};
+    const rowids = (req.body.rowids || []).map(r => parseInt(r, 10)).filter(Number.isFinite);
+    if (!rowids.length) return res.status(400).json({ error: 'No rows selected' });
+    const keys = Object.keys(vals).filter(k => real.has(k) && !_dataLocked(k));
+    const blocked = Object.keys(vals).filter(k => real.has(k) && _dataLocked(k));
+    if (blocked.length) return res.status(400).json({ error: `These fields are protected and can't be edited here: ${blocked.join(', ')}` });
+    if (!keys.length) return res.status(400).json({ error: 'No editable fields supplied' });
+    _devSnapshot('fixdata');
+    const placeholders = rowids.map(() => '?').join(',');
+    // Capture each affected row's PRIOR value for the fields we're about to
+    // change, so the undo can restore them one by one (values differ per row).
+    const before = db.all(
+      `SELECT rowid AS _rowid_, ${keys.map(k => `"${k}"`).join(',')} FROM "${def.table}" WHERE rowid IN (${placeholders})`,
+      rowids);
+    const info = db.transaction(() => db.run(
+      `UPDATE "${def.table}" SET ${keys.map(k => `"${k}"=?`).join(',')} WHERE rowid IN (${placeholders})`,
+      [...keys.map(k => vals[k]), ...rowids]))();
+    try {
+      db.run('INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?,?,?,?,?)',
+        [req.user.id, 'fixdata_bulk_update', def.table, rowids.join(','),
+         JSON.stringify(keys.map(k => ({ field: k, to: vals[k] })))]);
+    } catch (_) {}
+    const token = _newUndoToken();
+    _fixdataUndo = { token, userId: req.user.id, table: def.table, entity: req.params.entity,
+                     kind: 'update', keys, before, count: info.changes };
+    res.json({ success: true, changes: info.changes, undoToken: token });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Delete many rows at once. Body: { rowids:[…] }. One transaction, one backup.
+app.post('/api/data/:entity/bulk-delete', requireAdmin, (req, res) => {
+  try {
+    const def = DATA_ENTITIES[req.params.entity];
+    if (!def) return res.status(404).json({ error: 'Unknown data section' });
+    const db = getDb();
+    const rowids = (req.body.rowids || []).map(r => parseInt(r, 10)).filter(Number.isFinite);
+    if (!rowids.length) return res.status(400).json({ error: 'No rows selected' });
+    _devSnapshot('fixdata');
+    const placeholders = rowids.map(() => '?').join(',');
+    // Capture the FULL rows (every column + their original rowid) before they
+    // go, so the undo can re-insert them exactly as they were.
+    const realCols = db.all(`PRAGMA table_info("${def.table}")`).map(c => c.name);
+    const before = db.all(
+      `SELECT rowid AS _rowid_, * FROM "${def.table}" WHERE rowid IN (${placeholders})`, rowids);
+    const info = db.transaction(() => db.run(
+      `DELETE FROM "${def.table}" WHERE rowid IN (${placeholders})`, rowids))();
+    try {
+      db.run('INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?,?,?,?,?)',
+        [req.user.id, 'fixdata_bulk_delete', def.table, rowids.join(','), null]);
+    } catch (_) {}
+    const token = _newUndoToken();
+    _fixdataUndo = { token, userId: req.user.id, table: def.table, entity: req.params.entity,
+                     kind: 'delete', realCols, before, count: info.changes };
+    res.json({ success: true, changes: info.changes, undoToken: token });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
