@@ -827,6 +827,27 @@ app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
 });
 app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSettingsFlat(getDb())));
 
+// Change history for the tracked Rates & Charges settings, scoped to the
+// active business mode (matching what the Settings panel shows). Newest
+// first, capped per key so the panel stays light.
+app.get('/api/settings-history', requireView, (req, res) => {
+  try {
+    const db = getDb();
+    const mode = getSettingsFlat(db).business_mode || '*';
+    const PER_KEY = 25;
+    const rows = db.all(
+      'SELECT setting_key, old_value, new_value, changed_by, changed_at ' +
+      'FROM settings_history WHERE business_mode = ? ORDER BY id DESC', [mode]);
+    const history = {};
+    for (const r of rows) {
+      const arr = history[r.setting_key] || (history[r.setting_key] = []);
+      if (arr.length < PER_KEY) arr.push(
+        { old: r.old_value, new: r.new_value, by: r.changed_by, at: r.changed_at });
+    }
+    res.json({ mode, history });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Active trade (shared) ────────────────────────────────────
 // The admin app's topbar trade picker pushes its current selection here
 // so the mobile app can default to the same trade (mobile has no trade

@@ -648,6 +648,24 @@ async function initDb() {
     created_at TEXT DEFAULT (datetime('now','localtime'))
   )`);
 
+  // ── SETTINGS HISTORY ───────────────────────────────────────
+  // Change trail for a small set of rate/charge settings, so the
+  // operator can see how a figure (gunny rate, transport, discount %,
+  // etc.) moved over time, when, and by whom. Written by updateSettings()
+  // only when a tracked key's value actually changes. Mode-scoped, mirroring
+  // company_settings (a key has separate values per business_mode).
+  wrapped.exec(`CREATE TABLE IF NOT EXISTS settings_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    setting_key TEXT NOT NULL,
+    business_mode TEXT NOT NULL DEFAULT '*',
+    old_value TEXT,
+    new_value TEXT,
+    changed_by TEXT,
+    changed_at TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+  wrapped.exec(`CREATE INDEX IF NOT EXISTS idx_settings_history_key
+    ON settings_history (setting_key, business_mode, id DESC)`);
+
   // ── DELETE LOG (Delete All audit trail) ────────────────────
   // Records every Delete All action so the operator can see WHO wiped
   // WHICH table WHEN, with row counts + the on-disk backup path so a

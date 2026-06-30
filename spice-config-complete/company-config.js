@@ -487,6 +487,13 @@ const GLOBAL_MODE = '*';
 const MODES = ['e-Trade', 'e-Auction'];
 const GLOBAL_KEYS = new Set(['business_mode', 'business_state', 'tenant_preset', 'preset_config']);
 
+// Rate/charge keys whose every change is recorded in settings_history so the
+// operator can see how the figure moved over time. Keep in sync with the
+// Settings → Rates & Charges history panel in public/index.html.
+const HISTORY_KEYS = new Set([
+  'gunny_rate', 'transport', 'insurance', 'discount_pct', 'discount_days', 'dealer_days',
+]);
+
 // Mode-appropriate seed split. A key listed here for mode M is NOT shown in
 // (and does NOT belong to) mode M, so on first install it is seeded ONLY into
 // the OTHER mode. MUST be kept in sync with public/index.html `_MODE_HIDE_KEYS`
@@ -829,12 +836,26 @@ function updateSettings(db, settings) {
   // also flips business_mode still writes the other fields to the
   // pre-switch mode. Global keys are written to the '*' row.
   const mode = _activeMode(db);
+  const sel = db.prepare('SELECT value FROM company_settings WHERE key = ? AND business_mode = ?');
   const upd = db.prepare('UPDATE company_settings SET value = ? WHERE key = ? AND business_mode = ?');
+  // changed_by comes from current_actor() (set per-request to the username),
+  // the same source the audit-stamping triggers use.
+  const hist = db.prepare(
+    'INSERT INTO settings_history (setting_key, business_mode, old_value, new_value, changed_by) ' +
+    'VALUES (?, ?, ?, ?, current_actor())');
   const batch = db.transaction((items) => {
     let n = 0;
     for (const [k, v] of Object.entries(items)) {
       const m = GLOBAL_KEYS.has(k) ? GLOBAL_MODE : mode;
-      upd.run(String(v), k, m);
+      const nv = String(v);
+      // Record the before→after of tracked rate/charge keys, but only when the
+      // value genuinely changes (a no-op Save shouldn't add a history row).
+      if (HISTORY_KEYS.has(k)) {
+        const cur = sel.get(k, m);
+        const ov = cur ? cur.value : null;
+        if (ov !== nv) { try { hist.run(k, m, ov, nv); } catch (_) {} }
+      }
+      upd.run(nv, k, m);
       n++;
     }
     return n;
