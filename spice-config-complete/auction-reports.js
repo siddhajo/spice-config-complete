@@ -327,7 +327,10 @@ async function carbonSlipPdf(db, auctionId, _cfg, extra, opts) {
 
   const fmtCell = (kind, raw) => {
     if (kind === 'qty')   return fmtQty(raw);
-    if (kind === 'price') return fmtPrice(raw);
+    // Blank an unpriced cell rather than rendering "0.00" — the SQL already
+    // returns '' for price=0 (pre-trade lots), but fmtPrice('') would coerce
+    // it back to 0. Keep it empty so the PRICE column reads blank pre-trade.
+    if (kind === 'price') return (raw === '' || raw == null || Number(raw) === 0) ? '' : fmtPrice(raw);
     return raw == null ? '' : String(raw);
   };
 
