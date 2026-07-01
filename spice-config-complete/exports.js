@@ -629,6 +629,34 @@ async function exportDealerList(db, auctionId) {
   });
 }
 
+// ── Export Type: Planter List (Grade 1) ──────────────────────
+// Pre-trade roster of planters (Grade 1 = pooler lots, no GSTIN). Run
+// BEFORE prices are imported, so it must NOT filter on `amount`/`price`
+// (those stay unset until price import — same reasoning as the Dealer List
+// and Price List (Before)). Qualifies purely on grade = '1'. The CR column
+// shows the control/registration number with the "CR." prefix stripped.
+async function exportPlanterList(db, auctionId) {
+  const rows = db.all(
+    `SELECT state, name,
+        CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
+             ELSE COALESCE(cr,'') END AS cr,
+        COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+     FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
+     GROUP BY state, name, cr ORDER BY state, name`, [auctionId]
+  );
+  const cols = [
+    { header: 'STATE', key: 'state', width: 12 },
+    { header: 'NAME',  key: 'name',  width: 30 },
+    { header: 'CR',    key: 'cr',    width: 22 },
+    { header: 'LOTS',  key: 'lots',  width: 6 },
+    { header: 'BAGS',  key: 'bags',  width: 6 },
+    { header: 'QTY',   key: 'qty',   width: 12 },
+  ];
+  return createExcelBuffer('PlanterList', cols, rows, {
+    db, title: 'Planter List (Grade 1)', metaLines: auctionMeta(db, auctionId),
+  });
+}
+
 // ── Export Type 9: Sales & Taxes ─────────────────────────────
 async function exportSalesTaxes(db, auctionId) {
   const rows = db.all(
@@ -1113,6 +1141,7 @@ const EXPORT_TYPES = {
   collection:     { fn: exportCollection,    name: 'Collection' },
   trade_report:   { fn: exportTradeReport,   name: 'TradeReport' },
   dealer_list:    { fn: exportDealerList,    name: 'DealerList' },
+  planter_list:   { fn: exportPlanterList,   name: 'PlanterList' },
   sales_taxes:    { fn: exportSalesTaxes,    name: 'SalesTaxes' },
   payment:        { fn: exportPaymentSummary,name: 'Payment',        needsCfg: true },
   payment_partywise: { fn: exportPaymentPartyWise, name: 'PaymentPartyWise', needsCfg: true },
@@ -1292,7 +1321,7 @@ module.exports = {
   EXPORT_TYPES,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
   exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentBefore,
-  exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList,
+  exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList, exportPlanterList,
   exportSalesTaxes, exportPaymentSummary, exportPaymentPartyWise, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
   exportPurchaseRegister, exportSalesRegister, exportIndividualRegister,

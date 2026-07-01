@@ -635,6 +635,14 @@ const COLS = {
     { header: 'BAGS',  key: 'bags',  width: 6  },
     { header: 'QTY',   key: 'qty',   width: 12 },
   ],
+  planter_list: [
+    { header: 'SL.NO', key: '_sn',  width: 6  },
+    { header: 'NAME',  key: 'name', width: 30 },
+    { header: 'CR',    key: 'cr',   width: 20 },
+    { header: 'LOTS',  key: 'lots', width: 6  },
+    { header: 'BAGS',  key: 'bags', width: 6  },
+    { header: 'QTY',   key: 'qty',  width: 12 },
+  ],
   sales_taxes: [
     { header: 'STATE', key: 'state', width: 10 }, { header: 'SALE', key: 'sale', width: 6 },
     { header: 'INVO', key: 'invo', width: 8 }, { header: 'TRADERNAME', key: 'tradername', width: 22 },
@@ -790,6 +798,7 @@ const TOTAL_KEYS = {
   full_file:       ['bags', 'qty', 'amount', 'pqty', 'puramt', 'cgst', 'sgst', 'igst', 'advance', 'balance'],
   collection:      ['bag', 'qty'],
   dealer_list:     ['lots', 'bags', 'qty'],
+  planter_list:    ['lots', 'bags', 'qty'],
   sales_taxes:     ['bag', 'qty', 'cardamom_cost', 'gunny_cost', 'cgst', 'sgst', 'igst', 'tcs', 'transport', 'insurance', 'total'],
   payment:         ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'],
   tally_purchase:  ['bag', 'qty', 'amount', 'cgst', 'sgst', 'igst', 'discount', 'bilamt'],
@@ -810,6 +819,7 @@ const TITLES = {
   full_file:       'Full File',
   collection:      'Collection / Lorry',
   dealer_list:     'Dealer List',
+  planter_list:    'Planter List (Grade 1)',
   sales_taxes:     'Sales & Taxes',
   payment:         'Payment Summary',
   tally_purchase:  'Tally Purchase',
@@ -854,6 +864,10 @@ const ROW_PREPROCESS = {
   },
   // Dealer list — flat sequential serial (no grouping).
   dealer_list: {
+    serialKey: '_sn',
+  },
+  // Planter list (Grade 1) — flat sequential serial (no grouping).
+  planter_list: {
     serialKey: '_sn',
   },
   // Payment summary — serial restarts per pooler name; subtotal of bag, qty,
@@ -956,6 +970,17 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
           COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
          FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
+         GROUP BY state, name, cr ORDER BY name`, [auctionId]);
+
+    case 'planter_list':
+      // Pre-trade roster of Grade 1 planters — must not depend on price/amount
+      // (unset until price import). Mirrors the XLSX exportPlanterList query.
+      return db.all(
+        `SELECT state, name,
+            CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
+                 ELSE COALESCE(cr,'') END AS cr,
+            COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+         FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
          GROUP BY state, name, cr ORDER BY name`, [auctionId]);
 
     case 'sales_taxes':
