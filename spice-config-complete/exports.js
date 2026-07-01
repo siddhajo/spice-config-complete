@@ -258,7 +258,9 @@ async function exportLotName(db, auctionId) {
               WHEN 'TAMIL NADU' THEN 'TN'
               ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
             END AS br,
-            bags AS bag, qty, price, '' AS control
+            bags AS bag, qty,
+            CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
+            '' AS control
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
   );
   const cols = [

@@ -899,7 +899,9 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
                   WHEN 'TAMIL NADU' THEN 'TN'
                   ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
                 END AS br,
-                bags as bag, qty, price, '' as control
+                bags as bag, qty,
+                CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
+                '' as control
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
     case 'price_list':
