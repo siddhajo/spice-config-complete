@@ -4993,6 +4993,52 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   });
 });
 
+// POST /api/lots/bulk-seller — reassign the seller (trader) on multiple
+// lots. The new trader's denormalised seller fields (name / cr / pan / tel
+// / aadhar / padd / ppla / ppin / pstate / pst_code) are copied onto every
+// lot, mirroring the single-lot backfill in PUT /api/lots/:id so a bulk
+// reassign lands identical data. Body: { ids:[...], trader_id: 42 }
+app.post('/api/lots/bulk-seller', requireLotWrite, (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
+  const traderId = parseInt(req.body.trader_id, 10);
+  if (!ids.length)  return res.status(400).json({ error: 'ids array required' });
+  if (!traderId)    return res.status(400).json({ error: 'trader_id required' });
+  const db = getDb();
+  // Resolve the new seller once so all updates share one read.
+  const seller = db.get(
+    'SELECT id,name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code FROM traders WHERE id = ?',
+    [traderId]
+  );
+  if (!seller) return res.status(404).json({ error: `No seller found with id ${traderId}. It may have been deleted — reopen the picker and choose again.` });
+  const part = partitionLotsByLock(db, ids, req);
+  if (!part.allowedIds.length) {
+    return res.status(423).json({
+      error: 'Every selected lot is locked. Ask an admin to unlock first.',
+      locked: true,
+      skipped: part.skipped,
+    });
+  }
+  // Stamp trader_id + the denormalised seller columns on each lot in one
+  // batched UPDATE. (trader.pin → lot.ppin on denormalise, per PUT.)
+  const placeholders = part.allowedIds.map(() => '?').join(',');
+  db.run(
+    `UPDATE lots SET trader_id=?, name=?, cr=?, pan=?, tel=?, aadhar=?, padd=?, ppla=?, ppin=?, pstate=?, pst_code=?
+     WHERE id IN (${placeholders})`,
+    [seller.id, seller.name || '', seller.cr || '', seller.pan || '', seller.tel || '', seller.aadhar || '',
+     seller.padd || '', seller.ppla || '', seller.pin || '', seller.pstate || '', seller.pst_code || '',
+     ...part.allowedIds]
+  );
+  // Stale price-check / validation for every affected trade.
+  const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+  res.json({
+    success: true,
+    updated: part.allowedIds.length,
+    name: seller.name || '',
+    skipped: part.skipped,
+  });
+});
+
 // POST /api/lots/bulk-grade — set grade on multiple lots, then run
 // calculateLot on each so prate/puramt/discount reflect the new grade
 // without forcing the operator to click Calculate All. Body:
