@@ -5752,6 +5752,39 @@ function validateAuctionLots(db, auctionId) {
   // Flag ONLY when the GSTIN column is blank/empty — a present-but-nonstandard
   // GSTIN (e.g. not exactly 15 chars) is left alone, per the operator's request.
   pushWarn('no_gstin', 'No GSTIN',       'Seller has no GSTIN (excluded from Dealer List)', l => !cleanGstin(l.cr));
+
+  // ── cr-prefix convention checks ────────────────────────────────
+  // The `cr` column stores a seller's registration two ways: a GSTIN holder
+  // as "GSTIN.<15-char GSTIN>", everyone else as "CR.<control number>". The
+  // Dealer List export reads the GSTIN via SUBSTR(cr,7,15) and filters on
+  // cr LIKE '%GST%', so a GSTIN stored WITHOUT the "GSTIN." tag (bare, or
+  // "GST 32…") silently drops out of the Dealer List. These two warnings
+  // surface prefix drift before price import so it can be fixed.
+  //
+  //   _crBody   — the registration with any leading GSTIN./CR. tag stripped
+  //   _looksGstin — that body is a structurally valid 15-char GSTIN
+  //   GSTIN structure: 2-digit state + 10-char PAN + entity + Z + check.
+  const _crBody = (cr) => {
+    let s = String(cr == null ? '' : cr).trim();
+    const up = s.toUpperCase();
+    if (up.startsWith('GSTIN')) return s.slice(5).replace(/^[.\s:_-]+/, '').trim();
+    if (up.startsWith('CR'))    return s.slice(2).replace(/^[.\s:_-]+/, '').trim();
+    return s;
+  };
+  const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/i;
+  const _looksGstin = (cr) => GSTIN_RE.test(_crBody(cr));
+  // A GSTIN value that isn't tagged with the literal "GSTIN." prefix.
+  pushWarn('gstin_prefix', 'GSTIN prefix',
+    'GSTIN not prefixed with "GSTIN." (drops out of the Dealer List)',
+    l => _looksGstin(l.cr) && !/^GSTIN\./i.test(String(l.cr || '').trim()));
+  // A non-GSTIN registration (non-empty) that isn't tagged with "CR.".
+  pushWarn('cr_prefix', 'CR prefix',
+    'Registration not prefixed with "CR."',
+    l => {
+      const raw = String(l.cr || '').trim();
+      return raw !== '' && !_looksGstin(l.cr) && !/^CR\./i.test(raw);
+    });
+
   pushWarn('no_bank',  'No bank account', 'Seller has no bank account on file',             l => l.trader_id && !tradersWithBank.has(l.trader_id));
   pushWarn('no_pan',   'No PAN',          'Seller has no PAN',                              l => !String(l.pan || '').trim());
   pushWarn('no_phone', 'No phone',        'Seller has no phone number',                     l => !String(l.tel || '').trim());
