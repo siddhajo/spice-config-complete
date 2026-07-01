@@ -4613,7 +4613,7 @@ app.get('/api/auctions/template', requireExport, async (req, res) => {
 // LOTS (CPA1.DBF — main data)
 // ══════════════════════════════════════════════════════════════
 app.get('/api/lots/:auctionId', requireView, (req, res) => {
-  const { branch, name, buyer, search } = req.query;
+  const { branch, name, buyer, search, grade } = req.query;
   // Correlated subquery (not LEFT JOIN) to avoid any risk of row duplication
   // if the same buyer code exists multiple times in the buyers table.
   let q = `SELECT lots.*,
@@ -4622,6 +4622,10 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
            WHERE lots.auction_id = ?`;
   const p = [req.params.auctionId];
   if (branch) { q += ' AND lots.branch = ?'; p.push(branch); }
+  // Grade filter (Lots screen). Exact match, trimmed, case-insensitive so
+  // "1a" matches "1A". Applied to q/p here so it flows through the flat,
+  // paginated, count, and summary query variants below.
+  if (grade)  { q += ' AND UPPER(TRIM(COALESCE(lots.grade,\'\'))) = ?'; p.push(String(grade).trim().toUpperCase()); }
   if (name)   { q += ' AND lots.name LIKE ?'; p.push(`%${name}%`); }
   if (buyer)  { q += ' AND lots.buyer = ?'; p.push(buyer); }
   // Free-text search across lot_no / seller name / buyer code / buyer

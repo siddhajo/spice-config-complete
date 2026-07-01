@@ -3291,6 +3291,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="">All branches</option>
           </select>
 
+          <!-- Grade filter — server-side (?grade=), so the KPI strip + pager
+               stay in sync. Options mirror the Lot Entry grade dropdown
+               (#le-grade). "All grades" passes no filter. -->
+          <select id="lot-grade-filter" onchange="loadLots()" style="padding:0 14px;height:38px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px;font-weight:500;min-width:130px" title="Filter by grade">
+            <option value="">All grades</option>
+            <option value="1">Grade 1</option>
+            <option value="1A">Grade 1A</option>
+            <option value="2">Grade 2</option>
+            <option value="2A">Grade 2A</option>
+          </select>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line);margin-left:4px">
             <button class="btn btn-o" style="height:38px;padding:0 16px;font-weight:600" onclick="refreshLots(this)" title="Reload the lots table from the server">🔄 Refresh</button>
             <button class="needs-lot-write btn btn-a" id="btn-calculate-all" style="height:38px;padding:0 16px;font-weight:600" onclick="calculateAll()">Calculate All</button>
@@ -15262,12 +15273,16 @@ async function loadLots(opts){
   }
   const branchFilter = branchSel ? branchSel.value : '';
   const branchParam = branchFilter ? `&branch=${encodeURIComponent(branchFilter)}` : '';
+  // Grade filter (?grade=) — server-side, same pattern as branch, so KPIs
+  // and the pager reflect the filtered set.
+  const gradeFilter = document.getElementById('lot-grade-filter')?.value || '';
+  const gradeParam = gradeFilter ? `&grade=${encodeURIComponent(gradeFilter)}` : '';
   // Free-text search across the currently-selected trade.
   const searchTerm = (document.getElementById('lot-search')?.value || '').trim();
   const searchParam = searchTerm ? `&search=${encodeURIComponent(searchTerm)}` : '';
   // Cache-buster ensures the browser actually hits the server (otherwise Refresh
   // may return stale cached JSON and nothing visibly changes).
-  const d=await j(`/api/lots/${aid}?_=${Date.now()}${branchParam}${searchParam}`);
+  const d=await j(`/api/lots/${aid}?_=${Date.now()}${branchParam}${gradeParam}${searchParam}`);
   const arr = Array.isArray(d) ? d : [];
   // Cache the full trade so bulk-tick can resolve lot_no → id without
   // re-fetching. Replaced on every load so it stays in sync with
