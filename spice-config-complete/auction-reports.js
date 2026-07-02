@@ -513,29 +513,50 @@ function getCollectionRows(db, auctionId) {
   //   NAME       ← b.buyer    (the full buyer name from the buyers master).
   //                              Falls back to b.sbl, then i.buyer if the
   //                              master record is missing.
+  // The buyers master often carries variant/duplicate records for the same
+  // person (e.g. "AMAL JOSE" + "AMAL JOSE 1", "ASHOK GUPTA AG/AGT/AGT1/AGT2").
+  // A plain LEFT JOIN on (buyer OR buyer1) fans out — one output row per
+  // matching master record — so a single invoice repeats several times with
+  // identical qty/value. To guarantee ONE row per invoice we resolve the buyer
+  // name/state via correlated scalar subqueries (each picks a single master
+  // row) instead of joining, and group by the invoice identity so SUM stays
+  // correct. NOTE: this SQLite build won't resolve an outer-table reference
+  // inside a subquery's ORDER BY, so the subqueries correlate only in WHERE and
+  // order by bb.id.
   return db.all(`
     SELECT
       i.sale                                                AS sale,
       i.invo                                                AS invo,
       COALESCE(i.buyer1, '')                                AS trade_name,
-      COALESCE(NULLIF(b.buyer, ''),
-               NULLIF(b.sbl,   ''),
-               i.buyer,
-               '')                                          AS buyer_name,
+      COALESCE(
+        (SELECT NULLIF(bb.buyer,'') FROM buyers bb
+           WHERE (UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+               OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1)))
+             AND NULLIF(bb.buyer,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        (SELECT NULLIF(bb.sbl,'')   FROM buyers bb
+           WHERE (UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+               OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1)))
+             AND NULLIF(bb.sbl,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        NULLIF(i.buyer,''),
+        '')                                                 AS buyer_name,
       SUM(i.qty)                                            AS qty,
       SUM(i.tot)                                            AS value,
-      COALESCE(b.state,'')                                  AS buyer_state
+      COALESCE(
+        (SELECT bb.state FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+              OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
+           ORDER BY bb.id LIMIT 1),
+        '')                                                 AS buyer_state
     FROM invoices i
-    LEFT JOIN buyers b
-      ON UPPER(TRIM(b.buyer))  = UPPER(TRIM(i.buyer))
-      OR UPPER(TRIM(b.buyer1)) = UPPER(TRIM(i.buyer1))
     WHERE i.auction_id = ?
       -- ISP only (IDEAL SPICES PRIVATE LIMITED). The invoices table holds
       -- both the ISP (Tamil Nadu) and its paired ASP (Kerala) row for each
       -- trade; without this filter every buyer appears twice. Matches the
       -- ISP_STATE_SQL classification used by the Tally export.
       AND (UPPER(COALESCE(i.state,'')) = 'TAMIL NADU' OR UPPER(COALESCE(i.state,'')) = '')
-    GROUP BY i.sale, i.invo, i.buyer1, b.buyer, b.sbl, i.buyer, b.state
+    GROUP BY i.sale, i.invo, i.buyer1, i.buyer
     ORDER BY i.sale, CAST(i.invo AS INTEGER), i.invo
   `, [auctionId]);
 }
