@@ -499,6 +499,8 @@ async function initDb() {
     qty REAL DEFAULT 0,
     gross_wt REAL DEFAULT 0,
     sample_wt REAL DEFAULT 0,
+    wt_with_gunny REAL DEFAULT 0,
+    gunny_wt REAL DEFAULT 0,
     moisture TEXT DEFAULT '',
     reserved_price REAL DEFAULT 0,
     price REAL DEFAULT 0,
@@ -855,6 +857,13 @@ async function initDb() {
     "ALTER TABLE buyers ADD COLUMN email TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN tdsq TEXT DEFAULT ''",
     "ALTER TABLE buyers ADD COLUMN sbl TEXT DEFAULT ''",
+    // Gunny weighing audit trail. The lot-entry form derives Net weight as
+    // (weight-with-gunny − gunny tare); previously only the resulting Net
+    // (qty) was stored, discarding how it was computed. Persist both inputs
+    // so a lot's original weighing is recoverable. 0 when the operator typed
+    // Net directly (gunny-entry mode off) or for pre-migration lots.
+    'ALTER TABLE lots ADD COLUMN wt_with_gunny REAL DEFAULT 0',
+    'ALTER TABLE lots ADD COLUMN gunny_wt REAL DEFAULT 0',
     // Discount GST columns (per-lot, when flag_disc_gst is ON)
     'ALTER TABLE lots ADD COLUMN dcgst REAL DEFAULT 0',
     'ALTER TABLE lots ADD COLUMN dsgst REAL DEFAULT 0',

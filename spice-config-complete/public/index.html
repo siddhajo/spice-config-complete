@@ -22936,6 +22936,11 @@ async function leSaveLot(){
   if (!Number.isFinite(qty) || qty <= 0)    { leShowError('Net weight (kg) must be greater than 0'); return; }
   const sample = parseFloat(document.getElementById('le-sample').value) || 0;
   const gross  = parseFloat(document.getElementById('le-gross').value) || (qty + sample);
+  // Gunny weighing inputs — persisted (wt_with_gunny / gunny_wt columns) so a
+  // lot's original weighing is recoverable. Read defensively; both are 0 when
+  // the operator typed Net directly (gunny-entry mode off).
+  const wwg    = parseFloat(document.getElementById('le-wwg')?.value) || 0;
+  const gunnyWt = parseFloat(document.getElementById('le-gunny-wt')?.value) || 0;
   // Moisture only when the show-moisture setting is on; we still read
   // the input value defensively because users may have typed something
   // before the wrap was hidden.
@@ -22974,6 +22979,8 @@ async function leSaveLot(){
       // doesn't silently default these to 0.
       sample_wt: sample,
       gross_wt: gross,
+      wt_with_gunny: wwg,
+      gunny_wt: gunnyWt,
       moisture: moisture,
       crpt: crptRaw,
       reserved_price: reservedPrice,
@@ -23156,13 +23163,22 @@ async function leEditLot(lotId){
       ? _lotSample.toFixed(3)
       : (_le.sampleWeight ? _le.sampleWeight.toFixed(3) : '0.000');
   }
-  // Weight w/ Gunny isn't stored (Net Wt is derive-only), so clear any
-  // stale value from a prior entry and refresh the read-only Gunny Wt
-  // for this lot's bag count. Net Wt keeps the stored value — leave it
-  // untouched (don't re-derive from a blank W/Gunny).
+  // Weight w/ Gunny and Gunny Wt are persisted (wt_with_gunny / gunny_wt).
+  // Restore them from the stored lot when present so the original weighing is
+  // visible and round-trips on re-save; otherwise fall back to a blank W/Gunny
+  // and a bag-count-seeded Gunny Wt (pre-migration lots, or lots entered with
+  // Net typed directly). Net Wt keeps its stored value either way — don't
+  // re-derive from a blank W/Gunny.
   const wwgEl = document.getElementById('le-wwg');
-  if (wwgEl) wwgEl.value = '';
-  leSeedGunnyWt();
+  const _lotWwg = Number(lot.wt_with_gunny);
+  const _lotGunny = Number(lot.gunny_wt);
+  if (wwgEl) wwgEl.value = (Number.isFinite(_lotWwg) && _lotWwg > 0) ? _lotWwg.toFixed(3) : '';
+  if (Number.isFinite(_lotGunny) && _lotGunny > 0) {
+    const gwEl = document.getElementById('le-gunny-wt');
+    if (gwEl) gwEl.value = _lotGunny.toFixed(3);
+  } else {
+    leSeedGunnyWt();
+  }
   const moistureEl = document.getElementById('le-moisture');
   if (moistureEl) moistureEl.value = lot.moisture || '';
   // Populate Crop Receipt + Reserved Price from the existing lot so

@@ -4747,9 +4747,9 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   const _pan    = _fill(l.pan,      'pan');
   const _tel    = _fill(l.tel,      'tel');
   const _aadhar = _fill(l.aadhar,   'aadhar');
-  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,moisture,user_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.moisture||'',l.user_id||'']);
+  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,wt_with_gunny,gunny_wt,moisture,user_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.wt_with_gunny||0,l.gunny_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
   lvClearGate(_db, l.auction_id);   // new lot → trade must be re-validated before price import
