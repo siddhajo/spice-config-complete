@@ -7003,12 +7003,25 @@ function _freeLotsForInvoice(db, inv) {
   if (!inv.auction_id) return 0;
   const isKerala = String(inv.state || '').toUpperCase() === 'KERALA';
   if (isKerala) {
+    // The ASP invoice number normally lives in lots.asp_invo (the current
+    // generator dual-writes invo=asp_invo=<no>). But some lots carry the ASP
+    // number in `invo` alone with asp_invo EMPTY (legacy stamping / mixed
+    // flows). Matching on asp_invo only — as this did before — misses those,
+    // so the revert deleted the invoice yet stranded `invo` on the lot,
+    // hiding the buyer from regeneration. Match BOTH shapes.
+    const aspLinkSql =
+      `(asp_invo=? OR (COALESCE(asp_invo,'')='' AND invo=?))`;
     const affected = db.all(
-      'SELECT lot_no FROM lots WHERE auction_id=? AND buyer=? AND asp_invo=?',
-      [inv.auction_id, inv.buyer, inv.invo]
+      `SELECT lot_no FROM lots WHERE auction_id=? AND buyer=? AND ${aspLinkSql}`,
+      [inv.auction_id, inv.buyer, inv.invo, inv.invo]
     );
-    db.run("UPDATE lots SET invo='' WHERE auction_id=? AND buyer=? AND asp_invo=? AND invo=asp_invo",
-      [inv.auction_id, inv.buyer, inv.invo]);
+    // Clear the ISP-side invo only where it's just the ASP number (no separate
+    // ISP invoice layered on): invo==asp_invo, OR asp_invo empty and invo holds
+    // the ASP number. A real ISP invoice (invo != asp_invo) is left intact.
+    db.run(
+      `UPDATE lots SET invo='' WHERE auction_id=? AND buyer=?
+         AND ((asp_invo=? AND invo=asp_invo) OR (COALESCE(asp_invo,'')='' AND invo=?))`,
+      [inv.auction_id, inv.buyer, inv.invo, inv.invo]);
     db.run("UPDATE lots SET asp_invo='' WHERE auction_id=? AND buyer=? AND asp_invo=?",
       [inv.auction_id, inv.buyer, inv.invo]);
     return affected.length;
