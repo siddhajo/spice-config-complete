@@ -122,7 +122,10 @@ function getLotsWithBuyer(db, auctionId) {
       ON UPPER(TRIM(b.code))  = UPPER(TRIM(l.code))
       OR UPPER(TRIM(b.buyer)) = UPPER(TRIM(l.buyer))
     WHERE l.auction_id = ?
-      AND l.amount > 0
+      -- Keep sold lots (amount > 0) AND withdrawn lots. Withdrawn lots carry
+      -- code='WD' with amount zeroed, so a plain amount>0 filter drops them;
+      -- Lorry reports must always list them.
+      AND (l.amount > 0 OR UPPER(COALESCE(l.code,'')) = 'WD')
     ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no
   `, [auctionId]);
 }
@@ -140,7 +143,8 @@ function getLotSlipRows(db, auctionId) {
       COALESCE(NULLIF(l.code,''), '') AS bidder
     FROM lots l
     WHERE l.auction_id = ?
-      AND l.amount > 0
+      -- include withdrawn lots (code='WD', amount zeroed) alongside sold lots
+      AND (l.amount > 0 OR UPPER(COALESCE(l.code,'')) = 'WD')
     ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no
   `, [auctionId]);
 }
@@ -397,7 +401,8 @@ function getTruckListRows(db, auctionId) {
       SUM(l.amount)   AS amount
     FROM lots l
     WHERE l.auction_id = ?
-      AND l.amount > 0
+      -- include withdrawn lots (code='WD', amount zeroed) alongside sold lots
+      AND (l.amount > 0 OR UPPER(COALESCE(l.code,'')) = 'WD')
     GROUP BY COALESCE(NULLIF(l.code,''), 'UNKNOWN')
     ORDER BY CASE WHEN COALESCE(NULLIF(l.code,''), 'UNKNOWN')='UNKNOWN' THEN 1 ELSE 0 END,
              code
