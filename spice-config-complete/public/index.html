@@ -15394,6 +15394,11 @@ async function loadLots(opts){
     { key:'buyer', label:'Buyer', sort:'text' },
     { key:'buyer_code', label:'Code', sort:'text',
       render:(l)=> l.buyer_code ? esc(l.buyer_code) : '<span style="color:var(--text3)">—</span>' },
+    // Buyer's trade name — resolved from the buyers master by buyer code
+    // (mirrors buyer_code above), falling back to the name stamped on the lot.
+    { key:'buyer_name', label:'Buyer Name', sort:'text',
+      value:(l)=> l.buyer_name || l.buyer1 || '',
+      render:(l)=>{ const n = l.buyer_name || l.buyer1; return n ? esc(n) : '<span style="color:var(--text3)">—</span>'; } },
     { key:'branch', label:'Branch', sort:'text' },
     { key:'grade', label:'Grade', sort:'text' },
     { key:'bags', label:'Bags', sort:'number', numeric:true },

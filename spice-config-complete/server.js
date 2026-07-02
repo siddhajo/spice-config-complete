@@ -4617,7 +4617,8 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
   // Correlated subquery (not LEFT JOIN) to avoid any risk of row duplication
   // if the same buyer code exists multiple times in the buyers table.
   let q = `SELECT lots.*,
-             (SELECT b.code FROM buyers b WHERE b.buyer = lots.buyer LIMIT 1) AS buyer_code
+             (SELECT b.code FROM buyers b WHERE b.buyer = lots.buyer LIMIT 1) AS buyer_code,
+             (SELECT b.buyer1 FROM buyers b WHERE b.buyer = lots.buyer LIMIT 1) AS buyer_name
            FROM lots
            WHERE lots.auction_id = ?`;
   const p = [req.params.auctionId];
