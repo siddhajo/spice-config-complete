@@ -513,40 +513,63 @@ function getCollectionRows(db, auctionId) {
   //   NAME       ← b.buyer    (the full buyer name from the buyers master).
   //                              Falls back to b.sbl, then i.buyer if the
   //                              master record is missing.
-  // The buyers master often carries variant/duplicate records for the same
-  // person (e.g. "AMAL JOSE" + "AMAL JOSE 1", "ASHOK GUPTA AG/AGT/AGT1/AGT2").
+  // The buyers master often carries variant/duplicate records that share a
+  // trade name (buyer1): e.g. "KARTHIKEYAN SPICES" belongs to MARREESWARAN KKS,
+  // PANDI RAVI *and* MAREESWARAN; "ANKIT SPICES" to ASHOK GUPTA AG/AGT/AGT1.
   // A plain LEFT JOIN on (buyer OR buyer1) fans out — one output row per
   // matching master record — so a single invoice repeats several times with
   // identical qty/value. To guarantee ONE row per invoice we resolve the buyer
   // name/state via correlated scalar subqueries (each picks a single master
   // row) instead of joining, and group by the invoice identity so SUM stays
-  // correct. NOTE: this SQLite build won't resolve an outer-table reference
-  // inside a subquery's ORDER BY, so the subqueries correlate only in WHERE and
-  // order by bb.id.
+  // correct.
+  //
+  // CRUCIAL: the buyer NAME (i.buyer) is the unambiguous key; the trade name
+  // (i.buyer1) is shared by several buyers, so a buyer1 match can resolve to the
+  // WRONG person (e.g. invoice for PANDI RAVI showing MARREESWARAN KKS). We
+  // therefore match on the exact (buyer + buyer1) pair first, then on buyer
+  // name alone, and only fall back to a trade-name (buyer1) match when the
+  // invoice carries no usable buyer name. NOTE: this SQLite build won't resolve
+  // an outer-table reference inside a subquery's ORDER BY, so the subqueries
+  // correlate only in WHERE and order by bb.id.
   return db.all(`
     SELECT
       i.sale                                                AS sale,
       i.invo                                                AS invo,
       COALESCE(i.buyer1, '')                                AS trade_name,
       COALESCE(
+        -- 1) exact buyer + trade-name pair (the true identity)
         (SELECT NULLIF(bb.buyer,'') FROM buyers bb
-           WHERE (UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
-               OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1)))
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+             AND UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
              AND NULLIF(bb.buyer,'') IS NOT NULL
            ORDER BY bb.id LIMIT 1),
-        (SELECT NULLIF(bb.sbl,'')   FROM buyers bb
-           WHERE (UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
-               OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1)))
+        -- 2) buyer name alone (unambiguous vs. shared trade names)
+        (SELECT NULLIF(bb.buyer,'') FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+             AND NULLIF(bb.buyer,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        -- 3) the invoice's own buyer name
+        NULLIF(i.buyer,''),
+        -- 4) last resort: sbl of any buyer under this trade name
+        (SELECT NULLIF(bb.sbl,'') FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
              AND NULLIF(bb.sbl,'') IS NOT NULL
            ORDER BY bb.id LIMIT 1),
-        NULLIF(i.buyer,''),
         '')                                                 AS buyer_name,
       SUM(i.qty)                                            AS qty,
       SUM(i.tot)                                            AS value,
       COALESCE(
+        -- state of the exact (buyer + trade) match, then buyer-name match,
+        -- then a trade-name match — same priority as buyer_name above
         (SELECT bb.state FROM buyers bb
            WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
-              OR UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
+             AND UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
+           ORDER BY bb.id LIMIT 1),
+        (SELECT bb.state FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+           ORDER BY bb.id LIMIT 1),
+        (SELECT bb.state FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
            ORDER BY bb.id LIMIT 1),
         '')                                                 AS buyer_state
     FROM invoices i
