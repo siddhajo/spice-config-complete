@@ -1085,6 +1085,60 @@ async function initDb() {
     }
   } catch (_) { /* columns may not exist on a partial schema — ignore */ }
 
+  // One-time (idempotent) data fix: backfill gross weight on lots stored with
+  // gross_wt = 0 despite having a net weight. Gross = Net + Sample here (the
+  // priced lots' stored gross already equals qty + sample_wt); lots created
+  // via paths that never captured gross (imports, some non-lot-entry flows)
+  // landed with gross_wt = 0, which printed a bogus "0.000" on the seller
+  // statement and dropped those lots from its Gross total.
+  //
+  // Runs for ALL modes/branches. Self-limiting via the WHERE (gross_wt is
+  // 0/NULL and qty > 0): once repaired, gross_wt > 0 so the row no longer
+  // matches — reruns and fresh DBs are no-ops, and it also heals any future
+  // bad import until the upstream entry path is fixed.
+  //
+  // Two ordered steps keep gross_wt / sample_wt / qty mutually consistent so
+  // exports/Tally/DBF agree with the printed slip:
+  //   1. Where sample_wt is missing, fill it from the lot's mode default
+  //      (company_settings.sample_weight for the auction's business mode) —
+  //      the same value the slip substitutes at print time. Auctions with no
+  //      mode (or no configured default) resolve to 0 and are left as-is.
+  //   2. gross_wt = ROUND(qty + sample_wt, 2) using the now-effective sample.
+  try {
+    // Active-mode default sample — the value the slip substitutes at print
+    // time. Used as the fallback for lots whose auction row is missing or
+    // carries no mode, so the backfill matches the printed statement in every
+    // case (a numeric literal from our own settings row → safe to inline).
+    const actMode = wrapped.get(
+      `SELECT value FROM company_settings WHERE key = 'business_mode' AND business_mode = '*'`);
+    const activeSampleRow = wrapped.get(
+      `SELECT CAST(value AS REAL) AS v FROM company_settings
+        WHERE key = 'sample_weight' AND business_mode = ?`,
+      [(actMode && actMode.value) || 'e-Trade']);
+    const activeSample = Number((activeSampleRow && activeSampleRow.v) || 0) || 0;
+    // Effective default sample for a lot: the auction's own mode default when
+    // available/non-zero, else the active-mode default above.
+    const modeSampleExpr = `COALESCE(NULLIF((
+             SELECT CAST(cs.value AS REAL)
+               FROM auctions a
+               JOIN company_settings cs
+                 ON cs.key = 'sample_weight' AND cs.business_mode = a.mode
+              WHERE a.id = lots.auction_id), 0), ${activeSample})`;
+    const sampleFix = wrapped.run(
+      `UPDATE lots SET sample_wt = ${modeSampleExpr}
+        WHERE (gross_wt IS NULL OR gross_wt = 0)
+          AND qty > 0
+          AND (sample_wt IS NULL OR sample_wt = 0)
+          AND ${modeSampleExpr} > 0`);
+    const grossFix = wrapped.run(
+      `UPDATE lots SET gross_wt = ROUND(qty + COALESCE(sample_wt, 0), 2)
+        WHERE (gross_wt IS NULL OR gross_wt = 0)
+          AND qty > 0`);
+    if ((grossFix && grossFix.changes > 0) || (sampleFix && sampleFix.changes > 0)) {
+      console.log(`Migration: backfilled gross_wt on ${grossFix.changes} lots (sample_wt filled on ${sampleFix.changes})`);
+    }
+  } catch (_) { /* columns/tables may not exist on a partial schema — ignore */ }
+
   // One-time data fix for the sales-invoice ISP/ASP book split.
   // `invoices.state` records which company book a row belongs to:
   // KERALA = ASP (Amazing Spice Park), TAMIL NADU = ISP (Ideal Spices).
