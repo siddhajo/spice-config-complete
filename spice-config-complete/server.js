@@ -4326,7 +4326,16 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
       }
       return '';
     };
-    const mapNum = (row, ...names) => parseFloat(mapCol(row, ...names)) || 0;
+    // Numeric cell parse, rounded to 2 decimals (paise) so floating-point
+    // noise from the source sheet (e.g. a QTY of 189.20000000000002) never
+    // lands in the DB. Covers every money/quantity import field (bags, qty,
+    // price, amount, pqty, prate, puramt, com, taxes, …). Sign-aware to match
+    // calculateLot's round2.
+    const mapNum = (row, ...names) => {
+      const v = parseFloat(mapCol(row, ...names));
+      if (!isFinite(v)) return 0;
+      return (v < 0 ? -1 : 1) * Math.round(Math.abs(v) * 100) / 100;
+    };
 
     // If user specified ano/date in the form → that OVERRIDES every row (single-auction import)
     // Otherwise → resolve auction per row from its own ANO/DATE columns (multi-auction import)
@@ -4415,7 +4424,7 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
           const bag   = mapNum(row, 'BAG', 'BAGS', 'NO_OF_BAGS');
           // If file didn't provide AMOUNT, compute qty × price (common in post-auction price sheets)
           let amount  = mapNum(row, 'AMOUNT', 'AMT', 'VALUE', 'TOTAL');
-          if (!amount && qty && price) amount = qty * price;
+          if (!amount && qty && price) amount = Math.round(qty * price * 100) / 100;
 
           // Build UPDATE dynamically — only touch fields the file provided, so a sparse "price-only"
           // file doesn't wipe pre-existing bag/qty/buyer values
@@ -6185,6 +6194,28 @@ function _hasGeneratedDocs(db, docType, auctionId) {
   }
   return !!db.get(`SELECT 1 FROM ${table} WHERE auction_id = ? LIMIT 1`, [auctionId]);
 }
+// SQL predicate: a lot (aliased `l`) is un-invoiced — i.e. still needs a sales
+// invoice — for the current state context. A lot qualifies when:
+//   • its `invo` link is empty; OR
+//   • (ISP context) the only link is the ASP one (invo == asp_invo); OR
+//   • the link is ORPHANED — no invoices row still references it. This last
+//     clause is what lets a buyer reappear in the eligible / generate-all list
+//     after their invoice is REVERTED. Revert deletes the invoice row but can
+//     leave a stale lots.invo behind (context/mode-mismatched reverts, direct
+//     deletes, blank-mode auctions); without the orphan escape that stale invo
+//     hides the buyer from regeneration forever. Because the escape only fires
+//     when NO invoice references the invo, it never frees a genuinely-invoiced
+//     lot — behaviour is unchanged whenever the invoice still exists.
+// Shared by the generation gate, /eligible-buyers, and /generate-all so all
+// three agree on exactly which lots still need invoicing.
+function lotUninvoicedExpr(isASPState) {
+  const orphan =
+    `NOT EXISTS (SELECT 1 FROM invoices i WHERE i.auction_id = l.auction_id AND i.invo = l.invo)`;
+  return isASPState
+    ? `(l.invo IS NULL OR l.invo = '' OR ${orphan})`
+    : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo) OR ${orphan})`;
+}
+
 // True iff at least one eligible party in the trade is still missing
 // its doc. Mirrors each generate-all endpoint's "what's left to do"
 // query, so the gate engages exactly when those endpoints would
@@ -6194,9 +6225,7 @@ function _hasRemainingParties(db, docType, auctionId) {
   if (docType === 'invoices') {
     const cfg = getSettingsFlat(db);
     const isASPState = String(cfg.business_state || '').toUpperCase() === 'KERALA';
-    const uninvoicedExpr = isASPState
-      ? `(l.invo IS NULL OR l.invo = '')`
-      : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo))`;
+    const uninvoicedExpr = lotUninvoicedExpr(isASPState);
     // WD = withdrawn lot, no buyer transaction → never gets an invoice.
     // The price-check Apply-fix flow writes code='WD' but leaves the
     // buyer column intact (since 'WD' doesn't match a buyers row), so
@@ -6641,12 +6670,10 @@ app.get('/api/invoices/eligible-buyers/:auctionId', requireView, (req, res) => {
   // considered "fully invoiced" for the current state and excluded.
   const isASPState = String(cfg.business_state || '').toUpperCase() === 'KERALA';
   // Both states share the same eligibility expression — what differs is
-  // the meaning. The expression: lot is eligible if no `invo` OR `invo
-  // matches asp_invo` (meaning the only existing invoice on this lot is
-  // an ASP one, which doesn't count toward "ISP-invoiced" status).
-  const eligibleExpr = isASPState
-    ? `(l.invo IS NULL OR l.invo = '')`
-    : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo))`;
+  // the meaning. See lotUninvoicedExpr: a lot is eligible if it has no `invo`,
+  // if `invo` matches asp_invo (ISP context — only an ASP invoice exists so
+  // far), or if the `invo` is orphaned (its invoice was reverted/deleted).
+  const eligibleExpr = lotUninvoicedExpr(isASPState);
 
   res.json(db.all(
     `SELECT l.buyer, COALESCE(b.buyer1, MAX(l.buyer1), l.buyer) as buyer1,
@@ -6754,14 +6781,14 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
   
   // Get distinct buyers. When saleType filter is set, only buyers whose
   // default sale matches (or whose lots already have that sale assigned) are included.
-  // The "un-invoiced" check is state-aware:
+  // The "un-invoiced" check is state-aware (see lotUninvoicedExpr):
   //   - In Tamil Nadu (ISP): a lot is un-invoiced if `invo` is empty OR
   //     if the only existing invoice is the ASP one (invo == asp_invo).
   //   - In Kerala (ASP): un-invoiced means `invo` is empty.
+  //   - Either context: an ORPHANED `invo` (its invoice was reverted) counts
+  //     as un-invoiced so the buyer can be regenerated.
   const isASPState = String(cfg.business_state || '').toUpperCase() === 'KERALA';
-  const uninvoicedExpr = isASPState
-    ? `(l.invo IS NULL OR l.invo = '')`
-    : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo))`;
+  const uninvoicedExpr = lotUninvoicedExpr(isASPState);
   const params = [req.params.auctionId];
   let saleClause = '';
   if (saleType) {

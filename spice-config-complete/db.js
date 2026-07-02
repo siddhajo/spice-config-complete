@@ -1035,6 +1035,27 @@ async function initDb() {
     }
   } catch (_) { /* tables/columns may not exist on a partial schema — ignore */ }
 
+  // One-time data fix: round every numeric money/quantity column on `lots`
+  // to 2 decimals (paise). Post-auction price imports historically stored the
+  // auctioneer sheet's raw floats (e.g. a QTY of 189.20000000000002); the
+  // import now rounds on the way in, and this scrubs rows already persisted.
+  // NULLs are preserved (only non-null values are rounded). Idempotent: the
+  // WHERE matches any row whose stored double differs from its 2dp value —
+  // even by a single ULP (e.g. 189.20000000000002 vs 189.2, which print
+  // differently), since ROUND snaps to the canonical 2dp double. After the
+  // scrub `col = ROUND(col,2)` exactly, so reruns and fresh DBs are no-ops.
+  try {
+    const ROUND_COLS = ['bags','qty','price','amount','pqty','prate','puramt','com','sertax',
+      'cgst','sgst','igst','advance','balance','bilamt','refund','refud',
+      'isp_pqty','isp_prate','isp_puramt','asp_pqty','asp_prate','asp_puramt'];
+    const setSql   = ROUND_COLS.map(c => `${c} = CASE WHEN ${c} IS NULL THEN NULL ELSE ROUND(${c}, 2) END`).join(', ');
+    const whereSql = ROUND_COLS.map(c => `(${c} IS NOT NULL AND ${c} <> ROUND(${c}, 2))`).join(' OR ');
+    const roundFix = wrapped.run(`UPDATE lots SET ${setSql} WHERE ${whereSql}`);
+    if (roundFix && roundFix.changes > 0) {
+      console.log(`Migration: rounded numeric lot columns to 2dp on ${roundFix.changes} lots`);
+    }
+  } catch (_) { /* columns may not exist on a partial schema — ignore */ }
+
   // One-time data fix for the sales-invoice ISP/ASP book split.
   // `invoices.state` records which company book a row belongs to:
   // KERALA = ASP (Amazing Spice Park), TAMIL NADU = ISP (Ideal Spices).
