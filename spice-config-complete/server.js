@@ -6195,25 +6195,43 @@ function _hasGeneratedDocs(db, docType, auctionId) {
   return !!db.get(`SELECT 1 FROM ${table} WHERE auction_id = ? LIMIT 1`, [auctionId]);
 }
 // SQL predicate: a lot (aliased `l`) is un-invoiced — i.e. still needs a sales
-// invoice — for the current state context. A lot qualifies when:
-//   • its `invo` link is empty; OR
-//   • (ISP context) the only link is the ASP one (invo == asp_invo); OR
-//   • the link is ORPHANED — no invoices row still references it. This last
-//     clause is what lets a buyer reappear in the eligible / generate-all list
-//     after their invoice is REVERTED. Revert deletes the invoice row but can
-//     leave a stale lots.invo behind (context/mode-mismatched reverts, direct
-//     deletes, blank-mode auctions); without the orphan escape that stale invo
-//     hides the buyer from regeneration forever. Because the escape only fires
-//     when NO invoice references the invo, it never frees a genuinely-invoiced
-//     lot — behaviour is unchanged whenever the invoice still exists.
-// Shared by the generation gate, /eligible-buyers, and /generate-all so all
-// three agree on exactly which lots still need invoicing.
+// invoice — for the current state context. Shared by the generation gate,
+// /eligible-buyers, and /generate-all so all three agree on which lots remain.
+//
+// e-Trade lots carry TWO independent invoice links (see the sales flow):
+//   • asp_invo — the ASP (Kerala) invoice number, backed by a KERALA invoice
+//   • invo     — the ISP (Tamil Nadu) number, backed by a TAMIL NADU invoice.
+//                The ISP step overwrites `invo` on top of the ASP number; before
+//                that layering, invo == asp_invo.
+// Each context keys on its OWN column so ASP and ISP can be reverted and
+// regenerated INDEPENDENTLY — reverting the ASP invoice must not require the
+// downstream ISP invoice to be reverted first (and vice-versa). Keying ASP on
+// `invo` (as an earlier version did) was the bug: a live ISP invoice occupied
+// `invo` and hid every buyer from ASP regeneration.
+//
+// In BOTH contexts a lot also qualifies when its link is ORPHANED — no live
+// invoice (in the matching state) still references it. That is what lets a
+// buyer reappear after their invoice is REVERTED but the lot link was left
+// stale (legacy stamping, mode/context-mismatched reverts, direct deletes).
+// The orphan escape only fires when NO backing invoice exists, so a genuinely
+// invoiced lot is never freed — behaviour is unchanged while the invoice lives.
+// Number ranges for ASP vs ISP can overlap, so each orphan check is scoped by
+// invoice state.
 function lotUninvoicedExpr(isASPState) {
-  const orphan =
-    `NOT EXISTS (SELECT 1 FROM invoices i WHERE i.auction_id = l.auction_id AND i.invo = l.invo)`;
-  return isASPState
-    ? `(l.invo IS NULL OR l.invo = '' OR ${orphan})`
-    : `(l.invo IS NULL OR l.invo = '' OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo) OR ${orphan})`;
+  if (isASPState) {
+    const orphanAsp =
+      `NOT EXISTS (SELECT 1 FROM invoices i
+                   WHERE i.auction_id = l.auction_id AND i.invo = l.asp_invo
+                     AND UPPER(COALESCE(i.state,'')) = 'KERALA')`;
+    return `(l.asp_invo IS NULL OR l.asp_invo = '' OR ${orphanAsp})`;
+  }
+  const orphanIsp =
+    `NOT EXISTS (SELECT 1 FROM invoices i
+                 WHERE i.auction_id = l.auction_id AND i.invo = l.invo
+                   AND UPPER(COALESCE(i.state,'')) <> 'KERALA')`;
+  return `(l.invo IS NULL OR l.invo = ''
+           OR (l.asp_invo IS NOT NULL AND l.asp_invo != '' AND l.invo = l.asp_invo)
+           OR ${orphanIsp})`;
 }
 
 // True iff at least one eligible party in the trade is still missing
