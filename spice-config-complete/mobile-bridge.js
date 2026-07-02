@@ -157,6 +157,18 @@ function addReceiptHeaderCompact(doc, appTitle, branch, dateFmt, tradeNo, pageW,
   doc.moveDown(0.2);
 }
 
+// Gross weight for a lot row = net + sample. Some lots (imported or created
+// via paths that don't capture gross_wt) are stored with gross_weight = 0,
+// which would otherwise print a bogus "0.000" and be dropped from the total.
+// Reconstruct from net + sample in that case; trust a genuine stored gross
+// when present. Matches the priced rows, whose stored gross already equals
+// net + sample.
+function grossWeightFor(l, netW, sw) {
+  const stored = Number(l.gross_weight) || 0;
+  if (stored > 0) return stored;
+  return netW > 0 ? netW + sw : 0;
+}
+
 // ── RENDERER (full) ──────────────────────────────────────────────
 function renderSellerReceipt(doc, sellerLots, cfg) {
   const m = 20;
@@ -219,18 +231,20 @@ function renderSellerReceipt(doc, sellerLots, cfg) {
     const ry = doc.y;
     cx = m;
     const sw = Number(l.sample_weight) || cfg.sampleWeight || 0;
+    const netW = Number(l.qty) || 0;
+    const grossW = grossWeightFor(l, netW, sw);
     const rowData = [
       l.lot_no,
       l.bags,
-      Number(l.qty).toFixed(3),
+      netW.toFixed(3),
       sw ? sw.toFixed(3) : '',
-      l.gross_weight != null ? Number(l.gross_weight).toFixed(3) : '',
+      grossW ? grossW.toFixed(3) : '',
     ];
     if (cfg.showMoisture) rowData.push(l.moisture ? Number(l.moisture).toFixed(1) : '');
     rowData.forEach((v, i) => { doc.text(String(v), cx, ry, { width: cols[i], align: 'center' }); cx += cols[i]; });
     doc.y = ry + 13 * vs;
-    totalQty    += Number(l.qty) || 0;
-    totalGross  += Number(l.gross_weight) || 0;
+    totalQty    += netW;
+    totalGross  += grossW;
     totalBags   += Number(l.bags) || 0;
     totalSample += sw;
   });
@@ -313,16 +327,18 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
     const ry = doc.y;
     cx = m;
     const sw = Number(l.sample_weight) || cfg.sampleWeight || 0;
+    const netW = Number(l.qty) || 0;
+    const grossW = grossWeightFor(l, netW, sw);
     const rowData = [
       l.lot_no, l.bags,
-      Number(l.qty).toFixed(3),
+      netW.toFixed(3),
       sw ? sw.toFixed(3) : '',
-      l.gross_weight != null ? Number(l.gross_weight).toFixed(3) : '',
+      grossW ? grossW.toFixed(3) : '',
     ];
     rowData.forEach((v, i) => { doc.text(String(v), cx, ry, { width: cols[i], align: 'center' }); cx += cols[i]; });
     doc.y = ry + 11;
-    totalQty    += Number(l.qty) || 0;
-    totalGross  += Number(l.gross_weight) || 0;
+    totalQty    += netW;
+    totalGross  += grossW;
     totalBags   += Number(l.bags) || 0;
     totalSample += sw;
   });

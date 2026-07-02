@@ -47,6 +47,8 @@ let SQL = null;        // sql.js module instance (loaded once)
 let rawDb = null;       // sql.js Database instance
 let wrapped = null;     // our API wrapper
 let pendingSave = null; // debounced fs.writeFile timer
+let saveInFlight = false; // true while an async disk write is running
+let saveDirty = false;  // a write arrived mid-save → re-persist when it finishes
 let lockOwned = false;  // true once we've successfully acquired LOCK_PATH
 let currentActor = '';  // username stamped into modified_by by table triggers
 
@@ -107,21 +109,48 @@ function markDataMigration(db, name) {
 /**
  * Persist the in-memory DB to disk. Debounced 200ms so a burst of writes
  * (e.g. invoice generation) only triggers one write.
+ *
+ * The disk write is ASYNCHRONOUS (fs.promises). This matters on Railway,
+ * where SPICE_DATA_DIR is a network-backed volume: a synchronous
+ * writeFileSync would park the single Node thread inside the write syscall
+ * for the full volume round-trip, freezing the event loop so that EVERY
+ * other request — including static homepage serving — queues behind it
+ * (CPU near 0% while latencies climb to tens of seconds). An async write
+ * keeps the loop free to serve reads while the volume write drains.
+ *
+ * Only one write runs at a time (saveInFlight). Writes that arrive while a
+ * save is draining set saveDirty, which re-schedules one more save when the
+ * current one completes — so we always end on a snapshot newer than the
+ * last mutation, without piling up concurrent writes to the same tmp file.
  */
+function runSave() {
+  pendingSave = null;
+  if (!rawDb) return;
+  if (saveInFlight) { saveDirty = true; return; }
+  saveInFlight = true;
+  saveDirty = false;
+  let buf;
+  try {
+    // Serialize synchronously (in-memory, ~ms for a sub-MB DB) then hand the
+    // buffer to the async writer so the CPU-cheap part doesn't race writes.
+    buf = exportDb();
+  } catch (e) {
+    saveInFlight = false;
+    console.error('[db] export failed:', e.message);
+    return;
+  }
+  const tmp = DB_PATH + '.tmp';
+  fs.promises.writeFile(tmp, buf)
+    .then(() => fs.promises.rename(tmp, DB_PATH))
+    .catch((e) => console.error('[db] save failed:', e.message))
+    .finally(() => {
+      saveInFlight = false;
+      if (saveDirty) scheduleSave(); // a mutation landed mid-save — flush again
+    });
+}
 function scheduleSave() {
   if (pendingSave) clearTimeout(pendingSave);
-  pendingSave = setTimeout(() => {
-    pendingSave = null;
-    if (!rawDb) return;
-    try {
-      const buf = exportDb();
-      const tmp = DB_PATH + '.tmp';
-      fs.writeFileSync(tmp, buf);
-      fs.renameSync(tmp, DB_PATH);
-    } catch (e) {
-      console.error('[db] save failed:', e.message);
-    }
-  }, 200);
+  pendingSave = setTimeout(runSave, 200);
 }
 
 /**
