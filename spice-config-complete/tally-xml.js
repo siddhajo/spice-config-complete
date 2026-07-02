@@ -2219,7 +2219,7 @@ const ASP_STATE_SQL = `UPPER(COALESCE(i.state,'')) = 'KERALA'`;
  */
 function buildSalesIspRows(db, auctionId, cfg) {
   const stmt = db.prepare(`
-    SELECT i.*, b.add1, b.add2, b.pla AS buyer_pla, b.pin AS buyer_pin
+    SELECT i.*, b.add1, b.add2, b.pla AS buyer_pla, b.pin AS buyer_pin, b.cpin AS buyer_cpin
     FROM invoices i
     LEFT JOIN buyers b ON b.buyer = i.buyer
     WHERE i.auction_id = ? AND ${ISP_STATE_SQL}
@@ -2325,11 +2325,14 @@ function buildSalesIspRows(db, auctionId, cfg) {
     if (r.distance_km != null && r.distance_km !== '') {
       distance = String(r.distance_km);
     } else {
-      const buyerPin = String(r.buyer_pin || '').trim();
-      if (buyerPin && dispatchPin) {
-        const [k1, k2] = dispatchPin < buyerPin
-          ? [dispatchPin, buyerPin]
-          : [buyerPin, dispatchPin];
+      // Consignee PIN drives the distance: ship-to (cpin) preferred, bill-to
+      // (pin) fallback — same rule as the UI + route-save endpoints so the
+      // <DISTANCE> matches what the operator saw and saved on screen.
+      const consigneePin = String(r.buyer_cpin || '').trim() || String(r.buyer_pin || '').trim();
+      if (consigneePin && dispatchPin) {
+        const [k1, k2] = dispatchPin < consigneePin
+          ? [dispatchPin, consigneePin]
+          : [consigneePin, dispatchPin];
         try {
           const hit = routeStmt.get(k1, k2);
           if (hit && hit.km != null) distance = String(hit.km);

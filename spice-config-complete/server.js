@@ -6477,8 +6477,10 @@ app.get('/api/invoices', requireView, (req, res) => {
     const pinByBuyer = new Map();
     if (buyerCodes.length) {
       const ph = buyerCodes.map(() => '?').join(',');
-      const brows = db.all(`SELECT buyer, pin FROM buyers WHERE buyer IN (${ph})`, buyerCodes);
-      for (const b of brows) pinByBuyer.set(b.buyer, b.pin);
+      // Consignee pin drives the e-way distance: prefer ship-to (cpin),
+      // fall back to bill-to (pin). Same rule everywhere (see consigneePin()).
+      const brows = db.all(`SELECT buyer, pin, cpin FROM buyers WHERE buyer IN (${ph})`, buyerCodes);
+      for (const b of brows) pinByBuyer.set(b.buyer, consigneePin(b.cpin, b.pin));
     }
     for (const r of rows) {
       r.resolved_km = null;
@@ -10651,6 +10653,16 @@ app.get('/api/tally/preview/:type/:auctionId', requireExport, (req, res) => {
 // every other invoice between the same two PINs (this auction and all
 // future ones) auto-resolves.
 
+// The consignee PIN for e-way bill distance: the goods physically travel to
+// the SHIP-TO (consignee) address, so ship-to (buyers.cpin) is the default;
+// fall back to the BILL-TO (buyers.pin) when no separate ship-to is on file.
+// Single source of truth so every distance site resolves the same PIN.
+function consigneePin(cpin, pin) {
+  const ship = String(cpin == null ? '' : cpin).trim();
+  const bill = String(pin  == null ? '' : pin ).trim();
+  return ship || bill;
+}
+
 // Resolve the configured dispatch PIN with the same fallback chain the
 // voucher generator uses. Used for normalising route lookups.
 function getDispatchPin(db) {
@@ -10678,7 +10690,7 @@ app.get('/api/invoices/distances/:auctionId', requireView, (req, res) => {
     const dispatchPin = getDispatchPin(db);
     const rows = db.all(
       `SELECT i.id, i.ano, i.invo, i.buyer, i.buyer1, i.gstin, i.state,
-              b.pin AS buyer_pin, b.pla AS buyer_pla,
+              b.pin AS bill_pin, b.cpin AS ship_pin, b.pla AS buyer_pla,
               i.distance_km
        FROM invoices i
        LEFT JOIN buyers b ON b.buyer = i.buyer
@@ -10704,17 +10716,22 @@ app.get('/api/invoices/distances/:auctionId', requireView, (req, res) => {
       }
     } catch (e) { /* table may not exist on very old DBs */ }
 
-    // Annotate each row with resolved distance + source
+    // Annotate each row with the resolved consignee PIN (ship-to → bill-to),
+    // its source, and the resolved distance + source.
     const enriched = rows.map(r => {
+      const shipPin = String(r.ship_pin || '').trim();
+      const billPin = String(r.bill_pin || '').trim();
+      const buyer_pin = consigneePin(r.ship_pin, r.bill_pin);
+      const pin_source = shipPin ? 'ship' : (billPin ? 'bill' : 'none');
       let km = null, source = 'none';
       if (r.distance_km != null) {
         km = r.distance_km;
         source = 'manual';
-      } else if (r.buyer_pin && routes[String(r.buyer_pin).trim()] != null) {
-        km = routes[String(r.buyer_pin).trim()];
+      } else if (buyer_pin && routes[buyer_pin] != null) {
+        km = routes[buyer_pin];
         source = 'route';
       }
-      return { ...r, resolved_km: km, distance_source: source };
+      return { ...r, buyer_pin, pin_source, resolved_km: km, distance_source: source };
     });
 
     res.json({
@@ -10784,7 +10801,7 @@ app.put('/api/route-distances', requireExport, (req, res) => {
            SELECT i.id FROM invoices i
            LEFT JOIN buyers b ON b.buyer = i.buyer
            WHERE UPPER(COALESCE(i.state,'')) = 'TAMIL NADU'
-             AND b.pin = ?
+             AND COALESCE(NULLIF(TRIM(b.cpin),''), TRIM(b.pin)) = ?
              AND i.distance_km IS NOT NULL
          )`,
         [otherPin]
@@ -10801,7 +10818,7 @@ app.put('/api/route-distances', requireExport, (req, res) => {
         `SELECT COUNT(*) AS n FROM invoices i
          LEFT JOIN buyers b ON b.buyer = i.buyer
          WHERE UPPER(COALESCE(i.state,'')) = 'TAMIL NADU'
-           AND b.pin = ?`,
+           AND COALESCE(NULLIF(TRIM(b.cpin),''), TRIM(b.pin)) = ?`,
         [otherPin]
       );
       appliedCount = r ? r.n : 0;

@@ -1258,7 +1258,9 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     doc.font('Helvetica').fontSize(8);
     const cAnchor = { v: cy };
     writeLeft(ship.addr, cAnchor);
-    writeLeft(ship.pla,  cAnchor);
+    // Place + PIN on one line (e.g. "KUMILY - 685509") so the delivery
+    // pincode is always visible without adding a whole extra row.
+    writeLeft([ship.pla, ship.pin].filter(Boolean).join(' - '), cAnchor);
     if (ship.gstin) writeLeftKV('GSTIN/UIN', ship.gstin, cAnchor);
     if (ship.state) writeLeftKV('State Name', `${ship.state}, Code : ${ship.stCode || ''}`, cAnchor);
   }
@@ -1282,6 +1284,7 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
       add1:  cfg.s_address1 || '',
       add2:  cfg.s_address2 || '',
       pla:   cfg.s_place || '',
+      pin:   cfg.s_pin || '',
       gstin: cfg.s_gstin || '',
       state: cfg.s_state || 'KERALA',
       stCode: cfg.s_st_code || '32',
@@ -1292,6 +1295,7 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
       add1:  cfg.tn_address1 || '',
       add2:  cfg.tn_address2 || '',
       pla:   cfg.tn_place || '',
+      pin:   cfg.tn_pin || '',
       gstin: cfg.tn_gstin || '',
       state: cfg.tn_state || 'TAMIL NADU',
       stCode: cfg.tn_st_code || '33',
@@ -1302,6 +1306,7 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
       add1:  buyer.add1 || '',
       add2:  buyer.add2 || '',
       pla:   buyer.pla || '',
+      pin:   buyer.pin || '',
       gstin: buyer.gstin || '',
       state: buyer.state || '',
       stCode: buyer.st_code || '',
@@ -1316,7 +1321,8 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
   const bAddr = [billTo.add1, billTo.add2].filter(Boolean).join(',');
   const bAnchor = { v: by };
   writeLeft(bAddr, bAnchor);
-  writeLeft(billTo.pla, bAnchor);
+  // Place + PIN on one line (e.g. "BODINAYAKANUR - 625513").
+  writeLeft([billTo.pla, billTo.pin].filter(Boolean).join(' - '), bAnchor);
   if (billTo.gstin) writeLeftKV('GSTIN/UIN', billTo.gstin, bAnchor);
   if (billTo.state) writeLeftKV('State Name', `${billTo.state}, Code : ${billTo.stCode || ''}`, bAnchor);
 

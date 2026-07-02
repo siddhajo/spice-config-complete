@@ -530,6 +530,11 @@ function getCollectionRows(db, auctionId) {
       ON UPPER(TRIM(b.buyer))  = UPPER(TRIM(i.buyer))
       OR UPPER(TRIM(b.buyer1)) = UPPER(TRIM(i.buyer1))
     WHERE i.auction_id = ?
+      -- ISP only (IDEAL SPICES PRIVATE LIMITED). The invoices table holds
+      -- both the ISP (Tamil Nadu) and its paired ASP (Kerala) row for each
+      -- trade; without this filter every buyer appears twice. Matches the
+      -- ISP_STATE_SQL classification used by the Tally export.
+      AND (UPPER(COALESCE(i.state,'')) = 'TAMIL NADU' OR UPPER(COALESCE(i.state,'')) = '')
     GROUP BY i.sale, i.invo, i.buyer1, b.buyer, b.sbl, i.buyer, b.state
     ORDER BY i.sale, CAST(i.invo AS INTEGER), i.invo
   `, [auctionId]);

@@ -20874,7 +20874,7 @@ async function loadInvoiceDistances(){
     // Header
     const h='padding:6px 8px;background:var(--bg);font-weight:700;font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)';
     html+=`<div style="${h}">Inv#</div>`;
-    html+=`<div style="${h}">Buyer · PIN</div>`;
+    html+=`<div style="${h}" title="Consignee PIN — ship-to address by default, bill-to when no ship-to is on file">Consignee · PIN</div>`;
     html+=`<div style="${h};text-align:right">Distance</div>`;
     html+=`<div style="${h};text-align:center">Lookup &amp; Save</div>`;
     for(const inv of data.invoices){
@@ -20885,9 +20885,18 @@ async function loadInvoiceDistances(){
       const km = resolvedKm == null ? '' : String(resolvedKm);
       const src = inv.distance_source || (inv.distance_km != null ? 'manual' : 'none');
       const buyerPin=String(inv.buyer_pin||'').trim();
+      // Which address the consignee PIN came from — ship-to (default) or the
+      // bill-to fallback. A small grey tag so the operator can verify the
+      // route is being keyed off the delivery address.
+      const pinSrc=inv.pin_source||'';
+      const pinTag=pinSrc==='ship'
+        ? `<span title="Ship-to (consignee) PIN" style="font-size:9px;padding:0 4px;background:var(--green-bg);color:var(--green);border-radius:6px;margin-left:4px;font-weight:700">ship</span>`
+        : pinSrc==='bill'
+        ? `<span title="No ship-to on file — using bill-to PIN" style="font-size:9px;padding:0 4px;background:var(--bg);color:var(--text2);border-radius:6px;margin-left:4px;font-weight:700">bill</span>`
+        : '';
       const cellBg='padding:7px 8px;border-bottom:1px solid var(--border);background:#fff';
       html+=`<div style="${cellBg};font-family:monospace;font-weight:700;color:var(--spice-cardamom-dk)">${esc(inv.invo)}</div>`;
-      html+=`<div style="${cellBg};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inv.buyer1||inv.buyer)} <span style="color:var(--text3);font-family:monospace">${esc(buyerPin||'(no pin)')}</span></div>`;
+      html+=`<div style="${cellBg};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(inv.buyer1||inv.buyer)} <span style="color:var(--text3);font-family:monospace">${esc(buyerPin||'(no pin)')}</span>${buyerPin?pinTag:''}</div>`;
       // Distance cell with source badge (route / manual / —). Route
       // values get a subtle "auto" pill so the user can see at a glance
       // which rows came from the lookup table vs being typed manually.
