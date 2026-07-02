@@ -6550,12 +6550,28 @@ app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) =>
   // from ISP invoices in the same auction, which matters for the sales
   // list cross-reference (ASP Inv# column).
   const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
+  // ASP→ISP transfer invoice (e-Trade + Kerala): the invoice bills ISP, so the
+  // stored Trade Name (buyer1) and Place must match what the sales list and the
+  // invoice PDF's BILL-TO already show — the ISP company name (short_name →
+  // trade_name → literal, mirroring _invTradeName / invoice-pdf billTo) and an
+  // "ASP "-prefixed place (the same prefix the import/state-derivation logic
+  // recognises via place.startsWith('ASP')). Non-ASP rows are stored as-is.
+  const _isETradeMode = String(cfg.business_mode || '').toLowerCase() === 'e-trade';
+  const _isASPInvoice = _isETradeMode && String(invoiceState || '').toUpperCase() === 'KERALA';
+  const _rawBuyer1 = invoice.buyer.buyer1 || '';
+  const _rawPlace  = invoice.buyer.pla || '';
+  const _storedBuyer1 = _isASPInvoice
+    ? (cfg.short_name || cfg.trade_name || 'IDEAL SPICES PRIVATE LIMITED')
+    : _rawBuyer1;
+  const _storedPlace = (_isASPInvoice && _rawPlace && !String(_rawPlace).toUpperCase().startsWith('ASP'))
+    ? `ASP ${_rawPlace}`
+    : _rawPlace;
   // Idempotent (re)generation — clear any prior matching row(s) first.
   clearPriorSalesInvoice(db, req.params.auctionId, buyerCode, invoiceState, invoice.saleType);
   db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot,inc_ti)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,String(invoiceNo),buyerCode,invoice.buyer.buyer1||'',
-     invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
+    [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,String(invoiceNo),buyerCode,_storedBuyer1,
+     invoice.buyer.gstin||'',_storedPlace,s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
      s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal,includeTI ? 1 : 0]);
 
   // Update lots with sale type and invoice number.
@@ -6775,12 +6791,24 @@ app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res
       const invoNo = String(nextNo);
       // Store BUSINESS context state — see single-invoice handler for rationale
       const invoiceState = stateForRecord(cfg, cfg.business_state || auction.state || '');
+      // ASP→ISP transfer (e-Trade + Kerala): store the ISP trade name and an
+      // "ASP "-prefixed place, matching the sales list / PDF BILL-TO. See the
+      // single-invoice handler above for the full rationale.
+      const _isETradeMode = String(cfg.business_mode || '').toLowerCase() === 'e-trade';
+      const _isASPInvoice = _isETradeMode && String(invoiceState || '').toUpperCase() === 'KERALA';
+      const _rawPlace = invoice.buyer.pla || '';
+      const _storedBuyer1 = _isASPInvoice
+        ? (cfg.short_name || cfg.trade_name || 'IDEAL SPICES PRIVATE LIMITED')
+        : (invoice.buyer.buyer1 || '');
+      const _storedPlace = (_isASPInvoice && _rawPlace && !String(_rawPlace).toUpperCase().startsWith('ASP'))
+        ? `ASP ${_rawPlace}`
+        : _rawPlace;
       // Idempotent (re)generation — clear any prior matching row(s) first.
       clearPriorSalesInvoice(db, req.params.auctionId, row.buyer, invoiceState, invoice.saleType);
       db.run(`INSERT INTO invoices (auction_id,ano,date,state,sale,invo,buyer,buyer1,gstin,place,bag,qty,amount,gunny,pava_hc,ins,cgst,sgst,igst,tcs,rund,tot,inc_ti)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,invoNo,row.buyer,invoice.buyer.buyer1||'',
-         invoice.buyer.gstin||'',invoice.buyer.pla||'',s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
+        [req.params.auctionId,auction.ano,auction.date,invoiceState,invoice.saleType,invoNo,row.buyer,_storedBuyer1,
+         invoice.buyer.gstin||'',_storedPlace,s.totalBags,s.totalQty,s.totalAmount,s.gunnyCost,s.transportCost,s.insuranceCost,
          s.cgst,s.sgst,s.igst,0,s.roundDiff,s.grandTotal,includeTI ? 1 : 0]);
       // ASP-aware lot update: see single-invoice handler above for rationale.
       const isASPStateBulk = String(cfg.business_state || '').toUpperCase() === 'KERALA';

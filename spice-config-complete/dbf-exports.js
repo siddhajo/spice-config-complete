@@ -12,7 +12,8 @@
  * 
  * Key DBF rules learned from the previous chat:
  *   - LotNo, grade, pst_code, ppin, litre → store as TEXT (preserves leading zeros)
- *   - Date format: DD/MM/YYYY (string, not D type — FoxPro reads this)
+ *   - Date fields: real DBF `D` (date) type — stored as YYYYMMDD, so FoxPro
+ *     and other consumers read them as dates rather than plain text
  *   - Qty: 3 decimal places
  *   - Amount: 2 decimal places
  */
@@ -25,15 +26,22 @@ const fs = require('fs');
 const TMP_DIR = path.join(__dirname, 'data', 'tmp-dbf');
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
-// Format date as DD/MM/YYYY string (FoxPro-friendly)
-function fmtDate(d) {
-  if (!d) return '';
+// Parse a stored date into a JS Date (UTC) so it can be written to a real
+// DBF `D` (date) field. dbffile serialises `D` values via Date#toISOString,
+// so we build the Date in UTC to avoid any timezone day-shift. Accepts the
+// ISO `YYYY-MM-DD` we store as well as legacy `DD/MM/YYYY` strings. Returns
+// null for blank/unparseable input, which dbffile writes as an empty date.
+function toDate(d) {
+  if (!d) return null;
   const s = String(d).trim();
-  if (s.includes('/')) return s;
-  // ISO format YYYY-MM-DD → DD/MM/YYYY
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  return s;
+  if (!s) return null;
+  // ISO format YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  // Legacy DD/MM/YYYY
+  m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  return null;
 }
 
 // Safely trim string values to fit DBF field size
@@ -154,7 +162,7 @@ async function exportLotsDbf(db, filters, format = 'dbf') {
 
   const fields = [
     { name: 'ANO',      type: 'C', size: 10 },
-    { name: 'DATE',     type: 'C', size: 10 },
+    { name: 'DATE',     type: 'D', size: 8 },
     { name: 'LOT',      type: 'C', size: 10 },
     { name: 'CROP',     type: 'C', size: 10 },
     { name: 'GRADE',    type: 'C', size: 10 },
@@ -194,7 +202,7 @@ async function exportLotsDbf(db, filters, format = 'dbf') {
 
   const records = rows.map(r => ({
     ANO: fit(r.trade_no, 10),
-    DATE: fmtDate(r.trade_date),
+    DATE: toDate(r.trade_date),
     LOT: fit(r.lot_no, 10),
     CROP: '',
     GRADE: fit(r.grade, 10),
@@ -242,7 +250,7 @@ async function exportInvoicesDbf(db, filters = {}, format = 'dbf') {
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
-    { name: 'DATE',    type: 'C', size: 10 },
+    { name: 'DATE',    type: 'D', size: 8 },
     { name: 'STATE',   type: 'C', size: 20 },
     { name: 'SALE',    type: 'C', size: 2 },
     { name: 'INVO',    type: 'C', size: 10 },
@@ -266,7 +274,7 @@ async function exportInvoicesDbf(db, filters = {}, format = 'dbf') {
 
   const records = rows.map(r => ({
     ANO: fit(r.ano, 10),
-    DATE: fmtDate(r.date),
+    DATE: toDate(r.date),
     STATE: fit(r.state, 20),
     SALE: fit(r.sale, 2),
     INVO: fit(r.invo, 10),
@@ -298,7 +306,7 @@ async function exportPurchasesDbf(db, filters = {}, format = 'dbf') {
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
-    { name: 'DATE',    type: 'C', size: 10 },
+    { name: 'DATE',    type: 'D', size: 8 },
     { name: 'STATE',   type: 'C', size: 20 },
     { name: 'BR',      type: 'C', size: 30 },
     { name: 'NAME',    type: 'C', size: 50 },
@@ -318,7 +326,7 @@ async function exportPurchasesDbf(db, filters = {}, format = 'dbf') {
 
   const records = rows.map(r => ({
     ANO: fit(r.ano, 10),
-    DATE: fmtDate(r.date),
+    DATE: toDate(r.date),
     STATE: fit(r.state, 20),
     BR: fit(r.br, 30),
     NAME: fit(r.name, 50),
@@ -346,7 +354,7 @@ async function exportBillsDbf(db, filters = {}, format = 'dbf') {
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
-    { name: 'DATE',    type: 'C', size: 10 },
+    { name: 'DATE',    type: 'D', size: 8 },
     { name: 'STATE',   type: 'C', size: 20 },
     { name: 'BR',      type: 'C', size: 30 },
     { name: 'CRPT',    type: 'C', size: 10 },
@@ -366,7 +374,7 @@ async function exportBillsDbf(db, filters = {}, format = 'dbf') {
 
   const records = rows.map(r => ({
     ANO: fit(r.ano, 10),
-    DATE: fmtDate(r.date),
+    DATE: toDate(r.date),
     STATE: fit(r.state, 20),
     BR: fit(r.br, 30),
     CRPT: fit(r.crpt, 10),
@@ -527,7 +535,7 @@ async function exportDebitNotesDbf(db, filters = {}, format = 'dbf') {
 
   const fields = [
     { name: 'ANO',     type: 'C', size: 10 },
-    { name: 'DATE',    type: 'C', size: 10 },
+    { name: 'DATE',    type: 'D', size: 8 },
     { name: 'STATE',   type: 'C', size: 20 },
     { name: 'NAME',    type: 'C', size: 50 },
     { name: 'NOTE_NO', type: 'C', size: 10 },
@@ -540,7 +548,7 @@ async function exportDebitNotesDbf(db, filters = {}, format = 'dbf') {
 
   const records = rows.map(r => ({
     ANO: fit(r.ano, 10),
-    DATE: fmtDate(r.date),
+    DATE: toDate(r.date),
     STATE: fit(r.state, 20),
     NAME: fit(r.name, 50),
     NOTE_NO: fit(r.note_no, 10),

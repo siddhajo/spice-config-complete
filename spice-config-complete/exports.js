@@ -604,27 +604,53 @@ async function exportCollection(db, auctionId) {
   return newCollectionXlsx(db, auctionId);
 }
 
-// ── Export Type 8: Dealer List ────────────────────────────────
+// Interleave a bold subtotal row after each contiguous run of rows sharing the
+// same `labelKey` value. Rows must already be ordered so each group is
+// contiguous. The subtotal lands in the labelKey column as "<value> TOTAL" and
+// sums each of `sumKeys`. Mirrors the Pooler Register's XLSX subtotal pass (and
+// the PDF's groupByKey/subtotalKeys) so both outputs match.
+function _lotwiseGroupSubtotals(rows, labelKey, sumKeys) {
+  const out = [];
+  let cur = null, acc = null;
+  const flush = () => {
+    if (!acc || cur == null) return;
+    const sub = { _isSubtotal: true, [labelKey]: `${cur} TOTAL` };
+    sumKeys.forEach(k => { sub[k] = acc[k] || 0; });
+    out.push(sub);
+  };
+  for (const r of rows) {
+    const k = r[labelKey] || '';
+    if (k !== cur) { flush(); cur = k; acc = Object.fromEntries(sumKeys.map(x => [x, 0])); }
+    sumKeys.forEach(x => { acc[x] += Number(r[x]) || 0; });
+    out.push(r);
+  }
+  flush();
+  return out;
+}
+
+// ── Export Type 8: Dealer List (lot-wise) ─────────────────────
 async function exportDealerList(db, auctionId) {
-  // Registered-dealer roster: a pre-trade export, so it must NOT depend on
-  // `amount` (lots carry no price/amount until prices are imported — see
-  // exportPriceListBefore). Filtering on amount>0 made the pre-trade Dealer
-  // List come back empty. Qualify on GSTIN presence + a real (qty>0) lot.
+  // Registered-dealer roster, lot-wise: one row per lot grouped by seller,
+  // with a per-seller subtotal (bags + qty). A pre-trade export, so it must
+  // NOT depend on `amount` (lots carry no price/amount until prices are
+  // imported — see exportPriceListBefore). Qualify on GSTIN presence + a real
+  // (qty>0) lot. Ordered by state, name so each seller's lots are contiguous.
   const rows = db.all(
-    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
-      COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin, lot_no as lot,
+      bags, qty
      FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
-     GROUP BY state, name, cr ORDER BY state, name`, [auctionId]
+     ORDER BY state, name, lot_no`, [auctionId]
   );
+  const grouped = _lotwiseGroupSubtotals(rows, 'name', ['bags', 'qty']);
   const cols = [
     { header: 'STATE', key: 'state', width: 12 },
     { header: 'NAME', key: 'name', width: 30 },
     { header: 'GSTIN', key: 'gstin', width: 18 },
-    { header: 'LOTS', key: 'lots', width: 6 },
+    { header: 'LOT', key: 'lot', width: 8 },
     { header: 'BAGS', key: 'bags', width: 6 },
     { header: 'QTY', key: 'qty', width: 12 },
   ];
-  return createExcelBuffer('DealerList', cols, rows, {
+  return createExcelBuffer('DealerList', cols, grouped, {
     db, title: 'Dealer List', metaLines: auctionMeta(db, auctionId),
   });
 }
@@ -636,23 +662,27 @@ async function exportDealerList(db, auctionId) {
 // and Price List (Before)). Qualifies purely on grade = '1'. The CR column
 // shows the control/registration number with the "CR." prefix stripped.
 async function exportPlanterList(db, auctionId) {
+  // Lot-wise: one row per Grade-1 lot grouped by planter, with a per-seller
+  // subtotal (bags + qty). Ordered by state, name so each planter's lots stay
+  // contiguous. Pre-trade — no dependency on price/amount (unset until import).
   const rows = db.all(
     `SELECT state, name,
         CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
              ELSE COALESCE(cr,'') END AS cr,
-        COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+        lot_no as lot, bags, qty
      FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
-     GROUP BY state, name, cr ORDER BY state, name`, [auctionId]
+     ORDER BY state, name, lot_no`, [auctionId]
   );
+  const grouped = _lotwiseGroupSubtotals(rows, 'name', ['bags', 'qty']);
   const cols = [
     { header: 'STATE', key: 'state', width: 12 },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'CR',    key: 'cr',    width: 22 },
-    { header: 'LOTS',  key: 'lots',  width: 6 },
+    { header: 'LOT',   key: 'lot',   width: 8 },
     { header: 'BAGS',  key: 'bags',  width: 6 },
     { header: 'QTY',   key: 'qty',   width: 12 },
   ];
-  return createExcelBuffer('PlanterList', cols, rows, {
+  return createExcelBuffer('PlanterList', cols, grouped, {
     db, title: 'Planter List (Grade 1)', metaLines: auctionMeta(db, auctionId),
   });
 }

@@ -627,19 +627,21 @@ const COLS = {
     { header: 'GRADE', key: 'grade', width: 8 },
   ],
   dealer_list: [
-    // STATE column dropped per user request; simple sequential serial number.
+    // Lot-wise: one row per lot, grouped by seller with a per-seller subtotal.
+    // Serial number restarts per seller (lands on the subtotal row).
     { header: 'SL.NO', key: '_sn',   width: 6  },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'GSTIN', key: 'gstin', width: 18 },
-    { header: 'LOTS',  key: 'lots',  width: 6  },
+    { header: 'LOT',   key: 'lot',   width: 8  },
     { header: 'BAGS',  key: 'bags',  width: 6  },
     { header: 'QTY',   key: 'qty',   width: 12 },
   ],
   planter_list: [
+    // Lot-wise: one row per Grade-1 lot, grouped by planter with subtotals.
     { header: 'SL.NO', key: '_sn',  width: 6  },
     { header: 'NAME',  key: 'name', width: 30 },
     { header: 'CR',    key: 'cr',   width: 20 },
-    { header: 'LOTS',  key: 'lots', width: 6  },
+    { header: 'LOT',   key: 'lot',  width: 8  },
     { header: 'BAGS',  key: 'bags', width: 6  },
     { header: 'QTY',   key: 'qty',  width: 12 },
   ],
@@ -797,8 +799,8 @@ const TOTAL_KEYS = {
   pooler_register: ['qty', 'amount', 'pqty', 'puramt'],
   full_file:       ['bags', 'qty', 'amount', 'pqty', 'puramt', 'cgst', 'sgst', 'igst', 'advance', 'balance'],
   collection:      ['bag', 'qty'],
-  dealer_list:     ['lots', 'bags', 'qty'],
-  planter_list:    ['lots', 'bags', 'qty'],
+  dealer_list:     ['bags', 'qty'],
+  planter_list:    ['bags', 'qty'],
   sales_taxes:     ['bag', 'qty', 'cardamom_cost', 'gunny_cost', 'cgst', 'sgst', 'igst', 'tcs', 'transport', 'insurance', 'total'],
   payment:         ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'],
   tally_purchase:  ['bag', 'qty', 'amount', 'cgst', 'sgst', 'igst', 'discount', 'bilamt'],
@@ -862,13 +864,21 @@ const ROW_PREPROCESS = {
     subtotalKeys: ['qty', 'amount', 'pqty', 'puramt'],
     subtotalLabelKey: 'poolername',
   },
-  // Dealer list — flat sequential serial (no grouping).
+  // Dealer list (lot-wise) — serial restarts per seller; subtotal of bags +
+  // qty after each seller's lots. Label lands in the NAME column.
   dealer_list: {
     serialKey: '_sn',
+    groupByKey: 'name',
+    subtotalKeys: ['bags', 'qty'],
+    subtotalLabelKey: 'name',
   },
-  // Planter list (Grade 1) — flat sequential serial (no grouping).
+  // Planter list (Grade 1, lot-wise) — grouped by planter with bags + qty
+  // subtotals, same as the Dealer List.
   planter_list: {
     serialKey: '_sn',
+    groupByKey: 'name',
+    subtotalKeys: ['bags', 'qty'],
+    subtotalLabelKey: 'name',
   },
   // Payment summary — serial restarts per pooler name; subtotal of bag, qty,
   // amount, pqty, puramt, discount, payable at the end of each pooler's rows.
@@ -964,24 +974,27 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
          FROM lots WHERE auction_id = ? ORDER BY branch, name`, [auctionId]);
 
     case 'dealer_list':
-      // Pre-trade roster — must not depend on `amount` (unset until prices are
-      // imported). Mirrors the XLSX exportDealerList query. See exports.js.
+      // Lot-wise roster grouped by seller — one row per lot. Pre-trade, so it
+      // must not depend on `amount` (unset until prices import). Ordered by
+      // state, name so preprocessRows groups each seller contiguously. Mirrors
+      // the XLSX exportDealerList query. See exports.js.
       return db.all(
-        `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
-          COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+        `SELECT state, name, SUBSTR(cr, 7, 15) as gstin, lot_no as lot,
+          bags, qty
          FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
-         GROUP BY state, name, cr ORDER BY name`, [auctionId]);
+         ORDER BY state, name, lot_no`, [auctionId]);
 
     case 'planter_list':
-      // Pre-trade roster of Grade 1 planters — must not depend on price/amount
-      // (unset until price import). Mirrors the XLSX exportPlanterList query.
+      // Lot-wise roster of Grade 1 planters — one row per lot, grouped by
+      // planter. Pre-trade (no price/amount dependency). Mirrors the XLSX
+      // exportPlanterList query.
       return db.all(
         `SELECT state, name,
             CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
                  ELSE COALESCE(cr,'') END AS cr,
-            COUNT(lot_no) as lots, SUM(bags) as bags, SUM(qty) as qty
+            lot_no as lot, bags, qty
          FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
-         GROUP BY state, name, cr ORDER BY name`, [auctionId]);
+         ORDER BY state, name, lot_no`, [auctionId]);
 
     case 'sales_taxes':
       return db.all(
