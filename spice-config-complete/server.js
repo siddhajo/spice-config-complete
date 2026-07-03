@@ -1,3 +1,13 @@
+// Force the process timezone to IST by default, FIRST — before any require,
+// Date, or the sql.js WASM init. Every server-side `datetime('now','localtime')`
+// (App/Lot Activity logs, login history, settings history, delete log, and all
+// created_at / modified_at columns) then records India time. Containers
+// (Railway) default to UTC otherwise, which made the Activity log read ~5h30m
+// behind local time. An explicit TZ from the host env (Railway dashboard /
+// shell) still wins; only a .env-file TZ (loaded below) is overridden — which
+// is fine, this app is IST-only (see istParts() usage across the codebase).
+process.env.TZ = process.env.TZ || 'Asia/Kolkata';
+
 // Load env vars from .env (if present) BEFORE any other require runs.
 // Anything downstream — db.js, the tenant-preset admin gate, etc. — can
 // then read process.env.<KEY> without caring whether the value came from
@@ -494,7 +504,10 @@ app.post('/api/login', async (req, res) => {
   // this lets the same user stay logged in on multiple devices simultaneously.
   db.run('INSERT INTO sessions (token, user_id, device_label) VALUES (?, ?, ?)', [token, user.id, device_label || '']);
   // Clean up very old sessions (> 30 days) so the table doesn't grow forever
-  db.run(`DELETE FROM sessions WHERE last_used_at < datetime('now','-30 days')`);
+  // Compare in the SAME frame as last_used_at, which is written with
+  // datetime('now','localtime') — so the threshold must also be localtime,
+  // otherwise the process-TZ (IST) shift skews the 30-day window by 5.5h.
+  db.run(`DELETE FROM sessions WHERE last_used_at < datetime('now','localtime','-30 days')`);
   // Return the user's capabilities array so the client can hide buttons
   // they're not allowed to use. Server still validates every request.
   const permissions = Array.from(effectivePermissions(user));

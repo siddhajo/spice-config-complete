@@ -229,10 +229,22 @@ function drawCompanyHeader(doc, header, opts) {
     : 0;
   const textBlockH = NAME_LINE_H + addressLineCount * ADDR_LINE_H;
 
-  // Logo sized to match the text block height (so they sit flush together).
-  // Caller can override with opts.logoH for special cases (carbon-copy halves).
-  const logoH = opts.logoH || textBlockH;
+  // Logo sized to match the text block height, but never smaller than a
+  // legible brand-mark minimum — a 1-line-name + 2-line-address block is only
+  // ~31pt, which rendered the logo as a tiny, barely-visible ornament. Floor it
+  // so the company logo actually reads as a logo (the band height, left-column
+  // reservation and title/meta centering below all key off logoH/logoW, so a
+  // larger logo cascades correctly and never overlaps the text). Callers can
+  // still override with opts.logoH for special cases (carbon-copy halves).
+  const MIN_LOGO = 46;
+  const logoH = opts.logoH || Math.max(textBlockH, MIN_LOGO);
   const logoW = opts.logoW || logoH;  // square by default; aspect-fit handles rectangular logos
+
+  // Band height = the taller of logo vs text. Vertically center the company
+  // text block against it so the name/address sit level with the logo instead
+  // of top-aligning while a taller logo hangs below.
+  const bandH = Math.max(logoH, textBlockH);
+  const textTop = startY + (bandH - textBlockH) / 2;
 
   // ── Three-column geometry (adaptive, symmetric) ──
   // For the title to actually appear centered on the page, the left and
@@ -249,9 +261,12 @@ function drawCompanyHeader(doc, header, opts) {
     doc.font('Helvetica-Bold').fontSize(NAME_FONT);
     const nameW = doc.widthOfString(header.name || '');
     const desiredLeftContent = logoW + GAP_LOGO_TEXT + nameW + 8;
-    // Clamp side width between 28% (so title gets >=44%) and 38% (so name
-    // doesn't overshoot if it's very long).
-    const sideW = Math.max(width * 0.28, Math.min(width * 0.38, desiredLeftContent));
+    // Clamp side width between 28% (so title keeps reasonable room) and 42%.
+    // The upper bound was raised from 38% so a prominent logo + a longer
+    // company name still fit on one line without ellipsizing; the title column
+    // auto-shrinks to fit whatever middle width remains. Short brand names
+    // clamp to the 28% floor, so their title width is unchanged.
+    const sideW = Math.max(width * 0.28, Math.min(width * 0.42, desiredLeftContent));
     leftW = sideW;
     rightW = sideW;
     midW = width - leftW - rightW;
@@ -283,7 +298,7 @@ function drawCompanyHeader(doc, header, opts) {
   // Company name (top of left text block). Use fitText so a long name doesn't
   // overrun and overlap into the middle column.
   doc.fillColor('#000').font('Helvetica-Bold').fontSize(NAME_FONT)
-     .text(fitText(doc, header.name || '', textW - 2), textX, startY, {
+     .text(fitText(doc, header.name || '', textW - 2), textX, textTop, {
        width: textW, align: 'left', lineBreak: false,
      });
 
@@ -291,7 +306,7 @@ function drawCompanyHeader(doc, header, opts) {
   // ellipsize lines that exceed the column width — PDFKit's `lineBreak: false`
   // is unreliable with long single-token strings.
   if (showAddress) {
-    let aY = startY + NAME_LINE_H;
+    let aY = textTop + NAME_LINE_H;
     doc.font('Helvetica').fontSize(ADDR_FONT).fillColor('#444');
     if (header.address1) {
       doc.text(fitText(doc, header.address1, textW - 2), textX, aY, {
@@ -317,7 +332,7 @@ function drawCompanyHeader(doc, header, opts) {
     while (titleSize > 9 && (doc.fontSize(titleSize), doc.widthOfString(title)) > midW - 6) {
       titleSize -= 0.5;
     }
-    const titleY = startY + (Math.max(logoH, textBlockH) - titleSize) / 2;
+    const titleY = startY + (bandH - titleSize) / 2;
     doc.fillColor('#000').font('Helvetica-Bold').fontSize(titleSize)
        .text(title, midX, titleY, {
          width: midW, align: 'center', lineBreak: false,
@@ -328,7 +343,7 @@ function drawCompanyHeader(doc, header, opts) {
   // Vertically center the meta block against the brand band.
   if (metaLines.length) {
     const totalMetaH = metaLines.length * (META_FONT + 4);
-    let mY = startY + (Math.max(logoH, textBlockH) - totalMetaH) / 2;
+    let mY = startY + (bandH - totalMetaH) / 2;
     doc.fillColor('#000').font('Helvetica-Bold').fontSize(META_FONT);
     metaLines.forEach((line) => {
       doc.text(fitText(doc, line, rightW - 2), rightX, mY, {
@@ -338,8 +353,7 @@ function drawCompanyHeader(doc, header, opts) {
     });
   }
 
-  // Total band height + small gap before report body begins
-  const bandH = Math.max(logoH, textBlockH);
+  // Small gap before the report body begins, measured from the band bottom.
   doc.fillColor('#000');
   return startY + bandH + 6;
 }

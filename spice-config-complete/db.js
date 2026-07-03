@@ -23,6 +23,13 @@
  *   db.transaction(fn)            // returns a wrapped function
  */
 
+// Default the process timezone to IST before sql.js initialises, so every
+// `datetime('now','localtime')` default (activity/audit logs, created_at /
+// modified_at columns) records India time even when db.js is loaded outside
+// server.js (tools, tests, Electron). server.js sets this too; the guard makes
+// the repeat a no-op and lets an explicit host TZ win.
+process.env.TZ = process.env.TZ || 'Asia/Kolkata';
+
 const initSqlJs = require('sql.js');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
