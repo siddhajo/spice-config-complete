@@ -1135,32 +1135,85 @@ tr:hover td{background:var(--spice-cream)}
 #lot-kpis .kpi-icon{width:28px;height:28px;right:10px;top:10px;border-radius:8px}
 #lot-kpis .kpi-icon svg{width:14px;height:14px}
 
-/* Dashboard "Headline metrics" tiles — same .kpi shell as the top KPI
-   row so colors, borders, and hover affordances match. Seven tiles
-   (Trades / Lots / Sold / Withdrawn / Value / Payable / Outstanding);
-   Lots/Sold/Withdrawn carry a bags/qty/amount breakdown and Value carries
-   min/max/avg price (see .kpi-meta below). The emoji icon sits in the
-   .kpi-icon corner; we override font-size since emojis read tiny at SVG
-   size. */
-#dash-headline-grid .kpi{padding:14px 16px;border-radius:12px}
-/* margin-bottom pushes the value's line down past the icon so the value
-   can use the FULL tile width on its own line without running underneath
-   the corner icon. */
-#dash-headline-grid .kpi-label{font-size:10.5px;letter-spacing:.6px;margin-bottom:18px;padding-right:36px}
-/* Values stay on ONE line with decimals intact; fitDashHeadlineValues()
-   shrinks the whole strip's font uniformly just enough that the longest
-   value fits its tile. overflow:hidden is a last-resort guard. */
-#dash-headline-grid .kpi-value{font-size:20px;white-space:nowrap;overflow:hidden}
-#dash-headline-grid .kpi-icon{width:32px;height:32px;right:12px;top:12px;border-radius:9px;font-size:17px;line-height:1}
-/* Breakdown table under the headline number (bags / qty / amount, or
-   min / max / avg in the Value tile). Mirrors #lot-kpis .kpi-meta. */
-#dash-headline-grid .kpi-meta{
-  margin-top:10px;padding-top:8px;border-top:1px solid var(--spice-line);
-  display:grid;grid-template-columns:auto 1fr;gap:3px 10px;
-  font-size:11px;line-height:1.4
-}
-#dash-headline-grid .kpi-meta .lbl{color:var(--spice-text-mute);font-weight:500;letter-spacing:.1px}
-#dash-headline-grid .kpi-meta .val{text-align:right;font-weight:600;color:var(--spice-text-main);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+/* Dashboard top KPI row — one restrained colour rule instead of a
+   four-colour rainbow. The multicolour left stripe (.kpi::before) is a
+   big part of the "busy" feel, so we drop it here and carry meaning
+   purely through the icon accent:
+     .money     → amber/gold  (money figures)
+     .structure → green       (counts / positive structure)
+     .action    → red         (things needing attention: dues, pending)
+     .neutral   → grey         (everything else)
+   Only ::before is removed; the icon-accent classes below reuse the
+   existing .kpi palette so nothing else on the page changes. */
+#dash-kpis .kpi::before{display:none}
+#dash-kpis .kpi.money    .kpi-icon{background:var(--spice-saffron-lt);color:var(--spice-saffron)}
+#dash-kpis .kpi.structure .kpi-icon{background:var(--spice-cardamom-lt);color:var(--spice-cardamom)}
+#dash-kpis .kpi.action   .kpi-icon{background:var(--spice-chili-lt);color:var(--spice-chili)}
+#dash-kpis .kpi.neutral  .kpi-icon{background:var(--tab-bg);color:var(--spice-text-mute)}
+/* Faint red border on the action tiles so Outstanding / Pending draw the
+   eye more than the (now softened) selected-trade snapshot below. */
+#dash-kpis .kpi.action{border-color:#F3D4D4}
+
+/* ── Selected-trade snapshot (softened hero) ──
+   White card with a pale-green header band instead of a saturated green
+   block, so the red action KPIs above stay the visual priority. */
+.dash-snap{padding:0;overflow:hidden}
+.dash-snap-hd{background:var(--spice-cardamom-lt);border-bottom:1px solid var(--spice-line);
+  padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.dash-snap-who{display:flex;align-items:center;gap:12px;min-width:0}
+.dash-snap-tag{min-width:40px;height:40px;padding:0 8px;border-radius:11px;background:var(--spice-cardamom);
+  color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex:0 0 auto}
+.dash-snap-t1{font-size:16px;font-weight:800;letter-spacing:-.2px;color:var(--spice-cardamom-dk)}
+.dash-snap-t2{font-size:12px;color:var(--spice-text-mute)}
+.dash-snap-matrix{overflow-x:auto}
+.dash-snap-matrix table{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+.dash-snap-matrix th,.dash-snap-matrix td{padding:11px 16px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.dash-snap-matrix th.l,.dash-snap-matrix td.l{text-align:left}
+.dash-snap-matrix thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--spice-text-hint);
+  font-weight:700;border-bottom:1px solid var(--spice-line)}
+.dash-snap-matrix tbody td{border-bottom:1px solid var(--spice-line)}
+.dash-snap-matrix tbody tr:last-child td{border-bottom:0}
+.snap-st{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:12.5px}
+.snap-st .dot{width:8px;height:8px;border-radius:50%}
+.snap-st-book .dot{background:var(--spice-text-mute)}
+.snap-st-sold .dot{background:var(--spice-cardamom)}
+.snap-st-wd .dot{background:var(--spice-chili)}
+.snap-row.snap-sold td{background:#F5FBF6}
+.snap-row.snap-wd td{background:#FEF6F6}
+.snap-amt{font-weight:800}
+.dash-snap-ft{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--spice-line)}
+.dash-snap-ft .mf{padding:12px 16px;border-right:1px solid var(--spice-line)}
+.dash-snap-ft .mf:last-child{border-right:0}
+.dash-snap-ft .mf .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--spice-text-hint);margin-bottom:5px}
+.dash-snap-ft .mf .v{font-size:17px;font-weight:800;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+.dash-snap-ft .mf.pay .v{color:var(--spice-saffron)}
+.dash-snap-ft .mf.inc .v{color:var(--spice-cardamom-dk)}
+
+/* ── Tabbed breakdown (Planter / Dealer / Branch) ── */
+.bd-tabs{display:inline-flex;gap:3px;background:var(--tab-bg);border-radius:9px;padding:3px}
+.bd-tabs button{appearance:none;border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:700;
+  color:var(--spice-text-mute);padding:6px 13px;border-radius:7px;cursor:pointer;transition:all .15s}
+.bd-tabs button.on{background:#fff;color:var(--spice-cardamom-dk);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.bd-pane{display:none}
+.bd-pane.on{display:block}
+.bd-tblwrap{overflow-x:auto}
+.bd-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
+.bd-table th,.bd-table td{padding:10px 20px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bd-table th.l,.bd-table td.l{text-align:left;white-space:normal}
+.bd-table thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--spice-text-hint);
+  font-weight:700;border-bottom:1px solid var(--spice-line)}
+.bd-table tbody td{border-bottom:1px solid var(--spice-line)}
+.bd-table tbody tr:hover td{background:#F7FAF7}
+.bd-name{font-weight:700;color:var(--spice-text-main)}
+.bd-table tr.bd-more td{color:var(--spice-text-hint);font-style:italic}
+.bd-table tfoot td{font-weight:800;background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk)}
+.bd-share{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
+.bd-bar{width:46px;height:6px;border-radius:999px;background:var(--spice-line);overflow:hidden;display:inline-block}
+.bd-bar i{display:block;height:100%;background:var(--spice-cardamom);border-radius:999px}
+.bd-due{color:var(--spice-chili);font-weight:700}
+.bd-ok{color:var(--spice-text-hint)}
+.bd-empty{padding:26px 20px;text-align:center;color:var(--spice-text-hint);font-size:13px}
+@media(max-width:720px){.dash-snap-ft{grid-template-columns:repeat(3,1fr)}}
 #lot-kpis .kpi-meta{
   /* Mini-table layout — label on the left (muted, small), value on
      the right (tabular numerals). Thin divider above separates the
@@ -8343,15 +8396,20 @@ async function refreshCurrentTab(){
 //   <id>  => drilled into that specific auction
 let _dashSelectedAuctionId = null;
 
-// Branch panel collapse state — persists across loadStats() re-renders
-// so the user's open/closed preference sticks during a session.
-let _dashBranchOpen = false;
-function toggleBranchTotals() {
-  _dashBranchOpen = !_dashBranchOpen;
-  const body = document.getElementById('dash-branch-body');
-  const toggle = document.getElementById('dash-branch-toggle');
-  if (body) body.style.display = _dashBranchOpen ? '' : 'none';
-  if (toggle) toggle.textContent = _dashBranchOpen ? '▾ Hide' : '▸ Show';
+// Breakdown card tab switcher (Planter-wise / Dealer-wise / Branch-wise).
+// Panes render together in loadStats(); this toggles which one is visible.
+function dashBreakdownTab(name, btn) {
+  ['planter','dealer','branch'].forEach(k => {
+    const p = document.getElementById('dash-bd-' + k);
+    if (p) p.classList.toggle('on', k === name);
+  });
+  if (btn && btn.parentNode) {
+    btn.parentNode.querySelectorAll('button').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+  }
 }
 async function loadStats(auctionId){
   // Allow explicit override; otherwise use the remembered selection
@@ -8362,10 +8420,22 @@ async function loadStats(auctionId){
   // /api/stats response and the user sees old branches even after
   // saving Settings → Branches & Contacts.
   const _cb = `_=${Date.now()}`;
-  const url = _dashSelectedAuctionId
-    ? `/api/stats?auction_id=${_dashSelectedAuctionId}&${_cb}`
-    : `/api/stats?auction_id=all&${_cb}`;
-  const d=await j(url);
+  const _scope = _dashSelectedAuctionId || 'all';
+  const url = `/api/stats?auction_id=${_scope}&${_cb}`;
+  // Fetch /api/stats and /api/insights together so the KPI row and the
+  // green hero can render the "headline" numbers (Trades / Sold / Withdrawn
+  // / Value / Payable / Outstanding) synchronously in a single strip —
+  // this replaces the separate "Headline metrics" card that used to repeat
+  // these figures. Insights is best-effort: if it fails we fall back to an
+  // empty totals object and the strip degrades gracefully.
+  const [d, dIns] = await Promise.all([
+    j(url),
+    j(`/api/insights?auction_id=${_scope}&${_cb}`).catch(() => ({})),
+  ]);
+  const T = (dIns && dIns.totals) || {};
+  const PLAN = Array.isArray(dIns.perPlanter) ? dIns.perPlanter : [];
+  const DEAL = Array.isArray(dIns.perDealer)  ? dIns.perDealer  : [];
+  const BRK  = Array.isArray(dIns.perBranch)  ? dIns.perBranch  : [];
   const K=d.kpi||{}, A=d.currentAuction, S=d.topSellers||[], I=d.recentInvoices||[], C=d.counts||{}, AA=d.allAuctions||[];
   const CUM=d.cumulative||{qty:0,amount:0,lots:0,auctions:0};
   const PT=d.perTradeBreakdown||[];
@@ -8375,21 +8445,22 @@ async function loadStats(auctionId){
 
   // Format helpers
   const inr = n => '₹'+Math.round(n||0).toLocaleString('en-IN');
-  const inrL = n => { const v = (n||0)/100000; return v>=1 ? '₹'+v.toFixed(1)+'L' : inr(n); };
+  // Unified money scale used across the dashboard: ₹ Cr for ≥1 crore,
+  // ₹ L for ≥1 lakh, plain grouped rupees below — always without paise.
+  // One scale everywhere replaces the old mix of full-rupee strings,
+  // "₹8277.7L" and bare crore values, and keeps wide totals from clipping.
+  const inrCr = n => {
+    const v = Number(n) || 0;
+    if (v >= 1e7) return '₹' + (v / 1e7).toFixed(2) + ' Cr';
+    if (v >= 1e5) return '₹' + (v / 1e5).toFixed(2) + ' L';
+    return '₹' + Math.round(v).toLocaleString('en-IN');
+  };
   const kg = n => (n||0).toFixed(0)+' kg';
   const kgK = n => { const v = (n||0)/1000; return v>=1 ? v.toFixed(1)+'T' : Math.round(n||0)+' kg'; };
   const now = new Date();
   const hour = Number((istParts(now)||{}).hh ?? now.getHours());
   const greet = hour<12 ? 'Good morning' : hour<17 ? 'Good afternoon' : 'Good evening';
   const today = now.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',weekday:'long',day:'numeric',month:'long',year:'numeric'});
-
-  // KPI deltas
-  const revDelta = K.lastMonthRevenue > 0
-    ? Math.round(((K.monthRevenue||0) - K.lastMonthRevenue)/K.lastMonthRevenue*100)
-    : null;
-  const revPill = revDelta===null ? '<span class="kpi-delta neutral">First month</span>'
-    : revDelta>=0 ? `<span class="kpi-delta">▲ ${revDelta}% vs last month</span>`
-    : `<span class="kpi-delta down">▼ ${Math.abs(revDelta)}% vs last month</span>`;
 
   // Build auction picker — includes "All Trades" as default option
   const isAllMode = !_dashSelectedAuctionId;
@@ -8402,79 +8473,132 @@ async function loadStats(auctionId){
     }).join('');
   const picker = `<select onchange="loadStats(this.value === 'all' ? null : parseInt(this.value))" style="background:rgba(255,255,255,.85);border:1px solid rgba(22,101,52,.25);border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;color:var(--spice-cardamom-dk);cursor:pointer;font-family:inherit">${pickerOptions}</select>`;
 
-  // Hero card: "All Trades" cumulative view in default/cumulative mode,
-  // otherwise the drilled-in current-auction view.
-  const aHTML = isAllMode ? `
-    <div class="auction-hero" style="background:var(--spice-cardamom-lt);color:var(--spice-text-main)">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px">
-        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">All ${termAuction(true)} · Cumulative</div>
+  // ── Selected-trade snapshot: Booked / Sold / Withdrawn matrix ──
+  // Softened, information-first replacement for the old saturated green
+  // hero. Scoped by the picker to one trade (or All Trades). Every figure
+  // comes from /api/insights totals (T), so it stays in one source.
+  //   Planter Wt = pqty (sample-refund-adjusted seller weighment)
+  //   Dealer Wt  = qty  (net weight the buyer is billed on)
+  const nkg = n => Math.round(Number(n)||0).toLocaleString('en-IN');
+  const priceRange = (T.min_price > 0 || T.max_price > 0)
+    ? `${inr(T.min_price)} – ${inr(T.max_price)}` : '—';
+  // One matrix row. `tone` shades Sold (green) / Withdrawn (red).
+  const mrow = (label, tone, lots, bags, pqty, qty, amount) => `
+    <tr class="snap-row${tone ? ' snap-'+tone : ''}">
+      <td class="l"><span class="snap-st snap-st-${tone||'book'}"><span class="dot"></span>${label}</span></td>
+      <td class="num">${nkg(lots)}</td>
+      <td class="num">${nkg(bags)}</td>
+      <td class="num">${nkg(pqty)}</td>
+      <td class="num">${nkg(qty)}</td>
+      <td class="num snap-amt">${inrCr(amount)}</td>
+    </tr>`;
+  const snapWho = isAllMode
+    ? { tag: 'ALL', t1: `All ${termAuction(true)}`, t2: `Cumulative across ${CUM.auctions||0} ${termAuction(CUM.auctions!==1, true)}` }
+    : (A ? { tag: '#'+esc(A.ano), t1: `${termAuction()} #${esc(A.ano)}${A.crop_type?' — '+esc(A.crop_type):''}`, t2: fmtD(A.date) }
+         : { tag: '—', t1: 'No '+termAuction(false, true)+' selected', t2: '' });
+  const aHTML = (isAllMode || A) ? `
+    <div class="card dash-snap">
+      <div class="dash-snap-hd">
+        <div class="dash-snap-who">
+          <div class="dash-snap-tag">${snapWho.tag}</div>
+          <div>
+            <div class="dash-snap-t1">${snapWho.t1}</div>
+            <div class="dash-snap-t2">${snapWho.t2}</div>
+          </div>
+        </div>
         ${picker}
       </div>
-      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">${CUM.auctions||0} ${termAuction(CUM.auctions!==1)}</div>
-      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Lifetime totals across every auction</div>
-      <div class="auction-hero-stats">
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${CUM.lots||0}</strong>Total Lots</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${kgK(CUM.qty)}</strong>Total Qty</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${inrL(CUM.amount)}</strong>Total Volume</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${CUM.auctions?inrL((CUM.amount||0)/CUM.auctions).replace('₹','₹'):'—'}</strong>Avg / Trade</div>
+      <div class="dash-snap-matrix">
+        <table>
+          <thead><tr>
+            <th class="l">Status</th><th>Lots</th><th>Bags</th>
+            <th title="Planter (seller) weighment">Planter Wt</th>
+            <th title="Dealer (buyer) billed weight = net qty">Dealer Wt</th>
+            <th>Amount</th>
+          </tr></thead>
+          <tbody>
+            ${mrow('Booked', '',   T.lots, T.bags, T.pqty, T.qty, T.value)}
+            ${mrow('Sold', 'sold', T.sold, T.sold_bags, T.sold_pqty, T.sold_qty, T.sold_value)}
+            ${mrow('Withdrawn', 'wd', T.withdrawn, T.wd_bags, T.wd_pqty, T.wd_qty, T.wd_value)}
+          </tbody>
+        </table>
       </div>
-      <div style="font-size:12px;color:var(--spice-text-mute);opacity:.9;border-top:1px solid rgba(22,101,52,.15);padding-top:10px;margin-top:4px">
-        💡 Select a specific trade above to drill into its details
+      <div class="dash-snap-ft">
+        <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inrCr(T.payable_to_sellers)}</div></div>
+        <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inrCr(T.commission_income)}</div></div>
+        <div class="mf"><div class="k">Min ₹/kg</div><div class="v">${T.min_price>0?inr(T.min_price):'—'}</div></div>
+        <div class="mf"><div class="k">Max ₹/kg</div><div class="v">${T.max_price>0?inr(T.max_price):'—'}</div></div>
+        <div class="mf" title="Range ${priceRange}"><div class="k">Avg ₹/kg</div><div class="v">${T.avg_price>0?inr(T.avg_price):'—'}</div></div>
       </div>
-    </div>
-  ` : (A ? `
-    <div class="auction-hero" style="background:var(--spice-cardamom-lt);color:var(--spice-text-main)">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px">
-        <div class="auction-hero-label" style="color:var(--spice-cardamom-dk);opacity:.85">Current Trade</div>
-        ${picker}
-      </div>
-      <div class="auction-hero-number" style="color:var(--spice-cardamom-dk)">Trade #${esc(A.ano)}</div>
-      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">${fmtD(A.date)} · ${esc(A.crop_type||'')}</div>
-      <div class="auction-hero-stats">
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.totalLots||0}</strong>Total Lots</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.priced||0}</strong>Priced</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${A.invoiced||0}</strong>Invoiced</div>
-        <div class="hero-stat" style="color:var(--spice-text-mute);opacity:1"><strong style="color:var(--spice-text-main)">${inrL(A.totalAmt)}</strong>Volume</div>
-      </div>
-      ${(() => {
-        // Compact 2×2 grid of mini progress bars — one per document
-        // workflow for this trade. Kept thin (6px) with the label and
-        // percentage on a single line so all four fit without crowding
-        // the hero. Denominators differ per workflow (see /api/stats):
-        // invoicing/payments are lot-level, purchases/bills are
-        // per-seller. A 0-denominator workflow (e.g. no URD sellers)
-        // shows "n/a" rather than a misleading 0%.
-        const bar = (label, done, total, color) => {
-          const has = total > 0;
-          const pct = has ? Math.round(done / total * 100) : 0;
-          return `
-            <div>
-              <div class="progress-label" style="color:var(--spice-text-mute);opacity:1;font-size:11.5px;margin-bottom:3px">
-                <span>${label}</span>
-                <span>${has ? `<strong style="color:var(--spice-cardamom-dk)">${pct}%</strong>` : '<span style="color:var(--spice-text-hint)">n/a</span>'}</span>
-              </div>
-              <div style="height:6px;background:#ffffff;border:1px solid rgba(22,101,52,.18);border-radius:999px;overflow:hidden" title="${done} of ${total}">
-                <div style="height:100%;background:${color};width:${pct}%;border-radius:999px;transition:width .6s ease-out"></div>
-              </div>
-            </div>`;
-        };
-        return `
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;margin-top:2px">
-            ${bar('Invoicing', A.invoiced || 0, A.totalLots || 0, 'var(--spice-cardamom)')}
-            ${bar('Payments', A.paymentsDone || 0, A.paymentsTotal || 0, 'var(--spice-saffron)')}
-            ${bar('Purchases', A.purchasesDone || 0, A.purchasesTotal || 0, 'var(--spice-turmeric)')}
-            ${bar('Bills of Supply', A.billsDone || 0, A.billsTotal || 0, 'var(--spice-clove)')}
-          </div>`;
-      })()}
     </div>
   ` : `
-    <div class="auction-hero" style="background:var(--tab-bg);color:var(--spice-text-main)">
-      <div class="auction-hero-label" style="color:var(--spice-text-mute)">No active trade</div>
-      <div class="auction-hero-number" style="color:var(--spice-text-main);font-size:22px">Create your first auction</div>
-      <div class="auction-hero-date" style="color:var(--spice-text-mute);opacity:1">Head to the Auctions tab to get started.</div>
-      <button class="btn btn-a" onclick="go('auctions')" style="margin-top:8px">+ New ${termAuction()}</button>
-    </div>
-  `);
+    <div class="card dash-snap"><div class="dash-snap-hd">
+      <div class="dash-snap-who"><div class="dash-snap-tag">—</div><div><div class="dash-snap-t1">No ${termAuction(false, true)} yet</div><div class="dash-snap-t2">Create one to see its breakdown.</div></div></div>
+      <button class="btn btn-a" onclick="go('auctions')">+ New ${termAuction()}</button>
+    </div></div>`;
+
+  // ── Breakdown: Planter-wise / Dealer-wise / Branch-wise (tabbed) ──
+  // Three "who" views of the selected scope in one card, so they read as a
+  // set instead of three stacked blocks. Each shows the top 8 with the rest
+  // rolled into a muted "+ N more" line and a reconciling totals footer.
+  const bdSum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
+  const bdShare = (v, tot) => tot > 0 ? Math.round(v / tot * 100) : 0;
+  const bdBar = pct => `<span class="bd-share"><span class="bd-bar"><i style="width:${pct}%"></i></span>${pct}%</span>`;
+  const bdEmpty = msg => `<div class="bd-empty">${msg}</div>`;
+
+  const planTot = bdSum(PLAN, p => p.payable);
+  const planPane = PLAN.length ? `<div class="bd-tblwrap"><table class="bd-table">
+    <thead><tr><th class="l">Planter (seller)</th><th>Lots</th><th>Planter Wt</th><th>Payable</th><th>Share</th></tr></thead>
+    <tbody>
+      ${PLAN.slice(0,8).map(p => `<tr>
+        <td class="l bd-name">${esc(p.planter)}</td>
+        <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.pqty)}</td>
+        <td class="num">${inrCr(p.payable)}</td><td class="num">${bdBar(bdShare(p.payable, planTot))}</td></tr>`).join('')}
+      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inrCr(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
+    </tbody>
+    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inrCr(planTot)}</td><td class="num">100%</td></tr></tfoot>
+  </table></div>` : bdEmpty('No planter data in this scope yet.');
+
+  const dealVal = bdSum(DEAL, x => x.value);
+  const dealPane = DEAL.length ? `<div class="bd-tblwrap"><table class="bd-table">
+    <thead><tr><th class="l">Dealer (buyer)</th><th>Lots</th><th>Dealer Wt</th><th>Amount</th><th>Outstanding</th></tr></thead>
+    <tbody>
+      ${DEAL.slice(0,8).map(x => `<tr>
+        <td class="l bd-name">${esc(x.dealer)}</td>
+        <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.qty)}</td>
+        <td class="num">${inrCr(x.value)}</td>
+        <td class="num">${(x.outstanding||0)>0 ? `<span class="bd-due">${inrCr(x.outstanding)}</span>` : '<span class="bd-ok">Settled</span>'}</td></tr>`).join('')}
+      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inrCr(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inrCr(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
+    </tbody>
+    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inrCr(dealVal)}</td><td class="num">${inrCr(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
+  </table></div>` : bdEmpty('No dealer data in this scope yet.');
+
+  const brkVal = bdSum(BRK, b => b.value);
+  const brkPane = BRK.length ? `<div class="bd-tblwrap"><table class="bd-table">
+    <thead><tr><th class="l">Branch</th><th>Lots</th><th>Qty (kg)</th><th>Amount</th><th>Share</th></tr></thead>
+    <tbody>
+      ${BRK.slice(0,10).map(b => `<tr>
+        <td class="l bd-name">${esc(b.branch)}</td>
+        <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.qty)}</td>
+        <td class="num">${inrCr(b.value)}</td><td class="num">${bdBar(bdShare(b.value, brkVal))}</td></tr>`).join('')}
+    </tbody>
+    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.qty))}</td><td class="num">${inrCr(brkVal)}</td><td class="num">100%</td></tr></tfoot>
+  </table></div>` : bdEmpty('No branch data in this scope yet.');
+
+  const breakdownHTML = `
+    <div class="card" style="margin-bottom:20px">
+      <div style="padding:15px 22px 13px;border-bottom:1px solid var(--spice-line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Breakdown</h2>
+        <div class="bd-tabs" role="tablist" aria-label="Breakdown by">
+          <button class="on" role="tab" aria-selected="true" onclick="dashBreakdownTab('planter',this)">Planter-wise</button>
+          <button role="tab" aria-selected="false" onclick="dashBreakdownTab('dealer',this)">Dealer-wise</button>
+          <button role="tab" aria-selected="false" onclick="dashBreakdownTab('branch',this)">Branch-wise</button>
+        </div>
+      </div>
+      <div class="bd-pane on" id="dash-bd-planter">${planPane}</div>
+      <div class="bd-pane" id="dash-bd-dealer">${dealPane}</div>
+      <div class="bd-pane" id="dash-bd-branch">${brkPane}</div>
+    </div>`;
 
   // Per-trade breakdown table (rendered in BOTH cumulative and drilled-in
   // modes — clicking a row selects that trade for the hero+KPIs above
@@ -8490,81 +8614,6 @@ async function loadStats(auctionId){
       </div>
       <div style="padding:18px 22px;height:280px;position:relative">
         <canvas id="dash-revenue-chart"></canvas>
-      </div>
-    </div>
-  ` : '';
-
-  // ── Branch-wise breakdown ──
-  // Aggregates lots by `lots.branch` for either ALL trades or just the
-  // currently-selected trade. Toggle (collapsed by default) lets the user
-  // open the panel only when they need it — keeps the dashboard compact
-  // for the 90% case where the headline KPIs are sufficient.
-  const BR = Array.isArray(d.branchTotals) ? d.branchTotals : [];
-  const brTotals = BR.reduce(
-    (acc, b) => ({
-      lots:   acc.lots   + (Number(b.lots)   || 0),
-      qty:    acc.qty    + (Number(b.qty)    || 0),
-      amount: acc.amount + (Number(b.amount) || 0),
-    }),
-    { lots:0, qty:0, amount:0 }
-  );
-  const branchScopeLabel = isAllMode
-    ? 'across all trades'
-    : (A ? `in Trade #${esc(A.ano)}` : 'in selected trade');
-  const branchHTML = BR.length ? `
-    <div class="card" id="dash-branch-card" style="padding:0;margin-bottom:20px">
-      <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleBranchTotals()">
-        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Branch-wise Total <span style="font-weight:400;font-size:13px;color:var(--spice-text-hint)">— ${branchScopeLabel}</span></h2>
-        <div style="display:flex;align-items:center;gap:12px">
-          <span style="font-size:12px;color:var(--spice-text-hint)">${BR.length} branch${BR.length===1?'':'es'}</span>
-          <span id="dash-branch-toggle" style="font-size:14px;color:var(--spice-cardamom-dk);font-weight:700;user-select:none">▸ Show</span>
-        </div>
-      </div>
-      <div id="dash-branch-body" style="padding:18px 22px;display:none">
-        <!-- Tile grid — auto-fits to viewport. Each tile shows the
-             branch name, lot count, qty, and amount with a thin share
-             bar at the bottom so the user can compare branches at a
-             glance. Configured branches always render; unrecognized
-             "(unspecified)" or strays are shown muted/italic so the
-             user can spot data they need to clean up. -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px">
-          ${BR.map(b => {
-            const lots = Number(b.lots) || 0;
-            const qty = Number(b.qty) || 0;
-            const amount = Number(b.amount) || 0;
-            const sharePct = brTotals.amount > 0 ? Math.round(amount / brTotals.amount * 100) : 0;
-            const isEmpty = lots === 0;
-            // Empty configured branches get a muted background so
-            // active branches stand out. Strays are filtered out
-            // server-side — every tile here corresponds to a row in
-            // Settings → Branches & Contacts.
-            const tileBg = isEmpty
-              ? 'background:#F9FAFB;border:1px solid var(--spice-line)'
-              : 'background:#fff;border:1px solid var(--spice-line)';
-            return `
-              <div style="${tileBg};border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
-                <div style="font-weight:700;font-size:13px;color:var(--spice-text-main);line-height:1.25;word-break:break-word">${esc(b.branch)}</div>
-                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
-                  <div style="font-size:22px;font-weight:800;color:var(--spice-cardamom-dk);font-feature-settings:'tnum'">${inrL(amount)}</div>
-                  <div style="font-size:11px;color:var(--spice-text-hint);font-weight:600">${sharePct}%</div>
-                </div>
-                <div style="font-size:11px;color:var(--spice-text-hint);display:flex;justify-content:space-between;gap:8px">
-                  <span><strong style="color:var(--spice-text-main);font-weight:700">${lots}</strong> lot${lots===1?'':'s'}</span>
-                  <span><strong style="color:var(--spice-text-main);font-weight:700">${kg(qty)}</strong></span>
-                </div>
-                <div style="height:4px;background:var(--spice-line);border-radius:999px;overflow:hidden;margin-top:2px">
-                  <div style="height:100%;background:var(--spice-cardamom);width:${sharePct}%;transition:width .4s ease-out"></div>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-        <!-- Footer reconciles to the dashboard headline so the user can
-             verify branch numbers add up to the cumulative total. -->
-        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--spice-text-hint)">
-          <span><strong style="color:var(--spice-text-main)">Total:</strong> ${brTotals.lots} lot${brTotals.lots===1?'':'s'} · ${kg(brTotals.qty)} · ${inrL(brTotals.amount)}</span>
-          <span>${BR.filter(b => Number(b.lots) > 0).length} active · ${BR.filter(b => Number(b.lots) === 0).length} idle</span>
-        </div>
       </div>
     </div>
   ` : '';
@@ -8620,7 +8669,7 @@ async function loadStats(auctionId){
                 <td class="num">${kg(t.qty)}</td>
                 <td class="num" style="color:var(--spice-cardamom-dk)">${kg(t.sold_qty)}</td>
                 <td class="num" style="color:${(t.wd_qty||0)>0?'#991B1B':'var(--spice-text-hint)'}">${kg(t.wd_qty)}</td>
-                <td class="num"><strong>${inrL(t.amount)}</strong></td>
+                <td class="num"><strong>${inrCr(t.amount)}</strong></td>
                 <td class="num">${inrPrice(t.min_price)}</td>
                 <td class="num">${inrPrice(t.max_price)}</td>
                 <td class="num"><strong>${inrPrice(t.avg_price)}</strong></td>
@@ -8642,7 +8691,7 @@ async function loadStats(auctionId){
               <td class="num">${kg(CUM.qty)}</td>
               <td class="num">${kg(CUM.sold_qty)}</td>
               <td class="num">${kg(CUM.wd_qty)}</td>
-              <td class="num">${inrL(CUM.amount)}</td>
+              <td class="num">${inrCr(CUM.amount)}</td>
               <td class="num">${inrPrice(CUM.min_price)}</td>
               <td class="num">${inrPrice(CUM.max_price)}</td>
               <td class="num">${inrPrice(CUM.avg_price)}</td>
@@ -8665,7 +8714,7 @@ async function loadStats(auctionId){
         <div class="leader-meta">${s.lots} lot${s.lots!==1?'s':''} · ${kg(s.qty)}</div>
       </div>
       <div class="leader-bar"><div class="leader-fill" style="width:${pct}%"></div></div>
-      <div class="leader-value">${inrL(s.amount)}</div>
+      <div class="leader-value">${inrCr(s.amount)}</div>
     </div>`;
   }).join('') : emptyStateHTML({icon:'traders', title:'No seller data this week', body:'Once trades are recorded, your top sellers will appear here.'});
 
@@ -8708,56 +8757,34 @@ async function loadStats(auctionId){
       </div>
     </div>
 
-    <div class="kpi-grid">
-      <div class="kpi">
+    <div class="kpi-grid" id="dash-kpis">
+      <div class="kpi money">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M8 13v5M13 9v9M18 6v12"/></svg></div>
         <div class="kpi-label">${isAllMode ? 'Total volume' : 'Trade volume'}</div>
-        <div class="kpi-value">${isAllMode
-          ? inrL(CUM.amount).replace('₹','').replace('L','')
-          : inrL(A ? A.totalAmt : 0).replace('₹','').replace('L','')}<span class="kpi-unit">${isAllMode
-            ? ((CUM.amount||0)>=100000?'L':'')
-            : (((A && A.totalAmt)||0)>=100000?'L':'')}</span></div>
+        <div class="kpi-value">${inrCr(isAllMode ? (T.value!=null?T.value:CUM.amount) : (A ? A.totalAmt : 0))}</div>
         <span class="kpi-delta neutral">${isAllMode
-          ? `${CUM.auctions||0} trade${CUM.auctions===1?'':'s'}`
-          : (A ? `${kg(A.totalQty)} traded` : 'No auction')}</span>
+          ? `${CUM.auctions||0} ${termAuction(CUM.auctions!==1, true)}`
+          : (A ? `${kg(A.totalQty)} traded` : 'No ' + termAuction(false, true))}</span>
       </div>
-      <div class="kpi cardamom">
+      <div class="kpi structure">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/></svg></div>
-        <div class="kpi-label">${isAllMode ? 'Total lots' : 'Active lots'}</div>
-        <div class="kpi-value">${isAllMode ? (CUM.lots||0) : (K.activeLots||0)}</div>
-        <span class="kpi-delta neutral">${isAllMode
-          ? `across all trades`
-          : `${C.lots||0} total lots`}</span>
+        <div class="kpi-label">Total lots</div>
+        <div class="kpi-value">${isAllMode ? (T.lots!=null?T.lots:(CUM.lots||0)) : (A ? A.totalLots||0 : 0)}</div>
+        <span class="kpi-delta neutral">${T.sold!=null ? `${T.sold} sold` : `${C.lots||0} total`}</span>
       </div>
-      <div class="kpi turmeric">
+      <div class="kpi action">
+        <div class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+        <div class="kpi-label">Outstanding</div>
+        <div class="kpi-value">${inrCr(T.outstanding_by_buyers)}</div>
+        <span class="kpi-delta ${(T.outstanding_by_buyers||0)>0?'down':'neutral'}">${(T.outstanding_by_buyers||0)>0 ? 'Due from buyers' : 'All settled'}</span>
+      </div>
+      <div class="kpi action">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
         <div class="kpi-label">Pending invoices</div>
         <div class="kpi-value">${K.pendingInvoices||0}</div>
         <span class="kpi-delta ${K.pendingInvoices>0?'down':'neutral'}">${K.pendingInvoices>0
-          ? (isAllMode ? 'Across all trades' : 'Buyers awaiting')
+          ? (isAllMode ? 'Across all ' + termAuction(true, true) : 'Buyers awaiting')
           : 'All clear'}</span>
-      </div>
-      <div class="kpi chili">
-        <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg></div>
-        <div class="kpi-label">Revenue this month</div>
-        <div class="kpi-value">${inrL(K.monthRevenue).replace('₹','').replace('L','')}<span class="kpi-unit">${(K.monthRevenue||0)>=100000?'L':''}</span></div>
-        ${revPill}
-        <span class="kpi-spark" id="rev-spark"></span>
-      </div>
-    </div>
-
-    <div class="card" id="dash-headline-card" style="padding:0;margin-bottom:20px">
-      <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div>
-          <h2 style="font-size:17px;font-weight:700;margin:0 0 2px;color:var(--spice-text-main)">🎯 Headline metrics</h2>
-          <p style="margin:0;font-size:12.5px;color:var(--spice-text-mute)" id="dash-headline-sub">${isAllMode ? `At-a-glance totals across every ${termAuction(false, true)}.` : `At-a-glance totals for the selected ${termAuction(false, true)}.`}</p>
-        </div>
-        <div style="font-size:12px;color:var(--spice-text-hint)" id="dash-headline-range">${isAllMode ? `All ${termAuction(true, true)}` : (A ? `${termAuction()} #${esc(A.ano)} · ${fmtD(A.date)}` : '')}</div>
-      </div>
-      <div style="padding:14px 22px 18px" id="dash-headline-body">
-        <div class="kpi-grid" id="dash-headline-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:0">
-          ${skeletonKpis(4)}
-        </div>
       </div>
     </div>
 
@@ -8774,19 +8801,9 @@ async function loadStats(auctionId){
               <div class="qa-label">Generate invoices</div>
               <div class="qa-sub">For all buyers</div>
             </button>
-            <button class="qa" onclick="go('exports')">
-              <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg></div>
-              <div class="qa-label">Export data</div>
-              <div class="qa-sub">XLSX or PDF</div>
-            </button>
-            <button class="qa" onclick="go('auctions')">
-              <div class="qa-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
-              <div class="qa-label">New ${termAuction()}</div>
-              <div class="qa-sub">Start today's ${termAuction(false, true)}</div>
-            </button>
             <button class="qa" onclick="go('payments')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
-              <div class="qa-label">View Payments</div>
+              <div class="qa-label">View payments</div>
               <div class="qa-sub">Check pending dues</div>
             </button>
           </div>
@@ -8794,9 +8811,9 @@ async function loadStats(auctionId){
       </div>
     </div>
 
-    ${chartHTML}
+    ${breakdownHTML}
 
-    ${branchHTML}
+    ${chartHTML}
 
     ${ptHTML}
 
@@ -8810,23 +8827,13 @@ async function loadStats(auctionId){
       </div>
       <div class="card" style="padding:0">
         <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Top sellers</h2>
+          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Top planters</h2>
           <span style="font-size:12px;color:var(--spice-text-hint)">Last 7 days</span>
         </div>
         <div style="padding:4px 22px 18px">${sellersHTML}</div>
       </div>
     </div>
   `;
-
-  // Restore branch panel open state after re-render — without this the
-  // panel snaps shut every time loadStats() is called (e.g. picking a
-  // different trade in the dropdown), losing the user's expand choice.
-  if (_dashBranchOpen) {
-    const body = document.getElementById('dash-branch-body');
-    const toggle = document.getElementById('dash-branch-toggle');
-    if (body) body.style.display = '';
-    if (toggle) toggle.textContent = '▾ Hide';
-  }
 
   // Render the dashboard revenue chart AFTER the HTML is in the DOM so
   // the canvas element exists for Chart.js to grab. requestAnimationFrame
@@ -8895,45 +8902,7 @@ async function loadStats(auctionId){
     });
   }
 
-  // Headline metric tiles. Mirrors the Insights "Headline metrics"
-  // strip but always for the dashboard-selected trade (or current
-  // calendar month when "All Trades" is picked). The tile grid renders
-  // synchronously above with a "Loading…" placeholder; this call fills
-  // it in asynchronously so the dashboard paint is never blocked.
-  renderDashHeadlineTiles(_dashSelectedAuctionId);
-  // Real-data sparkline in the Revenue KPI — async, best-effort.
-  drawRevenueSparkline();
 }
-
-// Keep every headline value on ONE line with decimals visible. Money
-// totals like "₹11,65,74,670.30" can exceed the tile width at the base
-// 20px font; rather than wrap (which slid under the corner icon), we
-// shrink the WHOLE strip's font uniformly — one size for all nine tiles
-// so they stay visually consistent — until the widest value fits. Pure
-// CSS can't size-to-fit a variable-width grid track, so we measure here.
-function fitDashHeadlineValues(grid){
-  if (!grid) return;
-  const vals = Array.from(grid.querySelectorAll('.kpi-value'));
-  if (!vals.length) return;
-  const BASE = 20, MIN = 11;
-  let fs = BASE;
-  vals.forEach(v => { v.style.fontSize = fs + 'px'; });
-  // scrollWidth > clientWidth means the (nowrap) text overflows its tile.
-  // +1 tolerates sub-pixel rounding so we don't shrink a value that fits.
-  while (fs > MIN && vals.some(v => v.scrollWidth > v.clientWidth + 1)) {
-    fs -= 1;
-    vals.forEach(v => { v.style.fontSize = fs + 'px'; });
-  }
-}
-// Re-fit when the window resizes (tile widths change with the grid).
-let _dashFitRaf;
-window.addEventListener('resize', () => {
-  cancelAnimationFrame(_dashFitRaf);
-  _dashFitRaf = requestAnimationFrame(() => {
-    const g = document.getElementById('dash-headline-grid');
-    if (g && g.offsetParent) fitDashHeadlineValues(g);
-  });
-});
 
 // Shrink ONLY the Lots-screen "Total amount" value just enough that it fits
 // its tile on one line — crore-scale totals (e.g. "₹1,56,94,320.00") are wide
@@ -8952,70 +8921,6 @@ window.addEventListener('resize', () => {
   cancelAnimationFrame(_lotKpiFitRaf);
   _lotKpiFitRaf = requestAnimationFrame(fitLotKpiAmount);
 });
-
-// Fills #dash-headline-grid by querying /api/insights. When auctionId
-// is set we ask for that single trade; otherwise we ask for ALL trades
-// (cumulative) — matching the "All Trades · Cumulative" hero/label above.
-// (Passing no scope makes the endpoint default to the current month,
-// which mislabelled the all-trades view as showing only this month.)
-async function renderDashHeadlineTiles(auctionId){
-  const grid = document.getElementById('dash-headline-grid');
-  if (!grid) return;
-  const fmtI = (n, dp) => {
-    const v = Number(n) || 0;
-    return v.toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp });
-  };
-  // Use the dashboard's existing .kpi shell so these tiles match the
-  // top KPI row (Total volume / Pending invoices / etc.) exactly.
-  // Colors cycle the four .kpi accent variants — saffron (default),
-  // cardamom, turmeric, chili — so the strip stays visually consistent
-  // with the rest of the dashboard while still reading at a glance.
-  // `meta` (optional) is an array of [label, value] pairs rendered as a
-  // small breakdown table under the headline number (e.g. bags/qty/amount).
-  const tile = (icon, label, value, accent, meta) => `<div class="kpi${accent ? ' ' + accent : ''}">
-    <div class="kpi-icon">${icon}</div>
-    <div class="kpi-label">${esc(label)}</div>
-    <div class="kpi-value">${value}</div>
-    ${meta && meta.length ? `<div class="kpi-meta">${meta.map(([l, v]) => `<span class="lbl">${esc(l)}</span><span class="val">${v}</span>`).join('')}</div>` : ''}
-  </div>`;
-  const price = n => (n != null && Number(n) > 0) ? fmtI(n, 2) : '—';
-  try {
-    const url = auctionId
-      ? `/api/insights?auction_id=${auctionId}&_=${Date.now()}`
-      : `/api/insights?auction_id=all&_=${Date.now()}`;
-    const d = await j(url);
-    const t = (d && d.totals) || {};
-    grid.innerHTML =
-      tile('📊', termAuction(true), fmtI(t.trades, 0),    'cardamom') +
-      tile('🌾', 'Lots',        fmtI(t.lots, 0),      '', [
-        ['Bags',     fmtI(t.bags, 0)],
-        ['Qty (kg)', fmtI(t.qty, 2)],
-        ['Amount',   '₹ ' + fmtI(t.value, 2)],
-      ]) +
-      tile('✅', 'Sold',        fmtI(t.sold, 0),      'cardamom', [
-        ['Bags',     fmtI(t.sold_bags, 0)],
-        ['Qty (kg)', fmtI(t.sold_qty, 2)],
-        ['Amount',   '₹ ' + fmtI(t.sold_value, 2)],
-      ]) +
-      tile('↩️', 'Withdrawn',   fmtI(t.withdrawn, 0), 'turmeric', [
-        ['Bags',     fmtI(t.wd_bags, 0)],
-        ['Qty (kg)', fmtI(t.wd_qty, 2)],
-        ['Amount',   '₹ ' + fmtI(t.wd_value, 2)],
-      ]) +
-      tile('💰', 'Value',       '₹ ' + fmtI(t.value, 2), 'cardamom', [
-        ['Min ₹', price(t.min_price)],
-        ['Max ₹', price(t.max_price)],
-        ['Avg ₹', t.avg_price > 0 ? fmtI(t.avg_price, 2) : '—'],
-      ]) +
-      tile('💸', 'Payable',     '₹ ' + fmtI(t.payable_to_sellers, 2),    'chili') +
-      tile('⏳', 'Outstanding', '₹ ' + fmtI(t.outstanding_by_buyers, 2), 'chili');
-    // Shrink-to-fit once layout is committed so scrollWidth/clientWidth
-    // reflect the real tile widths.
-    requestAnimationFrame(() => fitDashHeadlineValues(grid));
-  } catch (e) {
-    grid.innerHTML = `<div style="grid-column:1/-1;padding:14px 8px;text-align:center;color:var(--spice-text-hint);font-size:13px">Could not load headline metrics.</div>`;
-  }
-}
 
 // Range tracker for the revenue-trend chart. Default 7 days; changed by
 // the 7/14/30 buttons on the card header.

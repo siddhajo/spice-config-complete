@@ -11505,10 +11505,15 @@ app.get('/api/stats', requireView, (req, res) => {
   // Recent invoices (last 5) — mode-filtered via the parent auction.
   // No alias on FROM: mwInv's subquery references `invoices.auction_id`,
   // which SQLite refuses to resolve once the table is aliased.
+  // Exclude ASP invoices (state='KERALA'): those are internal transfers
+  // that bill our own ISP company, so buyer1 is stamped with our own trade
+  // name ("IDEAL SPICES …") rather than a real buyer — showing them made
+  // every recent-invoice row read as our own company. Real external sales
+  // are the non-KERALA (ISP / TAMIL NADU) invoices. No-op in eAuction mode.
   const recentInvoices = db.all(
     `SELECT id, sale, invo, buyer, buyer1, tot, date, place
      FROM invoices
-     ${mwInv.sql ? 'WHERE 1=1' + mwInv.sql : ''}
+     WHERE 1=1 AND UPPER(COALESCE(state,'')) NOT IN ('KERALA')${mwInv.sql || ''}
      ORDER BY id DESC LIMIT 5`,
     mwInv.params
   );
@@ -11669,15 +11674,15 @@ app.get('/api/insights', requireView, (req, res) => {
 
   const aids = auctions.map(a => a.id);
   const blankTotals = {
-    trades: auctions.length, lots: 0, bags: 0, qty: 0, value: 0,
-    sold: 0, sold_bags: 0, sold_qty: 0, sold_value: 0,
-    withdrawn: 0, wd_bags: 0, wd_qty: 0, wd_value: 0,
+    trades: auctions.length, lots: 0, bags: 0, qty: 0, pqty: 0, value: 0,
+    sold: 0, sold_bags: 0, sold_qty: 0, sold_pqty: 0, sold_value: 0,
+    withdrawn: 0, wd_bags: 0, wd_qty: 0, wd_pqty: 0, wd_value: 0,
     min_price: null, max_price: null, avg_price: 0,
-    payable_to_sellers: 0, outstanding_by_buyers: 0,
+    payable_to_sellers: 0, outstanding_by_buyers: 0, commission_income: 0,
   };
   if (!aids.length) {
     return res.json({
-      range, totals: blankTotals, perTrade: [], perBranch: [],
+      range, totals: blankTotals, perTrade: [], perBranch: [], perPlanter: [], perDealer: [],
       branchStacked: { labels: [], datasets: [] },
       outstandingByBuyer: [], buyerActivity: [],
     });
@@ -11695,15 +11700,19 @@ app.get('/api/insights', requireView, (req, res) => {
             COUNT(*) AS lots,
             COALESCE(SUM(bags),0) AS bags,
             COALESCE(SUM(qty),0)  AS qty,
+            COALESCE(SUM(pqty),0) AS pqty,
             COALESCE(SUM(amount),0) AS value,
             SUM(CASE WHEN ${SOLD} THEN 1 ELSE 0 END) AS sold,
             SUM(CASE WHEN ${WD}   THEN 1 ELSE 0 END) AS withdrawn,
             SUM(CASE WHEN COALESCE(TRIM(code),'')='' THEN 1 ELSE 0 END) AS unsold,
             COALESCE(SUM(CASE WHEN ${SOLD} THEN bags   ELSE 0 END),0) AS sold_bags,
             COALESCE(SUM(CASE WHEN ${SOLD} THEN qty    ELSE 0 END),0) AS sold_qty,
+            COALESCE(SUM(CASE WHEN ${SOLD} THEN pqty   ELSE 0 END),0) AS sold_pqty,
             COALESCE(SUM(CASE WHEN ${SOLD} THEN amount ELSE 0 END),0) AS sold_value,
+            COALESCE(SUM(CASE WHEN ${SOLD} THEN com    ELSE 0 END),0) AS sold_com,
             COALESCE(SUM(CASE WHEN ${WD}   THEN bags   ELSE 0 END),0) AS wd_bags,
             COALESCE(SUM(CASE WHEN ${WD}   THEN qty    ELSE 0 END),0) AS wd_qty,
+            COALESCE(SUM(CASE WHEN ${WD}   THEN pqty   ELSE 0 END),0) AS wd_pqty,
             COALESCE(SUM(CASE WHEN ${WD}   THEN amount ELSE 0 END),0) AS wd_value,
             MIN(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS min_price,
             MAX(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS max_price,
@@ -11732,7 +11741,7 @@ app.get('/api/insights', requireView, (req, res) => {
 
   const newBranchAgg = (name) => ({
     branch: name, lots: 0, sold: 0, withdrawn: 0, unsold: 0,
-    bags: 0, qty: 0, value: 0, sold_qty: 0, sold_value: 0,
+    bags: 0, qty: 0, value: 0, sold_bags: 0, sold_qty: 0, sold_value: 0,
     _minP: null, _maxP: null, payable_to_sellers: 0,
   });
 
@@ -11750,23 +11759,38 @@ app.get('/api/insights', requireView, (req, res) => {
     if (!b) { b = newBranchAgg(g.branch); byBranch.set(g.branch, b); }
     b.lots += num(g.lots); b.sold += num(g.sold); b.withdrawn += num(g.withdrawn); b.unsold += num(g.unsold);
     b.bags += num(g.bags); b.qty += num(g.qty); b.value += num(g.value);
-    b.sold_qty += num(g.sold_qty); b.sold_value += num(g.sold_value);
+    b.sold_bags += num(g.sold_bags); b.sold_qty += num(g.sold_qty); b.sold_value += num(g.sold_value);
     b.payable_to_sellers += num(g.payable);
     if (g.min_price != null) b._minP = (b._minP == null) ? num(g.min_price) : Math.min(b._minP, num(g.min_price));
     if (g.max_price != null) b._maxP = (b._maxP == null) ? num(g.max_price) : Math.max(b._maxP, num(g.max_price));
 
-    totals.lots += num(g.lots); totals.bags += num(g.bags); totals.qty += num(g.qty); totals.value += num(g.value);
-    totals.sold += num(g.sold); totals.sold_bags += num(g.sold_bags); totals.sold_qty += num(g.sold_qty); totals.sold_value += num(g.sold_value);
-    totals.withdrawn += num(g.withdrawn); totals.wd_bags += num(g.wd_bags); totals.wd_qty += num(g.wd_qty); totals.wd_value += num(g.wd_value);
-    totals.payable_to_sellers += num(g.payable);
+    totals.lots += num(g.lots); totals.bags += num(g.bags); totals.qty += num(g.qty); totals.pqty += num(g.pqty); totals.value += num(g.value);
+    totals.sold += num(g.sold); totals.sold_bags += num(g.sold_bags); totals.sold_qty += num(g.sold_qty); totals.sold_pqty += num(g.sold_pqty); totals.sold_value += num(g.sold_value);
+    totals.withdrawn += num(g.withdrawn); totals.wd_bags += num(g.wd_bags); totals.wd_qty += num(g.wd_qty); totals.wd_pqty += num(g.wd_pqty); totals.wd_value += num(g.wd_value);
+    totals.payable_to_sellers += num(g.payable); totals.commission_income += num(g.sold_com);
     if (g.min_price != null) priceMin = (priceMin == null) ? num(g.min_price) : Math.min(priceMin, num(g.min_price));
     if (g.max_price != null) priceMax = (priceMax == null) ? num(g.max_price) : Math.max(priceMax, num(g.max_price));
   }
   totals.min_price = priceMin;
   totals.max_price = priceMax;
   totals.avg_price = totals.sold_qty > 0 ? (totals.sold_value / totals.sold_qty) : 0;
+  // Income = the firm's commission/margin, not a pass-through. Prefer the
+  // per-lot commission (lots.com) when it's populated; otherwise fall back
+  // to gross sold value minus what's payable to sellers (≈ the commission
+  // the firm retains). Older imports leave lots.com at 0, hence the fallback.
+  totals.commission_income = totals.commission_income > 0
+    ? totals.commission_income
+    : Math.max(0, totals.sold_value - totals.payable_to_sellers);
 
   // ── Invoices in scope: outstanding-by-buyer + grand outstanding. ──
+  // Exclude ASP invoices (state='KERALA'). In e-Trade/ASP mode every sale
+  // writes TWO invoices for the same goods: the ASP invoice bills our own
+  // ISP company (an internal transfer, buyer1 is stamped with our own name)
+  // and the ISP invoice bills the real external buyer (state='TAMIL NADU').
+  // Summing both double-counts and made "Outstanding" ~2× the true buyer
+  // dues (it even exceeded total Value). Only external-buyer (non-KERALA)
+  // invoices are real receivables. No-op in eAuction mode, which never
+  // writes KERALA-state invoices.
   const invByBuyer = db.all(
     `SELECT COALESCE(NULLIF(TRIM(buyer1),''), buyer) AS buyer_name,
             buyer AS buyer_code,
@@ -11774,6 +11798,7 @@ app.get('/api/insights', requireView, (req, res) => {
             COALESCE(SUM(tot),0) AS value
      FROM invoices
      WHERE auction_id IN (${ph})
+       AND UPPER(COALESCE(state,'')) NOT IN ('KERALA')
      GROUP BY COALESCE(NULLIF(TRIM(buyer1),''), buyer), buyer
      ORDER BY value DESC
      LIMIT 100`,
@@ -11811,11 +11836,53 @@ app.get('/api/insights', requireView, (req, res) => {
   const perBranch = Array.from(byBranch.values())
     .map(b => ({
       branch: b.branch, lots: b.lots, sold: b.sold, withdrawn: b.withdrawn, unsold: b.unsold,
-      qty: b.qty, value: b.value, min_price: b._minP, max_price: b._maxP,
+      bags: b.bags, qty: b.qty, sold_qty: b.sold_qty, value: b.value,
+      sold_value: b.sold_value, min_price: b._minP, max_price: b._maxP,
       avg_price: b.sold_qty > 0 ? (b.sold_value / b.sold_qty) : 0,
       payable_to_sellers: b.payable_to_sellers,
     }))
     .sort((x, y) => y.value - x.value);
+
+  // ── Planter-wise (seller) breakdown — sold lots, ranked by payable. ──
+  // Sellers are "planters"; identity lives in lots.name (denorm of traders).
+  // Planter Wt = pqty (sample-refund-adjusted planter qty); Dealer Wt = qty.
+  const perPlanter = db.all(
+    `SELECT COALESCE(NULLIF(TRIM(name),''),'(unknown)') AS planter,
+            COUNT(*) AS lots,
+            COALESCE(SUM(qty),0)     AS qty,
+            COALESCE(SUM(pqty),0)    AS pqty,
+            COALESCE(SUM(amount),0)  AS value,
+            COALESCE(SUM(balance),0) AS payable
+     FROM lots
+     WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(name),'')<>''
+     GROUP BY COALESCE(NULLIF(TRIM(name),''),'(unknown)')
+     ORDER BY payable DESC
+     LIMIT 100`,
+    aids
+  ).map(r => ({ planter: r.planter, lots: num(r.lots), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
+
+  // ── Dealer-wise (buyer) breakdown — sold lots, ranked by purchase value,
+  //    with each dealer's outstanding pulled from invByBuyer (KERALA-excluded).
+  //    Grouped by buyer CODE to dodge shared trade-name collisions. ──
+  const outstandingByCode = {};
+  for (const r of invByBuyer) outstandingByCode[r.buyer_code] = (outstandingByCode[r.buyer_code] || 0) + r.value;
+  const perDealer = db.all(
+    `SELECT buyer AS buyer_code,
+            COALESCE(NULLIF(TRIM(MAX(buyer1)),''), buyer) AS dealer,
+            COUNT(*) AS lots,
+            COALESCE(SUM(qty),0)    AS qty,
+            COALESCE(SUM(amount),0) AS value
+     FROM lots
+     WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(buyer),'')<>''
+     GROUP BY buyer
+     ORDER BY value DESC
+     LIMIT 100`,
+    aids
+  ).map(r => ({
+    dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '',
+    lots: num(r.lots), qty: num(r.qty), value: num(r.value),
+    outstanding: num(outstandingByCode[r.buyer_code] || 0),
+  }));
 
   // ── Stacked bar: one stack per trade (newest-window last 20), one
   //    dataset per branch with that branch's value in each trade. ──
@@ -11833,7 +11900,7 @@ app.get('/api/insights', requireView, (req, res) => {
   };
 
   res.json({
-    range, totals, perTrade, perBranch, branchStacked,
+    range, totals, perTrade, perBranch, perPlanter, perDealer, branchStacked,
     outstandingByBuyer: invByBuyer.slice(0, 50),
     buyerActivity,
   });
