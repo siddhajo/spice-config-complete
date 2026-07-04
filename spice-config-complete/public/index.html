@@ -8767,13 +8767,16 @@ async function loadStats(auctionId){
   // Clickable entity → opens the lot-wise (grade-segregated) drill-down.
   const bdLink = (by, key, label) =>
     `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
-  // Invoice-number cell — one number per entity when a single trade is
-  // selected; a comma list across All Trades (trimmed to 3 + "+N", full on hover).
-  const invCell = raw => {
+  // Invoice-number cell. One invoice per entity per trade, so a single trade
+  // shows one clean number; across All Trades an entity spans many invoices —
+  // show a "N invoices" count (full list on hover) rather than a wall of numbers.
+  // `prefix` marks the invoice type: 'P - ' purchase (seller), 'S - ' sales (buyer).
+  const invCell = (raw, prefix) => {
     const a = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!a.length) return '<span style="color:var(--spice-text-hint)">—</span>';
-    const shown = a.length <= 3 ? a.join(', ') : `${a.slice(0,3).join(', ')} +${a.length-3}`;
-    return `<span title="${esc(a.join(', '))}">${esc(shown)}</span>`;
+    const pfx = n => prefix + n;
+    if (a.length === 1) return esc(pfx(a[0]));
+    return `<span title="${esc(a.map(pfx).join(', '))}" style="color:var(--spice-text-mute)">${a.length} invoices</span>`;
   };
 
   // Seller-wise: Seller · Inv No · Lots · Bags · Qty · Inv amt
@@ -8782,7 +8785,7 @@ async function loadStats(auctionId){
     <tbody>
       ${PLAN.map(p => `<tr>
         <td class="l bd-name">${bdLink('seller', p.planter, p.planter)}</td>
-        <td class="l">${invCell(p.invos)}</td>
+        <td class="l">${invCell(p.invos, 'P - ')}</td>
         <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.bags)}</td><td class="num">${nq(p.qty)}</td>
         <td class="num">${inr2(p.value)}</td></tr>`).join('')}
     </tbody>
@@ -8795,7 +8798,7 @@ async function loadStats(auctionId){
     <tbody>
       ${DEAL.map(x => `<tr>
         <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
-        <td class="l">${invCell(x.invos)}</td>
+        <td class="l">${invCell(x.invos, 'S - ')}</td>
         <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
         <td class="num">${inr2(x.value)}</td></tr>`).join('')}
     </tbody>
