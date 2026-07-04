@@ -1184,11 +1184,17 @@ tr:hover td{background:var(--spice-cream)}
 .snap-row.snap-sold td{background:#F5FBF6}
 .snap-row.snap-wd td{background:#FEF6F6}
 .snap-amt{font-weight:800}
-.dash-snap-ft{display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--spice-line)}
-.dash-snap-ft .mf{padding:12px 16px;border-right:1px solid var(--spice-line)}
-.dash-snap-ft .mf:last-child{border-right:0}
-.dash-snap-ft .mf .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--spice-text-hint);margin-bottom:5px}
-.dash-snap-ft .mf .v{font-size:17px;font-weight:800;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+/* 6 money tiles wrap 3-per-row inside the (narrow) snapshot card instead of
+   forcing one overflowing row. `gap:1px` over a line-coloured background
+   draws crisp dividers at any column count. Labels reserve two lines so the
+   value baselines line up whether the label wraps ("Stock (kg)") or not. */
+.dash-snap-ft{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
+  background:var(--spice-line);border-top:1px solid var(--spice-line)}
+.dash-snap-ft .mf{background:var(--card);padding:11px 16px;min-width:0;display:flex;flex-direction:column}
+.dash-snap-ft .mf .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--spice-text-hint);line-height:1.25;min-height:25px;margin-bottom:4px}
+.dash-snap-ft .mf .v{font-size:16px;font-weight:800;letter-spacing:-.2px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dash-snap-ft .mf.pay .v{color:var(--spice-saffron)}
 .dash-snap-ft .mf.inc .v{color:var(--spice-cardamom-dk)}
 
@@ -1231,11 +1237,43 @@ tr:hover td{background:var(--spice-cream)}
 .lot-wd{background:var(--spice-chili-lt);color:var(--spice-chili)}
 .lot-uns{background:var(--tab-bg);color:var(--spice-text-hint)}
 .lot-grand{margin-top:4px;padding:12px 14px;background:var(--spice-cardamom-lt);border-radius:10px;font-size:12.5px;color:var(--spice-text-main);line-height:1.6}
-@media(max-width:720px){.dash-snap-ft{grid-template-columns:repeat(3,1fr)}}
+.lots-tabs{margin-bottom:12px}
+.lots-pane{display:none}
+.lots-pane.on{display:block;margin-bottom:12px}
+/* Body scrolls (not the whole modal) so the corner X stays pinned. */
+#dash-lots-body{max-height:60vh;overflow:auto}
+@media(max-width:560px){.dash-snap-ft{grid-template-columns:repeat(2,1fr)}}
+
+/* ── Per-trade table: capped height + scroll, sticky coloured header ── */
+.dash-pt-scroll{padding:0 4px;overflow:auto;max-height:440px}
+.dash-pt-scroll>table{width:100%}
+.dash-pt-scroll thead th{position:sticky;top:0;z-index:2}
+
+/* ── Coloured table headers across dashboard + modal tables ── */
+#tc-dash thead th,.modal thead th{
+  background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk);
+  border-bottom:1px solid rgba(21,128,61,.20)}
+.lot-tbl tfoot td{background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk)}
+
+/* ── Vibrancy: subtle semantic tints + gradients so the page reads richer ── */
+#dash-kpis .kpi.money{background:linear-gradient(135deg,#ffffff 56%,#FFF4DF)}
+#dash-kpis .kpi.structure{background:linear-gradient(135deg,#ffffff 56%,#E7F8ED)}
+#dash-kpis .kpi.action{background:linear-gradient(135deg,#ffffff 56%,#FDEAEA)}
+.dash-snap-hd{background:linear-gradient(120deg,var(--spice-cardamom-lt) 0%,#EFF9F2 52%,#FFF6E6 100%)}
+.dash-snap-tag{background:linear-gradient(135deg,var(--spice-cardamom),var(--spice-cardamom-dk))}
+.snap-amt{color:var(--spice-cardamom-dk)}
+.greeting h1{background:linear-gradient(90deg,var(--spice-cardamom-dk),var(--spice-cardamom) 70%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+/* ── Generic modal close (X) — injected into every modal on load ── */
+.modal{position:relative}
+.modal-x{position:absolute;top:12px;right:12px;width:30px;height:30px;border:0;border-radius:8px;
+  background:var(--tab-bg);color:var(--spice-text-mute);font-size:20px;line-height:1;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .15s;z-index:5}
+.modal-x:hover{background:var(--spice-chili-lt);color:var(--spice-chili)}
+.modal-x:focus-visible{outline:2px solid var(--spice-cardamom);outline-offset:2px}
 /* Full 2-decimal rupee amounts are wide — shrink the dashboard KPI value a
    touch and keep it on one line so ₹82,77,67,181.00 fits its tile. */
 #dash-kpis .kpi-value{font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dash-snap-ft .mf .v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #lot-kpis .kpi-meta{
   /* Mini-table layout — label on the left (muted, small), value on
      the right (tabular numerals). Thin divider above separates the
@@ -6592,6 +6630,7 @@ function leSyncStateCode(stateId, codeId){
 function showModal(id){
   const el = document.getElementById(id);
   if (!el) return;
+  injectModalCloses();   // ensure this (and any new) modal carries a corner X
   el.classList.add('show');
   // P5 — drop the cursor straight into the first editable field so the
   // operator can type immediately instead of clicking. Skips read-only /
@@ -6604,6 +6643,23 @@ function showModal(id){
   }, 60);
 }
 function hideModal(id){document.getElementById(id).classList.remove('show')}
+// Inject a top-right close (X) into every modal so all dialogs can be
+// dismissed from the corner. Idempotent — skips modals already carrying one.
+function injectModalCloses(){
+  document.querySelectorAll('.modal-bg').forEach(bg => {
+    const box = bg.querySelector(':scope > .modal');
+    if (!box || box.querySelector(':scope > .modal-x')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'modal-x';
+    btn.setAttribute('aria-label', 'Close');
+    btn.innerHTML = '&times;';
+    btn.addEventListener('click', () => bg.classList.remove('show'));
+    box.appendChild(btn);
+  });
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectModalCloses);
+else injectModalCloses();
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
 // ── Indian number formatter (lakhs grouping) ──────────────────
 // fmtI(1234567.89)    → "12,34,567.89"
@@ -8504,20 +8560,32 @@ async function openLotsModal(el){
     : s === 'sold' ? '<span class="lot-st lot-sold">Sold</span>' : '<span class="lot-st lot-uns">Unsold</span>';
   const sub0 = { bags: 0, sellerq: 0, qty: 0, amount: 0 };
   const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + l.amount }), { ...sub0 });
-  const sections = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].map(([glabel, gkey]) => {
+  // Grade 1 / Grade 2 / Ungraded as tabs — one grade's lots visible at a time.
+  const grades = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].filter(([, k]) => lots.some(l => l.grade === k));
+  const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${grades.map(([glabel, gkey], i) =>
+    `<button class="${i===0?'on':''}" role="tab" aria-selected="${i===0}" onclick="lotsTab('${gkey}',this)">${glabel} · ${nf(lots.filter(l=>l.grade===gkey).length)}</button>`).join('')}</div>`;
+  const panes = grades.map(([glabel, gkey], i) => {
     const gl = lots.filter(l => l.grade === gkey);
-    if (!gl.length) return '';
     const sub = roll(gl);
-    return `<div class="lot-grp"><div class="lot-grp-hd">${glabel} <span>· ${nf(gl.length)} lot${gl.length===1?'':'s'}</span></div>
+    return `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${gkey}">
       <div class="bd-tblwrap"><table class="bd-table lot-tbl">
         <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Amount</th><th class="l">Status</th></tr></thead>
         <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td><td class="num">${qf(l.seller_qty)}</td><td class="num">${qf(l.qty)}</td><td class="num">${money(l.amount)}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td class="l" colspan="2">Subtotal</td><td class="num">${nf(sub.bags)}</td><td class="num">${qf(sub.sellerq)}</td><td class="num">${qf(sub.qty)}</td><td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
+        <tfoot><tr><td class="l" colspan="2">Subtotal · ${nf(gl.length)} lots</td><td class="num">${nf(sub.bags)}</td><td class="num">${qf(sub.sellerq)}</td><td class="num">${qf(sub.qty)}</td><td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
       </table></div></div>`;
   }).join('');
   const gt = roll(lots);
-  body.innerHTML = sections +
+  body.innerHTML = tabsBar + panes +
     `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · Seller Qty ${qf(gt.sellerq)} · Buyer Qty ${qf(gt.qty)} · ${money(gt.amount)}</div>`;
+}
+// Grade tab switcher inside the lot-wise modal.
+function lotsTab(gkey, btn){
+  document.querySelectorAll('#dash-lots-body .lots-pane').forEach(p => p.classList.remove('on'));
+  const pane = document.getElementById('lots-pane-' + gkey);
+  if (pane) pane.classList.add('on');
+  if (btn && btn.parentNode) btn.parentNode.querySelectorAll('button').forEach(b => {
+    const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on));
+  });
 }
 // Breakdown card tab switcher (Seller-wise / Buyer-wise / Branch-wise).
 // Panes render together in loadStats(); this toggles which one is visible.
@@ -8734,20 +8802,7 @@ async function loadStats(auctionId){
   // Per-trade breakdown table (rendered in BOTH cumulative and drilled-in
   // modes — clicking a row selects that trade for the hero+KPIs above
   // without losing the cross-trade context this section provides).
-  // Companion: a bar chart of revenue per trade rendered above the table
-  // (chart container is empty here; real Chart.js drawing happens in a
-  // requestAnimationFrame after innerHTML lands so the canvas exists).
-  const chartHTML = PT.length ? `
-    <div class="card" style="padding:0;margin-bottom:20px">
-      <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-        <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Revenue by ${termAuction()}</h2>
-        <span style="font-size:12px;color:var(--spice-text-hint)">Hover bars for exact amount</span>
-      </div>
-      <div style="padding:18px 22px;height:280px;position:relative">
-        <canvas id="dash-revenue-chart"></canvas>
-      </div>
-    </div>
-  ` : '';
+  // (The "Revenue by trade" bar chart now lives in the Insights tab.)
 
   // Per-kg price formatter — full Indian-grouping with 2 decimals, em-dash
   // for "no sold lot yet" rows so the column doesn't print misleading ₹0.
@@ -8761,7 +8816,7 @@ async function loadStats(auctionId){
         <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Per-${termAuction(false, true)} breakdown</h2>
         <span style="font-size:12px;color:var(--spice-text-hint)">${PT.length} trade${PT.length===1?'':'s'}${isAllMode ? ' · click a row to drill in' : ' · click the selected row to clear'}</span>
       </div>
-      <div style="padding:0 4px;overflow-x:auto">
+      <div class="dash-pt-scroll">
         <table style="width:100%">
           <thead>
             <tr>
@@ -8953,94 +9008,8 @@ async function loadStats(auctionId){
 
     ${breakdownHTML}
 
-    ${chartHTML}
-
     ${ptHTML}
-
-    <div class="dash-row-eq">
-      <div class="card" style="padding:0">
-        <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Recent invoices</h2>
-          <a href="#" onclick="go('invoices');return false" style="font-size:13px;color:var(--spice-saffron);font-weight:600;text-decoration:none">View all →</a>
-        </div>
-        <div style="padding:0 4px">${invoicesHTML}</div>
-      </div>
-      <div class="card" style="padding:0">
-        <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
-          <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Top planters</h2>
-          <span style="font-size:12px;color:var(--spice-text-hint)">Last 7 days</span>
-        </div>
-        <div style="padding:4px 22px 18px">${sellersHTML}</div>
-      </div>
-    </div>
   `;
-
-  // Render the dashboard revenue chart AFTER the HTML is in the DOM so
-  // the canvas element exists for Chart.js to grab. requestAnimationFrame
-  // ensures layout has settled before we measure the canvas size.
-  if (typeof Chart !== 'undefined' && PT.length) {
-    requestAnimationFrame(() => {
-      const canvas = document.getElementById('dash-revenue-chart');
-      if (!canvas) return;
-      // Destroy previous chart if any (loadStats can re-render multiple times)
-      if (canvas._chart) { canvas._chart.destroy(); canvas._chart = null; }
-      // Show most recent ~12 trades, oldest first (left to right). PT comes
-      // sorted by trade ano descending; reverse for chart order.
-      const data = PT.slice(0, 12).reverse();
-      const labels = data.map(t => `#${t.ano}`);
-      const amounts = data.map(t => Number(t.amount) || 0);
-      const ctx = canvas.getContext('2d');
-      // Spice-themed gradient for the bars
-      const grad = ctx.createLinearGradient(0, 0, 0, 240);
-      grad.addColorStop(0, '#10B981');
-      grad.addColorStop(1, '#166534');
-      canvas._chart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Revenue',
-            data: amounts,
-            backgroundColor: grad,
-            borderRadius: 6,
-            barThickness: 'flex',
-            maxBarThickness: 56,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              backgroundColor: '#0F172A',
-              padding: 10,
-              titleFont: { weight: '600' },
-              callbacks: {
-                title: (items) => `Trade ${items[0].label}`,
-                label: (ctx) => '₹' + Math.round(ctx.parsed.y).toLocaleString('en-IN'),
-              }
-            }
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { font: { size: 11, weight: '600' }, color: '#475569' }
-            },
-            y: {
-              beginAtZero: true,
-              grid: { color: '#E2E8F0', drawBorder: false },
-              ticks: {
-                font: { size: 11 },
-                color: '#94A3B8',
-                callback: (v) => v >= 100000 ? `₹${(v/100000).toFixed(1)}L` : `₹${(v/1000).toFixed(0)}k`
-              }
-            }
-          }
-        }
-      });
-    });
-  }
 
 }
 
@@ -18436,6 +18405,7 @@ async function _payDownloadSelected(type, aid, names){
 // canvas — Chart.js will otherwise leave the old chart attached and
 // the new one renders on top of it.
 let _insightsBarChart = null;
+let _insRevByTrade = null;
 let _insightsRange    = null;
 
 async function loadInsights(){
@@ -18908,10 +18878,19 @@ async function _renderInsights(){
 
     ${data.perTrade.length ? '' : '<div class="ins-section"><div class="ins-empty"><div class="ins-empty-icon">📭</div>No trades fall in this date range. Pick a wider window above.</div></div>'}
 
+    <!-- Revenue by trade (moved here from the dashboard) -->
+    ${data.perTrade.length ? `
+    <div class="ins-section" ${sectionAttrs('revbytrade')}>
+      ${sectionHead('📊', `Revenue by ${termAuction(false, true)}`, 'Total value per trade — most recent trades, oldest first.', 'emerald', 'revbytrade')}
+      <div class="ins-section-body">
+        <div style="height:280px;position:relative"><canvas id="ins-revbytrade-canvas"></canvas></div>
+      </div>
+    </div>` : ''}
+
     <!-- Stacked bar chart -->
     ${data.perTrade.length ? `
     <div class="ins-section" ${sectionAttrs('chart')}>
-      ${sectionHead('📊', `Branch contribution per ${termAuction(false, true)}`, 'Each segment is a branch\'s value contribution. Top 20 trades by date.', 'indigo', 'chart')}
+      ${sectionHead('🧩', `Branch contribution per ${termAuction(false, true)}`, 'Each segment is a branch\'s value contribution. Top 20 trades by date.', 'indigo', 'chart')}
       <div class="ins-section-body">
         <div style="height:320px;position:relative"><canvas id="ins-stacked-canvas"></canvas></div>
       </div>
@@ -18973,6 +18952,33 @@ async function _renderInsights(){
       </div>
     </div>
   `;
+
+  // ── Revenue-by-trade bar chart (relocated from the dashboard). ──
+  if (_insRevByTrade) { try { _insRevByTrade.destroy(); } catch(_) {} _insRevByTrade = null; }
+  const rbtCanvas = document.getElementById('ins-revbytrade-canvas');
+  if (typeof Chart !== 'undefined' && rbtCanvas && data.perTrade && data.perTrade.length) {
+    const pts = data.perTrade.slice(-15);   // perTrade is date-ascending
+    const rctx = rbtCanvas.getContext('2d');
+    const rgrad = rctx.createLinearGradient(0, 0, 0, 280);
+    rgrad.addColorStop(0, '#10B981'); rgrad.addColorStop(1, '#166534');
+    _insRevByTrade = new Chart(rctx, {
+      type: 'bar',
+      data: { labels: pts.map(t => '#' + t.ano), datasets: [{ label: 'Revenue', data: pts.map(t => Number(t.value) || 0), backgroundColor: rgrad, borderRadius: 6, maxBarThickness: 56 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { backgroundColor: 'rgba(15,23,42,.95)', padding: 10, cornerRadius: 8,
+            callbacks: { title: i => `${termAuction()} ${i[0].label}`, label: c => '₹' + fmtI(c.parsed.y, 0) } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10, weight: '600' }, color: '#64748B' } },
+          y: { beginAtZero: true, grid: { color: 'rgba(148,163,184,.15)' },
+            ticks: { font: { size: 10, weight: '600' }, color: '#64748B', callback: v => '₹' + (v >= 1e5 ? (v/1e5).toFixed(1) + 'L' : (v/1e3).toFixed(0) + 'k') } }
+        }
+      }
+    });
+  }
 
   // ── Draw the stacked bar chart. Dispose any prior instance — leaving
   // it attached layers the new render on top and breaks pointer events.
