@@ -1216,6 +1216,21 @@ tr:hover td{background:var(--spice-cream)}
 .bd-due{color:var(--spice-chili);font-weight:700}
 .bd-ok{color:var(--spice-text-hint)}
 .bd-empty{padding:26px 20px;text-align:center;color:var(--spice-text-hint);font-size:13px}
+/* Clickable entity in a breakdown pane → lot drill-down */
+.bd-link{cursor:pointer;color:var(--spice-cardamom-dk);font-weight:700}
+.bd-link:hover{text-decoration:underline;text-underline-offset:2px}
+.bd-link:focus-visible{outline:2px solid var(--spice-cardamom);outline-offset:2px;border-radius:4px}
+/* Lot-wise drill-down modal: per-grade groups */
+.lot-grp{margin-bottom:16px}
+.lot-grp-hd{font-size:12px;font-weight:800;color:var(--spice-cardamom-dk);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.lot-grp-hd span{color:var(--spice-text-hint);font-weight:600}
+.lot-tbl{font-size:12.5px}
+.lot-tbl th,.lot-tbl td{padding:8px 12px}
+.lot-st{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px}
+.lot-sold{background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk)}
+.lot-wd{background:var(--spice-chili-lt);color:var(--spice-chili)}
+.lot-uns{background:var(--tab-bg);color:var(--spice-text-hint)}
+.lot-grand{margin-top:4px;padding:12px 14px;background:var(--spice-cardamom-lt);border-radius:10px;font-size:12.5px;color:var(--spice-text-main);line-height:1.6}
 @media(max-width:720px){.dash-snap-ft{grid-template-columns:repeat(3,1fr)}}
 /* Full 2-decimal rupee amounts are wide — shrink the dashboard KPI value a
    touch and keep it on one line so ₹82,77,67,181.00 fits its tile. */
@@ -5169,6 +5184,15 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   </div>
 </div></div>
 
+<!-- Dashboard: lot-wise (grade-segregated) drill-down for a Breakdown entity. -->
+<div class="modal-bg" id="dash-lots-modal"><div class="modal" style="max-width:840px">
+  <h2 id="dash-lots-title">Lot-wise details</h2>
+  <div id="dash-lots-body"></div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('dash-lots-modal')">Close</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="trader-view-modal"><div class="modal" style="max-width:560px">
   <h2 id="trader-view-title">Seller</h2>
   <div id="trader-view-body"></div>
@@ -8450,7 +8474,52 @@ function openGradeModal(status) {
   </table></div>`;
   showModal('dash-grade-modal');
 }
-// Breakdown card tab switcher (Planter-wise / Dealer-wise / Branch-wise).
+// Lot-wise drill-down for a Breakdown entity (seller / buyer / branch),
+// segregated into Grade 1 / Grade 2. Fetches on demand from /api/insights/lots
+// scoped to the dashboard's current trade selection. `el` carries data-by /
+// data-key / data-label so entity names with quotes stay safe.
+async function openLotsModal(el){
+  const by = el.dataset.by, key = el.dataset.key, label = el.dataset.label || key;
+  const body = document.getElementById('dash-lots-body');
+  const titleEl = document.getElementById('dash-lots-title');
+  if (!body) return;
+  const kindLabel = { seller: 'Seller', buyer: 'Buyer', branch: 'Branch' }[by] || '';
+  if (titleEl) titleEl.textContent = `${label} — lot-wise details`;
+  body.innerHTML = '<div class="bd-empty">Loading lots…</div>';
+  showModal('dash-lots-modal');
+  const scope = _dashSelectedAuctionId || 'all';
+  let data;
+  try {
+    data = await j(`/api/insights/lots?by=${encodeURIComponent(by)}&key=${encodeURIComponent(key)}&auction_id=${scope}&_=${Date.now()}`);
+  } catch (e) { body.innerHTML = '<div class="bd-empty">Could not load lots.</div>'; return; }
+  const lots = (data && data.lots) || [];
+  if (!lots.length) { body.innerHTML = '<div class="bd-empty">No lots found for this selection.</div>'; return; }
+  const money = n => '₹' + (Number(n)||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const qf = n => (Number(n)||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nf = n => Math.round(Number(n)||0).toLocaleString('en-IN');
+  // Counterparty column flips with the view.
+  const cpHead = by === 'seller' ? 'Buyer' : by === 'buyer' ? 'Seller' : 'Seller · Buyer';
+  const cpCell = l => by === 'seller' ? esc(l.buyer) : by === 'buyer' ? esc(l.seller) : `${esc(l.seller)} · ${esc(l.buyer)}`;
+  const pill = s => s === 'withdrawn' ? '<span class="lot-st lot-wd">Withdrawn</span>'
+    : s === 'sold' ? '<span class="lot-st lot-sold">Sold</span>' : '<span class="lot-st lot-uns">Unsold</span>';
+  const sub0 = { bags: 0, sellerq: 0, qty: 0, amount: 0 };
+  const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + l.amount }), { ...sub0 });
+  const sections = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].map(([glabel, gkey]) => {
+    const gl = lots.filter(l => l.grade === gkey);
+    if (!gl.length) return '';
+    const sub = roll(gl);
+    return `<div class="lot-grp"><div class="lot-grp-hd">${glabel} <span>· ${nf(gl.length)} lot${gl.length===1?'':'s'}</span></div>
+      <div class="bd-tblwrap"><table class="bd-table lot-tbl">
+        <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Amount</th><th class="l">Status</th></tr></thead>
+        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td><td class="num">${qf(l.seller_qty)}</td><td class="num">${qf(l.qty)}</td><td class="num">${money(l.amount)}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td class="l" colspan="2">Subtotal</td><td class="num">${nf(sub.bags)}</td><td class="num">${qf(sub.sellerq)}</td><td class="num">${qf(sub.qty)}</td><td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
+      </table></div></div>`;
+  }).join('');
+  const gt = roll(lots);
+  body.innerHTML = sections +
+    `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · Seller Qty ${qf(gt.sellerq)} · Buyer Qty ${qf(gt.qty)} · ${money(gt.amount)}</div>`;
+}
+// Breakdown card tab switcher (Seller-wise / Buyer-wise / Branch-wise).
 // Panes render together in loadStats(); this toggles which one is visible.
 function dashBreakdownTab(name, btn) {
   ['planter','dealer','branch'].forEach(k => {
@@ -8600,47 +8669,51 @@ async function loadStats(auctionId){
   // set instead of three stacked blocks. Each shows the top 8 with the rest
   // rolled into a muted "+ N more" line and a reconciling totals footer.
   const bdSum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
-  const bdShare = (v, tot) => tot > 0 ? Math.round(v / tot * 100) : 0;
-  const bdBar = pct => `<span class="bd-share"><span class="bd-bar"><i style="width:${pct}%"></i></span>${pct}%</span>`;
   const bdEmpty = msg => `<div class="bd-empty">${msg}</div>`;
+  const sampleWt = Number(T.sample_weight) || 0;
+  // Clickable entity → opens the lot-wise (grade-segregated) drill-down.
+  const bdLink = (by, key, label) =>
+    `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
 
-  const planTot = bdSum(PLAN, p => p.payable);
+  // Seller-wise: Seller · Lots · Bags · Qty · Inv amt
   const planPane = PLAN.length ? `<div class="bd-tblwrap"><table class="bd-table">
-    <thead><tr><th class="l">Planter (seller)</th><th>Lots</th><th>Planter Qty</th><th>Payable</th><th>Share</th></tr></thead>
+    <thead><tr><th class="l">Seller</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
       ${PLAN.slice(0,8).map(p => `<tr>
-        <td class="l bd-name">${esc(p.planter)}</td>
-        <td class="num">${nkg(p.lots)}</td><td class="num">${nq(p.pqty)}</td>
-        <td class="num">${inr2(p.payable)}</td><td class="num">${bdBar(bdShare(p.payable, planTot))}</td></tr>`).join('')}
-      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nq(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
+        <td class="l bd-name">${bdLink('seller', p.planter, p.planter)}</td>
+        <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.bags)}</td><td class="num">${nq(p.qty)}</td>
+        <td class="num">${inr2(p.value)}</td></tr>`).join('')}
+      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more sellers</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN.slice(8),p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.value))}</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nq(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inr2(planTot)}</td><td class="num">100%</td></tr></tfoot>
-  </table></div>` : bdEmpty('No planter data in this scope yet.');
+    <tfoot><tr><td class="l">${PLAN.length} seller${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN,p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN,p=>p.value))}</td></tr></tfoot>
+  </table></div>` : bdEmpty('No seller data in this scope yet.');
 
-  const dealVal = bdSum(DEAL, x => x.value);
+  // Buyer-wise: Buyer · Lots · Bags · Qty · Inv amt
   const dealPane = DEAL.length ? `<div class="bd-tblwrap"><table class="bd-table">
-    <thead><tr><th class="l">Dealer (buyer)</th><th>Lots</th><th>Dealer Qty</th><th>Amount</th><th>Outstanding</th></tr></thead>
+    <thead><tr><th class="l">Buyer</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
       ${DEAL.slice(0,8).map(x => `<tr>
-        <td class="l bd-name">${esc(x.dealer)}</td>
-        <td class="num">${nkg(x.lots)}</td><td class="num">${nq(x.qty)}</td>
-        <td class="num">${inr2(x.value)}</td>
-        <td class="num">${(x.outstanding||0)>0 ? `<span class="bd-due">${inr2(x.outstanding)}</span>` : '<span class="bd-ok">Settled</span>'}</td></tr>`).join('')}
-      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nq(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
+        <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
+        <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
+        <td class="num">${inr2(x.value)}</td></tr>`).join('')}
+      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more buyers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(dealVal)}</td><td class="num">${inr2(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
-  </table></div>` : bdEmpty('No dealer data in this scope yet.');
+    <tfoot><tr><td class="l">${DEAL.length} buyer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL,x=>x.value))}</td></tr></tfoot>
+  </table></div>` : bdEmpty('No buyer data in this scope yet.');
 
-  const brkVal = bdSum(BRK, b => b.value);
+  // Branch-wise: Branch · Lots · Bags · Seller Qty · Buyer Qty · Total Qty · Total amount
+  //   Seller Qty = net qty + sample × lots; Buyer Qty = Total Qty = net qty.
+  const brSellerQty = b => (Number(b.qty)||0) + sampleWt * (Number(b.lots)||0);
   const brkPane = BRK.length ? `<div class="bd-tblwrap"><table class="bd-table">
-    <thead><tr><th class="l">Branch</th><th>Lots</th><th>Qty (kg)</th><th>Amount</th><th>Share</th></tr></thead>
+    <thead><tr><th class="l">Branch</th><th>Lots</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Total Qty</th><th>Total amount</th></tr></thead>
     <tbody>
-      ${BRK.slice(0,10).map(b => `<tr>
-        <td class="l bd-name">${esc(b.branch)}</td>
-        <td class="num">${nkg(b.lots)}</td><td class="num">${nq(b.qty)}</td>
-        <td class="num">${inr2(b.value)}</td><td class="num">${bdBar(bdShare(b.value, brkVal))}</td></tr>`).join('')}
+      ${BRK.slice(0,20).map(b => `<tr>
+        <td class="l bd-name">${bdLink('branch', b.branch, b.branch)}</td>
+        <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.bags)}</td>
+        <td class="num">${nq(brSellerQty(b))}</td><td class="num">${nq(b.qty)}</td><td class="num">${nq(b.qty)}</td>
+        <td class="num">${inr2(b.value)}</td></tr>`).join('')}
     </tbody>
-    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(brkVal)}</td><td class="num">100%</td></tr></tfoot>
+    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.bags))}</td><td class="num">${nq(bdSum(BRK,brSellerQty))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(bdSum(BRK,b=>b.value))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No branch data in this scope yet.');
 
   const breakdownHTML = `
@@ -8648,8 +8721,8 @@ async function loadStats(auctionId){
       <div style="padding:15px 22px 13px;border-bottom:1px solid var(--spice-line);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Breakdown</h2>
         <div class="bd-tabs" role="tablist" aria-label="Breakdown by">
-          <button class="on" role="tab" aria-selected="true" onclick="dashBreakdownTab('planter',this)">Planter-wise</button>
-          <button role="tab" aria-selected="false" onclick="dashBreakdownTab('dealer',this)">Dealer-wise</button>
+          <button class="on" role="tab" aria-selected="true" onclick="dashBreakdownTab('planter',this)">Seller-wise</button>
+          <button role="tab" aria-selected="false" onclick="dashBreakdownTab('dealer',this)">Buyer-wise</button>
           <button role="tab" aria-selected="false" onclick="dashBreakdownTab('branch',this)">Branch-wise</button>
         </div>
       </div>

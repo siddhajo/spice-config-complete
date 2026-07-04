@@ -11858,23 +11858,24 @@ app.get('/api/insights', requireView, (req, res) => {
     }))
     .sort((x, y) => y.value - x.value);
 
-  // ── Planter-wise (seller) breakdown — sold lots, ranked by payable. ──
-  // Sellers are "planters"; identity lives in lots.name (denorm of traders).
-  // Planter Wt = pqty (sample-refund-adjusted planter qty); Dealer Wt = qty.
+  // ── Seller-wise breakdown — every lot a seller brought, ranked by
+  //    invoiced amount. Seller identity lives in lots.name (denorm of
+  //    traders). value = Σ amount (= invoiced amount; withdrawn lots are ~0).
   const perPlanter = db.all(
     `SELECT COALESCE(NULLIF(TRIM(name),''),'(unknown)') AS planter,
             COUNT(*) AS lots,
+            COALESCE(SUM(bags),0)    AS bags,
             COALESCE(SUM(qty),0)     AS qty,
             COALESCE(SUM(pqty),0)    AS pqty,
             COALESCE(SUM(amount),0)  AS value,
             COALESCE(SUM(balance),0) AS payable
      FROM lots
-     WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(name),'')<>''
+     WHERE auction_id IN (${ph}) AND COALESCE(TRIM(name),'')<>''
      GROUP BY COALESCE(NULLIF(TRIM(name),''),'(unknown)')
-     ORDER BY payable DESC
-     LIMIT 100`,
+     ORDER BY value DESC
+     LIMIT 200`,
     aids
-  ).map(r => ({ planter: r.planter, lots: num(r.lots), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
+  ).map(r => ({ planter: r.planter, lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
 
   // ── Dealer-wise (buyer) breakdown — sold lots, ranked by purchase value,
   //    with each dealer's outstanding pulled from invByBuyer (KERALA-excluded).
@@ -11885,17 +11886,18 @@ app.get('/api/insights', requireView, (req, res) => {
     `SELECT buyer AS buyer_code,
             COALESCE(NULLIF(TRIM(MAX(buyer1)),''), buyer) AS dealer,
             COUNT(*) AS lots,
+            COALESCE(SUM(bags),0)   AS bags,
             COALESCE(SUM(qty),0)    AS qty,
             COALESCE(SUM(amount),0) AS value
      FROM lots
      WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(buyer),'')<>''
      GROUP BY buyer
      ORDER BY value DESC
-     LIMIT 100`,
+     LIMIT 200`,
     aids
   ).map(r => ({
     dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '',
-    lots: num(r.lots), qty: num(r.qty), value: num(r.value),
+    lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), value: num(r.value),
     outstanding: num(outstandingByCode[r.buyer_code] || 0),
   }));
 
@@ -11944,6 +11946,58 @@ app.get('/api/insights', requireView, (req, res) => {
     outstandingByBuyer: invByBuyer.slice(0, 50),
     buyerActivity,
   });
+});
+
+// ── Lot-level drill-down for the dashboard Breakdown widget ──────────
+// Returns every lot for ONE seller / buyer / branch within the current
+// scope, grade-tagged, so the frontend can segregate Grade 1 / Grade 2.
+// Scope resolution mirrors /api/insights (specific auction, or all in the
+// active business mode). Seller Qty per lot = qty + the lot's sample.
+app.get('/api/insights/lots', requireView, (req, res) => {
+  const db = getDb();
+  const mwAa = modeWhereClause(db, 'a.mode');
+  const by  = String(req.query.by  || '').toLowerCase();
+  const key = String(req.query.key || '');
+  const rawAid = req.query.auction_id;
+  let aids;
+  if (rawAid && String(rawAid).trim() !== '' && String(rawAid) !== 'all') {
+    aids = [parseInt(rawAid, 10)].filter(n => !Number.isNaN(n));
+  } else {
+    aids = db.all(`SELECT id FROM auctions a WHERE 1=1 ${mwAa.sql} ORDER BY a.id`, mwAa.params).map(r => r.id);
+  }
+  const sampleWt = Number((getSettingsFlat(db) || {}).sample_weight) || 0;
+  if (!aids.length || !key) return res.json({ by, key, sample_weight: sampleWt, lots: [] });
+  const ph = aids.map(() => '?').join(',');
+  let cond, params;
+  if (by === 'seller')      { cond = `COALESCE(NULLIF(TRIM(name),''),'(unknown)') = ?`;        params = [key]; }
+  else if (by === 'buyer')  { cond = `buyer = ?`;                                              params = [key]; }
+  else if (by === 'branch') { cond = `COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') = ?`;  params = [key]; }
+  else return res.status(400).json({ error: 'by must be seller | buyer | branch' });
+  const num = v => Number(v) || 0;
+  const lots = db.all(
+    `SELECT lot_no,
+            CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN TRIM(grade) ELSE 'other' END AS grade,
+            COALESCE(bags,0) AS bags, COALESCE(qty,0) AS qty, COALESCE(amount,0) AS amount,
+            COALESCE(NULLIF(TRIM(name),''),'') AS seller,
+            COALESCE(NULLIF(TRIM(buyer1),''), buyer, '') AS buyer,
+            COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') AS branch,
+            UPPER(TRIM(COALESCE(code,''))) AS code
+     FROM lots
+     WHERE auction_id IN (${ph}) AND ${cond}
+     ORDER BY (CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN CAST(grade AS INTEGER) ELSE 9 END),
+              CAST(lot_no AS INTEGER), lot_no
+     LIMIT 1000`,
+    [...aids, ...params]
+  ).map(r => {
+    const code = r.code || '';
+    const status = code === 'WD' ? 'withdrawn' : code !== '' ? 'sold' : 'unsold';
+    return {
+      lot_no: r.lot_no, grade: r.grade, bags: num(r.bags), qty: num(r.qty),
+      seller_qty: num(r.qty) + sampleWt, amount: num(r.amount),
+      seller: r.seller, buyer: r.buyer, branch: r.branch, status,
+    };
+  });
+  res.json({ by, key, sample_weight: sampleWt, lots });
 });
 
 // ══════════════════════════════════════════════════════════════
