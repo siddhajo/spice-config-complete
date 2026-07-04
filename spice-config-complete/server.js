@@ -11679,12 +11679,19 @@ app.get('/api/insights', requireView, (req, res) => {
   }
 
   const aids = auctions.map(a => a.id);
+  // Default Sample Weight (kg) per lot — the seller (planter) is credited for
+  // the sample taken from each lot, so Seller Wt = net qty + sample × lots,
+  // and the firm accrues that sample weight as physical "Stock".
+  const sampleWt = Number((getSettingsFlat(db) || {}).sample_weight) || 0;
+  const ISP_COMMISSION_PCT = 1.25;   // ISP commission rate (config: deduction1)
   const blankTotals = {
     trades: auctions.length, lots: 0, bags: 0, qty: 0, pqty: 0, value: 0,
     sold: 0, sold_bags: 0, sold_qty: 0, sold_pqty: 0, sold_value: 0,
     withdrawn: 0, wd_bags: 0, wd_qty: 0, wd_pqty: 0, wd_value: 0,
+    seller_qty: 0, sold_seller_qty: 0, wd_seller_qty: 0,
     min_price: null, max_price: null, avg_price: 0,
     payable_to_sellers: 0, outstanding_by_buyers: 0, commission_income: 0,
+    stock_kg: 0, sample_weight: sampleWt,
   };
   if (!aids.length) {
     return res.json({
@@ -11715,14 +11722,13 @@ app.get('/api/insights', requireView, (req, res) => {
             COALESCE(SUM(CASE WHEN ${SOLD} THEN qty    ELSE 0 END),0) AS sold_qty,
             COALESCE(SUM(CASE WHEN ${SOLD} THEN pqty   ELSE 0 END),0) AS sold_pqty,
             COALESCE(SUM(CASE WHEN ${SOLD} THEN amount ELSE 0 END),0) AS sold_value,
-            COALESCE(SUM(CASE WHEN ${SOLD} THEN com    ELSE 0 END),0) AS sold_com,
             COALESCE(SUM(CASE WHEN ${WD}   THEN bags   ELSE 0 END),0) AS wd_bags,
             COALESCE(SUM(CASE WHEN ${WD}   THEN qty    ELSE 0 END),0) AS wd_qty,
             COALESCE(SUM(CASE WHEN ${WD}   THEN pqty   ELSE 0 END),0) AS wd_pqty,
             COALESCE(SUM(CASE WHEN ${WD}   THEN amount ELSE 0 END),0) AS wd_value,
             MIN(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS min_price,
             MAX(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS max_price,
-            COALESCE(SUM(balance),0) AS payable
+            COALESCE(SUM(CASE WHEN amount>0 THEN balance ELSE 0 END),0) AS payable
      FROM lots
      WHERE auction_id IN (${ph})
      GROUP BY auction_id, COALESCE(NULLIF(TRIM(branch),''),'(unspecified)')`,
@@ -11773,20 +11779,23 @@ app.get('/api/insights', requireView, (req, res) => {
     totals.lots += num(g.lots); totals.bags += num(g.bags); totals.qty += num(g.qty); totals.pqty += num(g.pqty); totals.value += num(g.value);
     totals.sold += num(g.sold); totals.sold_bags += num(g.sold_bags); totals.sold_qty += num(g.sold_qty); totals.sold_pqty += num(g.sold_pqty); totals.sold_value += num(g.sold_value);
     totals.withdrawn += num(g.withdrawn); totals.wd_bags += num(g.wd_bags); totals.wd_qty += num(g.wd_qty); totals.wd_pqty += num(g.wd_pqty); totals.wd_value += num(g.wd_value);
-    totals.payable_to_sellers += num(g.payable); totals.commission_income += num(g.sold_com);
+    totals.payable_to_sellers += num(g.payable);
     if (g.min_price != null) priceMin = (priceMin == null) ? num(g.min_price) : Math.min(priceMin, num(g.min_price));
     if (g.max_price != null) priceMax = (priceMax == null) ? num(g.max_price) : Math.max(priceMax, num(g.max_price));
   }
   totals.min_price = priceMin;
   totals.max_price = priceMax;
   totals.avg_price = totals.sold_qty > 0 ? (totals.sold_value / totals.sold_qty) : 0;
-  // Income = the firm's commission/margin, not a pass-through. Prefer the
-  // per-lot commission (lots.com) when it's populated; otherwise fall back
-  // to gross sold value minus what's payable to sellers (≈ the commission
-  // the firm retains). Older imports leave lots.com at 0, hence the fallback.
-  totals.commission_income = totals.commission_income > 0
-    ? totals.commission_income
-    : Math.max(0, totals.sold_value - totals.payable_to_sellers);
+  // Seller (planter) weighment = net qty + the sample taken from each lot.
+  // Buyer Wt stays the net qty; the gap between the two columns is exactly
+  // the accrued sample weight.
+  totals.seller_qty      = totals.qty      + sampleWt * totals.lots;
+  totals.sold_seller_qty = totals.sold_qty + sampleWt * totals.sold;
+  totals.wd_seller_qty   = totals.wd_qty   + sampleWt * totals.withdrawn;
+  // Stock = the firm's accrued sample weight across every lot.
+  totals.stock_kg = sampleWt * totals.lots;
+  // Income = the firm's ISP commission: 1.25% of the sold lot value.
+  totals.commission_income = totals.sold_value * (ISP_COMMISSION_PCT / 100);
 
   // ── Invoices in scope: outstanding-by-buyer + grand outstanding. ──
   // Exclude ASP invoices (state='KERALA'). In e-Trade/ASP mode every sale

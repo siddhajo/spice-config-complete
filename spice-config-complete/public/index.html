@@ -1181,7 +1181,7 @@ tr:hover td{background:var(--spice-cream)}
 .snap-row.snap-sold td{background:#F5FBF6}
 .snap-row.snap-wd td{background:#FEF6F6}
 .snap-amt{font-weight:800}
-.dash-snap-ft{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--spice-line)}
+.dash-snap-ft{display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--spice-line)}
 .dash-snap-ft .mf{padding:12px 16px;border-right:1px solid var(--spice-line)}
 .dash-snap-ft .mf:last-child{border-right:0}
 .dash-snap-ft .mf .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--spice-text-hint);margin-bottom:5px}
@@ -1214,6 +1214,10 @@ tr:hover td{background:var(--spice-cream)}
 .bd-ok{color:var(--spice-text-hint)}
 .bd-empty{padding:26px 20px;text-align:center;color:var(--spice-text-hint);font-size:13px}
 @media(max-width:720px){.dash-snap-ft{grid-template-columns:repeat(3,1fr)}}
+/* Full 2-decimal rupee amounts are wide — shrink the dashboard KPI value a
+   touch and keep it on one line so ₹82,77,67,181.00 fits its tile. */
+#dash-kpis .kpi-value{font-size:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-snap-ft .mf .v{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #lot-kpis .kpi-meta{
   /* Mini-table layout — label on the left (muted, small), value on
      the right (tabular numerals). Thin divider above separates the
@@ -8445,16 +8449,10 @@ async function loadStats(auctionId){
 
   // Format helpers
   const inr = n => '₹'+Math.round(n||0).toLocaleString('en-IN');
-  // Unified money scale used across the dashboard: ₹ Cr for ≥1 crore,
-  // ₹ L for ≥1 lakh, plain grouped rupees below — always without paise.
-  // One scale everywhere replaces the old mix of full-rupee strings,
-  // "₹8277.7L" and bare crore values, and keeps wide totals from clipping.
-  const inrCr = n => {
-    const v = Number(n) || 0;
-    if (v >= 1e7) return '₹' + (v / 1e7).toFixed(2) + ' Cr';
-    if (v >= 1e5) return '₹' + (v / 1e5).toFixed(2) + ' L';
-    return '₹' + Math.round(v).toLocaleString('en-IN');
-  };
+  // Full rupee amount with Indian grouping and exactly 2 decimals
+  // (e.g. ₹9,20,45,123.45). Every money figure on the dashboard uses this
+  // one formatter so amounts read precisely for reconciliation.
+  const inr2 = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const kg = n => (n||0).toFixed(0)+' kg';
   const kgK = n => { const v = (n||0)/1000; return v>=1 ? v.toFixed(1)+'T' : Math.round(n||0)+' kg'; };
   const now = new Date();
@@ -8481,16 +8479,17 @@ async function loadStats(auctionId){
   //   Dealer Wt  = qty  (net weight the buyer is billed on)
   const nkg = n => Math.round(Number(n)||0).toLocaleString('en-IN');
   const priceRange = (T.min_price > 0 || T.max_price > 0)
-    ? `${inr(T.min_price)} – ${inr(T.max_price)}` : '—';
+    ? `${inr2(T.min_price)} – ${inr2(T.max_price)}` : '—';
   // One matrix row. `tone` shades Sold (green) / Withdrawn (red).
-  const mrow = (label, tone, lots, bags, pqty, qty, amount) => `
+  // sellerWt = net qty + sample per lot; buyerWt = net qty.
+  const mrow = (label, tone, lots, bags, sellerWt, buyerWt, amount) => `
     <tr class="snap-row${tone ? ' snap-'+tone : ''}">
       <td class="l"><span class="snap-st snap-st-${tone||'book'}"><span class="dot"></span>${label}</span></td>
       <td class="num">${nkg(lots)}</td>
       <td class="num">${nkg(bags)}</td>
-      <td class="num">${nkg(pqty)}</td>
-      <td class="num">${nkg(qty)}</td>
-      <td class="num snap-amt">${inrCr(amount)}</td>
+      <td class="num">${nkg(sellerWt)}</td>
+      <td class="num">${nkg(buyerWt)}</td>
+      <td class="num snap-amt">${inr2(amount)}</td>
     </tr>`;
   const snapWho = isAllMode
     ? { tag: 'ALL', t1: `All ${termAuction(true)}`, t2: `Cumulative across ${CUM.auctions||0} ${termAuction(CUM.auctions!==1, true)}` }
@@ -8512,23 +8511,24 @@ async function loadStats(auctionId){
         <table>
           <thead><tr>
             <th class="l">Status</th><th>Lots</th><th>Bags</th>
-            <th title="Planter (seller) weighment">Planter Wt</th>
-            <th title="Dealer (buyer) billed weight = net qty">Dealer Wt</th>
+            <th title="Seller weighment = net qty + sample weight per lot">Seller Wt</th>
+            <th title="Buyer billed weight = net qty">Buyer Wt</th>
             <th>Amount</th>
           </tr></thead>
           <tbody>
-            ${mrow('Booked', '',   T.lots, T.bags, T.pqty, T.qty, T.value)}
-            ${mrow('Sold', 'sold', T.sold, T.sold_bags, T.sold_pqty, T.sold_qty, T.sold_value)}
-            ${mrow('Withdrawn', 'wd', T.withdrawn, T.wd_bags, T.wd_pqty, T.wd_qty, T.wd_value)}
+            ${mrow('Booked', '',   T.lots, T.bags, T.seller_qty, T.qty, T.value)}
+            ${mrow('Sold', 'sold', T.sold, T.sold_bags, T.sold_seller_qty, T.sold_qty, T.sold_value)}
+            ${mrow('Withdrawn', 'wd', T.withdrawn, T.wd_bags, T.wd_seller_qty, T.wd_qty, T.wd_value)}
           </tbody>
         </table>
       </div>
       <div class="dash-snap-ft">
-        <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inrCr(T.payable_to_sellers)}</div></div>
-        <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inrCr(T.commission_income)}</div></div>
-        <div class="mf"><div class="k">Min ₹/kg</div><div class="v">${T.min_price>0?inr(T.min_price):'—'}</div></div>
-        <div class="mf"><div class="k">Max ₹/kg</div><div class="v">${T.max_price>0?inr(T.max_price):'—'}</div></div>
-        <div class="mf" title="Range ${priceRange}"><div class="k">Avg ₹/kg</div><div class="v">${T.avg_price>0?inr(T.avg_price):'—'}</div></div>
+        <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inr2(T.payable_to_sellers)}</div></div>
+        <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inr2(T.commission_income)}</div></div>
+        <div class="mf"><div class="k">Stock (kg)</div><div class="v">${nkg(T.stock_kg)}</div></div>
+        <div class="mf"><div class="k">Min ₹/kg</div><div class="v">${T.min_price>0?inr2(T.min_price):'—'}</div></div>
+        <div class="mf"><div class="k">Max ₹/kg</div><div class="v">${T.max_price>0?inr2(T.max_price):'—'}</div></div>
+        <div class="mf" title="Range ${priceRange}"><div class="k">Avg ₹/kg</div><div class="v">${T.avg_price>0?inr2(T.avg_price):'—'}</div></div>
       </div>
     </div>
   ` : `
@@ -8553,10 +8553,10 @@ async function loadStats(auctionId){
       ${PLAN.slice(0,8).map(p => `<tr>
         <td class="l bd-name">${esc(p.planter)}</td>
         <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.pqty)}</td>
-        <td class="num">${inrCr(p.payable)}</td><td class="num">${bdBar(bdShare(p.payable, planTot))}</td></tr>`).join('')}
-      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inrCr(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
+        <td class="num">${inr2(p.payable)}</td><td class="num">${bdBar(bdShare(p.payable, planTot))}</td></tr>`).join('')}
+      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inrCr(planTot)}</td><td class="num">100%</td></tr></tfoot>
+    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inr2(planTot)}</td><td class="num">100%</td></tr></tfoot>
   </table></div>` : bdEmpty('No planter data in this scope yet.');
 
   const dealVal = bdSum(DEAL, x => x.value);
@@ -8566,11 +8566,11 @@ async function loadStats(auctionId){
       ${DEAL.slice(0,8).map(x => `<tr>
         <td class="l bd-name">${esc(x.dealer)}</td>
         <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.qty)}</td>
-        <td class="num">${inrCr(x.value)}</td>
-        <td class="num">${(x.outstanding||0)>0 ? `<span class="bd-due">${inrCr(x.outstanding)}</span>` : '<span class="bd-ok">Settled</span>'}</td></tr>`).join('')}
-      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inrCr(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inrCr(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
+        <td class="num">${inr2(x.value)}</td>
+        <td class="num">${(x.outstanding||0)>0 ? `<span class="bd-due">${inr2(x.outstanding)}</span>` : '<span class="bd-ok">Settled</span>'}</td></tr>`).join('')}
+      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inrCr(dealVal)}</td><td class="num">${inrCr(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
+    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(dealVal)}</td><td class="num">${inr2(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No dealer data in this scope yet.');
 
   const brkVal = bdSum(BRK, b => b.value);
@@ -8580,9 +8580,9 @@ async function loadStats(auctionId){
       ${BRK.slice(0,10).map(b => `<tr>
         <td class="l bd-name">${esc(b.branch)}</td>
         <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.qty)}</td>
-        <td class="num">${inrCr(b.value)}</td><td class="num">${bdBar(bdShare(b.value, brkVal))}</td></tr>`).join('')}
+        <td class="num">${inr2(b.value)}</td><td class="num">${bdBar(bdShare(b.value, brkVal))}</td></tr>`).join('')}
     </tbody>
-    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.qty))}</td><td class="num">${inrCr(brkVal)}</td><td class="num">100%</td></tr></tfoot>
+    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(brkVal)}</td><td class="num">100%</td></tr></tfoot>
   </table></div>` : bdEmpty('No branch data in this scope yet.');
 
   const breakdownHTML = `
@@ -8618,11 +8618,10 @@ async function loadStats(auctionId){
     </div>
   ` : '';
 
-  // Per-kg price formatter — full Indian-grouping, integer rupees (no
-  // ".00" trailing zeros at this density), em-dash for "no sold lot
-  // yet" rows so the column doesn't print misleading ₹0.
+  // Per-kg price formatter — full Indian-grouping with 2 decimals, em-dash
+  // for "no sold lot yet" rows so the column doesn't print misleading ₹0.
   const inrPrice = n => (Number(n) || 0) > 0
-    ? '₹' + Math.round(Number(n)).toLocaleString('en-IN')
+    ? inr2(n)
     : '<span style="color:var(--spice-text-hint)">—</span>';
 
   const ptHTML = PT.length ? `
@@ -8669,7 +8668,7 @@ async function loadStats(auctionId){
                 <td class="num">${kg(t.qty)}</td>
                 <td class="num" style="color:var(--spice-cardamom-dk)">${kg(t.sold_qty)}</td>
                 <td class="num" style="color:${(t.wd_qty||0)>0?'#991B1B':'var(--spice-text-hint)'}">${kg(t.wd_qty)}</td>
-                <td class="num"><strong>${inrCr(t.amount)}</strong></td>
+                <td class="num"><strong>${inr2(t.amount)}</strong></td>
                 <td class="num">${inrPrice(t.min_price)}</td>
                 <td class="num">${inrPrice(t.max_price)}</td>
                 <td class="num"><strong>${inrPrice(t.avg_price)}</strong></td>
@@ -8691,7 +8690,7 @@ async function loadStats(auctionId){
               <td class="num">${kg(CUM.qty)}</td>
               <td class="num">${kg(CUM.sold_qty)}</td>
               <td class="num">${kg(CUM.wd_qty)}</td>
-              <td class="num">${inrCr(CUM.amount)}</td>
+              <td class="num">${inr2(CUM.amount)}</td>
               <td class="num">${inrPrice(CUM.min_price)}</td>
               <td class="num">${inrPrice(CUM.max_price)}</td>
               <td class="num">${inrPrice(CUM.avg_price)}</td>
@@ -8714,7 +8713,7 @@ async function loadStats(auctionId){
         <div class="leader-meta">${s.lots} lot${s.lots!==1?'s':''} · ${kg(s.qty)}</div>
       </div>
       <div class="leader-bar"><div class="leader-fill" style="width:${pct}%"></div></div>
-      <div class="leader-value">${inrCr(s.amount)}</div>
+      <div class="leader-value">${inr2(s.amount)}</div>
     </div>`;
   }).join('') : emptyStateHTML({icon:'traders', title:'No seller data this week', body:'Once trades are recorded, your top sellers will appear here.'});
 
@@ -8736,7 +8735,7 @@ async function loadStats(auctionId){
           </div></td>
           <td>${pillCls?`<span class="pill ${pillCls}"><span class="pill-dot"></span>${pillLbl}</span>`:'—'}</td>
           <td style="font-family:monospace;font-size:13px">${esc(inv.sale||'')}-${esc(inv.invo||'')}</td>
-          <td class="num">${inr(inv.tot)}</td>
+          <td class="num">${inr2(inv.tot)}</td>
           <td style="color:var(--spice-text-hint)">${fmtD(inv.date)}</td>
         </tr>`;
       }).join('')}</tbody>
@@ -8761,7 +8760,7 @@ async function loadStats(auctionId){
       <div class="kpi money">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M8 13v5M13 9v9M18 6v12"/></svg></div>
         <div class="kpi-label">${isAllMode ? 'Total volume' : 'Trade volume'}</div>
-        <div class="kpi-value">${inrCr(isAllMode ? (T.value!=null?T.value:CUM.amount) : (A ? A.totalAmt : 0))}</div>
+        <div class="kpi-value">${inr2(isAllMode ? (T.value!=null?T.value:CUM.amount) : (A ? A.totalAmt : 0))}</div>
         <span class="kpi-delta neutral">${isAllMode
           ? `${CUM.auctions||0} ${termAuction(CUM.auctions!==1, true)}`
           : (A ? `${kg(A.totalQty)} traded` : 'No ' + termAuction(false, true))}</span>
@@ -8775,7 +8774,7 @@ async function loadStats(auctionId){
       <div class="kpi action">
         <div class="kpi-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
         <div class="kpi-label">Outstanding</div>
-        <div class="kpi-value">${inrCr(T.outstanding_by_buyers)}</div>
+        <div class="kpi-value">${inr2(T.outstanding_by_buyers)}</div>
         <span class="kpi-delta ${(T.outstanding_by_buyers||0)>0?'down':'neutral'}">${(T.outstanding_by_buyers||0)>0 ? 'Due from buyers' : 'All settled'}</span>
       </div>
       <div class="kpi action">
@@ -8798,8 +8797,18 @@ async function loadStats(auctionId){
           <div class="qa-grid">
             <button class="qa" onclick="go('invoices')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div>
-              <div class="qa-label">Generate invoices</div>
+              <div class="qa-label">Generate Sales invoice</div>
               <div class="qa-sub">For all buyers</div>
+            </button>
+            <button class="qa state-kerala-only" onclick="go('purchases')">
+              <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg></div>
+              <div class="qa-label">Generate Purchase invoice</div>
+              <div class="qa-sub">For all dealers</div>
+            </button>
+            <button class="qa feat-bills state-kerala-only" onclick="go('bills')">
+              <div class="qa-icon"><svg viewBox="0 0 24 24"><path d="M20 14v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8z"/><path d="M14 2v6h6M9 15h4M9 18h6M9 12h2"/></svg></div>
+              <div class="qa-label">Generate Bills of Supply</div>
+              <div class="qa-sub">For agri sellers</div>
             </button>
             <button class="qa" onclick="go('payments')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
