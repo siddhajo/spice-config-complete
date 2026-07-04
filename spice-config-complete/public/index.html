@@ -1197,14 +1197,16 @@ tr:hover td{background:var(--spice-cream)}
    forcing one overflowing row. `gap:1px` over a line-coloured background
    draws crisp dividers at any column count. Labels reserve two lines so the
    value baselines line up whether the label wraps ("Stock (kg)") or not. */
+/* Highlighted summary band below the Withdrawn row — theme-tinted tiles with
+   a coloured top edge so the money/price figures stand out. */
 .dash-snap-ft{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;
-  background:var(--spice-line);border-top:1px solid var(--spice-line)}
-.dash-snap-ft .mf{background:var(--card);padding:11px 16px;min-width:0;display:flex;flex-direction:column}
+  background:var(--spice-saffron-md);border-top:2px solid var(--spice-saffron)}
+.dash-snap-ft .mf{background:var(--spice-saffron-lt);padding:12px 16px;min-width:0;display:flex;flex-direction:column}
 .dash-snap-ft .mf .k{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
-  color:var(--spice-text-hint);line-height:1.25;min-height:25px;margin-bottom:4px}
+  color:var(--spice-saffron-dk);opacity:.9;line-height:1.25;min-height:25px;margin-bottom:4px}
 .dash-snap-ft .mf .v{font-size:16px;font-weight:800;letter-spacing:-.2px;font-variant-numeric:tabular-nums;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dash-snap-ft .mf.pay .v{color:var(--spice-saffron)}
+  color:var(--spice-text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-snap-ft .mf.pay .v{color:var(--spice-saffron-dk)}
 .dash-snap-ft .mf.inc .v{color:var(--spice-cardamom-dk)}
 
 /* ── Tabbed breakdown (Planter / Dealer / Branch) ── */
