@@ -1178,6 +1178,9 @@ tr:hover td{background:var(--spice-cream)}
 .snap-st-book .dot{background:var(--spice-text-mute)}
 .snap-st-sold .dot{background:var(--spice-cardamom)}
 .snap-st-wd .dot{background:var(--spice-chili)}
+.snap-link{cursor:pointer;color:var(--spice-cardamom-dk)}
+.snap-link:hover{text-decoration:underline;text-underline-offset:2px}
+.snap-link:focus-visible{outline:2px solid var(--spice-cardamom);outline-offset:2px;border-radius:4px}
 .snap-row.snap-sold td{background:#F5FBF6}
 .snap-row.snap-wd td{background:#FEF6F6}
 .snap-amt{font-weight:800}
@@ -5157,6 +5160,15 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 </div>
 
 <!-- MODALS -->
+<!-- Dashboard: Grade 1 / Grade 2 breakdown for a snapshot-matrix status. -->
+<div class="modal-bg" id="dash-grade-modal"><div class="modal" style="max-width:560px">
+  <h2 id="dash-grade-title">Grade breakdown</h2>
+  <div id="dash-grade-body"></div>
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('dash-grade-modal')">Close</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="trader-view-modal"><div class="modal" style="max-width:560px">
   <h2 id="trader-view-title">Seller</h2>
   <div id="trader-view-body"></div>
@@ -8400,6 +8412,44 @@ async function refreshCurrentTab(){
 //   <id>  => drilled into that specific auction
 let _dashSelectedAuctionId = null;
 
+// Grade breakdown for the snapshot matrix, kept across re-renders so the
+// click-through modal can read it after loadStats() rebuilds the card.
+let _dashGrade = null;
+// Open the Grade 1 / Grade 2 breakdown modal for a status (booked/sold/withdrawn).
+function openGradeModal(status) {
+  const body = document.getElementById('dash-grade-body');
+  const titleEl = document.getElementById('dash-grade-title');
+  if (!body) return;
+  const labels = { booked: 'Booked', sold: 'Sold', withdrawn: 'Withdrawn' };
+  if (titleEl) titleEl.textContent = (labels[status] || status) + ' — grade breakdown';
+  const data = (_dashGrade || {})[status];
+  const money = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const numf  = n => Math.round(Number(n) || 0).toLocaleString('en-IN');           // counts
+  const qf    = n => (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });  // qty (kg)
+  const blank = { lots: 0, bags: 0, qty: 0, seller_qty: 0, amount: 0 };
+  if (!data) {
+    body.innerHTML = '<div class="bd-empty">No grade data in this scope yet.</div>';
+    showModal('dash-grade-modal');
+    return;
+  }
+  const rows = [['Grade 1', data['1'] || blank], ['Grade 2', data['2'] || blank]];
+  const other = data['other'];
+  if (other && (other.lots || other.bags || other.amount)) rows.push(['Ungraded', other]);
+  const tot = rows.reduce((a, [, g]) => ({
+    lots: a.lots + g.lots, bags: a.bags + g.bags, qty: a.qty + g.qty,
+    seller_qty: a.seller_qty + g.seller_qty, amount: a.amount + g.amount,
+  }), { ...blank });
+  const rowHtml = (label, g) => `<tr>
+    <td class="l bd-name">${label} <span style="color:var(--spice-text-hint);font-weight:500">· ${numf(g.lots)} lot${g.lots === 1 ? '' : 's'}</span></td>
+    <td class="num">${numf(g.bags)}</td><td class="num">${qf(g.seller_qty)}</td>
+    <td class="num">${qf(g.qty)}</td><td class="num">${money(g.amount)}</td></tr>`;
+  body.innerHTML = `<div class="bd-tblwrap"><table class="bd-table" style="min-width:440px">
+    <thead><tr><th class="l">Grade</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Amount</th></tr></thead>
+    <tbody>${rows.map(([l, g]) => rowHtml(l, g)).join('')}</tbody>
+    <tfoot><tr><td class="l">Total · ${numf(tot.lots)} lots</td><td class="num">${numf(tot.bags)}</td><td class="num">${qf(tot.seller_qty)}</td><td class="num">${qf(tot.qty)}</td><td class="num">${money(tot.amount)}</td></tr></tfoot>
+  </table></div>`;
+  showModal('dash-grade-modal');
+}
 // Breakdown card tab switcher (Planter-wise / Dealer-wise / Branch-wise).
 // Panes render together in loadStats(); this toggles which one is visible.
 function dashBreakdownTab(name, btn) {
@@ -8440,6 +8490,8 @@ async function loadStats(auctionId){
   const PLAN = Array.isArray(dIns.perPlanter) ? dIns.perPlanter : [];
   const DEAL = Array.isArray(dIns.perDealer)  ? dIns.perDealer  : [];
   const BRK  = Array.isArray(dIns.perBranch)  ? dIns.perBranch  : [];
+  // Stash grade breakdown for the snapshot matrix click-through modal.
+  _dashGrade = dIns.gradeBreakdown || null;
   const K=d.kpi||{}, A=d.currentAuction, S=d.topSellers||[], I=d.recentInvoices||[], C=d.counts||{}, AA=d.allAuctions||[];
   const CUM=d.cumulative||{qty:0,amount:0,lots:0,auctions:0};
   const PT=d.perTradeBreakdown||[];
@@ -8453,7 +8505,7 @@ async function loadStats(auctionId){
   // (e.g. ₹9,20,45,123.45). Every money figure on the dashboard uses this
   // one formatter so amounts read precisely for reconciliation.
   const inr2 = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const kg = n => (n||0).toFixed(0)+' kg';
+  const kg = n => (Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg';
   const kgK = n => { const v = (n||0)/1000; return v>=1 ? v.toFixed(1)+'T' : Math.round(n||0)+' kg'; };
   const now = new Date();
   const hour = Number((istParts(now)||{}).hh ?? now.getHours());
@@ -8475,22 +8527,28 @@ async function loadStats(auctionId){
   // Softened, information-first replacement for the old saturated green
   // hero. Scoped by the picker to one trade (or All Trades). Every figure
   // comes from /api/insights totals (T), so it stays in one source.
-  //   Planter Wt = pqty (sample-refund-adjusted seller weighment)
-  //   Dealer Wt  = qty  (net weight the buyer is billed on)
+  //   Seller Qty = qty + sample per lot; Buyer Qty = net billed qty (= qty).
+  // nkg → integer counts (lots, bags); nq → quantities in kg, always to
+  // 2 decimals for consistency across the dashboard.
   const nkg = n => Math.round(Number(n)||0).toLocaleString('en-IN');
+  const nq  = n => (Number(n)||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const priceRange = (T.min_price > 0 || T.max_price > 0)
     ? `${inr2(T.min_price)} – ${inr2(T.max_price)}` : '—';
   // One matrix row. `tone` shades Sold (green) / Withdrawn (red).
-  // sellerWt = net qty + sample per lot; buyerWt = net qty.
-  const mrow = (label, tone, lots, bags, sellerWt, buyerWt, amount) => `
+  // sellerWt = net qty + sample per lot; buyerWt = net qty. The status label
+  // is a link that opens the grade-1 / grade-2 breakdown modal.
+  const mrow = (label, tone, lots, bags, sellerWt, buyerWt, amount) => {
+    const sk = tone === 'sold' ? 'sold' : tone === 'wd' ? 'withdrawn' : 'booked';
+    return `
     <tr class="snap-row${tone ? ' snap-'+tone : ''}">
-      <td class="l"><span class="snap-st snap-st-${tone||'book'}"><span class="dot"></span>${label}</span></td>
+      <td class="l"><span class="snap-st snap-st-${tone||'book'} snap-link" onclick="openGradeModal('${sk}')" role="button" tabindex="0" title="View Grade 1 / Grade 2 breakdown"><span class="dot"></span>${label}</span></td>
       <td class="num">${nkg(lots)}</td>
       <td class="num">${nkg(bags)}</td>
-      <td class="num">${nkg(sellerWt)}</td>
-      <td class="num">${nkg(buyerWt)}</td>
+      <td class="num">${nq(sellerWt)}</td>
+      <td class="num">${nq(buyerWt)}</td>
       <td class="num snap-amt">${inr2(amount)}</td>
     </tr>`;
+  };
   const snapWho = isAllMode
     ? { tag: 'ALL', t1: `All ${termAuction(true)}`, t2: `Cumulative across ${CUM.auctions||0} ${termAuction(CUM.auctions!==1, true)}` }
     : (A ? { tag: '#'+esc(A.ano), t1: `${termAuction()} #${esc(A.ano)}${A.crop_type?' — '+esc(A.crop_type):''}`, t2: fmtD(A.date) }
@@ -8511,8 +8569,8 @@ async function loadStats(auctionId){
         <table>
           <thead><tr>
             <th class="l">Status</th><th>Lots</th><th>Bags</th>
-            <th title="Seller weighment = net qty + sample weight per lot">Seller Wt</th>
-            <th title="Buyer billed weight = net qty">Buyer Wt</th>
+            <th title="Seller qty = net qty + sample weight per lot">Seller Qty</th>
+            <th title="Buyer billed qty = net qty">Buyer Qty</th>
             <th>Amount</th>
           </tr></thead>
           <tbody>
@@ -8525,7 +8583,7 @@ async function loadStats(auctionId){
       <div class="dash-snap-ft">
         <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inr2(T.payable_to_sellers)}</div></div>
         <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inr2(T.commission_income)}</div></div>
-        <div class="mf"><div class="k">Stock (kg)</div><div class="v">${nkg(T.stock_kg)}</div></div>
+        <div class="mf"><div class="k">Stock (kg)</div><div class="v">${nq(T.stock_kg)}</div></div>
         <div class="mf"><div class="k">Min ₹/kg</div><div class="v">${T.min_price>0?inr2(T.min_price):'—'}</div></div>
         <div class="mf"><div class="k">Max ₹/kg</div><div class="v">${T.max_price>0?inr2(T.max_price):'—'}</div></div>
         <div class="mf" title="Range ${priceRange}"><div class="k">Avg ₹/kg</div><div class="v">${T.avg_price>0?inr2(T.avg_price):'—'}</div></div>
@@ -8548,29 +8606,29 @@ async function loadStats(auctionId){
 
   const planTot = bdSum(PLAN, p => p.payable);
   const planPane = PLAN.length ? `<div class="bd-tblwrap"><table class="bd-table">
-    <thead><tr><th class="l">Planter (seller)</th><th>Lots</th><th>Planter Wt</th><th>Payable</th><th>Share</th></tr></thead>
+    <thead><tr><th class="l">Planter (seller)</th><th>Lots</th><th>Planter Qty</th><th>Payable</th><th>Share</th></tr></thead>
     <tbody>
       ${PLAN.slice(0,8).map(p => `<tr>
         <td class="l bd-name">${esc(p.planter)}</td>
-        <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.pqty)}</td>
+        <td class="num">${nkg(p.lots)}</td><td class="num">${nq(p.pqty)}</td>
         <td class="num">${inr2(p.payable)}</td><td class="num">${bdBar(bdShare(p.payable, planTot))}</td></tr>`).join('')}
-      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
+      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more planters</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nq(bdSum(PLAN.slice(8),p=>p.pqty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.payable))}</td><td class="num">${bdShare(bdSum(PLAN.slice(8),p=>p.payable),planTot)}%</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inr2(planTot)}</td><td class="num">100%</td></tr></tfoot>
+    <tfoot><tr><td class="l">${PLAN.length} planter${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nq(bdSum(PLAN,p=>p.pqty))}</td><td class="num">${inr2(planTot)}</td><td class="num">100%</td></tr></tfoot>
   </table></div>` : bdEmpty('No planter data in this scope yet.');
 
   const dealVal = bdSum(DEAL, x => x.value);
   const dealPane = DEAL.length ? `<div class="bd-tblwrap"><table class="bd-table">
-    <thead><tr><th class="l">Dealer (buyer)</th><th>Lots</th><th>Dealer Wt</th><th>Amount</th><th>Outstanding</th></tr></thead>
+    <thead><tr><th class="l">Dealer (buyer)</th><th>Lots</th><th>Dealer Qty</th><th>Amount</th><th>Outstanding</th></tr></thead>
     <tbody>
       ${DEAL.slice(0,8).map(x => `<tr>
         <td class="l bd-name">${esc(x.dealer)}</td>
-        <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.qty)}</td>
+        <td class="num">${nkg(x.lots)}</td><td class="num">${nq(x.qty)}</td>
         <td class="num">${inr2(x.value)}</td>
         <td class="num">${(x.outstanding||0)>0 ? `<span class="bd-due">${inr2(x.outstanding)}</span>` : '<span class="bd-ok">Settled</span>'}</td></tr>`).join('')}
-      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
+      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more dealers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nq(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.outstanding))}</td></tr>`:''}
     </tbody>
-    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(dealVal)}</td><td class="num">${inr2(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
+    <tfoot><tr><td class="l">${DEAL.length} dealer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(dealVal)}</td><td class="num">${inr2(bdSum(DEAL,x=>x.outstanding))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No dealer data in this scope yet.');
 
   const brkVal = bdSum(BRK, b => b.value);
@@ -8579,10 +8637,10 @@ async function loadStats(auctionId){
     <tbody>
       ${BRK.slice(0,10).map(b => `<tr>
         <td class="l bd-name">${esc(b.branch)}</td>
-        <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.qty)}</td>
+        <td class="num">${nkg(b.lots)}</td><td class="num">${nq(b.qty)}</td>
         <td class="num">${inr2(b.value)}</td><td class="num">${bdBar(bdShare(b.value, brkVal))}</td></tr>`).join('')}
     </tbody>
-    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(brkVal)}</td><td class="num">100%</td></tr></tfoot>
+    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(brkVal)}</td><td class="num">100%</td></tr></tfoot>
   </table></div>` : bdEmpty('No branch data in this scope yet.');
 
   const breakdownHTML = `

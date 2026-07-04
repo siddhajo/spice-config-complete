@@ -11914,8 +11914,33 @@ app.get('/api/insights', requireView, (req, res) => {
     })),
   };
 
+  // ── Grade breakdown per status — drives the click-through modal on the
+  //    snapshot matrix (Booked / Sold / Withdrawn → Grade 1 / Grade 2). One
+  //    row per grade bucket; Seller Wt = qty + sample × lots, as elsewhere.
+  const gradeRows = db.all(
+    `SELECT CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN TRIM(grade) ELSE 'other' END AS grade,
+            COUNT(*) AS b_lots, COALESCE(SUM(bags),0) AS b_bags, COALESCE(SUM(qty),0) AS b_qty, COALESCE(SUM(amount),0) AS b_amt,
+            SUM(CASE WHEN ${SOLD} THEN 1 ELSE 0 END) AS s_lots, COALESCE(SUM(CASE WHEN ${SOLD} THEN bags ELSE 0 END),0) AS s_bags, COALESCE(SUM(CASE WHEN ${SOLD} THEN qty ELSE 0 END),0) AS s_qty, COALESCE(SUM(CASE WHEN ${SOLD} THEN amount ELSE 0 END),0) AS s_amt,
+            SUM(CASE WHEN ${WD}   THEN 1 ELSE 0 END) AS w_lots, COALESCE(SUM(CASE WHEN ${WD} THEN bags ELSE 0 END),0) AS w_bags, COALESCE(SUM(CASE WHEN ${WD} THEN qty ELSE 0 END),0) AS w_qty, COALESCE(SUM(CASE WHEN ${WD} THEN amount ELSE 0 END),0) AS w_amt
+     FROM lots
+     WHERE auction_id IN (${ph})
+     GROUP BY CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN TRIM(grade) ELSE 'other' END`,
+    aids
+  );
+  const gradeCell = (lots, bags, qty, amount) => ({
+    lots: num(lots), bags: num(bags), qty: num(qty),
+    seller_qty: num(qty) + sampleWt * num(lots), amount: num(amount),
+  });
+  const gradeBreakdown = { booked: {}, sold: {}, withdrawn: {} };
+  for (const g of gradeRows) {
+    gradeBreakdown.booked[g.grade]    = gradeCell(g.b_lots, g.b_bags, g.b_qty, g.b_amt);
+    gradeBreakdown.sold[g.grade]      = gradeCell(g.s_lots, g.s_bags, g.s_qty, g.s_amt);
+    gradeBreakdown.withdrawn[g.grade] = gradeCell(g.w_lots, g.w_bags, g.w_qty, g.w_amt);
+  }
+
   res.json({
     range, totals, perTrade, perBranch, perPlanter, perDealer, branchStacked,
+    gradeBreakdown,
     outstandingByBuyer: invByBuyer.slice(0, 50),
     buyerActivity,
   });
