@@ -1146,13 +1146,22 @@ tr:hover td{background:var(--spice-cream)}
    Only ::before is removed; the icon-accent classes below reuse the
    existing .kpi palette so nothing else on the page changes. */
 #dash-kpis .kpi::before{display:none}
-#dash-kpis .kpi.money    .kpi-icon{background:var(--spice-saffron-lt);color:var(--spice-saffron)}
-#dash-kpis .kpi.structure .kpi-icon{background:var(--spice-cardamom-lt);color:var(--spice-cardamom)}
-#dash-kpis .kpi.action   .kpi-icon{background:var(--spice-chili-lt);color:var(--spice-chili)}
-#dash-kpis .kpi.neutral  .kpi-icon{background:var(--tab-bg);color:var(--spice-text-mute)}
-/* Faint red border on the action tiles so Outstanding / Pending draw the
-   eye more than the (now softened) selected-trade snapshot below. */
-#dash-kpis .kpi.action{border-color:#F3D4D4}
+/* Dashboard follows the BRANDING THEME. --spice-cardamom / --spice-chili are
+   only partially theme-swapped (cardamom falls back to green in Ocean, chili
+   is always red), whereas --spice-saffron* is the primary and recolours in
+   EVERY theme (ISP→Emerald, ASP→Ocean, …). Remap cardamom → saffron across
+   the whole dashboard + its modals so every accent tracks the active theme. */
+#tc-dash, #dash-grade-modal, #dash-lots-modal{
+  --spice-cardamom:    var(--spice-saffron);
+  --spice-cardamom-lt: var(--spice-saffron-lt);
+  --spice-cardamom-dk: var(--spice-saffron-dk);
+}
+/* All KPI icons carry the single theme-primary accent — the icon SHAPE tells
+   the metrics apart, not a fixed money/structure/action colour palette. */
+#dash-kpis .kpi .kpi-icon{background:var(--spice-saffron-lt);color:var(--spice-saffron)}
+/* Attention deltas (dues / pending) use the theme's secondary accent, which
+   also recolours per theme, instead of a hardcoded red. */
+#dash-kpis .kpi-delta.down{background:var(--spice-turmeric-lt);color:var(--spice-turmeric)}
 
 /* ── Selected-trade snapshot (softened hero) ──
    White card with a pale-green header band instead of a saturated green
@@ -1177,12 +1186,12 @@ tr:hover td{background:var(--spice-cream)}
 .snap-st .dot{width:8px;height:8px;border-radius:50%}
 .snap-st-book .dot{background:var(--spice-text-mute)}
 .snap-st-sold .dot{background:var(--spice-cardamom)}
-.snap-st-wd .dot{background:var(--spice-chili)}
+.snap-st-wd .dot{background:var(--spice-turmeric)}
 .snap-link{cursor:pointer;color:var(--spice-cardamom-dk)}
 .snap-link:hover{text-decoration:underline;text-underline-offset:2px}
 .snap-link:focus-visible{outline:2px solid var(--spice-cardamom);outline-offset:2px;border-radius:4px}
-.snap-row.snap-sold td{background:#F5FBF6}
-.snap-row.snap-wd td{background:#FEF6F6}
+.snap-row.snap-sold td{background:var(--spice-saffron-lt)}
+.snap-row.snap-wd td{background:var(--spice-turmeric-lt)}
 .snap-amt{font-weight:800}
 /* 6 money tiles wrap 3-per-row inside the (narrow) snapshot card instead of
    forcing one overflowing row. `gap:1px` over a line-coloured background
@@ -1250,19 +1259,19 @@ tr:hover td{background:var(--spice-cream)}
 .dash-pt-scroll thead th{position:sticky;top:0;z-index:2}
 
 /* ── Coloured table headers across dashboard + modal tables ── */
+/* Coloured table headers — theme primary, so they recolour with branding. */
 #tc-dash thead th,.modal thead th{
-  background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk);
-  border-bottom:1px solid rgba(21,128,61,.20)}
-.lot-tbl tfoot td{background:var(--spice-cardamom-lt);color:var(--spice-cardamom-dk)}
+  background:var(--spice-saffron-lt);color:var(--spice-saffron-dk);
+  border-bottom:1px solid var(--spice-saffron-md)}
+.lot-tbl tfoot td{background:var(--spice-saffron-lt);color:var(--spice-saffron-dk)}
 
-/* ── Vibrancy: subtle semantic tints + gradients so the page reads richer ── */
-#dash-kpis .kpi.money{background:linear-gradient(135deg,#ffffff 56%,#FFF4DF)}
-#dash-kpis .kpi.structure{background:linear-gradient(135deg,#ffffff 56%,#E7F8ED)}
-#dash-kpis .kpi.action{background:linear-gradient(135deg,#ffffff 56%,#FDEAEA)}
-.dash-snap-hd{background:linear-gradient(120deg,var(--spice-cardamom-lt) 0%,#EFF9F2 52%,#FFF6E6 100%)}
-.dash-snap-tag{background:linear-gradient(135deg,var(--spice-cardamom),var(--spice-cardamom-dk))}
-.snap-amt{color:var(--spice-cardamom-dk)}
-.greeting h1{background:linear-gradient(90deg,var(--spice-cardamom-dk),var(--spice-cardamom) 70%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+/* ── Vibrancy: all tints/gradients are theme-driven (saffron primary +
+     turmeric secondary), so the whole page recolours with the theme. ── */
+#dash-kpis .kpi{background:linear-gradient(135deg,var(--spice-paper) 62%,var(--spice-saffron-lt))}
+.dash-snap-hd{background:linear-gradient(120deg,var(--spice-saffron-lt) 0%,var(--spice-paper) 55%,var(--spice-turmeric-lt) 100%)}
+.dash-snap-tag{background:linear-gradient(135deg,var(--spice-saffron),var(--spice-saffron-dk))}
+.snap-amt{color:var(--spice-saffron-dk)}
+.greeting h1{background:linear-gradient(90deg,var(--spice-saffron-dk),var(--spice-saffron) 70%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 
 /* ── Generic modal close (X) — injected into every modal on load ── */
 .modal{position:relative}
