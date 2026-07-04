@@ -4983,7 +4983,7 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   // Resolve buyer details once so all updates share one read.
   // Case-insensitive match because operators type codes in any case.
   const buyer = db.get(
-    'SELECT buyer, buyer1, sale FROM buyers WHERE UPPER(buyer) = ? LIMIT 1',
+    'SELECT buyer, buyer1, code, sale FROM buyers WHERE UPPER(buyer) = ? LIMIT 1',
     [buyerCode.toUpperCase()]
   );
   if (!buyer) return res.status(404).json({ error: `No buyer registered with code "${buyerCode}". Add them in the Buyers tab first.` });
@@ -4995,13 +4995,18 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
       skipped: part.skipped,
     });
   }
-  // Stamp buyer, buyer1, and sale on each lot in one batched UPDATE.
+  // Stamp buyer, buyer1, code, and sale on each lot in one batched UPDATE.
+  // `code` MUST be stamped too: the lots list resolves its Code column via a
+  // join on the buyer master (buyer_code), but the edit modal reads the raw
+  // lots.code column — and the Sold/Withdrawn aggregates + WD invoice-
+  // eligibility checks also key off lots.code. Leaving it stale desyncs the
+  // edit view (and reports) from the reassigned buyer.
   // We also clear `invo` so the lot is treated as un-invoiced again
   // (it'll need a fresh invoice after a buyer reassignment).
   const placeholders = part.allowedIds.map(() => '?').join(',');
   db.run(
-    `UPDATE lots SET buyer=?, buyer1=?, sale=?, invo='' WHERE id IN (${placeholders})`,
-    [buyer.buyer, buyer.buyer1 || '', buyer.sale || 'L', ...part.allowedIds]
+    `UPDATE lots SET buyer=?, buyer1=?, code=?, sale=?, invo='' WHERE id IN (${placeholders})`,
+    [buyer.buyer, buyer.buyer1 || '', buyer.code || '', buyer.sale || 'L', ...part.allowedIds]
   );
   // Stale price-check for every affected trade.
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
@@ -5011,6 +5016,7 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
     updated: part.allowedIds.length,
     buyer: buyer.buyer,
     buyer1: buyer.buyer1 || '',
+    code: buyer.code || '',
     sale: buyer.sale || 'L',
     skipped: part.skipped,
   });
