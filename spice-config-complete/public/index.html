@@ -8767,29 +8767,39 @@ async function loadStats(auctionId){
   // Clickable entity → opens the lot-wise (grade-segregated) drill-down.
   const bdLink = (by, key, label) =>
     `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
+  // Invoice-number cell — one number per entity when a single trade is
+  // selected; a comma list across All Trades (trimmed to 3 + "+N", full on hover).
+  const invCell = raw => {
+    const a = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!a.length) return '<span style="color:var(--spice-text-hint)">—</span>';
+    const shown = a.length <= 3 ? a.join(', ') : `${a.slice(0,3).join(', ')} +${a.length-3}`;
+    return `<span title="${esc(a.join(', '))}">${esc(shown)}</span>`;
+  };
 
-  // Seller-wise: Seller · Lots · Bags · Qty · Inv amt
+  // Seller-wise: Seller · Inv No · Lots · Bags · Qty · Inv amt
   const planPane = PLAN.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
-    <thead><tr><th class="l">Seller</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
+    <thead><tr><th class="l">Seller</th><th class="l">Inv No</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
       ${PLAN.map(p => `<tr>
         <td class="l bd-name">${bdLink('seller', p.planter, p.planter)}</td>
+        <td class="l">${invCell(p.invos)}</td>
         <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.bags)}</td><td class="num">${nq(p.qty)}</td>
         <td class="num">${inr2(p.value)}</td></tr>`).join('')}
     </tbody>
-    <tfoot><tr><td class="l">${PLAN.length} seller${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN,p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN,p=>p.value))}</td></tr></tfoot>
+    <tfoot><tr><td class="l">${PLAN.length} seller${PLAN.length===1?'':'s'}</td><td></td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN,p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN,p=>p.value))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No seller data in this scope yet.');
 
-  // Buyer-wise: Buyer · Lots · Bags · Qty · Inv amt
+  // Buyer-wise: Buyer · Inv No · Lots · Bags · Qty · Inv amt
   const dealPane = DEAL.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
-    <thead><tr><th class="l">Buyer</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
+    <thead><tr><th class="l">Buyer</th><th class="l">Inv No</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
       ${DEAL.map(x => `<tr>
         <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
+        <td class="l">${invCell(x.invos)}</td>
         <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
         <td class="num">${inr2(x.value)}</td></tr>`).join('')}
     </tbody>
-    <tfoot><tr><td class="l">${DEAL.length} buyer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL,x=>x.value))}</td></tr></tfoot>
+    <tfoot><tr><td class="l">${DEAL.length} buyer${DEAL.length===1?'':'s'}</td><td></td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL,x=>x.value))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No buyer data in this scope yet.');
 
   // Branch-wise: Branch · Lots · Bags · Seller Qty · Buyer Qty · Total Qty · Total amount

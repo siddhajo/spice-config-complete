@@ -11858,6 +11858,17 @@ app.get('/api/insights', requireView, (req, res) => {
     }))
     .sort((x, y) => y.value - x.value);
 
+  // ── Seller purchase-invoice numbers, keyed by seller name (a seller's
+  //    "Inv No" is their purchase invoice from the purchases table). ──
+  const purInvBySeller = {};
+  db.all(
+    `SELECT TRIM(name) AS name, GROUP_CONCAT(DISTINCT NULLIF(TRIM(invo),'')) AS invos
+     FROM purchases
+     WHERE auction_id IN (${ph}) AND COALESCE(TRIM(name),'')<>'' AND COALESCE(TRIM(invo),'')<>''
+     GROUP BY TRIM(name)`,
+    aids
+  ).forEach(r => { purInvBySeller[r.name] = r.invos || ''; });
+
   // ── Seller-wise breakdown — every lot a seller brought, ranked by
   //    invoiced amount. Seller identity lives in lots.name (denorm of
   //    traders). value = Σ amount (= invoiced amount; withdrawn lots are ~0).
@@ -11875,7 +11886,7 @@ app.get('/api/insights', requireView, (req, res) => {
      ORDER BY value DESC
      LIMIT 2000`,
     aids
-  ).map(r => ({ planter: r.planter, lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
+  ).map(r => ({ planter: r.planter, invos: purInvBySeller[r.planter] || '', lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
 
   // ── Dealer-wise (buyer) breakdown — sold lots, ranked by purchase value,
   //    with each dealer's outstanding pulled from invByBuyer (KERALA-excluded).
@@ -11888,7 +11899,8 @@ app.get('/api/insights', requireView, (req, res) => {
             COUNT(*) AS lots,
             COALESCE(SUM(bags),0)   AS bags,
             COALESCE(SUM(qty),0)    AS qty,
-            COALESCE(SUM(amount),0) AS value
+            COALESCE(SUM(amount),0) AS value,
+            COALESCE(GROUP_CONCAT(DISTINCT NULLIF(TRIM(invo),'')),'') AS invos
      FROM lots
      WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(buyer),'')<>''
      GROUP BY buyer
@@ -11896,7 +11908,7 @@ app.get('/api/insights', requireView, (req, res) => {
      LIMIT 2000`,
     aids
   ).map(r => ({
-    dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '',
+    dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '', invos: r.invos || '',
     lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), value: num(r.value),
     outstanding: num(outstandingByCode[r.buyer_code] || 0),
   }));
