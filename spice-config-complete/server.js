@@ -11728,7 +11728,7 @@ app.get('/api/insights', requireView, (req, res) => {
             COALESCE(SUM(CASE WHEN ${WD}   THEN amount ELSE 0 END),0) AS wd_value,
             MIN(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS min_price,
             MAX(CASE WHEN ${SOLD} AND price>0 AND amount>0 THEN price END) AS max_price,
-            COALESCE(SUM(CASE WHEN amount>0 THEN balance ELSE 0 END),0) AS payable
+            COALESCE(SUM(CASE WHEN amount>0 THEN (CASE WHEN isp_puramt>0 THEN isp_puramt ELSE puramt END) ELSE 0 END),0) AS payable
      FROM lots
      WHERE auction_id IN (${ph})
      GROUP BY auction_id, COALESCE(NULLIF(TRIM(branch),''),'(unspecified)')`,
@@ -11873,7 +11873,7 @@ app.get('/api/insights', requireView, (req, res) => {
      WHERE auction_id IN (${ph}) AND COALESCE(TRIM(name),'')<>''
      GROUP BY COALESCE(NULLIF(TRIM(name),''),'(unknown)')
      ORDER BY value DESC
-     LIMIT 200`,
+     LIMIT 2000`,
     aids
   ).map(r => ({ planter: r.planter, lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), pqty: num(r.pqty), value: num(r.value), payable: num(r.payable) }));
 
@@ -11893,7 +11893,7 @@ app.get('/api/insights', requireView, (req, res) => {
      WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(buyer),'')<>''
      GROUP BY buyer
      ORDER BY value DESC
-     LIMIT 200`,
+     LIMIT 2000`,
     aids
   ).map(r => ({
     dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '',
@@ -11978,6 +11978,7 @@ app.get('/api/insights/lots', requireView, (req, res) => {
     `SELECT lot_no,
             CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN TRIM(grade) ELSE 'other' END AS grade,
             COALESCE(bags,0) AS bags, COALESCE(qty,0) AS qty, COALESCE(amount,0) AS amount,
+            COALESCE(price,0) AS price, COALESCE(prate,0) AS prate,
             COALESCE(NULLIF(TRIM(name),''),'') AS seller,
             COALESCE(NULLIF(TRIM(buyer1),''), buyer, '') AS buyer,
             COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') AS branch,
@@ -11994,6 +11995,7 @@ app.get('/api/insights/lots', requireView, (req, res) => {
     return {
       lot_no: r.lot_no, grade: r.grade, bags: num(r.bags), qty: num(r.qty),
       seller_qty: num(r.qty) + sampleWt, amount: num(r.amount),
+      price: num(r.price), prate: num(r.prate),   // buyer's price / seller's rate per kg
       seller: r.seller, buyer: r.buyer, branch: r.branch, status,
     };
   });

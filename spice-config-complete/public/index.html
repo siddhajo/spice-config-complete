@@ -1215,6 +1215,11 @@ tr:hover td{background:var(--spice-cream)}
 .bd-pane{display:none}
 .bd-pane.on{display:block}
 .bd-tblwrap{overflow-x:auto}
+/* Breakdown panes list EVERY row and scroll, with the header + totals row
+   pinned so the column labels and grand total stay visible while scrolling. */
+.bd-scroll{max-height:360px;overflow:auto}
+.bd-scroll thead th{position:sticky;top:0;z-index:3}
+.bd-scroll tfoot td{position:sticky;bottom:0;z-index:3}
 .bd-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
 .bd-table th,.bd-table td{padding:10px 20px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .bd-table th.l,.bd-table td.l{text-align:left;white-space:normal}
@@ -8569,6 +8574,16 @@ async function openLotsModal(el){
     : s === 'sold' ? '<span class="lot-st lot-sold">Sold</span>' : '<span class="lot-st lot-uns">Unsold</span>';
   const sub0 = { bags: 0, sellerq: 0, qty: 0, amount: 0 };
   const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + l.amount }), { ...sub0 });
+  const pricef = n => (Number(n) || 0) > 0 ? '₹' + qf(n) : '—';
+  // Measure columns flip with the view:
+  //   seller → Seller Qty + Price (prate, the seller's per-kg rate)
+  //   buyer  → Buyer Qty  + Price (price, the buyer's per-kg price)
+  //   branch → Seller Qty + Buyer Qty (both weighments, no single price)
+  const midCols = by === 'seller'
+    ? [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Price', c: l => pricef(l.prate), f: () => '' }]
+    : by === 'buyer'
+    ? [{ h: 'Buyer Qty', c: l => qf(l.qty), f: s => qf(s.qty) }, { h: 'Price', c: l => pricef(l.price), f: () => '' }]
+    : [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Buyer Qty', c: l => qf(l.qty), f: s => qf(s.qty) }];
   // Grade 1 / Grade 2 / Ungraded as tabs — one grade's lots visible at a time.
   const grades = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].filter(([, k]) => lots.some(l => l.grade === k));
   const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${grades.map(([glabel, gkey], i) =>
@@ -8578,14 +8593,15 @@ async function openLotsModal(el){
     const sub = roll(gl);
     return `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${gkey}">
       <div class="bd-tblwrap"><table class="bd-table lot-tbl">
-        <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Amount</th><th class="l">Status</th></tr></thead>
-        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td><td class="num">${qf(l.seller_qty)}</td><td class="num">${qf(l.qty)}</td><td class="num">${money(l.amount)}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td class="l" colspan="2">Subtotal · ${nf(gl.length)} lots</td><td class="num">${nf(sub.bags)}</td><td class="num">${qf(sub.sellerq)}</td><td class="num">${qf(sub.qty)}</td><td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
+        <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th>${midCols.map(c => `<th>${c.h}</th>`).join('')}<th>Amount</th><th class="l">Status</th></tr></thead>
+        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td>${midCols.map(c => `<td class="num">${c.c(l)}</td>`).join('')}<td class="num">${money(l.amount)}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td class="l" colspan="2">Subtotal · ${nf(gl.length)} lots</td><td class="num">${nf(sub.bags)}</td>${midCols.map(c => `<td class="num">${c.f(sub)}</td>`).join('')}<td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
       </table></div></div>`;
   }).join('');
   const gt = roll(lots);
+  const gtQty = by === 'buyer' ? `Buyer Qty ${qf(gt.qty)}` : `Seller Qty ${qf(gt.sellerq)}`;
   body.innerHTML = tabsBar + panes +
-    `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · Seller Qty ${qf(gt.sellerq)} · Buyer Qty ${qf(gt.qty)} · ${money(gt.amount)}</div>`;
+    `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · ${gtQty} · ${money(gt.amount)}</div>`;
 }
 // Grade tab switcher inside the lot-wise modal.
 function lotsTab(gkey, btn){
@@ -8753,27 +8769,25 @@ async function loadStats(auctionId){
     `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
 
   // Seller-wise: Seller · Lots · Bags · Qty · Inv amt
-  const planPane = PLAN.length ? `<div class="bd-tblwrap"><table class="bd-table">
+  const planPane = PLAN.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
     <thead><tr><th class="l">Seller</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
-      ${PLAN.slice(0,8).map(p => `<tr>
+      ${PLAN.map(p => `<tr>
         <td class="l bd-name">${bdLink('seller', p.planter, p.planter)}</td>
         <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.bags)}</td><td class="num">${nq(p.qty)}</td>
         <td class="num">${inr2(p.value)}</td></tr>`).join('')}
-      ${PLAN.length>8 ? `<tr class="bd-more"><td class="l">+ ${PLAN.length-8} more sellers</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN.slice(8),p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN.slice(8),p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN.slice(8),p=>p.value))}</td></tr>`:''}
     </tbody>
     <tfoot><tr><td class="l">${PLAN.length} seller${PLAN.length===1?'':'s'}</td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN,p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN,p=>p.value))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No seller data in this scope yet.');
 
   // Buyer-wise: Buyer · Lots · Bags · Qty · Inv amt
-  const dealPane = DEAL.length ? `<div class="bd-tblwrap"><table class="bd-table">
+  const dealPane = DEAL.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
     <thead><tr><th class="l">Buyer</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
     <tbody>
-      ${DEAL.slice(0,8).map(x => `<tr>
+      ${DEAL.map(x => `<tr>
         <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
         <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
         <td class="num">${inr2(x.value)}</td></tr>`).join('')}
-      ${DEAL.length>8 ? `<tr class="bd-more"><td class="l">+ ${DEAL.length-8} more buyers</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL.slice(8),x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL.slice(8),x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL.slice(8),x=>x.value))}</td></tr>`:''}
     </tbody>
     <tfoot><tr><td class="l">${DEAL.length} buyer${DEAL.length===1?'':'s'}</td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL,x=>x.value))}</td></tr></tfoot>
   </table></div>` : bdEmpty('No buyer data in this scope yet.');
@@ -8781,10 +8795,10 @@ async function loadStats(auctionId){
   // Branch-wise: Branch · Lots · Bags · Seller Qty · Buyer Qty · Total Qty · Total amount
   //   Seller Qty = net qty + sample × lots; Buyer Qty = Total Qty = net qty.
   const brSellerQty = b => (Number(b.qty)||0) + sampleWt * (Number(b.lots)||0);
-  const brkPane = BRK.length ? `<div class="bd-tblwrap"><table class="bd-table">
+  const brkPane = BRK.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
     <thead><tr><th class="l">Branch</th><th>Lots</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Total Qty</th><th>Total amount</th></tr></thead>
     <tbody>
-      ${BRK.slice(0,20).map(b => `<tr>
+      ${BRK.map(b => `<tr>
         <td class="l bd-name">${bdLink('branch', b.branch, b.branch)}</td>
         <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.bags)}</td>
         <td class="num">${nq(brSellerQty(b))}</td><td class="num">${nq(b.qty)}</td><td class="num">${nq(b.qty)}</td>

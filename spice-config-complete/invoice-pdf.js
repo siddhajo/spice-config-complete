@@ -2104,8 +2104,8 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
   doc.moveTo(x0, infoY + infoH).lineTo(x1, infoY + infoH).stroke();
   const invDate = (billData && billData.billDate) || new Date().toLocaleDateString('en-GB');
   const eTradeNo = (billData && billData.eTradeNo) || cfg.e_trade_no || '';
-  // Mode-aware: 'e-TRADE No:' or 'e-AUCTION No:' from cfg.business_mode.
-  const eTradeLabel2 = (cfg.business_mode === 'e-Auction') ? 'e-AUCTION No' : 'e-TRADE No';
+  // Labelled "Purchase No" on the Bills of Supply (the trade/auction number).
+  const eTradeLabel2 = 'Purchase No';
   doc.font('Helvetica').fontSize(8.5);
   doc.text(`Invoice No: ${billNo || ''}`, x0 + 6, infoY + 4);
   doc.text(`${eTradeLabel2}: ${eTradeNo}`, x0, infoY + 4, { width: W, align: 'center' });
@@ -2368,11 +2368,6 @@ function generateAgriBillPDF(billData, cfg, billNo, externalDoc) {
   y += 14;
   // Vertical separator between label column and value column
   doc.moveTo(sumX + sumLabelW, sumStartY).lineTo(sumX + sumLabelW, y).stroke();
-
-  // DC No. / Date: aligned with "Total Value" row on the left
-  doc.font('Helvetica').fontSize(8);
-  doc.text('DC No.', x0 + 6, y - 14);
-  doc.text('Date:', x0 + W * 0.22, y - 14);
 
   // Separator before amount-in-words
   doc.moveTo(x0, y).lineTo(x1, y).stroke(); y += 6;
