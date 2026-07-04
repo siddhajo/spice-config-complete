@@ -8572,18 +8572,21 @@ async function openLotsModal(el){
   const cpCell = l => by === 'seller' ? esc(l.buyer) : by === 'buyer' ? esc(l.seller) : `${esc(l.seller)} · ${esc(l.buyer)}`;
   const pill = s => s === 'withdrawn' ? '<span class="lot-st lot-wd">Withdrawn</span>'
     : s === 'sold' ? '<span class="lot-st lot-sold">Sold</span>' : '<span class="lot-st lot-uns">Unsold</span>';
+  // Amount is view-specific: for a seller it's the ISP purchase amount they're
+  // paid (isp_puramt); for a buyer/branch it's the sale amount (amount).
+  const amtOf = l => by === 'seller' ? (Number(l.isp_puramt) || 0) : (Number(l.amount) || 0);
   const sub0 = { bags: 0, sellerq: 0, qty: 0, amount: 0 };
-  const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + l.amount }), { ...sub0 });
+  const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + amtOf(l) }), { ...sub0 });
   const pricef = n => (Number(n) || 0) > 0 ? '₹' + qf(n) : '—';
   // Measure columns flip with the view:
-  //   seller → Seller Qty + Price (prate, the seller's per-kg rate)
-  //   buyer  → Buyer Qty  + Price (price, the buyer's per-kg price)
-  //   branch → Seller Qty + Buyer Qty (both weighments, no single price)
+  //   seller → Seller Qty + Price (ISP p_rate = isp_prate)
+  //   buyer  → Buyer Qty  + Price (buyer's price = price)
+  //   branch → Qty (net)  + Price (ISP price = price)
   const midCols = by === 'seller'
-    ? [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Price', c: l => pricef(l.prate), f: () => '' }]
+    ? [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Price', c: l => pricef(l.isp_prate), f: () => '' }]
     : by === 'buyer'
     ? [{ h: 'Buyer Qty', c: l => qf(l.qty), f: s => qf(s.qty) }, { h: 'Price', c: l => pricef(l.price), f: () => '' }]
-    : [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Buyer Qty', c: l => qf(l.qty), f: s => qf(s.qty) }];
+    : [{ h: 'Qty', c: l => qf(l.qty), f: s => qf(s.qty) }, { h: 'Price', c: l => pricef(l.price), f: () => '' }];
   // Grade 1 / Grade 2 / Ungraded as tabs — one grade's lots visible at a time.
   const grades = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].filter(([, k]) => lots.some(l => l.grade === k));
   const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${grades.map(([glabel, gkey], i) =>
@@ -8594,12 +8597,13 @@ async function openLotsModal(el){
     return `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${gkey}">
       <div class="bd-tblwrap"><table class="bd-table lot-tbl">
         <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th>${midCols.map(c => `<th>${c.h}</th>`).join('')}<th>Amount</th><th class="l">Status</th></tr></thead>
-        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td>${midCols.map(c => `<td class="num">${c.c(l)}</td>`).join('')}<td class="num">${money(l.amount)}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
+        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td>${midCols.map(c => `<td class="num">${c.c(l)}</td>`).join('')}<td class="num">${money(amtOf(l))}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
         <tfoot><tr><td class="l" colspan="2">Subtotal · ${nf(gl.length)} lots</td><td class="num">${nf(sub.bags)}</td>${midCols.map(c => `<td class="num">${c.f(sub)}</td>`).join('')}<td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
       </table></div></div>`;
   }).join('');
   const gt = roll(lots);
-  const gtQty = by === 'buyer' ? `Buyer Qty ${qf(gt.qty)}` : `Seller Qty ${qf(gt.sellerq)}`;
+  const gtQty = by === 'seller' ? `Seller Qty ${qf(gt.sellerq)}`
+    : by === 'buyer' ? `Buyer Qty ${qf(gt.qty)}` : `Qty ${qf(gt.qty)}`;
   body.innerHTML = tabsBar + panes +
     `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · ${gtQty} · ${money(gt.amount)}</div>`;
 }
@@ -8798,7 +8802,7 @@ async function loadStats(auctionId){
     <tbody>
       ${DEAL.map(x => `<tr>
         <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
-        <td class="l">${invCell(x.invos, 'S - ')}</td>
+        <td class="l">${invCell(x.invos, '')}</td>
         <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
         <td class="num">${inr2(x.value)}</td></tr>`).join('')}
     </tbody>

@@ -11900,7 +11900,9 @@ app.get('/api/insights', requireView, (req, res) => {
             COALESCE(SUM(bags),0)   AS bags,
             COALESCE(SUM(qty),0)    AS qty,
             COALESCE(SUM(amount),0) AS value,
-            COALESCE(GROUP_CONCAT(DISTINCT NULLIF(TRIM(invo),'')),'') AS invos
+            COALESCE(GROUP_CONCAT(DISTINCT
+              CASE WHEN COALESCE(TRIM(invo),'')<>''
+                   THEN TRIM(COALESCE(sale,'')) || ' - ' || TRIM(invo) END),'') AS invos
      FROM lots
      WHERE auction_id IN (${ph}) AND ${SOLD} AND COALESCE(TRIM(buyer),'')<>''
      GROUP BY buyer
@@ -11991,6 +11993,7 @@ app.get('/api/insights/lots', requireView, (req, res) => {
             CASE WHEN TRIM(COALESCE(grade,'')) IN ('1','2') THEN TRIM(grade) ELSE 'other' END AS grade,
             COALESCE(bags,0) AS bags, COALESCE(qty,0) AS qty, COALESCE(amount,0) AS amount,
             COALESCE(price,0) AS price, COALESCE(prate,0) AS prate,
+            COALESCE(isp_prate,0) AS isp_prate, COALESCE(isp_puramt,0) AS isp_puramt,
             COALESCE(NULLIF(TRIM(name),''),'') AS seller,
             COALESCE(NULLIF(TRIM(buyer1),''), buyer, '') AS buyer,
             COALESCE(NULLIF(TRIM(branch),''),'(unspecified)') AS branch,
@@ -12007,7 +12010,8 @@ app.get('/api/insights/lots', requireView, (req, res) => {
     return {
       lot_no: r.lot_no, grade: r.grade, bags: num(r.bags), qty: num(r.qty),
       seller_qty: num(r.qty) + sampleWt, amount: num(r.amount),
-      price: num(r.price), prate: num(r.prate),   // buyer's price / seller's rate per kg
+      price: num(r.price), prate: num(r.prate),                 // buyer price / seller rate per kg
+      isp_prate: num(r.isp_prate), isp_puramt: num(r.isp_puramt), // ISP seller rate / purchase amount
       seller: r.seller, buyer: r.buyer, branch: r.branch, status,
     };
   });
