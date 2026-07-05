@@ -11692,7 +11692,7 @@ app.get('/api/insights', requireView, (req, res) => {
     seller_qty: 0, sold_seller_qty: 0, wd_seller_qty: 0,
     min_price: null, max_price: null, avg_price: 0,
     payable_to_sellers: 0, outstanding_by_buyers: 0, commission_income: 0,
-    stock_kg: 0, sample_weight: sampleWt, discount: 0, purchase_gst: 0,
+    stock_kg: 0, sample_weight: sampleWt, discount: 0, purchase_gst: 0, sales_gst: 0,
   };
   if (!aids.length) {
     return res.json({
@@ -11857,7 +11857,10 @@ app.get('/api/insights', requireView, (req, res) => {
     aids
   ).map(r => ({ buyer_name: r.buyer_name || '(unknown)', buyer_code: r.buyer_code || '', invoices: num(r.invoices), value: num(r.value), gst: num(r.gst) }));
   totals.outstanding_by_buyers = invByBuyer.reduce((s, r) => s + r.value, 0);
-  // Per-buyer sales-invoice GST (CGST+SGST+IGST), for the Buyer-wise GST column.
+  // Total sales-invoice GST (CGST+SGST+IGST, non-KERALA) — all on sold lots,
+  // so the snapshot matrix shows it on the Booked & Sold rows (Withdrawn = 0).
+  totals.sales_gst = invByBuyer.reduce((s, r) => s + r.gst, 0);
+  // Per-buyer sales-invoice GST, kept for potential drill-downs.
   const gstByCode = {};
   for (const r of invByBuyer) gstByCode[r.buyer_code] = (gstByCode[r.buyer_code] || 0) + r.gst;
 

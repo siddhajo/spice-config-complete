@@ -8751,7 +8751,6 @@ const _BD_CONF = {
     { k:'bags',   h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
     { k:'qty',    h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
     { k:'value',  h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
-    { k:'gst',    h:'GST',           n:r=>r.gst,   foot:'money', cell:r=>`<td class="num">${dashNMoney(r.gst)}</td>` },
   ]},
   branch: { noun:'branch', cols:[
     { k:'branch',    h:'Branch',       l:1, sf:1, txt:r=>String(r.branch||''), cell:r=>`<td class="l bd-name">${dashBdLink('branch',r.branch,r.branch)}</td>` },
@@ -8912,7 +8911,7 @@ async function loadStats(auctionId){
   // One matrix row. `tone` shades Sold (green) / Withdrawn (red).
   // sellerWt = net qty + sample per lot; buyerWt = net qty. The status label
   // is a link that opens the grade-1 / grade-2 breakdown modal.
-  const mrow = (label, tone, lots, bags, sellerWt, buyerWt, amount) => {
+  const mrow = (label, tone, lots, bags, sellerWt, buyerWt, amount, gst) => {
     const sk = tone === 'sold' ? 'sold' : tone === 'wd' ? 'withdrawn' : 'booked';
     return `
     <tr class="snap-row${tone ? ' snap-'+tone : ''}">
@@ -8922,6 +8921,7 @@ async function loadStats(auctionId){
       <td class="num">${nq(sellerWt)}</td>
       <td class="num">${nq(buyerWt)}</td>
       <td class="num snap-amt">${inr2(amount)}</td>
+      <td class="num">${inr2(gst)}</td>
     </tr>`;
   };
   const snapWho = isAllMode
@@ -8947,11 +8947,12 @@ async function loadStats(auctionId){
             <th title="Seller qty = net qty + sample weight per lot">Seller Qty</th>
             <th title="Buyer billed qty = net qty">Buyer Qty</th>
             <th>Amount</th>
+            <th title="Sales-invoice GST (CGST+SGST+IGST); on sold lots only">GST</th>
           </tr></thead>
           <tbody>
-            ${mrow('Booked', '',   T.lots, T.bags, T.seller_qty, T.qty, T.value)}
-            ${mrow('Sold', 'sold', T.sold, T.sold_bags, T.sold_seller_qty, T.sold_qty, T.sold_value)}
-            ${mrow('Withdrawn', 'wd', T.withdrawn, T.wd_bags, T.wd_seller_qty, T.wd_qty, T.wd_value)}
+            ${mrow('Booked', '',   T.lots, T.bags, T.seller_qty, T.qty, T.value, T.sales_gst)}
+            ${mrow('Sold', 'sold', T.sold, T.sold_bags, T.sold_seller_qty, T.sold_qty, T.sold_value, T.sales_gst)}
+            ${mrow('Withdrawn', 'wd', T.withdrawn, T.wd_bags, T.wd_seller_qty, T.wd_qty, T.wd_value, 0)}
           </tbody>
         </table>
       </div>
