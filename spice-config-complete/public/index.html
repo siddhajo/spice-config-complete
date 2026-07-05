@@ -8710,7 +8710,7 @@ const _BD_CONF = {
   planter: { noun:'seller', cols:[
     { k:'planter', h:'Seller',  l:1, sf:1, txt:r=>String(r.planter||''), cell:r=>`<td class="l bd-name">${dashBdLink('seller',r.planter,r.planter)}</td>` },
     { k:'invos',   h:'Inv No',  l:1, sf:1, txt:r=>String(r.invos||''),   cell:r=>`<td class="l">${dashInvCell(r.invos,'P - ')}</td>` },
-    { k:'lots',    h:'Lots',    sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'lots',    h:'Lots',    n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
     { k:'bags',    h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
     { k:'qty',     h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
     { k:'value',   h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
@@ -8718,14 +8718,14 @@ const _BD_CONF = {
   dealer: { noun:'buyer', cols:[
     { k:'dealer', h:'Buyer',   l:1, sf:1, txt:r=>String(r.dealer||''), cell:r=>`<td class="l bd-name">${dashBdLink('buyer',r.buyer_code,r.dealer)}</td>` },
     { k:'invos',  h:'Inv No',  l:1, sf:1, txt:r=>String(r.invos||''),  cell:r=>`<td class="l">${dashInvCell(r.invos,'')}</td>` },
-    { k:'lots',   h:'Lots',    sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'lots',   h:'Lots',    n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
     { k:'bags',   h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
     { k:'qty',    h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
     { k:'value',  h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
   ]},
   branch: { noun:'branch', cols:[
     { k:'branch',    h:'Branch',       l:1, sf:1, txt:r=>String(r.branch||''), cell:r=>`<td class="l bd-name">${dashBdLink('branch',r.branch,r.branch)}</td>` },
-    { k:'lots',      h:'Lots',         sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'lots',      h:'Lots',         n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
     { k:'bags',      h:'Bags',              n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
     { k:'sellerQty', h:'Seller Qty',        n:r=>(r.qty+_sw()*r.lots), foot:'qty', cell:r=>`<td class="num">${dashNQty(r.qty+_sw()*r.lots)}</td>` },
     { k:'buyerQty',  h:'Buyer Qty',         n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
