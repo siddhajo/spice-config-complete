@@ -1220,8 +1220,20 @@ tr:hover td{background:var(--spice-cream)}
 /* Breakdown panes list EVERY row and scroll, with the header + totals row
    pinned so the column labels and grand total stay visible while scrolling. */
 .bd-scroll{max-height:360px;overflow:auto}
-.bd-scroll thead th{position:sticky;top:0;z-index:3}
+/* Two sticky header rows: sortable labels at the top, filter inputs just below. */
+.bd-scroll thead tr:first-child th{position:sticky;top:0;z-index:4}
+.bd-scroll thead tr.bd-filt-row th{position:sticky;top:34px;z-index:3}
 .bd-scroll tfoot td{position:sticky;bottom:0;z-index:3}
+/* Sortable headers + filter inputs */
+.bd-sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.bd-sortable:hover{filter:brightness(.92)}
+.bd-arrow{font-size:9px}
+.bd-filt-row th{padding:5px 8px !important;background:var(--spice-saffron-lt)}
+.bd-filt-inp{width:100%;box-sizing:border-box;font-family:inherit;font-size:11px;font-weight:500;
+  text-transform:none;letter-spacing:normal;padding:3px 7px;border:1px solid var(--spice-line);
+  border-radius:6px;background:var(--spice-paper);color:var(--spice-text-main)}
+.bd-filt-inp::placeholder{color:var(--spice-text-hint);font-weight:400}
+.bd-filt-inp:focus{outline:none;border-color:var(--spice-saffron)}
 .bd-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
 .bd-table th,.bd-table td{padding:10px 20px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .bd-table th.l,.bd-table td.l{text-align:left;white-space:normal}
@@ -1258,6 +1270,8 @@ tr:hover td{background:var(--spice-cream)}
 .lots-pane.on{display:block;margin-bottom:12px}
 /* Body scrolls (not the whole modal) so the corner X stays pinned. */
 #dash-lots-body{max-height:60vh;overflow:auto}
+.lots-filter{display:flex;gap:10px;margin:0 0 12px;flex-wrap:wrap}
+.lots-filter .bd-filt-inp{flex:1;min-width:140px;max-width:240px;font-size:12px;padding:5px 9px}
 @media(max-width:560px){.dash-snap-ft{grid-template-columns:repeat(2,1fr)}}
 
 /* ── Per-trade table: capped height + scroll, sticky coloured header ── */
@@ -8511,6 +8525,7 @@ let _dashSelectedAuctionId = null;
 // Grade breakdown for the snapshot matrix, kept across re-renders so the
 // click-through modal can read it after loadStats() rebuilds the card.
 let _dashGrade = null;
+let _lm = null;   // lot-wise modal state (data + sort/filter), see openLotsModal
 // Open the Grade 1 / Grade 2 breakdown modal for a status (booked/sold/withdrawn).
 function openGradeModal(status) {
   const body = document.getElementById('dash-grade-body');
@@ -8569,45 +8584,96 @@ async function openLotsModal(el){
   const money = n => '₹' + (Number(n)||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const qf = n => (Number(n)||0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const nf = n => Math.round(Number(n)||0).toLocaleString('en-IN');
-  // Counterparty column flips with the view.
+  // Counterparty column flips with the view (Buyer for a seller, etc.).
   const cpHead = by === 'seller' ? 'Buyer' : by === 'buyer' ? 'Seller' : 'Seller · Buyer';
   const cpCell = l => by === 'seller' ? esc(l.buyer) : by === 'buyer' ? esc(l.seller) : `${esc(l.seller)} · ${esc(l.buyer)}`;
+  const cpText = l => by === 'seller' ? String(l.buyer||'') : by === 'buyer' ? String(l.seller||'') : `${l.seller||''} ${l.buyer||''}`;
   const pill = s => s === 'withdrawn' ? '<span class="lot-st lot-wd">Withdrawn</span>'
     : s === 'sold' ? '<span class="lot-st lot-sold">Sold</span>' : '<span class="lot-st lot-uns">Unsold</span>';
   // Amount is view-specific: for a seller it's the ISP purchase amount they're
   // paid (isp_puramt); for a buyer/branch it's the sale amount (amount).
   const amtOf = l => by === 'seller' ? (Number(l.isp_puramt) || 0) : (Number(l.amount) || 0);
-  const sub0 = { bags: 0, sellerq: 0, qty: 0, amount: 0 };
-  const roll = arr => arr.reduce((a, l) => ({ bags: a.bags + l.bags, sellerq: a.sellerq + l.seller_qty, qty: a.qty + l.qty, amount: a.amount + amtOf(l) }), { ...sub0 });
   const pricef = n => (Number(n) || 0) > 0 ? '₹' + qf(n) : '—';
   // Measure columns flip with the view:
   //   seller → Seller Qty + Price (ISP p_rate = isp_prate)
   //   buyer  → Buyer Qty  + Price (buyer's price = price)
   //   branch → Qty (net)  + Price (ISP price = price)
   const midCols = by === 'seller'
-    ? [{ h: 'Seller Qty', c: l => qf(l.seller_qty), f: s => qf(s.sellerq) }, { h: 'Price', c: l => pricef(l.isp_prate), f: () => '' }]
+    ? [{ h: 'Seller Qty', c: l => qf(l.seller_qty) }, { h: 'Price', c: l => pricef(l.isp_prate) }]
     : by === 'buyer'
-    ? [{ h: 'Buyer Qty', c: l => qf(l.qty), f: s => qf(s.qty) }, { h: 'Price', c: l => pricef(l.price), f: () => '' }]
-    : [{ h: 'Qty', c: l => qf(l.qty), f: s => qf(s.qty) }, { h: 'Price', c: l => pricef(l.price), f: () => '' }];
-  // Grade 1 / Grade 2 / Ungraded as tabs — one grade's lots visible at a time.
-  const grades = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].filter(([, k]) => lots.some(l => l.grade === k));
-  const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${grades.map(([glabel, gkey], i) =>
-    `<button class="${i===0?'on':''}" role="tab" aria-selected="${i===0}" onclick="lotsTab('${gkey}',this)">${glabel} · ${nf(lots.filter(l=>l.grade===gkey).length)}</button>`).join('')}</div>`;
-  const panes = grades.map(([glabel, gkey], i) => {
-    const gl = lots.filter(l => l.grade === gkey);
-    const sub = roll(gl);
-    return `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${gkey}">
-      <div class="bd-tblwrap"><table class="bd-table lot-tbl">
-        <thead><tr><th class="l">Lot</th><th class="l">${cpHead}</th><th>Bags</th>${midCols.map(c => `<th>${c.h}</th>`).join('')}<th>Amount</th><th class="l">Status</th></tr></thead>
-        <tbody>${gl.map(l => `<tr><td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td>${midCols.map(c => `<td class="num">${c.c(l)}</td>`).join('')}<td class="num">${money(amtOf(l))}</td><td class="l">${pill(l.status)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td class="l" colspan="2">Subtotal · ${nf(gl.length)} lots</td><td class="num">${nf(sub.bags)}</td>${midCols.map(c => `<td class="num">${c.f(sub)}</td>`).join('')}<td class="num">${money(sub.amount)}</td><td></td></tr></tfoot>
-      </table></div></div>`;
-  }).join('');
-  const gt = roll(lots);
-  const gtQty = by === 'seller' ? `Seller Qty ${qf(gt.sellerq)}`
-    : by === 'buyer' ? `Buyer Qty ${qf(gt.qty)}` : `Qty ${qf(gt.qty)}`;
-  body.innerHTML = tabsBar + panes +
-    `<div class="lot-grand">${kindLabel}: <strong>${esc(label)}</strong> · ${nf(lots.length)} lots · ${nf(gt.bags)} bags · ${gtQty} · ${money(gt.amount)}</div>`;
+    ? [{ h: 'Buyer Qty', c: l => qf(l.qty) }, { h: 'Price', c: l => pricef(l.price) }]
+    : [{ h: 'Qty', c: l => qf(l.qty) }, { h: 'Price', c: l => pricef(l.price) }];
+  const midqtyOf = l => by === 'seller' ? (Number(l.seller_qty)||0) : (Number(l.qty)||0);
+  // Precompute each lot's row HTML + sort/filter keys so the global
+  // renderLotBodies() can re-render on sort/filter without these local helpers.
+  const buildRow = l => ({
+    lotStr: String(l.lot_no||'').toLowerCase(),
+    lotSort: Number(String(l.lot_no||'').replace(/\D/g,'')) || 0,
+    cpStr: cpText(l).toLowerCase(),
+    row: `<td class="l">${esc(l.lot_no)}</td><td class="l">${cpCell(l)}</td><td class="num">${nf(l.bags)}</td>${midCols.map(c => `<td class="num">${c.c(l)}</td>`).join('')}<td class="num">${money(amtOf(l))}</td><td class="l">${pill(l.status)}</td>`,
+    num: { bags: Number(l.bags)||0, midqty: midqtyOf(l), amount: amtOf(l) },
+  });
+  const gradesDef = [['Grade 1', '1'], ['Grade 2', '2'], ['Ungraded', 'other']].filter(([, k]) => lots.some(l => l.grade === k));
+  const gradesData = gradesDef.map(([glabel, gkey]) => ({ key: gkey, label: glabel, rows: lots.filter(l => l.grade === gkey).map(buildRow) }));
+  _lm = { by, kindLabel, label, cpHead, colCount: 3 + midCols.length + 2, sort: { col:null, dir:1 }, filt: { lot:'', cp:'' }, grades: gradesData };
+
+  const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${gradesData.map((g, i) =>
+    `<button class="${i===0?'on':''}" role="tab" aria-selected="${i===0}" onclick="lotsTab('${g.key}',this)">${g.label} · ${nf(g.rows.length)}</button>`).join('')}</div>`;
+  const filterBar = `<div class="lots-filter">
+    <input class="bd-filt-inp" type="text" placeholder="Filter Lot…" aria-label="Filter Lot" oninput="lotFilterInput('lot',this.value)">
+    <input class="bd-filt-inp" type="text" placeholder="Filter ${cpHead}…" aria-label="Filter ${cpHead}" oninput="lotFilterInput('cp',this.value)">
+  </div>`;
+  const panes = gradesData.map((g, i) => `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${g.key}">
+    <div class="bd-tblwrap"><table class="bd-table lot-tbl">
+      <thead><tr>
+        <th class="l bd-sortable" onclick="lotSortClick('lot')">Lot <span class="bd-arrow" data-col="lot"></span></th>
+        <th class="l bd-sortable" onclick="lotSortClick('cp')">${cpHead} <span class="bd-arrow" data-col="cp"></span></th>
+        <th>Bags</th>${midCols.map(c => `<th>${c.h}</th>`).join('')}<th>Amount</th><th class="l">Status</th>
+      </tr></thead>
+      <tbody id="lots-body-${g.key}"></tbody><tfoot id="lots-foot-${g.key}"></tfoot>
+    </table></div></div>`).join('');
+  body.innerHTML = tabsBar + filterBar + panes + `<div class="lot-grand" id="lots-grand"></div>`;
+  renderLotBodies();
+}
+// Filter → sort → paint every grade pane in the lot-wise modal, plus the grand
+// total line. Only tbodies/tfeet are rewritten so the filter inputs keep focus.
+function renderLotBodies(){
+  if (!_lm) return;
+  const f = _lm.filt, s = _lm.sort;
+  const match = r => (!f.lot || r.lotStr.includes(f.lot)) && (!f.cp || r.cpStr.includes(f.cp));
+  const acc = s.col === 'cp' ? (r=>r.cpStr) : (r=>r.lotSort);
+  const grand = { lots:0, bags:0, midqty:0, amount:0 };
+  _lm.grades.forEach(g => {
+    let rows = g.rows.filter(match);
+    if (s.col) rows = rows.slice().sort((a,b)=>{ const x=acc(a), y=acc(b); return x<y ? -s.dir : x>y ? s.dir : 0; });
+    const sub = rows.reduce((a,r)=>({ bags:a.bags+r.num.bags, midqty:a.midqty+r.num.midqty, amount:a.amount+r.num.amount }), { bags:0, midqty:0, amount:0 });
+    grand.lots += rows.length; grand.bags += sub.bags; grand.midqty += sub.midqty; grand.amount += sub.amount;
+    const body = document.getElementById('lots-body-'+g.key);
+    const foot = document.getElementById('lots-foot-'+g.key);
+    if (body) body.innerHTML = rows.length
+      ? rows.map(r=>`<tr>${r.row}</tr>`).join('')
+      : `<tr><td colspan="${_lm.colCount}" style="padding:14px;text-align:center;color:var(--spice-text-hint)">No lots match the filter.</td></tr>`;
+    if (foot) foot.innerHTML = `<tr><td class="l" colspan="2">Subtotal · ${dashNInt(rows.length)} lots</td><td class="num">${dashNInt(sub.bags)}</td><td class="num">${dashNQty(sub.midqty)}</td><td></td><td class="num">${dashNMoney(sub.amount)}</td><td></td></tr>`;
+  });
+  const gEl = document.getElementById('lots-grand');
+  if (gEl) {
+    const ql = _lm.by === 'buyer' ? 'Buyer Qty' : _lm.by === 'seller' ? 'Seller Qty' : 'Qty';
+    gEl.innerHTML = `${_lm.kindLabel}: <strong>${esc(_lm.label)}</strong> · ${dashNInt(grand.lots)} lots · ${dashNInt(grand.bags)} bags · ${ql} ${dashNQty(grand.midqty)} · ${dashNMoney(grand.amount)}`;
+  }
+  document.querySelectorAll('#dash-lots-body .bd-arrow').forEach(a => {
+    a.textContent = (s.col && a.dataset.col === s.col) ? (s.dir>0?'▲':'▼') : '';
+  });
+}
+function lotSortClick(col){
+  if (!_lm) return;
+  const s = _lm.sort;
+  if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; }
+  renderLotBodies();
+}
+function lotFilterInput(col, val){
+  if (!_lm) return;
+  _lm.filt[col] = String(val||'').toLowerCase().trim();
+  renderLotBodies();
 }
 // Grade tab switcher inside the lot-wise modal.
 function lotsTab(gkey, btn){
@@ -8617,6 +8683,117 @@ function lotsTab(gkey, btn){
   if (btn && btn.parentNode) btn.parentNode.querySelectorAll('button').forEach(b => {
     const on = b === btn; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on));
   });
+}
+// ── Breakdown sort + filter ──────────────────────────────────────────
+// Global so the handlers work after loadStats() has rebuilt #tc-dash.
+let _bd = null;                       // { planter:[], dealer:[], branch:[], sampleWt }
+let _bdSort = { planter:{col:null,dir:1}, dealer:{col:null,dir:1}, branch:{col:null,dir:1} };
+let _bdFilt = { planter:{}, dealer:{}, branch:{} };
+// Formatters + cell builders (module-level so renderBdBody can use them).
+function dashNInt(n){ return Math.round(Number(n)||0).toLocaleString('en-IN'); }
+function dashNQty(n){ return (Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function dashNMoney(n){ return '₹'+(Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function dashBdLink(by,key,label){
+  return `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
+}
+function dashInvCell(raw,prefix){
+  const a = String(raw||'').split(',').map(s=>s.trim()).filter(Boolean);
+  if (!a.length) return '<span style="color:var(--spice-text-hint)">—</span>';
+  const pfx = n => (prefix||'')+n;
+  if (a.length === 1) return esc(pfx(a[0]));
+  return `<span title="${esc(a.map(pfx).join(', '))}" style="color:var(--spice-text-mute)">${a.length} invoices</span>`;
+}
+// Column config per breakdown kind. sf = sortable + filterable; txt / n give the
+// sort/filter value; cell builds the <td>; foot = footer aggregate type.
+const _sw = () => (_bd && _bd.sampleWt) || 0;
+const _BD_CONF = {
+  planter: { noun:'seller', cols:[
+    { k:'planter', h:'Seller',  l:1, sf:1, txt:r=>String(r.planter||''), cell:r=>`<td class="l bd-name">${dashBdLink('seller',r.planter,r.planter)}</td>` },
+    { k:'invos',   h:'Inv No',  l:1, sf:1, txt:r=>String(r.invos||''),   cell:r=>`<td class="l">${dashInvCell(r.invos,'P - ')}</td>` },
+    { k:'lots',    h:'Lots',    sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'bags',    h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
+    { k:'qty',     h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
+    { k:'value',   h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
+  ]},
+  dealer: { noun:'buyer', cols:[
+    { k:'dealer', h:'Buyer',   l:1, sf:1, txt:r=>String(r.dealer||''), cell:r=>`<td class="l bd-name">${dashBdLink('buyer',r.buyer_code,r.dealer)}</td>` },
+    { k:'invos',  h:'Inv No',  l:1, sf:1, txt:r=>String(r.invos||''),  cell:r=>`<td class="l">${dashInvCell(r.invos,'')}</td>` },
+    { k:'lots',   h:'Lots',    sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'bags',   h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
+    { k:'qty',    h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
+    { k:'value',  h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
+  ]},
+  branch: { noun:'branch', cols:[
+    { k:'branch',    h:'Branch',       l:1, sf:1, txt:r=>String(r.branch||''), cell:r=>`<td class="l bd-name">${dashBdLink('branch',r.branch,r.branch)}</td>` },
+    { k:'lots',      h:'Lots',         sf:1, n:r=>r.lots,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.lots)}</td>` },
+    { k:'bags',      h:'Bags',              n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
+    { k:'sellerQty', h:'Seller Qty',        n:r=>(r.qty+_sw()*r.lots), foot:'qty', cell:r=>`<td class="num">${dashNQty(r.qty+_sw()*r.lots)}</td>` },
+    { k:'buyerQty',  h:'Buyer Qty',         n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
+    { k:'totalQty',  h:'Total Qty',         n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
+    { k:'value',     h:'Total amount',      n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
+  ]},
+};
+// Build a pane's static shell: sortable header row + a filter-input row + empty
+// body/foot (filled by renderBdBody, which leaves the inputs untouched so they
+// keep focus while typing).
+function bdPaneShell(kind){
+  const noun = { planter:'seller', dealer:'buyer', branch:'branch' }[kind];
+  if (!_bd || !Array.isArray(_bd[kind]) || !_bd[kind].length) return `<div class="bd-empty">No ${noun} data in this scope yet.</div>`;
+  const cols = _BD_CONF[kind].cols;
+  const heads = cols.map(c => {
+    const cls = [c.l?'l':'', c.sf?'bd-sortable':''].filter(Boolean).join(' ');
+    return `<th${cls?` class="${cls}"`:''}${c.sf?` onclick="bdSortClick('${kind}','${c.k}')"`:''}>${c.h}${c.sf?` <span class="bd-arrow" data-col="${c.k}"></span>`:''}</th>`;
+  }).join('');
+  const filts = cols.map(c => c.sf
+    ? `<th class="bd-filt-th"><input class="bd-filt-inp" type="text" placeholder="Filter…" aria-label="Filter ${c.h}" oninput="bdFilterInput('${kind}','${c.k}',this.value)"></th>`
+    : '<th></th>').join('');
+  return `<div class="bd-tblwrap bd-scroll"><table class="bd-table" id="bd-head-${kind}">
+    <thead><tr>${heads}</tr><tr class="bd-filt-row">${filts}</tr></thead>
+    <tbody id="bd-body-${kind}"></tbody><tfoot id="bd-foot-${kind}"></tfoot>
+  </table></div>`;
+}
+// Filter → sort → paint the body + footer of one breakdown pane.
+function renderBdBody(kind){
+  if (!_bd || !Array.isArray(_bd[kind])) return;
+  const cols = _BD_CONF[kind].cols, noun = _BD_CONF[kind].noun;
+  const byKey = {}; cols.forEach(c => byKey[c.k] = c);
+  const filt = _bdFilt[kind] || {}, sort = _bdSort[kind] || { col:null, dir:1 };
+  let rows = _bd[kind].filter(r => Object.keys(filt).every(k => {
+    const f = filt[k]; if (!f) return true;
+    const c = byKey[k]; if (!c) return true;
+    return (c.txt ? c.txt(r).toLowerCase() : String(c.n(r))).includes(f);
+  }));
+  if (sort.col && byKey[sort.col]) {
+    const c = byKey[sort.col], acc = c.txt ? (r=>c.txt(r).toLowerCase()) : (r=>Number(c.n(r))||0);
+    rows = rows.slice().sort((a,b)=>{ const x=acc(a), y=acc(b); return x<y ? -sort.dir : x>y ? sort.dir : 0; });
+  }
+  const body = document.getElementById('bd-body-'+kind);
+  const foot = document.getElementById('bd-foot-'+kind);
+  if (body) body.innerHTML = rows.length
+    ? rows.map(r => `<tr>${cols.map(c=>c.cell(r)).join('')}</tr>`).join('')
+    : `<tr><td colspan="${cols.length}" style="padding:16px;text-align:center;color:var(--spice-text-hint)">No rows match the filter.</td></tr>`;
+  if (foot) {
+    const nn = rows.length + ' ' + (rows.length===1 ? noun : (noun==='branch' ? 'branches' : noun+'s'));
+    foot.innerHTML = '<tr>' + cols.map((c,i) => {
+      if (i===0) return `<td class="l">${nn}</td>`;
+      if (!c.foot) return '<td></td>';
+      const tot = rows.reduce((s,r)=>s+(Number(c.n(r))||0),0);
+      return `<td class="num">${c.foot==='money'?dashNMoney(tot):c.foot==='qty'?dashNQty(tot):dashNInt(tot)}</td>`;
+    }).join('') + '</tr>';
+  }
+  const head = document.getElementById('bd-head-'+kind);
+  if (head) head.querySelectorAll('.bd-arrow').forEach(a => {
+    a.textContent = (sort.col && a.dataset.col===sort.col) ? (sort.dir>0?'▲':'▼') : '';
+  });
+}
+function bdSortClick(kind, col){
+  const s = _bdSort[kind] || (_bdSort[kind] = { col:null, dir:1 });
+  if (s.col === col) s.dir = -s.dir; else { s.col = col; s.dir = 1; }
+  renderBdBody(kind);
+}
+function bdFilterInput(kind, col, val){
+  (_bdFilt[kind] || (_bdFilt[kind] = {}))[col] = String(val||'').toLowerCase().trim();
+  renderBdBody(kind);
 }
 // Breakdown card tab switcher (Seller-wise / Buyer-wise / Branch-wise).
 // Panes render together in loadStats(); this toggles which one is visible.
@@ -8763,68 +8940,14 @@ async function loadStats(auctionId){
       <button class="btn btn-a" onclick="go('auctions')">+ New ${termAuction()}</button>
     </div></div>`;
 
-  // ── Breakdown: Planter-wise / Dealer-wise / Branch-wise (tabbed) ──
-  // Three "who" views of the selected scope in one card, so they read as a
-  // set instead of three stacked blocks. Each shows the top 8 with the rest
-  // rolled into a muted "+ N more" line and a reconciling totals footer.
-  const bdSum = (arr, f) => arr.reduce((s, x) => s + (Number(f(x)) || 0), 0);
-  const bdEmpty = msg => `<div class="bd-empty">${msg}</div>`;
-  const sampleWt = Number(T.sample_weight) || 0;
-  // Clickable entity → opens the lot-wise (grade-segregated) drill-down.
-  const bdLink = (by, key, label) =>
-    `<span class="bd-link" role="button" tabindex="0" data-by="${by}" data-key="${esc(key)}" data-label="${esc(label)}" onclick="openLotsModal(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLotsModal(this)}" title="View lot-wise Grade 1 / Grade 2 details">${esc(label)}</span>`;
-  // Invoice-number cell. One invoice per entity per trade, so a single trade
-  // shows one clean number; across All Trades an entity spans many invoices —
-  // show a "N invoices" count (full list on hover) rather than a wall of numbers.
-  // `prefix` marks the invoice type: 'P - ' purchase (seller), 'S - ' sales (buyer).
-  const invCell = (raw, prefix) => {
-    const a = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (!a.length) return '<span style="color:var(--spice-text-hint)">—</span>';
-    const pfx = n => prefix + n;
-    if (a.length === 1) return esc(pfx(a[0]));
-    return `<span title="${esc(a.map(pfx).join(', '))}" style="color:var(--spice-text-mute)">${a.length} invoices</span>`;
-  };
-
-  // Seller-wise: Seller · Inv No · Lots · Bags · Qty · Inv amt
-  const planPane = PLAN.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
-    <thead><tr><th class="l">Seller</th><th class="l">Inv No</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
-    <tbody>
-      ${PLAN.map(p => `<tr>
-        <td class="l bd-name">${bdLink('seller', p.planter, p.planter)}</td>
-        <td class="l">${invCell(p.invos, 'P - ')}</td>
-        <td class="num">${nkg(p.lots)}</td><td class="num">${nkg(p.bags)}</td><td class="num">${nq(p.qty)}</td>
-        <td class="num">${inr2(p.value)}</td></tr>`).join('')}
-    </tbody>
-    <tfoot><tr><td class="l">${PLAN.length} seller${PLAN.length===1?'':'s'}</td><td></td><td class="num">${nkg(bdSum(PLAN,p=>p.lots))}</td><td class="num">${nkg(bdSum(PLAN,p=>p.bags))}</td><td class="num">${nq(bdSum(PLAN,p=>p.qty))}</td><td class="num">${inr2(bdSum(PLAN,p=>p.value))}</td></tr></tfoot>
-  </table></div>` : bdEmpty('No seller data in this scope yet.');
-
-  // Buyer-wise: Buyer · Inv No · Lots · Bags · Qty · Inv amt
-  const dealPane = DEAL.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
-    <thead><tr><th class="l">Buyer</th><th class="l">Inv No</th><th>Lots</th><th>Bags</th><th>Qty</th><th>Inv amt</th></tr></thead>
-    <tbody>
-      ${DEAL.map(x => `<tr>
-        <td class="l bd-name">${bdLink('buyer', x.buyer_code, x.dealer)}</td>
-        <td class="l">${invCell(x.invos, '')}</td>
-        <td class="num">${nkg(x.lots)}</td><td class="num">${nkg(x.bags)}</td><td class="num">${nq(x.qty)}</td>
-        <td class="num">${inr2(x.value)}</td></tr>`).join('')}
-    </tbody>
-    <tfoot><tr><td class="l">${DEAL.length} buyer${DEAL.length===1?'':'s'}</td><td></td><td class="num">${nkg(bdSum(DEAL,x=>x.lots))}</td><td class="num">${nkg(bdSum(DEAL,x=>x.bags))}</td><td class="num">${nq(bdSum(DEAL,x=>x.qty))}</td><td class="num">${inr2(bdSum(DEAL,x=>x.value))}</td></tr></tfoot>
-  </table></div>` : bdEmpty('No buyer data in this scope yet.');
-
-  // Branch-wise: Branch · Lots · Bags · Seller Qty · Buyer Qty · Total Qty · Total amount
-  //   Seller Qty = net qty + sample × lots; Buyer Qty = Total Qty = net qty.
-  const brSellerQty = b => (Number(b.qty)||0) + sampleWt * (Number(b.lots)||0);
-  const brkPane = BRK.length ? `<div class="bd-tblwrap bd-scroll"><table class="bd-table">
-    <thead><tr><th class="l">Branch</th><th>Lots</th><th>Bags</th><th>Seller Qty</th><th>Buyer Qty</th><th>Total Qty</th><th>Total amount</th></tr></thead>
-    <tbody>
-      ${BRK.map(b => `<tr>
-        <td class="l bd-name">${bdLink('branch', b.branch, b.branch)}</td>
-        <td class="num">${nkg(b.lots)}</td><td class="num">${nkg(b.bags)}</td>
-        <td class="num">${nq(brSellerQty(b))}</td><td class="num">${nq(b.qty)}</td><td class="num">${nq(b.qty)}</td>
-        <td class="num">${inr2(b.value)}</td></tr>`).join('')}
-    </tbody>
-    <tfoot><tr><td class="l">${BRK.length} branch${BRK.length===1?'':'es'}</td><td class="num">${nkg(bdSum(BRK,b=>b.lots))}</td><td class="num">${nkg(bdSum(BRK,b=>b.bags))}</td><td class="num">${nq(bdSum(BRK,brSellerQty))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${nq(bdSum(BRK,b=>b.qty))}</td><td class="num">${inr2(bdSum(BRK,b=>b.value))}</td></tr></tfoot>
-  </table></div>` : bdEmpty('No branch data in this scope yet.');
+  // ── Breakdown: Seller-wise / Buyer-wise / Branch-wise (tabbed) ──
+  // Stash the data globally so the sort/filter handlers can re-render the
+  // rows after loadStats() finishes (see _BD_CONF + renderBdBody). Each
+  // pane's shell (sortable headers + filter row + empty body) is built by
+  // bdPaneShell(); the body is populated by renderBdBody() below.
+  _bd = { planter: PLAN, dealer: DEAL, branch: BRK, sampleWt: Number(T.sample_weight) || 0 };
+  _bdSort = { planter: {col:null,dir:1}, dealer: {col:null,dir:1}, branch: {col:null,dir:1} };
+  _bdFilt = { planter: {}, dealer: {}, branch: {} };
 
   const breakdownHTML = `
     <div class="card" style="margin-bottom:20px">
@@ -8836,9 +8959,9 @@ async function loadStats(auctionId){
           <button role="tab" aria-selected="false" onclick="dashBreakdownTab('branch',this)">Branch-wise</button>
         </div>
       </div>
-      <div class="bd-pane on" id="dash-bd-planter">${planPane}</div>
-      <div class="bd-pane" id="dash-bd-dealer">${dealPane}</div>
-      <div class="bd-pane" id="dash-bd-branch">${brkPane}</div>
+      <div class="bd-pane on" id="dash-bd-planter">${bdPaneShell('planter')}</div>
+      <div class="bd-pane" id="dash-bd-dealer">${bdPaneShell('dealer')}</div>
+      <div class="bd-pane" id="dash-bd-branch">${bdPaneShell('branch')}</div>
     </div>`;
 
   // Per-trade breakdown table (rendered in BOTH cumulative and drilled-in
@@ -9053,6 +9176,8 @@ async function loadStats(auctionId){
     ${ptHTML}
   `;
 
+  // Populate the breakdown pane bodies now that their shells are in the DOM.
+  ['planter', 'dealer', 'branch'].forEach(renderBdBody);
 }
 
 // Shrink ONLY the Lots-screen "Total amount" value just enough that it fits
