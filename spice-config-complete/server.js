@@ -11679,10 +11679,11 @@ app.get('/api/insights', requireView, (req, res) => {
   }
 
   const aids = auctions.map(a => a.id);
+  const _cfg = getSettingsFlat(db) || {};
   // Default Sample Weight (kg) per lot — the seller (planter) is credited for
   // the sample taken from each lot, so Seller Wt = net qty + sample × lots,
   // and the firm accrues that sample weight as physical "Stock".
-  const sampleWt = Number((getSettingsFlat(db) || {}).sample_weight) || 0;
+  const sampleWt = Number(_cfg.sample_weight) || 0;
   const ISP_COMMISSION_PCT = 1.25;   // ISP commission rate (config: deduction1)
   const blankTotals = {
     trades: auctions.length, lots: 0, bags: 0, qty: 0, pqty: 0, value: 0,
@@ -11691,7 +11692,7 @@ app.get('/api/insights', requireView, (req, res) => {
     seller_qty: 0, sold_seller_qty: 0, wd_seller_qty: 0,
     min_price: null, max_price: null, avg_price: 0,
     payable_to_sellers: 0, outstanding_by_buyers: 0, commission_income: 0,
-    stock_kg: 0, sample_weight: sampleWt,
+    stock_kg: 0, sample_weight: sampleWt, discount: 0, purchase_gst: 0,
   };
   if (!aids.length) {
     return res.json({
@@ -11797,6 +11798,41 @@ app.get('/api/insights', requireView, (req, res) => {
   // Income = the firm's ISP commission: 1.25% of the sold lot value.
   totals.commission_income = totals.sold_value * (ISP_COMMISSION_PCT / 100);
 
+  // ── "To be earned" = the Payments-screen Discount total (policy discount
+  //    per lot + manual debit notes). Mirrors getPaymentSummary so the tile
+  //    matches the Payments screen. Discount is what the firm retains. ──
+  const _mode = String(_cfg.business_mode || 'e-Trade').toLowerCase();
+  if (_mode === 'e-trade') {
+    const rollFlag   = (_cfg.flag_discount_in_prate === true || String(_cfg.flag_discount_in_prate || '').toLowerCase() === 'true') ? 1 : 0;
+    const dealerDays = Number(_cfg.dealer_days)   || 0;
+    const discDays   = Number(_cfg.discount_days) || 0;
+    const discPct    = Number(_cfg.discount_pct)  || 0;
+    const dr = db.get(
+      `SELECT COALESCE(SUM(CASE WHEN ?=1 AND TRIM(COALESCE(grade,''))='1' THEN 0
+         ELSE ROUND( (CASE WHEN isp_puramt>0 THEN isp_puramt ELSE puramt END)/1000.0
+              * (CASE WHEN (UPPER(COALESCE(cr,'')) LIKE 'GSTIN%' OR cr GLOB '[0-9][0-9]*') THEN ? ELSE ? END)
+              * ? ) END),0) AS disc
+       FROM lots WHERE auction_id IN (${ph}) AND amount>0`,
+      [rollFlag, dealerDays, discDays, discPct, ...aids]
+    );
+    totals.discount = num(dr && dr.disc);
+  } else {
+    const col = _mode === 'auction' ? 'advance' : 'refund';
+    const dr = db.get(`SELECT COALESCE(SUM(${col}),0) AS disc FROM lots WHERE auction_id IN (${ph}) AND amount>0`, aids);
+    totals.discount = num(dr && dr.disc);
+  }
+  const anos = auctions.map(a => a.ano).filter(x => x != null && String(x).trim() !== '');
+  if (anos.length) {
+    const dph = anos.map(() => '?').join(',');
+    const dn = db.get(`SELECT COALESCE(SUM(amount),0) AS t FROM debit_notes WHERE ano IN (${dph})`, anos);
+    totals.discount += num(dn && dn.t);
+  }
+
+  // ── "GST" under Payable = purchase-invoice GST (CGST+SGST+IGST) for the
+  //    sellers' purchase invoices in scope. ──
+  const pg = db.get(`SELECT COALESCE(SUM(cgst+sgst+igst),0) AS g FROM purchases WHERE auction_id IN (${ph})`, aids);
+  totals.purchase_gst = num(pg && pg.g);
+
   // ── Invoices in scope: outstanding-by-buyer + grand outstanding. ──
   // Exclude ASP invoices (state='KERALA'). In e-Trade/ASP mode every sale
   // writes TWO invoices for the same goods: the ASP invoice bills our own
@@ -11810,7 +11846,8 @@ app.get('/api/insights', requireView, (req, res) => {
     `SELECT COALESCE(NULLIF(TRIM(buyer1),''), buyer) AS buyer_name,
             buyer AS buyer_code,
             COUNT(*) AS invoices,
-            COALESCE(SUM(tot),0) AS value
+            COALESCE(SUM(tot),0) AS value,
+            COALESCE(SUM(cgst+sgst+igst),0) AS gst
      FROM invoices
      WHERE auction_id IN (${ph})
        AND UPPER(COALESCE(state,'')) NOT IN ('KERALA')
@@ -11818,8 +11855,11 @@ app.get('/api/insights', requireView, (req, res) => {
      ORDER BY value DESC
      LIMIT 100`,
     aids
-  ).map(r => ({ buyer_name: r.buyer_name || '(unknown)', buyer_code: r.buyer_code || '', invoices: num(r.invoices), value: num(r.value) }));
+  ).map(r => ({ buyer_name: r.buyer_name || '(unknown)', buyer_code: r.buyer_code || '', invoices: num(r.invoices), value: num(r.value), gst: num(r.gst) }));
   totals.outstanding_by_buyers = invByBuyer.reduce((s, r) => s + r.value, 0);
+  // Per-buyer sales-invoice GST (CGST+SGST+IGST), for the Buyer-wise GST column.
+  const gstByCode = {};
+  for (const r of invByBuyer) gstByCode[r.buyer_code] = (gstByCode[r.buyer_code] || 0) + r.gst;
 
   // ── Buyer activity leaderboard (by purchased lot value). ──
   const buyerActivity = db.all(
@@ -11912,6 +11952,7 @@ app.get('/api/insights', requireView, (req, res) => {
   ).map(r => ({
     dealer: r.dealer || '(unknown)', buyer_code: r.buyer_code || '', invos: r.invos || '',
     lots: num(r.lots), bags: num(r.bags), qty: num(r.qty), value: num(r.value),
+    gst: num(gstByCode[r.buyer_code] || 0),
     outstanding: num(outstandingByCode[r.buyer_code] || 0),
   }));
 

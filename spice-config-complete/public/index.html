@@ -1208,6 +1208,12 @@ tr:hover td{background:var(--spice-cream)}
   color:var(--spice-text-main);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dash-snap-ft .mf.pay .v{color:var(--spice-saffron-dk)}
 .dash-snap-ft .mf.inc .v{color:var(--spice-cardamom-dk)}
+/* Secondary metric under the Payable / Income headline value. */
+.dash-snap-ft .mf-sub{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  margin-top:6px;padding-top:5px;border-top:1px dashed var(--spice-saffron-md);font-size:10.5px}
+.dash-snap-ft .mf-sub-k{color:var(--spice-text-mute);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.dash-snap-ft .mf-sub-v{font-weight:800;font-variant-numeric:tabular-nums;color:var(--spice-text-main);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ── Tabbed breakdown (Planter / Dealer / Branch) ── */
 .bd-tabs{display:inline-flex;gap:3px;background:var(--tab-bg);border-radius:9px;padding:3px}
@@ -1234,6 +1240,15 @@ tr:hover td{background:var(--spice-cream)}
   border-radius:6px;background:var(--spice-paper);color:var(--spice-text-main)}
 .bd-filt-inp::placeholder{color:var(--spice-text-hint);font-weight:400}
 .bd-filt-inp:focus{outline:none;border-color:var(--spice-saffron)}
+/* Search box: magnifier (left) + clear × (right, only while there's text). */
+.bd-search{position:relative;display:block;width:100%}
+.bd-search .bd-filt-inp{padding-left:23px;padding-right:22px}
+.bd-search-ico{position:absolute;left:7px;top:50%;transform:translateY(-50%);width:12px;height:12px;
+  color:var(--spice-text-hint);pointer-events:none}
+.bd-search-clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:transparent;
+  cursor:pointer;color:var(--spice-text-hint);font-size:15px;line-height:1;padding:1px 4px;border-radius:4px}
+.bd-search-clr:hover{color:var(--spice-chili)}
+.bd-search .bd-filt-inp:placeholder-shown ~ .bd-search-clr{display:none}
 .bd-table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
 .bd-table th,.bd-table td{padding:10px 20px;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .bd-table th.l,.bd-table td.l{text-align:left;white-space:normal}
@@ -1271,7 +1286,8 @@ tr:hover td{background:var(--spice-cream)}
 /* Body scrolls (not the whole modal) so the corner X stays pinned. */
 #dash-lots-body{max-height:60vh;overflow:auto}
 .lots-filter{display:flex;gap:10px;margin:0 0 12px;flex-wrap:wrap}
-.lots-filter .bd-filt-inp{flex:1;min-width:140px;max-width:240px;font-size:12px;padding:5px 9px}
+.lots-filter .bd-search{flex:1;min-width:150px;max-width:250px}
+.lots-filter .bd-filt-inp{font-size:12px;padding-top:5px;padding-bottom:5px}
 @media(max-width:560px){.dash-snap-ft{grid-template-columns:repeat(2,1fr)}}
 
 /* ── Per-trade table: capped height + scroll, sticky coloured header ── */
@@ -8620,8 +8636,8 @@ async function openLotsModal(el){
   const tabsBar = `<div class="bd-tabs lots-tabs" role="tablist" aria-label="Grade">${gradesData.map((g, i) =>
     `<button class="${i===0?'on':''}" role="tab" aria-selected="${i===0}" onclick="lotsTab('${g.key}',this)">${g.label} · ${nf(g.rows.length)}</button>`).join('')}</div>`;
   const filterBar = `<div class="lots-filter">
-    <input class="bd-filt-inp" type="text" placeholder="Filter Lot…" aria-label="Filter Lot" oninput="lotFilterInput('lot',this.value)">
-    <input class="bd-filt-inp" type="text" placeholder="Filter ${cpHead}…" aria-label="Filter ${cpHead}" oninput="lotFilterInput('cp',this.value)">
+    ${dashSearchBox(`<input class="bd-filt-inp" type="text" placeholder="Filter Lot…" aria-label="Filter Lot" oninput="lotFilterInput('lot',this.value)">`)}
+    ${dashSearchBox(`<input class="bd-filt-inp" type="text" placeholder="Filter ${cpHead}…" aria-label="Filter ${cpHead}" oninput="lotFilterInput('cp',this.value)">`)}
   </div>`;
   const panes = gradesData.map((g, i) => `<div class="lots-pane${i===0?' on':''}" id="lots-pane-${g.key}">
     <div class="bd-tblwrap"><table class="bd-table lot-tbl">
@@ -8703,6 +8719,19 @@ function dashInvCell(raw,prefix){
   if (a.length === 1) return esc(pfx(a[0]));
   return `<span title="${esc(a.map(pfx).join(', '))}" style="color:var(--spice-text-mute)">${a.length} invoices</span>`;
 }
+// Wrap a filter <input> in a search box: magnifier icon on the left, a clear
+// (×) on the right that shows only while there's text (CSS :placeholder-shown).
+const DASH_SEARCH_ICON = '<svg class="bd-search-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>';
+function dashSearchBox(inputHtml){
+  return `<span class="bd-search">${DASH_SEARCH_ICON}${inputHtml}<button type="button" class="bd-search-clr" tabindex="-1" onclick="dashClearFilter(this)" aria-label="Clear filter">&times;</button></span>`;
+}
+function dashClearFilter(btn){
+  const inp = btn.parentNode.querySelector('input');
+  if (!inp) return;
+  inp.value = '';
+  inp.dispatchEvent(new Event('input', { bubbles: true }));   // fires the inline oninput → re-render
+  inp.focus();
+}
 // Column config per breakdown kind. sf = sortable + filterable; txt / n give the
 // sort/filter value; cell builds the <td>; foot = footer aggregate type.
 const _sw = () => (_bd && _bd.sampleWt) || 0;
@@ -8722,6 +8751,7 @@ const _BD_CONF = {
     { k:'bags',   h:'Bags',          n:r=>r.bags,  foot:'int',   cell:r=>`<td class="num">${dashNInt(r.bags)}</td>` },
     { k:'qty',    h:'Qty',           n:r=>r.qty,   foot:'qty',   cell:r=>`<td class="num">${dashNQty(r.qty)}</td>` },
     { k:'value',  h:'Inv amt',       n:r=>r.value, foot:'money', cell:r=>`<td class="num">${dashNMoney(r.value)}</td>` },
+    { k:'gst',    h:'GST',           n:r=>r.gst,   foot:'money', cell:r=>`<td class="num">${dashNMoney(r.gst)}</td>` },
   ]},
   branch: { noun:'branch', cols:[
     { k:'branch',    h:'Branch',       l:1, sf:1, txt:r=>String(r.branch||''), cell:r=>`<td class="l bd-name">${dashBdLink('branch',r.branch,r.branch)}</td>` },
@@ -8745,7 +8775,7 @@ function bdPaneShell(kind){
     return `<th${cls?` class="${cls}"`:''}${c.sf?` onclick="bdSortClick('${kind}','${c.k}')"`:''}>${c.h}${c.sf?` <span class="bd-arrow" data-col="${c.k}"></span>`:''}</th>`;
   }).join('');
   const filts = cols.map(c => c.sf
-    ? `<th class="bd-filt-th"><input class="bd-filt-inp" type="text" placeholder="Filter…" aria-label="Filter ${c.h}" oninput="bdFilterInput('${kind}','${c.k}',this.value)"></th>`
+    ? `<th class="bd-filt-th">${dashSearchBox(`<input class="bd-filt-inp" type="text" placeholder="Filter…" aria-label="Filter ${c.h}" oninput="bdFilterInput('${kind}','${c.k}',this.value)">`)}</th>`
     : '<th></th>').join('');
   return `<div class="bd-tblwrap bd-scroll"><table class="bd-table" id="bd-head-${kind}">
     <thead><tr>${heads}</tr><tr class="bd-filt-row">${filts}</tr></thead>
@@ -8926,8 +8956,8 @@ async function loadStats(auctionId){
         </table>
       </div>
       <div class="dash-snap-ft">
-        <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inr2(T.payable_to_sellers)}</div></div>
-        <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inr2(T.commission_income)}</div></div>
+        <div class="mf pay"><div class="k">Payable to sellers</div><div class="v">${inr2(T.payable_to_sellers)}</div><div class="mf-sub"><span class="mf-sub-k">GST</span><span class="mf-sub-v">${inr2(T.purchase_gst)}</span></div></div>
+        <div class="mf inc"><div class="k">Income (commission)</div><div class="v">${inr2(T.commission_income)}</div><div class="mf-sub"><span class="mf-sub-k">To be earned</span><span class="mf-sub-v">${inr2(T.discount)}</span></div></div>
         <div class="mf"><div class="k">Stock (kg)</div><div class="v">${nq(T.stock_kg)}</div></div>
         <div class="mf"><div class="k">Min ₹/kg</div><div class="v">${T.min_price>0?inr2(T.min_price):'—'}</div></div>
         <div class="mf"><div class="k">Max ₹/kg</div><div class="v">${T.max_price>0?inr2(T.max_price):'—'}</div></div>
