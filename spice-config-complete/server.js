@@ -4980,9 +4980,19 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   if (!ids.length) return res.status(400).json({ error: 'ids array required' });
   if (!buyerCode) return res.status(400).json({ error: 'buyer code required' });
   const db = getDb();
+  // WD (Withdrawn) / NA (N/A) are pseudo-buyers, not rows in the buyers
+  // master — they mark a lot as pulled from sale. Mirror the single-lot edit
+  // modal's SPECIAL handling: skip the master lookup, stamp the marker, and
+  // (below) zero the price so the lot carries no money. Any other code must
+  // resolve to a registered buyer.
+  const SPECIAL_BUYER = {
+    WD: { buyer: 'WD', buyer1: 'Withdrawn', code: 'WD', sale: 'W' },
+    NA: { buyer: 'NA', buyer1: 'N/A',       code: 'NA', sale: 'N' },
+  };
+  const special = SPECIAL_BUYER[buyerCode.toUpperCase()];
   // Resolve buyer details once so all updates share one read.
   // Case-insensitive match because operators type codes in any case.
-  const buyer = db.get(
+  const buyer = special || db.get(
     'SELECT buyer, buyer1, code, sale FROM buyers WHERE UPPER(buyer) = ? LIMIT 1',
     [buyerCode.toUpperCase()]
   );
@@ -5004,10 +5014,30 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   // We also clear `invo` so the lot is treated as un-invoiced again
   // (it'll need a fresh invoice after a buyer reassignment).
   const placeholders = part.allowedIds.map(() => '?').join(',');
-  db.run(
-    `UPDATE lots SET buyer=?, buyer1=?, code=?, sale=?, invo='' WHERE id IN (${placeholders})`,
-    [buyer.buyer, buyer.buyer1 || '', buyer.code || '', buyer.sale || 'L', ...part.allowedIds]
-  );
+  if (special) {
+    // Withdrawn / N/A: zero the sale price AND amount, then recompute every
+    // money field to 0. We can't lean on POST /api/lots/calculate/:id here —
+    // that endpoint only touches lots with amount>0, so a just-zeroed lot
+    // would keep its stale prate/puramt/GST/balance. Recalc them inline.
+    const cfg = getSettingsFlat(db);
+    db.run(
+      `UPDATE lots SET buyer=?, buyer1=?, code=?, sale=?, price=0, amount=0, invo='' WHERE id IN (${placeholders})`,
+      [buyer.buyer, buyer.buyer1, buyer.code, buyer.sale, ...part.allowedIds]
+    );
+    const wdLots = db.all(`SELECT * FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+    for (const lot of wdLots) {
+      const c = calculateLot(lot, cfg);
+      db.run(
+        `UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+        [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]
+      );
+    }
+  } else {
+    db.run(
+      `UPDATE lots SET buyer=?, buyer1=?, code=?, sale=?, invo='' WHERE id IN (${placeholders})`,
+      [buyer.buyer, buyer.buyer1 || '', buyer.code || '', buyer.sale || 'L', ...part.allowedIds]
+    );
+  }
   // Stale price-check for every affected trade.
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
@@ -5018,6 +5048,7 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
     buyer1: buyer.buyer1 || '',
     code: buyer.code || '',
     sale: buyer.sale || 'L',
+    withdrawn: !!special,
     skipped: part.skipped,
   });
 });

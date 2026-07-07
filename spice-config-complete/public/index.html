@@ -15855,6 +15855,15 @@ function lotBulkBuyerPreview(){
   if (!input || !prev) return;
   const code = String(input.value || '').trim().toUpperCase();
   if (!code) { prev.innerHTML = ''; return; }
+  // WD / NA are pseudo-buyers (not in the master) — mark the lot withdrawn /
+  // N/A and zero its price. Preview them explicitly so they don't read as
+  // "unregistered".
+  const SPECIAL = { WD:{buyer1:'Withdrawn',sale:'W'}, NA:{buyer1:'N/A',sale:'N'} };
+  if (SPECIAL[code]) {
+    prev.innerHTML = `✓ <strong style="color:var(--spice-cardamom)">${esc(SPECIAL[code].buyer1)}</strong>`
+      + `<span style="color:var(--text3)"> · price will be zeroed &amp; lots recalculated</span>`;
+    return;
+  }
   const b = (_lotBulkBuyer.buyers || []).find(
     x => String(x.buyer || '').trim().toUpperCase() === code
   );
@@ -15891,7 +15900,8 @@ async function lotBulkBuyerApply(){
     if (aid) { try { await j(`/api/lots/calculate/${aid}`, { method: 'POST' }); } catch (_) {} }
     hideModal('lot-bulk-buyer-modal');
     const saleLabel = {L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'}[r.sale] || 'Local';
-    toast(`Set buyer ${r.buyer} (${saleLabel}) on ${n} lot${n === 1 ? '' : 's'}${skipNote} · recalculated`);
+    const recalcNote = r.withdrawn ? ' · price zeroed & recalculated' : ' · recalculated';
+    toast(`Set buyer ${r.buyer} (${saleLabel}) on ${n} lot${n === 1 ? '' : 's'}${skipNote}${recalcNote}`);
     if (typeof loadLots === 'function') loadLots({ keepPage: true });
   } catch (e) {
     // Server returns 423 when EVERY selected lot is locked. Surface
