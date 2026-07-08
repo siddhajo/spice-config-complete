@@ -17,6 +17,7 @@ const {
   fmtMoney, fmtQty, fmtPrice,
   getCompanyHeader, drawCompanyHeader,
 } = require('./report-formatters');
+const { getSettingsFlat } = require('./company-config');
 
 // ── Number formatting ────────────────────────────────────────
 // fmtMoney / fmtQty / fmtPrice come from report-formatters.js (Indian comma
@@ -924,13 +925,19 @@ function getTradeReportData(db, auctionId) {
   // e-Trade: the BIDDER column shows the buyer name (e.g. "NAGENDRAN")
   // rather than the proprietor short-name used for e-Auction.
   const isETrade = auction && auction.mode === 'e-Trade';
+  // Home state for the inter/intra split. e-Trade compares the buyer against
+  // the configured business_state (the selling company's own state); e-Auction
+  // keeps comparing against the auction's stored state.
+  const homeState = isETrade
+    ? String(getSettingsFlat(db).business_state || auction.state || '').trim().toUpperCase()
+    : auctionState;
   rows.forEach(r => {
     if (isETrade) r.bidder = r.buyer_name || '';
     r.inv_amount = invByCode[r.code] || 0;
     const buyerSt = String(r.state || '').trim().toUpperCase();
-    // Inter-state if buyer state ≠ auction state. Empty buyer state defaults
+    // Inter-state if buyer state ≠ home state. Empty buyer state defaults
     // to intra-state (matches the FoxPro fallback).
-    r.sale = (buyerSt && buyerSt !== auctionState) ? 'I' : 'L';
+    r.sale = (buyerSt && buyerSt !== homeState) ? 'I' : 'L';
   });
 
   // Group by buyer-state (column on the report). Within each state, split into
