@@ -1368,19 +1368,21 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
     const dStCd  = isEAuction ? (co.stateCode || '') : (cfg.s_st_code || '32');
     const dGstin = isEAuction ? (co.gstin || '')     : cfg.s_gstin;
     doc.font('Helvetica-Bold').fontSize(8).text('Dispatch From:', rightX + 3, dispatchY + 4, { width: rightW - 6 });
-    doc.font('Helvetica-Bold').fontSize(9).text(dName, rightX + 3, dispatchY + 14, { width: rightW - 6 });
-    doc.font('Helvetica').fontSize(8);
-    // Advance dy by actual rendered height so wrapped text doesn't overlap next line.
-    let dy = dispatchY + 26;
+    // Flow every line off a single dy so ordering (GSTIN before/after the
+    // company name) stays honest and wrapped text can't overlap the next line.
+    let dy = dispatchY + 14;
     const dispW = rightW - 6;
-    const writeLine = (txt) => {
+    const writeLine = (txt, opts) => {
       if (!txt) return;
-      doc.text(txt, rightX + 3, dy, { width: dispW });
+      doc.font(opts && opts.bold ? 'Helvetica-Bold' : 'Helvetica')
+         .fontSize(opts && opts.size ? opts.size : 8)
+         .text(txt, rightX + 3, dy, { width: dispW });
       dy += doc.heightOfString(txt, { width: dispW }) + 1;
     };
-    // e-Trade: GSTIN leads the dispatch-from block (line 1), then address.
-    // e-Auction keeps the original order (GSTIN last).
+    // e-Trade: GSTIN prints before the company name; e-Auction keeps the
+    // original order (company name first, GSTIN last).
     if (!isEAuction && dGstin) writeLine(`GSTIN.${dGstin}`);
+    writeLine(dName, { bold: true, size: 9 });
     writeLine(dAddr1);
     writeLine(dAddr2);
     if (dState) writeLine(`${dState} Code:${dStCd || '32'}`);
