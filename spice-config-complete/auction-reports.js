@@ -886,6 +886,7 @@ function getTradeReportData(db, auctionId) {
                NULLIF(b.code,   ''),
                l.buyer1,
                '')                                            AS bidder,
+      COALESCE(b.buyer, l.buyer, '')                          AS buyer_name,
       COALESCE(b.buyer1, l.buyer1, '')                        AS trade_name,
       COALESCE(b.state,  '')                                  AS state,
       COALESCE(b.gstin,  '')                                  AS gstin,
@@ -899,7 +900,7 @@ function getTradeReportData(db, auctionId) {
       OR UPPER(TRIM(b.buyer)) = UPPER(TRIM(l.buyer))
     WHERE l.auction_id = ?
       AND l.amount > 0
-    GROUP BY l.code, b.buyer1, b.sbl, b.code, b.state, b.gstin, l.sale
+    GROUP BY l.code, b.buyer, l.buyer, b.buyer1, b.sbl, b.code, b.state, b.gstin, l.sale
     ORDER BY UPPER(COALESCE(b.buyer1, l.buyer1, l.code)), l.code
   `, [auctionId]);
 
@@ -920,11 +921,11 @@ function getTradeReportData(db, auctionId) {
 
   // Stamp each buyer-row with inv_amount and a uniform sale code (I/L)
   const auctionState = String(auction.state || '').trim().toUpperCase();
-  // e-Trade: the BIDDER column shows the buyer code (same as the CODE column)
+  // e-Trade: the BIDDER column shows the buyer name (e.g. "NAGENDRAN")
   // rather than the proprietor short-name used for e-Auction.
   const isETrade = auction && auction.mode === 'e-Trade';
   rows.forEach(r => {
-    if (isETrade) r.bidder = r.code || '';
+    if (isETrade) r.bidder = r.buyer_name || '';
     r.inv_amount = invByCode[r.code] || 0;
     const buyerSt = String(r.state || '').trim().toUpperCase();
     // Inter-state if buyer state ≠ auction state. Empty buyer state defaults
