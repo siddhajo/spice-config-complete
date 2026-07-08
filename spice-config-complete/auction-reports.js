@@ -920,7 +920,11 @@ function getTradeReportData(db, auctionId) {
 
   // Stamp each buyer-row with inv_amount and a uniform sale code (I/L)
   const auctionState = String(auction.state || '').trim().toUpperCase();
+  // e-Trade: the BIDDER column shows the buyer code (same as the CODE column)
+  // rather than the proprietor short-name used for e-Auction.
+  const isETrade = auction && auction.mode === 'e-Trade';
   rows.forEach(r => {
+    if (isETrade) r.bidder = r.code || '';
     r.inv_amount = invByCode[r.code] || 0;
     const buyerSt = String(r.state || '').trim().toUpperCase();
     // Inter-state if buyer state ≠ auction state. Empty buyer state defaults
