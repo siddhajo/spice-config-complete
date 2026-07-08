@@ -320,10 +320,11 @@ ${buyerAddrLines.map(l => `<BASICBUYERADDRESS>${xe(l)}</BASICBUYERADDRESS>`).joi
 </BASICBUYERADDRESS.LIST>`;
 
     if (dispatchEnabled) {
-      // Dispatch-from address — 5 lines as in reference, blanks for unused
+      // Dispatch-from address — 5 lines as in reference, blanks for unused.
+      // Line 1 = GSTIN, line 2 = address1 + address2 (e-Trade layout).
       const dispatchLines = [
-        d_add,
-        d_add2 || `${d_place}-${d_pin}`,
+        d_gstin ? `GSTIN.${d_gstin}` : '',
+        [d_add, d_add2].filter(Boolean).join(' '),
         '', '', '',
       ];
       xml += `

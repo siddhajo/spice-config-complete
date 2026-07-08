@@ -1378,10 +1378,13 @@ function generateSalesInvoicePDF(invoiceData, cfg, saleType, invoiceNo, invoiceD
       doc.text(txt, rightX + 3, dy, { width: dispW });
       dy += doc.heightOfString(txt, { width: dispW }) + 1;
     };
+    // e-Trade: GSTIN leads the dispatch-from block (line 1), then address.
+    // e-Auction keeps the original order (GSTIN last).
+    if (!isEAuction && dGstin) writeLine(`GSTIN.${dGstin}`);
     writeLine(dAddr1);
     writeLine(dAddr2);
     if (dState) writeLine(`${dState} Code:${dStCd || '32'}`);
-    if (dGstin) writeLine(`GSTIN.${dGstin}`);
+    if (isEAuction && dGstin) writeLine(`GSTIN.${dGstin}`);
   } else {
     // Empty bordered cell to keep the frame consistent with the left column
     box(rightX, ry2, rightW, dispatchFromH);
