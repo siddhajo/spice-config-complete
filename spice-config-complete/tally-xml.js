@@ -320,11 +320,10 @@ ${buyerAddrLines.map(l => `<BASICBUYERADDRESS>${xe(l)}</BASICBUYERADDRESS>`).joi
 </BASICBUYERADDRESS.LIST>`;
 
     if (dispatchEnabled) {
-      // Dispatch-from address — 5 lines as in reference, blanks for unused.
-      // Line 1 = GSTIN, line 2 = address1 + address2 (e-Trade layout).
+      // Dispatch-from address — 5 lines as in reference, blanks for unused
       const dispatchLines = [
-        d_gstin ? `GSTIN.${d_gstin}` : '',
-        [d_add, d_add2].filter(Boolean).join(' '),
+        d_add,
+        d_add2 || `${d_place}-${d_pin}`,
         '', '', '',
       ];
       xml += `
@@ -367,11 +366,11 @@ ${dispatchLines.map(l => `<DISPATCHFROMADDRESS>${xe(l)}</DISPATCHFROMADDRESS>`).
       xml += `
 <BASICORDERTERMS.LIST TYPE="String">
 <BASICORDERTERMS>Dispatch From:</BASICORDERTERMS>
+<BASICORDERTERMS>GSTIN.${xe(d_gstin)}</BASICORDERTERMS>
 <BASICORDERTERMS>${xe(d_company)}</BASICORDERTERMS>
 <BASICORDERTERMS>${xe(d_add)}</BASICORDERTERMS>
 <BASICORDERTERMS>${xe(d_place)}-${xe(d_pin)}</BASICORDERTERMS>
 <BASICORDERTERMS>${xe(d_state)} Code:${xe(d_state_code)}</BASICORDERTERMS>
-<BASICORDERTERMS>GSTIN.${xe(d_gstin)}</BASICORDERTERMS>
 </BASICORDERTERMS.LIST>`;
     }
 
