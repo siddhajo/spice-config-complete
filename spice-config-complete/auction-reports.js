@@ -959,7 +959,7 @@ function getTradeReportData(db, auctionId) {
   // billed on LOCAL sales only ('L'); inter-state buyers cover their own
   // freight, so both are 0 for 'I'. Rounded to the nearest rupee:
   //   cardamomGunny = Σ amount + (Σ bags × Gunny rate)
-  //   transport     = Σ bags × Transport (₹/kg)          [Local only, else 0]
+  //   transport     = Σ qty × Transport (₹/kg)           [Local only, else 0]
   //   insurance     = (cardamomGunny / 1000) × Insurance  [Local only, else 0]
   //   gst           = (cardamomGunny + transport + insurance) × Goods GST %
   //   INV.AMOUNT    = round( cardamomGunny + transport + insurance + gst )
@@ -969,9 +969,10 @@ function getTradeReportData(db, auctionId) {
   const _gstGoods      = Number(cfg.gst_goods)  || 5;
   const _tradeInvAmount = (r) => {
     const bags = Number(r.bag) || 0;
+    const qty = Number(r.qty) || 0;
     const cardamomGunny = (Number(r.amount) || 0) + bags * _gunnyRate;
     const isLocal = r.sale === 'L';
-    const transport = isLocal ? bags * _transportRate : 0;
+    const transport = isLocal ? qty * _transportRate : 0;
     const insurance = isLocal ? (cardamomGunny / 1000) * _insuranceRate : 0;
     const gst = (cardamomGunny + transport + insurance) * _gstGoods / 100;
     // Rounded to the nearest rupee.
