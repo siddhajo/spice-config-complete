@@ -7801,12 +7801,12 @@ async function loadFormulas(){
     h += card('Trade Report — Invoice Amount (e-Trade)', [
       {
         label: 'INV.AMOUNT per buyer',
-        note: 'On the Trade Report, e-Trade COMPUTES each buyer\'s Invoice Amount from their lot aggregates (so it shows even before sales invoices are generated). It is a simplified estimate: Transport is charged per bag, and GST + Insurance are based on Cardamom + Gunny only.',
+        note: 'On the Trade Report, e-Trade COMPUTES each buyer\'s Invoice Amount from their lot aggregates (so it shows even before sales invoices are generated). It is a simplified estimate: Transport is charged per bag, GST is on Cardamom + Gunny only, and Transport + Insurance apply to LOCAL sales only (0 for inter-state buyers). Rounded to the nearest rupee.',
         formula: `Cardamom+Gunny = Σ Amount + ( Σ Bags × ${pill('Gunny rate (₹/bag)', num('gunny_rate','165'))} )<br>
-                Transport      = Σ Bags × ${pill('Transport (₹/kg)', num('transport','2.5'))}<br>
-                Insurance      = ( Cardamom+Gunny / 1000 ) × ${pill('Insurance (₹/₹1000)', num('insurance','0.75'))}<br>
+                Transport      = Σ Bags × ${pill('Transport (₹/kg)', num('transport','2.5'))}    ${lit('— Local sales only, else 0')}<br>
+                Insurance      = ( Cardamom+Gunny / 1000 ) × ${pill('Insurance (₹/₹1000)', num('insurance','0.75'))}    ${lit('— Local sales only, else 0')}<br>
                 GST            = Cardamom+Gunny × ${pill('Goods GST %', num('gst_goods','5'))} / 100<br>
-                INV.AMOUNT     = round2( Cardamom+Gunny + Transport + Insurance + GST )`,
+                INV.AMOUNT     = round( Cardamom+Gunny + Transport + Insurance + GST )    ${lit('— nearest rupee')}`,
       },
     ]);
     h += card('Bill of Supply (Agriculturist — no GSTIN)', [

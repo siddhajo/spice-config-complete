@@ -955,32 +955,36 @@ function getTradeReportData(db, auctionId) {
     : auctionState;
   // e-Trade INV.AMOUNT is COMPUTED from each buyer's lot aggregates so it's
   // available even before sales invoices are generated (e-Auction keeps reading
-  // the stored invoice grand-totals via invByCode). Formula (rounded to 2dp):
+  // the stored invoice grand-totals via invByCode). Transport & Insurance are
+  // billed on LOCAL sales only ('L'); inter-state buyers cover their own
+  // freight, so both are 0 for 'I'. Rounded to the nearest rupee:
   //   cardamomGunny = Σ amount + (Σ bags × Gunny rate)
-  //   transport     = Σ bags × Transport (₹/kg)
-  //   insurance     = (cardamomGunny / 1000) × Insurance (₹/₹1000)
+  //   transport     = Σ bags × Transport (₹/kg)          [Local only, else 0]
+  //   insurance     = (cardamomGunny / 1000) × Insurance  [Local only, else 0]
   //   gst           = cardamomGunny × Goods GST %
-  //   INV.AMOUNT    = round2( cardamomGunny + transport + insurance + gst )
+  //   INV.AMOUNT    = round( cardamomGunny + transport + insurance + gst )
   const _gunnyRate     = Number(cfg.gunny_rate) || 165;
   const _transportRate = Number(cfg.transport)  || 2.5;
   const _insuranceRate = Number(cfg.insurance)  || 0.75;
   const _gstGoods      = Number(cfg.gst_goods)  || 5;
-  const _round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
   const _tradeInvAmount = (r) => {
     const bags = Number(r.bag) || 0;
     const cardamomGunny = (Number(r.amount) || 0) + bags * _gunnyRate;
-    const transport = bags * _transportRate;
-    const insurance = (cardamomGunny / 1000) * _insuranceRate;
+    const isLocal = r.sale === 'L';
+    const transport = isLocal ? bags * _transportRate : 0;
+    const insurance = isLocal ? (cardamomGunny / 1000) * _insuranceRate : 0;
     const gst = cardamomGunny * _gstGoods / 100;
-    return _round2(cardamomGunny + transport + insurance + gst);
+    // Rounded to the nearest rupee.
+    return Math.round(cardamomGunny + transport + insurance + gst);
   };
   rows.forEach(r => {
     if (isETrade) r.bidder = r.buyer_name || '';
-    r.inv_amount = isETrade ? _tradeInvAmount(r) : (invByCode[r.code] || 0);
+    // Sale type first (INV.AMOUNT depends on it: transport/insurance are
+    // Local-only). Inter-state if buyer state ≠ home state; empty buyer
+    // state defaults to intra-state (matches the FoxPro fallback).
     const buyerSt = String(r.state || '').trim().toUpperCase();
-    // Inter-state if buyer state ≠ home state. Empty buyer state defaults
-    // to intra-state (matches the FoxPro fallback).
     r.sale = (buyerSt && buyerSt !== homeState) ? 'I' : 'L';
+    r.inv_amount = isETrade ? _tradeInvAmount(r) : (invByCode[r.code] || 0);
   });
 
   // Group by buyer-state (column on the report). Within each state, split into
