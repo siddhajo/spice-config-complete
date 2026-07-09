@@ -3768,6 +3768,17 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button class="btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="loadPayments()">↻ Reload</button>
           </div>
 
+          <!-- Calculate Discount (e-Trade only). Persisted as flag_pay_calc_discount
+               so the screen + all payment reports/exports read it via cfg. It's a
+               single control for ALL sellers at once; display-only (never changes
+               Payable). Shown/hidden + synced by loadPayments(). -->
+          <div id="pay-calc-disc-wrap" style="display:none;align-items:center;padding:0 8px;border-left:2px solid var(--spice-line)">
+            <label style="display:inline-flex;align-items:center;gap:6px;height:38px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap" title="Calculate the trade-credit discount for all sellers. Display only — it never changes Payable, and it propagates to the payment reports & exports.">
+              <input type="checkbox" id="pay-calc-disc" onchange="togglePayCalcDiscount(this.checked)" style="width:16px;height:16px;accent-color:var(--green);cursor:pointer">
+              Calculate Discount
+            </label>
+          </div>
+
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('bank_payment')" title="Export bulk RTGS/NEFT file for bank portal upload">📤 Export Bank Payment</button>
             <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('payment')" title="Per-lot detailed payment breakdown">📊 Export Payment XLSX</button>
@@ -17587,6 +17598,14 @@ function _payIsDealer(p){
 async function loadPayments(opts){
   if (!opts || !opts.keepPage) _paymentsPager.page = 1;
   const aid=document.getElementById('pay-auction').value;
+  // "Calculate Discount" toggle — e-Trade only; reflect the persisted setting.
+  const _calcWrap = document.getElementById('pay-calc-disc-wrap');
+  if (_calcWrap) {
+    const _isET = (typeof getCurrentBusinessMode === 'function') && getCurrentBusinessMode() === 'e-Trade';
+    _calcWrap.style.display = _isET ? 'inline-flex' : 'none';
+    const _cb = document.getElementById('pay-calc-disc');
+    if (_cb) _cb.checked = payCalcDiscountOn();
+  }
   const body=document.getElementById('payments-list');
   if(!aid){body.innerHTML='<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:24px">Select an auction above</td></tr>';_paymentsAll=[];return}
   try{
@@ -17646,10 +17665,7 @@ async function loadPayments(opts){
       } else {
         kpiStrip.style.display = 'grid';
         const totalQty      = arr.reduce((a,i) => a + (Number(i.total_qty)      || 0), 0);
-        // Discount tile mirrors the table: in e-Trade, sellers toggled off are
-        // excluded so the KPI matches the sum of the displayed Discount column.
-        const _kpiIsETrade  = (typeof getCurrentBusinessMode === 'function') && getCurrentBusinessMode() === 'e-Trade';
-        const totalDiscount = arr.reduce((a,i) => a + ((_kpiIsETrade && _payIsDiscOff(aid, i.name)) ? 0 : (Number(i.total_discount) || 0)), 0);
+        const totalDiscount = arr.reduce((a,i) => a + (Number(i.total_discount) || 0), 0);
         const totalPayable  = arr.reduce((a,i) => a + (Number(i.total_payable)  || 0), 0);
         const filterTail    = (search || stype || expFilter)
           ? ` <span style="color:var(--text3);font-weight:400;font-size:11px">(of ${rows.length})</span>`
@@ -17674,30 +17690,17 @@ async function loadPayments(opts){
     //   e-Trade   → Seller, Lots, Qty, Amount, TDS, Payable, Discount (no Total)
     const _payIsETrade = (typeof getCurrentBusinessMode === 'function')
       && getCurrentBusinessMode() === 'e-Trade';
+    // Discount is display-only. In e-Trade the server (getPaymentSummary)
+    // returns 0 here unless the "Calculate Discount" toggle is on, so the
+    // column simply renders whatever value it receives.
     const _colDiscount = { key:'total_discount', label:'Discount', sort:'number', numeric:true,
-      // In e-Trade the sort/total value follows what's DISPLAYED (0 when the
-      // seller's discount is toggled off) so the footer total stays honest.
-      value:(p)=> (_payIsETrade && _payIsDiscOff(aid, p.name)) ? 0 : (Number(p.total_discount)||0),
       fmt:(n)=>fmtI(n,2),
       // Discount in turmeric/amber for visual distinction
       render:(p)=>{
         const v = Number(p.total_discount)||0;
-        // e-Auction (or non-e-Trade): plain display, no per-seller toggle.
-        if(!_payIsETrade){
-          return v>0
-            ? `<span style="color:#B45309;font-weight:600">${fmtI(v,2)}</span>`
-            : `<span style="color:var(--text3)">0.00</span>`;
-        }
-        // e-Trade: policy discount shows for every seller by default, with a
-        // per-seller toggle to exclude it from the display (Payable unchanged).
-        if(v<=0) return `<span style="color:var(--text3)">0.00</span>`;
-        const off = _payIsDiscOff(aid, p.name);
-        const nm  = esc(p.name||'');
-        const amt = off
-          ? `<span style="color:var(--text3)" title="Discount excluded from display (${fmtI(v,2)})">0.00</span>`
-          : `<span style="color:#B45309;font-weight:600">${fmtI(v,2)}</span>`;
-        const btn = `<button class="btn" data-seller="${nm}" onclick="event.stopPropagation();_payToggleDisc('${esc(String(aid))}',this.getAttribute('data-seller'))" title="${off?'Show the policy discount for this seller':'Exclude discount for this seller from the display (does not change Payable)'}" style="margin-left:6px;padding:1px 7px;font-size:11px;background:#fff;border:1px solid var(--border);border-radius:6px;cursor:pointer">${off?'Calc':'✕'}</button>`;
-        return `<span style="display:inline-flex;align-items:center;white-space:nowrap">${amt}${btn}</span>`;
+        return v>0
+          ? `<span style="color:#B45309;font-weight:600">${fmtI(v,2)}</span>`
+          : `<span style="color:var(--text3)">0.00</span>`;
       } };
     // Total = pre-TDS net (PurAmt − Discount − GST). Sits before TDS so the
     // reader follows Total → minus TDS → Payable left-to-right. e-Trade omits it.
@@ -17956,11 +17959,7 @@ document.addEventListener('change', (e) => {
 //                  Chronological export history; "↶ Undo Last Export"
 //                  pops the most recent entry.
 const _PAY_STATE_KEY = (aid) => `pay.state.${aid}`;
-//   discountOff  : { sellerName: true }
-//                  e-Trade only. Sellers listed here have their (policy-
-//                  computed) discount hidden in the Payments table — a
-//                  DISPLAY-ONLY toggle; Payable is unaffected.
-const _PAY_EMPTY = () => ({ picks: {}, exportedLots: {}, batches: [], discountOff: {} });
+const _PAY_EMPTY = () => ({ picks: {}, exportedLots: {}, batches: [] });
 function _payLoadState(aid){
   if (!aid) return _PAY_EMPTY();
   try {
@@ -17983,7 +17982,6 @@ function _payLoadState(aid){
       picks: (obj && typeof obj.picks === 'object' && obj.picks) ? obj.picks : {},
       exportedLots,
       batches,
-      discountOff: (obj && typeof obj.discountOff === 'object' && obj.discountOff) ? obj.discountOff : {},
     };
   } catch (_) { return _PAY_EMPTY(); }
 }
@@ -18002,19 +18000,23 @@ function _paySetLotPicks(aid, sellerName, lotNos){
   else delete s.picks[sellerName];
   _paySaveState(aid, s);
 }
-// Per-seller discount display toggle (e-Trade). "Off" hides that seller's
-// computed discount in the table — display-only, Payable is never touched.
-function _payIsDiscOff(aid, sellerName){
-  return !!_payLoadState(aid).discountOff[String(sellerName || '')];
+// Global "Calculate Discount" toggle (e-Trade). Persisted as the setting
+// flag_pay_calc_discount so the Payments screen AND its reports/exports all
+// read it via cfg. Display-only — never changes Payable.
+function payCalcDiscountOn(){
+  try {
+    const f = (_sdata.flags || []).find(x => x && x.key === 'flag_pay_calc_discount');
+    return !!f && String(f.value).toLowerCase() === 'true';
+  } catch (_) { return false; }
 }
-function _payToggleDisc(aid, sellerName){
-  const s = _payLoadState(aid);
-  const k = String(sellerName || '');
-  if (s.discountOff[k]) delete s.discountOff[k];
-  else s.discountOff[k] = true;
-  _paySaveState(aid, s);
-  // Re-render from cache (display-only change — no server round-trip needed).
-  loadPayments({ keepPage: true, useCache: true });
+async function togglePayCalcDiscount(on){
+  const val = on ? 'true' : 'false';
+  if (typeof updateSdataField === 'function') updateSdataField('flag_pay_calc_discount', val);
+  try {
+    await j('/api/company-settings', { method:'PUT', body: JSON.stringify({ settings: { flag_pay_calc_discount: val } }) });
+  } catch (e) { showError(e); }
+  // Reload so the Discount column + KPI reflect the server-gated values.
+  loadPayments();
 }
 // Lots already exported for this seller: '*' (all), array (partial), or null.
 function _payExportedLotsFor(aid, sellerName){

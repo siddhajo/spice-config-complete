@@ -267,8 +267,12 @@ function calculateLot(lot, cfg) {
     // e-Trade has no commission/handling, so advance = GST only (informational).
     result.advance = result.cgst + result.sgst + result.igst;
 
-    // Payable = PurAmt − Discount − GST-on-Discount
-    const totalDeductions = result.refund + result.cgst + result.sgst + result.igst;
+    // Payable = PurAmt − GST-on-Discount. The Discount (result.refund) is
+    // INFORMATIONAL only in e-Trade — a trade-credit figure shown on the
+    // Payments screen / statements — and must NOT reduce what the seller is
+    // paid. It stays computed above for display, but is deliberately excluded
+    // from the deductions here so Payable is discount-independent.
+    const totalDeductions = result.cgst + result.sgst + result.igst;
     result.balance = Math.round((result.puramt - totalDeductions) * 100) / 100;
   }
 
@@ -882,13 +886,19 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // spread ∝ puramt when a state filter narrows the lot set. 0 for
   // unregistered/agriculturist sellers and dealers below the threshold.
   const tdsCtx = paymentTdsContext(db, auctionId);
+  // e-Trade: the policy trade-credit discount is display-only and shown only
+  // when the operator has switched on "Calculate Discount" (flag_pay_calc_
+  // discount). When off, it's hidden (0). e-Auction always shows its discount.
+  const showPolicyDisc = !useIspDisc
+    || (cfg && (cfg.flag_pay_calc_discount === true
+                || String(cfg.flag_pay_calc_discount || '').toLowerCase() === 'true'));
   // Merge: total_discount = lot-policy discount + any manual debit notes
   return sellers.map(s => {
-    const lotDisc = Number(s.lot_discount) || 0;
+    const lotDisc = showPolicyDisc ? (Number(s.lot_discount) || 0) : 0;
     const manualDisc = Number(debitMap[s.name]) || 0;
-    // Pre-TDS net = balance − manual debit notes (balance already nets the
-    // lot-policy discount and GST). This is the "Total" column shown before
-    // TDS in the Payments views.
+    // Pre-TDS net = balance − manual debit notes. In e-Trade `balance` no
+    // longer nets the policy discount (it's display-only), so Payable is
+    // discount-independent; manual debit notes still apply.
     const totalBeforeTds = (Number(s.total_payable) || 0) - manualDisc;
     const tds = tdsCtx.share(s.name, s.total_puramt);
     return {

@@ -9832,6 +9832,15 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   // matching the Payments screen and the lots modal. Overwrite the stored
   // active-view `refund` the Discount/Total math below reads.
   for (const l of lots) l.refund = ispLotDiscount(l, cfg);
+  // e-Trade: the trade-credit discount is display-only and shown only when
+  // "Calculate Discount" (flag_pay_calc_discount) is ON — matches the Payments
+  // screen. When off, zero it so the statement's Discount column reads 0.
+  // Payable is unaffected either way (balance excludes the discount).
+  const _stmtIsETrade = String(cfg.business_mode || 'e-Trade').toLowerCase() === 'e-trade';
+  const _stmtShowDisc = !_stmtIsETrade
+    || cfg.flag_pay_calc_discount === true
+    || String(cfg.flag_pay_calc_discount || '').toLowerCase() === 'true';
+  if (!_stmtShowDisc) for (const l of lots) l.refund = 0;
   const trader = db.get('SELECT * FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [sellerName]);
   const fmtAmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 3, maximumFractionDigits: 3 });

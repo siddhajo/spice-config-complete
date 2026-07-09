@@ -793,9 +793,15 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   // the pre-TDS payable; "Payable" = Total − TDS (what the seller is paid).
   const { paymentTdsContext } = require('./calculations');
   const tdsCtx = paymentTdsContext(db, auctionId);
+  // e-Trade: the policy trade-credit discount is display-only and included
+  // only when "Calculate Discount" (flag_pay_calc_discount) is ON — mirrors
+  // the Payments screen + statement. Payable is discount-independent regardless.
+  const showPolicyDisc = mode !== 'e-trade'
+    || (cfg && (cfg.flag_pay_calc_discount === true
+                || String(cfg.flag_pay_calc_discount || '').toLowerCase() === 'true'));
   const seenSellers = new Set();
   const enrichedFlat = rows.map(r => {
-    const lotDisc = Number(r.lot_discount) || 0;
+    const lotDisc = showPolicyDisc ? (Number(r.lot_discount) || 0) : 0;
     const manualDisc = (!seenSellers.has(r.poolername))
       ? (Number(debitMap[r.poolername]) || 0)
       : 0;

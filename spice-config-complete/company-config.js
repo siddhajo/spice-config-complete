@@ -171,6 +171,11 @@ const DEFAULTS = [
   { key: 'flag_rtds_inv',   value: 'true',           category: 'flags',     label: 'TDS in ASP Purchase',      type: 'boolean' },
   { key: 'flag_wgst',       value: 'false',          category: 'flags',     label: 'TDS on Full Invoice Amount', type: 'boolean' },
   { key: 'flag_disc_gst',   value: 'false',          category: 'flags',     label: 'Discount includes GST',    type: 'boolean' },
+  // e-Trade Payments: when ON, the per-seller trade-credit Discount is
+  // computed + shown on the Payments screen and its reports/exports. It is
+  // DISPLAY-ONLY and never reduces Payable. Default OFF (opt-in per the
+  // Payments-screen "Calculate Discount" toggle).
+  { key: 'flag_pay_calc_discount', value: 'false',   category: 'flags',     label: 'Payments (e-Trade): Calculate trade-credit Discount (display only)', type: 'boolean' },
   // Rolls the per-lot Discount into P_Rate using deduction1_inclusive — ONLY for Grade 1 lots.
   { key: 'flag_discount_in_prate', value: 'false',   category: 'flags',     label: 'Roll Discount into P_Rate (Grade 1 only)', type: 'boolean' },
   { key: 'flag_debit_note', value: 'false',          category: 'flags',     label: 'Debit Note for Discount',  type: 'boolean' },
