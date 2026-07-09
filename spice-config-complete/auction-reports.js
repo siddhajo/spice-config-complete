@@ -961,7 +961,7 @@ function getTradeReportData(db, auctionId) {
   //   cardamomGunny = Σ amount + (Σ bags × Gunny rate)
   //   transport     = Σ bags × Transport (₹/kg)          [Local only, else 0]
   //   insurance     = (cardamomGunny / 1000) × Insurance  [Local only, else 0]
-  //   gst           = cardamomGunny × Goods GST %
+  //   gst           = (cardamomGunny + transport + insurance) × Goods GST %
   //   INV.AMOUNT    = round( cardamomGunny + transport + insurance + gst )
   const _gunnyRate     = Number(cfg.gunny_rate) || 165;
   const _transportRate = Number(cfg.transport)  || 2.5;
@@ -973,7 +973,7 @@ function getTradeReportData(db, auctionId) {
     const isLocal = r.sale === 'L';
     const transport = isLocal ? bags * _transportRate : 0;
     const insurance = isLocal ? (cardamomGunny / 1000) * _insuranceRate : 0;
-    const gst = cardamomGunny * _gstGoods / 100;
+    const gst = (cardamomGunny + transport + insurance) * _gstGoods / 100;
     // Rounded to the nearest rupee.
     return Math.round(cardamomGunny + transport + insurance + gst);
   };
