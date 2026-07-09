@@ -818,9 +818,10 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   const enriched = [];
   let curName = null;
   let acc = null;
+  let serial = 0;   // SL.NO — restarts per pooler group
   const flushSub = () => {
     if (!acc || curName == null) return;
-    const sub = { _isSubtotal: true, poolername: `${curName} TOTAL` };
+    const sub = { _isSubtotal: true, _sn: '', poolername: `${curName} TOTAL` };
     SUB_KEYS.forEach(k => { sub[k] = acc[k] || 0; });
     enriched.push(sub);
   };
@@ -830,21 +831,23 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
       flushSub();
       curName = k;
       acc = Object.fromEntries(SUB_KEYS.map(x => [x, 0]));
+      serial = 0;
     }
     SUB_KEYS.forEach(x => { acc[x] += Number(r[x]) || 0; });
+    r._sn = ++serial;
     enriched.push(r);
   }
   flushSub();
   const cols = [
+    { header: 'SL.NO', key: '_sn', width: 6 },
     { header: 'POOLERNAME', key: 'poolername', width: 30 },
     { header: 'LOT', key: 'lot', width: 8 }, { header: 'BAG', key: 'bag', width: 6 },
     { header: 'QTY', key: 'qty', width: 12 }, { header: 'PRICE', key: 'price', width: 10 },
     { header: 'AMOUNT', key: 'amount', width: 14 }, { header: 'PQTY', key: 'pqty', width: 12 },
     { header: 'PRATE', key: 'prate', width: 10 }, { header: 'PURAMT', key: 'puramt', width: 14 },
-    { header: 'DISCOUNT', key: 'discount', width: 14 },
-    { header: 'TOTAL', key: 'total', width: 14 },
     { header: 'TDS', key: 'tds', width: 12 },
     { header: 'PAYABLE', key: 'payable', width: 14 },
+    { header: 'DISCOUNT', key: 'discount', width: 14 },
   ];
   // Footer totals — sum every numeric column. The earlier export had no
   // totals row, so users had to compute payable/discount sums manually
@@ -882,15 +885,17 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
 async function exportPaymentPartyWise(db, auctionId, cfg, state, _opts) {
   const { getPaymentSummary } = require('./calculations');
   const sellers = getPaymentSummary(db, auctionId, state || '', cfg);
+  // Sequential SL.NO, one per party row.
+  sellers.forEach((s, i) => { s._sn = i + 1; });
   const cols = [
+    { header: 'SL.NO',    key: '_sn',            width: 6  },
     { header: 'SELLER',   key: 'name',           width: 32 },
     { header: 'LOTS',     key: 'lot_count',      width: 8  },
     { header: 'QTY',      key: 'total_qty',      width: 12 },
     { header: 'PUR.AMT',  key: 'total_puramt',   width: 14 },
-    { header: 'DISCOUNT', key: 'total_discount', width: 14 },
-    { header: 'TOTAL',    key: 'total_total',    width: 14 },
     { header: 'TDS',      key: 'total_tds',      width: 12 },
     { header: 'PAYABLE',  key: 'total_payable',  width: 14 },
+    { header: 'DISCOUNT', key: 'total_discount', width: 14 },
   ];
   const sum = (k) => sellers.reduce((s, r) => s + (Number(r[k]) || 0), 0);
   const grandTotal = {
@@ -899,10 +904,9 @@ async function exportPaymentPartyWise(db, auctionId, cfg, state, _opts) {
       lot_count:      sum('lot_count'),
       total_qty:      sum('total_qty'),
       total_puramt:   sum('total_puramt'),
-      total_discount: sum('total_discount'),
-      total_total:    sum('total_total'),
       total_tds:      sum('total_tds'),
       total_payable:  sum('total_payable'),
+      total_discount: sum('total_discount'),
     },
   };
   return createExcelBuffer('PaymentPartyWise', cols, sellers, {

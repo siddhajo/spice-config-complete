@@ -671,8 +671,9 @@ const COLS = {
     { header: 'PQTY',       key: 'pqty',        width: 10 },
     { header: 'PRATE',      key: 'prate',       width: 9  },
     { header: 'PURAMT',     key: 'puramt',      width: 14 },
-    { header: 'DISCOUNT',   key: 'discount',    width: 10 },
+    { header: 'TDS',        key: 'tds',         width: 12 },
     { header: 'PAYABLE',    key: 'payable',     width: 14 },
+    { header: 'DISCOUNT',   key: 'discount',    width: 10 },
   ],
   tally_purchase: [
     { header: 'NAME', key: 'name', width: 24 }, { header: 'ADD', key: 'add', width: 24 },
@@ -881,11 +882,11 @@ const ROW_PREPROCESS = {
     subtotalLabelKey: 'name',
   },
   // Payment summary — serial restarts per pooler name; subtotal of bag, qty,
-  // amount, pqty, puramt, discount, payable at the end of each pooler's rows.
+  // amount, pqty, puramt, tds, payable, discount at the end of each pooler's rows.
   payment: {
     serialKey: '_sn',
     groupByKey: 'poolername',
-    subtotalKeys: ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'],
+    subtotalKeys: ['bag', 'qty', 'amount', 'pqty', 'puramt', 'tds', 'payable', 'discount'],
     subtotalLabelKey: 'poolername',
   },
 };
@@ -1008,11 +1009,34 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       // Mode-aware discount column — see exports.js exportPaymentSummary.
       const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
       const discountCol = (mode === 'auction') ? 'advance' : 'refund';
-      return db.all(
+      const rows = db.all(
         `SELECT name as poolername, lot_no as lot, bags as bag, qty, price, amount,
-          pqty, prate, puramt, ${discountCol} as discount, balance as payable
+          pqty, prate, puramt, ${discountCol} as lot_discount, balance as payable
          FROM lots WHERE auction_id = ? AND amount > 0
          ORDER BY state, name`, [auctionId]);
+      // Enrich to match the XLSX Payment Summary exactly so both formats
+      // reconcile to the rupee: discount = per-lot policy discount + any manual
+      // debit_notes (spread onto the seller's FIRST row); TDS = Section-194Q
+      // purchase TDS spread ∝ each lot's puramt; PAYABLE = (balance − manual
+      // debit) − TDS. See exports.js exportPaymentSummary for the rationale.
+      const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
+      const ano = auction ? auction.ano : null;
+      const debitMap = {};
+      if (ano) {
+        for (const d of db.all('SELECT name, SUM(amount) as total FROM debit_notes WHERE ano = ? GROUP BY name', [ano]))
+          debitMap[d.name] = Number(d.total) || 0;
+      }
+      const { paymentTdsContext } = require('./calculations');
+      const tdsCtx = paymentTdsContext(db, auctionId);
+      const seen = new Set();
+      return rows.map(r => {
+        const lotDisc = Number(r.lot_discount) || 0;
+        const manualDisc = seen.has(r.poolername) ? 0 : (Number(debitMap[r.poolername]) || 0);
+        seen.add(r.poolername);
+        const total = (Number(r.payable) || 0) - manualDisc;   // pre-TDS payable
+        const tds = tdsCtx.share(r.poolername, r.puramt);
+        return { ...r, discount: lotDisc + manualDisc, tds, payable: total - tds };
+      });
     }
 
     case 'tally_purchase': {
