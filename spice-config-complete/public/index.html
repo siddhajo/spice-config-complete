@@ -7775,16 +7775,17 @@ async function loadFormulas(){
       },
       {
         label: 'Payable to seller (Balance)',
-        formula: `Payable = PurAmt − Discount − ( CGST + SGST + IGST )`,
+        note: 'The Discount is DISPLAY-ONLY in e-Trade — it is NOT deducted from Payable. Only GST-on-Discount (when the "Discount includes GST" flag is on) reduces the balance; otherwise Payable = PurAmt.',
+        formula: `Payable = PurAmt − ( CGST + SGST + IGST )`,
       },
     ]);
     h += card('Payment summary (e-Trade — per seller, per auction)', [
       {
         label: 'Total Amount, Total Purchase, Total Discount',
-        note: 'Sum across all lots a seller sold in the auction.',
+        note: 'Sum across all lots a seller sold in the auction. The Discount is DISPLAY-ONLY — shown only when the Payments "Calculate Discount" toggle (flag_pay_calc_discount) is ON, and it never reduces Payable.',
         formula: `Total Amount   = Σ ( Lot Amount )<br>
                 Total PurAmt   = Σ ( PurAmt )<br>
-                Total Discount = Σ ( Discount )`,
+                Total Discount = Σ ( Discount )    ${lit('— display only')}`,
       },
       {
         label: 'GST 5% (column on Payments tab)',
@@ -7793,7 +7794,19 @@ async function loadFormulas(){
       },
       {
         label: 'Payable',
-        formula: `Payable = Total PurAmt − Total Discount − GST 5%`,
+        note: 'The trade-credit Discount is NOT deducted (display-only). Manual debit notes, if any, still reduce Payable; TDS (194Q) is withheld separately — see the shared TDS card.',
+        formula: `Payable = Total PurAmt − GST 5%`,
+      },
+    ]);
+    h += card('Trade Report — Invoice Amount (e-Trade)', [
+      {
+        label: 'INV.AMOUNT per buyer',
+        note: 'On the Trade Report, e-Trade COMPUTES each buyer\'s Invoice Amount from their lot aggregates (so it shows even before sales invoices are generated). It is a simplified estimate: Transport is charged per bag, and GST + Insurance are based on Cardamom + Gunny only.',
+        formula: `Cardamom+Gunny = Σ Amount + ( Σ Bags × ${pill('Gunny rate (₹/bag)', num('gunny_rate','165'))} )<br>
+                Transport      = Σ Bags × ${pill('Transport (₹/kg)', num('transport','2.5'))}<br>
+                Insurance      = ( Cardamom+Gunny / 1000 ) × ${pill('Insurance (₹/₹1000)', num('insurance','0.75'))}<br>
+                GST            = Cardamom+Gunny × ${pill('Goods GST %', num('gst_goods','5'))} / 100<br>
+                INV.AMOUNT     = round2( Cardamom+Gunny + Transport + Insurance + GST )`,
       },
     ]);
     h += card('Bill of Supply (Agriculturist — no GSTIN)', [

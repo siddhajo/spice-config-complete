@@ -1001,16 +1001,23 @@ function getTradeReportData(db, auctionId) {
 
   // Statistics for the footer
   const allLots = db.all(
-    `SELECT bags, qty, price, amount FROM lots WHERE auction_id = ?`, [auctionId]
+    `SELECT bags, qty, price, amount, code FROM lots WHERE auction_id = ?`, [auctionId]
   );
-  const sold = allLots.filter(l => Number(l.amount) > 0);
-  const notSold = allLots.filter(l => !(Number(l.amount) > 0));
+  // e-Trade: Withdrawn lots (code = 'WD') are reported in the WITHDRAWN row,
+  // separate from the NOT eTRADED (unsold, non-withdrawn) bucket where they
+  // used to land. e-Auction keeps its prior behaviour (no WD split).
+  const isWd = (l) => isETrade && String(l.code || '').trim().toUpperCase() === 'WD';
+  const withdrawn = allLots.filter(isWd);
+  const sold = allLots.filter(l => !isWd(l) && Number(l.amount) > 0);
+  const notSold = allLots.filter(l => !isWd(l) && !(Number(l.amount) > 0));
   const sumLots = (xs, k) => xs.reduce((s, r) => s + (Number(r[k]) || 0), 0);
   const stats = {
     arrivals_qty:  sumLots(allLots, 'qty'),
     arrivals_bags: sumLots(allLots, 'bags'),
     arrivals_lots: allLots.length,
-    withdrawn_qty: 0, withdrawn_bags: 0, withdrawn_lots: 0,
+    withdrawn_qty:  sumLots(withdrawn, 'qty'),
+    withdrawn_bags: sumLots(withdrawn, 'bags'),
+    withdrawn_lots: withdrawn.length,
     sold_qty:      sumLots(sold, 'qty'),
     sold_bags:     sumLots(sold, 'bags'),
     sold_lots:     sold.length,
