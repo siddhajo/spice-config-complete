@@ -943,6 +943,7 @@ function getTradeReportData(db, auctionId) {
 
   // Stamp each buyer-row with inv_amount and a uniform sale code (I/L)
   const auctionState = String(auction.state || '').trim().toUpperCase();
+  const cfg = getSettingsFlat(db);
   // e-Trade: the BIDDER column shows the buyer name (e.g. "NAGENDRAN")
   // rather than the proprietor short-name used for e-Auction.
   const isETrade = auction && auction.mode === 'e-Trade';
@@ -950,11 +951,32 @@ function getTradeReportData(db, auctionId) {
   // the configured business_state (the selling company's own state); e-Auction
   // keeps comparing against the auction's stored state.
   const homeState = isETrade
-    ? String(getSettingsFlat(db).business_state || auction.state || '').trim().toUpperCase()
+    ? String(cfg.business_state || auction.state || '').trim().toUpperCase()
     : auctionState;
+  // e-Trade INV.AMOUNT is COMPUTED from each buyer's lot aggregates so it's
+  // available even before sales invoices are generated (e-Auction keeps reading
+  // the stored invoice grand-totals via invByCode). Formula (rounded to 2dp):
+  //   cardamomGunny = Σ amount + (Σ bags × Gunny rate)
+  //   transport     = Σ bags × Transport (₹/kg)
+  //   insurance     = (cardamomGunny / 1000) × Insurance (₹/₹1000)
+  //   gst           = cardamomGunny × Goods GST %
+  //   INV.AMOUNT    = round2( cardamomGunny + transport + insurance + gst )
+  const _gunnyRate     = Number(cfg.gunny_rate) || 165;
+  const _transportRate = Number(cfg.transport)  || 2.5;
+  const _insuranceRate = Number(cfg.insurance)  || 0.75;
+  const _gstGoods      = Number(cfg.gst_goods)  || 5;
+  const _round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const _tradeInvAmount = (r) => {
+    const bags = Number(r.bag) || 0;
+    const cardamomGunny = (Number(r.amount) || 0) + bags * _gunnyRate;
+    const transport = bags * _transportRate;
+    const insurance = (cardamomGunny / 1000) * _insuranceRate;
+    const gst = cardamomGunny * _gstGoods / 100;
+    return _round2(cardamomGunny + transport + insurance + gst);
+  };
   rows.forEach(r => {
     if (isETrade) r.bidder = r.buyer_name || '';
-    r.inv_amount = invByCode[r.code] || 0;
+    r.inv_amount = isETrade ? _tradeInvAmount(r) : (invByCode[r.code] || 0);
     const buyerSt = String(r.state || '').trim().toUpperCase();
     // Inter-state if buyer state ≠ home state. Empty buyer state defaults
     // to intra-state (matches the FoxPro fallback).

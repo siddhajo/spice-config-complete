@@ -7762,7 +7762,7 @@ async function loadFormulas(){
     h += card('Discount on Purchase (e-Trade)', [
       {
         label: 'Discount amount',
-        note: 'Quick-pay discount tied to settlement window. Rounded to nearest rupee. Days come from "Days for Dealer" when the seller has a GSTIN, otherwise "Days for Discount".',
+        note: 'Quick-pay discount tied to settlement window. Rounded to nearest rupee. Days come from "Days for Dealer" when the seller has a GSTIN, otherwise "Days for Discount". In e-Trade this Discount is DISPLAY-ONLY — it is shown on the Payments screen / statements / exports only when the "Calculate Discount" toggle (flag_pay_calc_discount) is ON, and it never reduces Payable.',
         formula: `Discount = round( PurAmt / 1000 × ${pill('Discount Days', num('discount_days', '0'))} × ${pill('Discount %', num('discount_pct', '0'))} )`,
       },
       {
@@ -16633,13 +16633,15 @@ async function loadInvoices(opts){
   if (typeof refreshGenerationLocks === 'function') refreshGenerationLocks(aid, '#tc-invoices', ['invoices']);
   const search   = (document.getElementById('inv-search')?.value || '').trim();
   const saleType = (document.getElementById('inv-sale-filter')?.value || '').trim();
-  // Build the URL with auction + search + saleType params. Search bypasses
-  // the auction filter so cross-trade lookups work — the server only
-  // applies auction_id when no search is active OR the user explicitly
-  // ticks "search within this trade" (not implemented yet; for now,
-  // search always overrides auction_id when present).
+  // Build the URL with auction + search + saleType params. In e-Auction,
+  // search bypasses the auction filter so cross-trade lookups work. In
+  // e-Trade, invoice numbers restart per trade (each trade re-numbers from 1),
+  // so an unscoped search for "5" would match invoice #5 in every trade —
+  // keep the search scoped to the selected trade (auction) instead.
+  const _invETradeScoped = (typeof getCurrentBusinessMode === 'function')
+    && String(getCurrentBusinessMode() || '').toLowerCase() === 'e-trade';
   const qs = [];
-  if (aid && !search) qs.push(`auction_id=${encodeURIComponent(aid)}`);
+  if (aid && (!search || _invETradeScoped)) qs.push(`auction_id=${encodeURIComponent(aid)}`);
   if (search)         qs.push(`search=${encodeURIComponent(search)}`);
   if (saleType)       qs.push(`saleType=${encodeURIComponent(saleType)}`);
   const url = qs.length ? `/api/invoices?${qs.join('&')}` : '/api/invoices';
