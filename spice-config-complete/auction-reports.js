@@ -960,7 +960,8 @@ function getTradeReportData(db, auctionId) {
   // freight, so both are 0 for 'I'. Rounded to the nearest rupee:
   //   cardamomGunny = Σ amount + (Σ bags × Gunny rate)
   //   transport     = Σ qty × Transport (₹/kg)           [Local only, else 0]
-  //   insurance     = (cardamomGunny / 1000) × Insurance  [Local only, else 0]
+  //   insurance     = ((cardamomGunny + cardamomGunny × Goods GST %) / 1000)
+  //                     × Insurance (₹/₹1000)             [Local only, else 0]
   //   gst           = (cardamomGunny + transport + insurance) × Goods GST %
   //   INV.AMOUNT    = round( cardamomGunny + transport + insurance + gst )
   const _gunnyRate     = Number(cfg.gunny_rate) || 165;
@@ -973,7 +974,9 @@ function getTradeReportData(db, auctionId) {
     const cardamomGunny = (Number(r.amount) || 0) + bags * _gunnyRate;
     const isLocal = r.sale === 'L';
     const transport = isLocal ? qty * _transportRate : 0;
-    const insurance = isLocal ? (cardamomGunny / 1000) * _insuranceRate : 0;
+    // Insurance base = goods value grossed up by Goods GST (per ₹1000).
+    const goodsWithGst = cardamomGunny + cardamomGunny * _gstGoods / 100;
+    const insurance = isLocal ? (goodsWithGst / 1000) * _insuranceRate : 0;
     const gst = (cardamomGunny + transport + insurance) * _gstGoods / 100;
     // Rounded to the nearest rupee.
     return Math.round(cardamomGunny + transport + insurance + gst);
