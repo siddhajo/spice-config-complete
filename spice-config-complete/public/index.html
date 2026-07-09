@@ -989,6 +989,12 @@ body[data-business-mode="e-Auction"] .tc.mode-eauction-only.active{display:block
    change, so this is pure CSS with no flicker. */
 body[data-business-state="TAMIL NADU"] .state-kerala-only{display:none !important}
 
+/* Payments is available in e-Trade only for Tamil Nadu (ISP) — it's hidden
+   for Kerala (ASP) e-Trade, where seller payments run on the ISP side.
+   e-Auction is unaffected (no data-business-mode="e-Trade"), so Payments
+   stays visible there. */
+body[data-business-mode="e-Trade"][data-business-state="KERALA"] .hide-etrade-kerala{display:none !important}
+
 /* ── .needs-lot-entry-view permission gate ──
    Mirrors existing .needs-* perm classes: hidden by default, shown
    when body[data-perm-lot-entry-view="1"] is set. */
@@ -2824,7 +2830,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes - Planter
         </button>
-        <button class="side-item state-kerala-only" data-tab="payments" onclick="go('payments')">
+        <button class="side-item hide-etrade-kerala" data-tab="payments" onclick="go('payments')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
           Payments
         </button>
@@ -9202,7 +9208,7 @@ async function loadStats(auctionId){
               <div class="qa-label">Generate Bills of Supply</div>
               <div class="qa-sub">For agri sellers</div>
             </button>
-            <button class="qa" onclick="go('payments')">
+            <button class="qa hide-etrade-kerala" onclick="go('payments')">
               <div class="qa-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
               <div class="qa-label">View payments</div>
               <div class="qa-sub">Check pending dues</div>
@@ -11345,6 +11351,14 @@ async function onBusinessStateChanged(newState){
   // Invoices (the sibling transaction tab) instead.
   if (String(newState || '').toUpperCase() === 'TAMIL NADU'
       && ['purchases', 'bills', 'debit'].includes(window._currentTab)) {
+    go('invoices');
+  }
+  // Payments is hidden in Kerala (ASP) e-Trade. If the operator was sitting on
+  // it when they flipped to Kerala, send them to Sales Invoices so they're not
+  // stranded on a now-hidden tab.
+  if (String(newState || '').toUpperCase() === 'KERALA'
+      && getCurrentBusinessMode() === 'e-Trade'
+      && window._currentTab === 'payments') {
     go('invoices');
   }
 
@@ -16757,11 +16771,10 @@ async function loadInvoices(opts){
         // external buyer's trade name.
         value:(i)=>_invTradeName(i),
         render:(i)=>esc(_invTradeName(i)) },
-      ...(_invIsAuction ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
+      // Bags before Qty in both e-Auction and e-Trade (invoices.bag = SUM of
+      // the invoiced lots' bags).
+      ...((_invIsAuction || _invIsETrade) ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
-      // e-Trade shows Bags right after Qty (invoices.bag = SUM of the invoiced
-      // lots' bags). e-Auction keeps its Bags column before Qty (above).
-      ...(_invIsETrade ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       // Charge breakdown — gunny, transport (stored in pava_hc), insurance (ins).
       { key:'gunny', label:'Gunny', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
