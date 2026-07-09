@@ -557,6 +557,24 @@ function getCollectionRows(db, auctionId) {
              AND NULLIF(bb.sbl,'') IS NOT NULL
            ORDER BY bb.id LIMIT 1),
         '')                                                 AS buyer_name,
+      COALESCE(
+        -- buyer code (buyers.code, e.g. "AG", "AKS") resolved with the same
+        -- priority as buyer_name: exact (buyer + trade) pair, then buyer name,
+        -- then trade name alone.
+        (SELECT NULLIF(bb.code,'') FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+             AND UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
+             AND NULLIF(bb.code,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        (SELECT NULLIF(bb.code,'') FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer))  = UPPER(TRIM(i.buyer))
+             AND NULLIF(bb.code,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        (SELECT NULLIF(bb.code,'') FROM buyers bb
+           WHERE UPPER(TRIM(bb.buyer1)) = UPPER(TRIM(i.buyer1))
+             AND NULLIF(bb.code,'') IS NOT NULL
+           ORDER BY bb.id LIMIT 1),
+        '')                                                 AS buyer_code,
       SUM(i.qty)                                            AS qty,
       SUM(i.tot)                                            AS value,
       COALESCE(
@@ -612,20 +630,20 @@ async function collectionXlsx(db, auctionId) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Collection');
   ws.columns = [
-    { width: 12 }, { width: 30 }, { width: 24 }, { width: 14 }, { width: 18 },
+    { width: 12 }, { width: 30 }, { width: 10 }, { width: 24 }, { width: 14 }, { width: 18 },
   ];
 
-  ws.mergeCells('A1:E1');
+  ws.mergeCells('A1:F1');
   ws.getCell('A1').value = 'IDEAL SPICES PRIVATE LIMITED';
   ws.getCell('A1').font = { bold: true, size: 14 };
   ws.getCell('A1').alignment = { horizontal: 'center' };
-  ws.mergeCells('A2:E2');
+  ws.mergeCells('A2:F2');
   ws.getCell('A2').value = `${modeHeaderLabel(auction)} No: ${auction.ano}    Date: ${fmtDateDMY(auction.date)}`;
   ws.getCell('A2').font = { bold: true, size: 11 };
   ws.getCell('A2').alignment = { horizontal: 'center' };
   ws.addRow([]);
 
-  const head = ws.addRow(['INVO', 'TRADE NAME', 'NAME', 'QUANTITY', 'VALUE']);
+  const head = ws.addRow(['INVO', 'TRADE NAME', 'CODE', 'NAME', 'QUANTITY', 'VALUE']);
   head.font = { bold: true };
   head.eachCell(c => {
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E4DD' } };
@@ -636,7 +654,7 @@ async function collectionXlsx(db, auctionId) {
   let gQty = 0, gValue = 0;
   groups.forEach(([state, items]) => {
     const sec = ws.addRow([state || 'OTHER']);
-    ws.mergeCells(`A${sec.number}:E${sec.number}`);
+    ws.mergeCells(`A${sec.number}:F${sec.number}`);
     sec.font = { bold: true, size: 10 };
     sec.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
     sec.alignment = { horizontal: 'left' };
@@ -645,23 +663,24 @@ async function collectionXlsx(db, auctionId) {
       const r = ws.addRow([
         `${it.sale || ''} ${it.invo || ''}`.trim(),
         it.trade_name || '',
+        it.buyer_code || '',
         it.buyer_name || '',
         Number(it.qty) || 0,
         Number(it.value) || 0,
       ]);
-      r.getCell(4).numFmt = '#,##0.000';
-      r.getCell(4).alignment = { horizontal: 'right' };
-      r.getCell(5).numFmt = '#,##,##0.00';
+      r.getCell(5).numFmt = '#,##0.000';
       r.getCell(5).alignment = { horizontal: 'right' };
+      r.getCell(6).numFmt = '#,##,##0.00';
+      r.getCell(6).alignment = { horizontal: 'right' };
       gQty += Number(it.qty) || 0;
       gValue += Number(it.value) || 0;
     });
   });
 
-  const tot = ws.addRow(['', '', 'Total', gQty, gValue]);
+  const tot = ws.addRow(['', '', '', 'Total', gQty, gValue]);
   tot.font = { bold: true };
-  tot.getCell(4).numFmt = '#,##0.000';
-  tot.getCell(5).numFmt = '#,##,##0.00';
+  tot.getCell(5).numFmt = '#,##0.000';
+  tot.getCell(6).numFmt = '#,##,##0.00';
   tot.eachCell((c) => {
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3CD' } };
     c.border = { top: { style: 'thin' }, bottom: { style: 'double' } };
@@ -684,20 +703,23 @@ async function collectionPdf(db, auctionId) {
   const pageH = doc.page.height;
   const usableW = pageW - m * 2;
 
-  // Cols: INVO | TRADE NAME | NAME | QTY | VALUE
+  // Cols: INVO | TRADE NAME | CODE | NAME | QTY | VALUE
   // Portrait A4 → ~547pt usable. Long firm names like "PERFECT CARDAMOM AND
   // SPICES MARKETING COMPANY PVT LTD" wrap to multiple lines via wrapText
   // (drawDataRow grows the row height to fit the tallest cell).
   const colW = [
     Math.floor(usableW * 0.10),  // INVO
-    Math.floor(usableW * 0.30),  // TRADE NAME
-    Math.floor(usableW * 0.30),  // NAME
+    Math.floor(usableW * 0.27),  // TRADE NAME
+    Math.floor(usableW * 0.08),  // CODE
+    Math.floor(usableW * 0.25),  // NAME
     Math.floor(usableW * 0.13),  // QUANTITY
     0,                           // VALUE absorbs rounding (~17%)
   ];
-  colW[4] = usableW - colW[0] - colW[1] - colW[2] - colW[3];
+  colW[5] = usableW - colW[0] - colW[1] - colW[2] - colW[3] - colW[4];
   const colX = [m];
   for (let i = 0; i < colW.length - 1; i++) colX.push(colX[i] + colW[i]);
+  // Per-column text alignment, shared by header + data + total rows.
+  const COL_ALIGN = ['center', 'left', 'left', 'left', 'right', 'right'];
 
   const ROW_H = 16;
   const HEAD_H = 18;
@@ -744,11 +766,10 @@ async function collectionPdf(db, auctionId) {
     const headTop = y;
     doc.rect(m, y, usableW, HEAD_H).fillAndStroke('#E8E4DD', '#444');
     doc.fillColor('#000').font('Helvetica-Bold').fontSize(9.5);
-    const heads = ['INVO', 'TRADE NAME', 'NAME', 'QUANTITY', 'VALUE'];
+    const heads = ['INVO', 'TRADE NAME', 'CODE', 'NAME', 'QUANTITY', 'VALUE'];
     heads.forEach((h, i) => {
-      const align = (i === 0) ? 'center' : (i <= 2 ? 'left' : 'right');
       doc.text(fitText(doc, h, colW[i] - 8), colX[i] + 4, y + 5, {
-        width: colW[i] - 8, align, lineBreak: false,
+        width: colW[i] - 8, align: COL_ALIGN[i], lineBreak: false,
       });
     });
     y += HEAD_H;
@@ -769,9 +790,9 @@ async function collectionPdf(db, auctionId) {
   function drawDataRow(it, idx) {
     doc.font('Helvetica').fontSize(9);
     const invoDisplay = `${it.sale || ''} ${it.invo || ''}`.trim();
-    const cells = [invoDisplay, it.trade_name || '', it.buyer_name || '',
-                   fmtQty(it.qty), fmtMoney(it.value)];
-    const aligns = ['center', 'left', 'left', 'right', 'right'];
+    const cells = [invoDisplay, it.trade_name || '', it.buyer_code || '',
+                   it.buyer_name || '', fmtQty(it.qty), fmtMoney(it.value)];
+    const aligns = COL_ALIGN;
 
     const LINE_H = 12;
     const PAD_TOP = 4, PAD_BOT = 4;
@@ -839,10 +860,10 @@ async function collectionPdf(db, auctionId) {
   closeSegment();
   doc.rect(m, y, usableW, ROW_H + 4).fillAndStroke('#FFF3CD', '#E0B020');
   doc.fillColor('#000').font('Helvetica-Bold').fontSize(10);
-  // The total occupies cols: empty | empty | "Total" | qty | value
-  doc.text('Total', colX[2] + 4, y + 6, { width: colW[2] - 8, align: 'right', lineBreak: false });
-  doc.text(fmtQty(gQty),   colX[3] + 4, y + 6, { width: colW[3] - 8, align: 'right', lineBreak: false });
-  doc.text(fmtMoney(gValue), colX[4] + 4, y + 6, { width: colW[4] - 8, align: 'right', lineBreak: false });
+  // The total occupies cols: empty | empty | empty | "Total" | qty | value
+  doc.text('Total', colX[3] + 4, y + 6, { width: colW[3] - 8, align: 'right', lineBreak: false });
+  doc.text(fmtQty(gQty),   colX[4] + 4, y + 6, { width: colW[4] - 8, align: 'right', lineBreak: false });
+  doc.text(fmtMoney(gValue), colX[5] + 4, y + 6, { width: colW[5] - 8, align: 'right', lineBreak: false });
   y += ROW_H + 4;
 
   finishPage();

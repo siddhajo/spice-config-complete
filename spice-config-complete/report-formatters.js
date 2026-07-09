@@ -12,6 +12,19 @@
 
 const fs = require('fs');
 const path = require('path');
+const { AsyncLocalStorage } = require('async_hooks');
+
+// Per-request override for which company identity (ISP vs ASP) exports render
+// under. When a request runs inside runWithCompanyOverride('ASP'|'ISP', fn),
+// getCompanyHeader() below honours that instead of the DB's active preset —
+// this powers the Export Center's "Use ISP / ASP company details" chooser
+// (Tamil Nadu + e-Trade) without threading a param through every builder.
+const _companyOverrideStore = new AsyncLocalStorage();
+function runWithCompanyOverride(code, fn) {
+  const norm = String(code || '').trim().toUpperCase();
+  if (norm !== 'ISP' && norm !== 'ASP') return fn();
+  return _companyOverrideStore.run(norm, fn);
+}
 
 // ── Indian-format number formatters ─────────────────────────
 
@@ -120,13 +133,20 @@ function getCompanyHeader(db) {
   if (db && typeof db.get === 'function') {
     try {
       // Determine which preset (ISP vs ASP) is active. Default to ISP.
+      // A per-request override (Export Center chooser) wins over the DB's
+      // stored active preset when present.
       let activeCode = 'ISP';
-      try {
-        const r = db.get(
-          "SELECT value FROM company_preset_meta WHERE key = 'active_preset_code'"
-        );
-        if (r && r.value) activeCode = r.value;
-      } catch (_) {}
+      const _ov = _companyOverrideStore.getStore();
+      if (_ov === 'ISP' || _ov === 'ASP') {
+        activeCode = _ov;
+      } else {
+        try {
+          const r = db.get(
+            "SELECT value FROM company_preset_meta WHERE key = 'active_preset_code'"
+          );
+          if (r && r.value) activeCode = r.value;
+        } catch (_) {}
+      }
 
       // Read short_name + logo for whichever preset is active.
       // The non-active preset's fields are stored under "s_" prefix (sister).
@@ -652,4 +672,5 @@ module.exports = {
   formatDateForDisplay,
   getCompanyHeader, drawCompanyHeader,
   xlsxNumFmtForHeader, writeXlsxCompanyHeader,
+  runWithCompanyOverride,
 };

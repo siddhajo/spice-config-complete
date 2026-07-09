@@ -29,6 +29,7 @@ const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF,
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
 const { exportPdf: exportAnyPdf } = require('./exports-pdf');
+const { runWithCompanyOverride } = require('./report-formatters');
 const { DBF_EXPORTS } = require('./dbf-exports');
 const { REPORTS: LORRY_REPORTS } = require('./lorry-reports');
 const { REPORTS: SPICE_BOARD_REPORTS, getReportFilters: getSpiceBoardFilters } = require('./spice-board-reports');
@@ -4644,7 +4645,11 @@ app.get('/api/lots/:auctionId', requireView, (req, res) => {
            FROM lots
            WHERE lots.auction_id = ?`;
   const p = [req.params.auctionId];
-  if (branch) { q += ' AND lots.branch = ?'; p.push(branch); }
+  // Case-insensitive, whitespace-trimmed branch match. The dropdown supplies
+  // uppercased-trimmed values (getConfiguredBranches) while stored lots.branch
+  // keeps the raw case from import / lot-entry, so an exact `=` match silently
+  // returned nothing. Mirrors the Bills branch filter (UPPER/TRIM both sides).
+  if (branch) { q += " AND UPPER(TRIM(COALESCE(lots.branch,''))) = UPPER(TRIM(?))"; p.push(branch); }
   // Grade filter (Lots screen). Exact match, trimmed, case-insensitive so
   // "1a" matches "1A". Applied to q/p here so it flows through the flat,
   // paginated, count, and summary query variants below.
@@ -8051,13 +8056,16 @@ app.get('/api/bills/pdf/:auctionId/:sellerName', requireView, async (req, res) =
     if (bill.seller && !bill.seller.crno) bill.seller.crno = bill.seller.cr || '';
     // Stamp the bill date + e-TRADE number so the new layout can render them
     // in the top strip (Invoice No / e-TRADE No / Date).
-    const auction = db.get('SELECT date FROM auctions WHERE id = ?', [req.params.auctionId]);
+    const auction = db.get('SELECT ano, date FROM auctions WHERE id = ?', [req.params.auctionId]);
     if (auction && auction.date) {
       const d = new Date(auction.date);
       if (!isNaN(d)) bill.billDate = d.toLocaleDateString('en-GB');
     }
     if (!bill.billDate) bill.billDate = new Date().toLocaleDateString('en-GB');
-    bill.eTradeNo = req.query.eTradeNo || req.params.auctionId;
+    // "Purchase No" on the Bills of Supply = the trade/auction number (ano),
+    // NOT the auctions primary key. Fall back to the raw id only if ano is
+    // somehow missing.
+    bill.eTradeNo = req.query.eTradeNo || (auction && auction.ano) || req.params.auctionId;
 
     const pdf = await generateAgriBillPDF(bill, cfg, billNo);
     res.setHeader('Content-Type', 'application/pdf');
@@ -8108,15 +8116,20 @@ app.post('/api/bills/pdf-bulk', requireView, async (req, res) => {
       }
       // Enrich for new renderer layout (Invoice No / e-TRADE No / Date strip)
       if (bill.seller && !bill.seller.crno) bill.seller.crno = bill.seller.cr || '';
+      let _ano = '';
       if (stored.auction_id) {
-        const auction = db.get('SELECT date FROM auctions WHERE id = ?', [stored.auction_id]);
-        if (auction && auction.date) {
-          const d = new Date(auction.date);
-          if (!isNaN(d)) bill.billDate = d.toLocaleDateString('en-GB');
+        const auction = db.get('SELECT ano, date FROM auctions WHERE id = ?', [stored.auction_id]);
+        if (auction) {
+          _ano = auction.ano || '';
+          if (auction.date) {
+            const d = new Date(auction.date);
+            if (!isNaN(d)) bill.billDate = d.toLocaleDateString('en-GB');
+          }
         }
       }
       if (!bill.billDate) bill.billDate = new Date().toLocaleDateString('en-GB');
-      bill.eTradeNo = stored.auction_id || '';
+      // "Purchase No" = the trade number (ano), not the auctions primary key.
+      bill.eTradeNo = _ano || stored.auction_id || '';
       payloads.push({ billData: bill, billNo: stored.bil });
     }
 
@@ -10250,7 +10263,10 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
     try {
       const db = getDb();
       const cfg = getSettingsFlat(db);
-      const buffer = await exportAnyPdf(db, type, auctionId, cfg, { state: req.query.state });
+      // ?company=isp|asp (Export Center chooser) swaps the brand identity on
+      // every export for this request via getCompanyHeader's override store.
+      const buffer = await runWithCompanyOverride(req.query.company,
+        () => exportAnyPdf(db, type, auctionId, cfg, { state: req.query.state }));
       const niceName = (EXPORT_TYPES[type] && EXPORT_TYPES[type].name) || type;
       // inline=1 lets the browser render the PDF in a tab (for the Exports
       // screen's Print button) instead of force-downloading it.
@@ -10275,12 +10291,13 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
     try {
       const db = getDb();
       let buffer;
-      if (exportDef.needsCfg) {
-        const cfg = getSettingsFlat(db);
-        buffer = await exportDef.fn(db, auctionId, cfg, req.query.state, undefined);
-      } else {
-        buffer = await exportDef.fn(db, auctionId, req.query.state, undefined);
-      }
+      buffer = await runWithCompanyOverride(req.query.company, () => {
+        if (exportDef.needsCfg) {
+          const cfg = getSettingsFlat(db);
+          return exportDef.fn(db, auctionId, cfg, req.query.state, undefined);
+        }
+        return exportDef.fn(db, auctionId, req.query.state, undefined);
+      });
       const isCsv = (exportDef.ext || 'xlsx') === 'csv';
       const wb = isCsv
         ? XLSX.read(Buffer.from(buffer).toString('utf8'), { type: 'string' })
@@ -10313,15 +10330,16 @@ app.get('/api/exports/:type/:auctionId', requireExport, async (req, res) => {
     if (!Array.isArray(rawNames)) rawNames = [];
     const names = rawNames.map(s => String(s || '').trim()).filter(Boolean);
     const opts = names.length ? { names } : undefined;
-    if (exportDef.needsCfg) {
-      const cfg = getSettingsFlat(db);
-      // Pass state too so exports that need both (e.g. Praman) can filter
-      // by state without losing cfg context. Backward-compatible: existing
-      // needsCfg exports that ignore the 4th/5th args are unaffected.
-      buffer = await exportDef.fn(db, auctionId, cfg, req.query.state, opts);
-    } else {
-      buffer = await exportDef.fn(db, auctionId, req.query.state, opts);
-    }
+    buffer = await runWithCompanyOverride(req.query.company, () => {
+      if (exportDef.needsCfg) {
+        const cfg = getSettingsFlat(db);
+        // Pass state too so exports that need both (e.g. Praman) can filter
+        // by state without losing cfg context. Backward-compatible: existing
+        // needsCfg exports that ignore the 4th/5th args are unaffected.
+        return exportDef.fn(db, auctionId, cfg, req.query.state, opts);
+      }
+      return exportDef.fn(db, auctionId, req.query.state, opts);
+    });
     // Per-export-type content-type/extension override (defaults to xlsx).
     // CSV exports like Praman use ext:'csv', mime:'text/csv'.
     const ext  = exportDef.ext  || 'xlsx';

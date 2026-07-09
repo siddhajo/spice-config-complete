@@ -3911,6 +3911,16 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <div id="exp-gate-notice" style="display:none;margin:12px 0 0;padding:12px 14px;background:var(--spice-saffron-lt);border:1px solid var(--spice-saffron);border-radius:8px;font-size:13px;color:var(--text2);line-height:1.5"></div>
             <!-- Action bar + preview — visible only once price import is done. -->
             <div id="exp-center-body" style="display:none">
+              <!-- Company-identity chooser — only for Tamil Nadu + e-Trade.
+                   Lets the operator render every export under ISP's or ASP's
+                   company name/details. Passed to the server as ?company=. -->
+              <div id="exp-company-row" class="fg" style="display:none;margin-top:12px;margin-bottom:6px">
+                <label>Company details for exports</label>
+                <select id="exp-company" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px">
+                  <option value="isp">Use ISP company details</option>
+                  <option value="asp">Use ASP company details</option>
+                </select>
+              </div>
               <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0">
                 <button class="btn btn-g" onclick="expLoadPreview()">Preview</button>
                 <button class="btn btn-a" onclick="expDownloadCurrent('xlsx')" id="exp-btn-xlsx">XLSX</button>
@@ -16729,6 +16739,9 @@ async function loadInvoices(opts){
       // Distance (e-Way Bill km) — resolved server-side: per-invoice override
       // (distance_km) wins, else the saved route value (resolved_km).
       ...(!_invIsASPContext ? [{ key:'distance_km', label:'Distance', sort:'number', numeric:true,
+        // A summed distance is meaningless (it's per-route km, not an additive
+        // quantity), so never show a footer total for this column.
+        noTotal:true,
         value:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km; return Number(km)||0; },
         render:(i)=>{ const km=(i.resolved_km!=null&&i.resolved_km!=='')?i.resolved_km:i.distance_km;
           return (km != null && km !== '' && Number(km) > 0)
@@ -16746,6 +16759,9 @@ async function loadInvoices(opts){
         render:(i)=>esc(_invTradeName(i)) },
       ...(_invIsAuction ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'qty', label:'Qty', sort:'number', numeric:true, fmt:(n)=>fmtI(n,3) },
+      // e-Trade shows Bags right after Qty (invoices.bag = SUM of the invoiced
+      // lots' bags). e-Auction keeps its Bags column before Qty (above).
+      ...(_invIsETrade ? [{ key:'bag', label:'Bags', sort:'number', numeric:true, fmt:(n)=>fmtI(n,0) }] : []),
       { key:'amount', label:'Amount', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
       // Charge breakdown — gunny, transport (stored in pava_hc), insurance (ins).
       { key:'gunny', label:'Gunny', sort:'number', numeric:true, fmt:(n)=>fmtI(n,2) },
@@ -19354,6 +19370,15 @@ function renderExportBtns(){
 // ── Export Center (spice-board-style preview/print/xlsx/pdf) ──────
 function expCurrentType(){ return document.getElementById('exp-type')?.value || Object.keys(expLabels())[0]; }
 function expCurrentAid(){ return document.getElementById('exp-auction')?.value || ''; }
+// Company-identity query fragment for Export Center requests. Non-empty only
+// when the ISP/ASP chooser is visible (Tamil Nadu + e-Trade). Returns e.g.
+// "&company=asp"; the server's getCompanyHeader honours it for every export.
+function expCompanyQuery(){
+  const row=document.getElementById('exp-company-row');
+  const sel=document.getElementById('exp-company');
+  if(!row||row.style.display==='none'||!sel||!sel.value) return '';
+  return '&company='+encodeURIComponent(sel.value);
+}
 
 // Fill the report-type dropdown from EXP_LABELS, preserving the current
 // pick across re-renders, then sync the format buttons.
@@ -19392,6 +19417,19 @@ async function expOnAuctionChange(){
   if(!notice||!body) return;
   const prev=document.getElementById('exp-preview'); if(prev) prev.innerHTML='';
   const meta=document.getElementById('exp-meta'); if(meta) meta.textContent='';
+  // Task 1: the Export Center is locked for Kerala (ASP) + e-Trade — those
+  // exports are produced from the Tamil-Nadu (ISP) context instead.
+  const _state=(typeof getCurrentBusinessState==='function'?getCurrentBusinessState():'').toUpperCase();
+  const _mode =(typeof getCurrentBusinessMode ==='function'?getCurrentBusinessMode ():'');
+  if(_state.includes('KERALA') && _mode==='e-Trade'){
+    body.style.display='none'; notice.style.display='block';
+    notice.innerHTML='🔒 <strong>Export Center is disabled for Kerala e-Trade.</strong> '+
+      'Switch the Business State to <strong>Tamil Nadu</strong> (Settings) to use the Export Center.';
+    return;
+  }
+  // Task 2: company chooser visible only for Tamil Nadu + e-Trade.
+  const compRow=document.getElementById('exp-company-row');
+  if(compRow) compRow.style.display=(_state.includes('TAMIL')&&_mode==='e-Trade')?'':'none';
   const aid=expCurrentAid();
   if(!aid){ notice.style.display='none'; body.style.display='none'; return; }
   notice.style.display='block'; notice.textContent='Checking price-import status…';
@@ -19417,13 +19455,13 @@ function expLoadPreview(){
   // Show the actual inline PDF so the preview matches the printed output.
   // CSV-only / XLSX-only reports have no PDF form, so they keep the table.
   if(EXP_CSV_ONLY.has(t) || EXP_XLSX_ONLY.has(t)){
-    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview`,'exp-meta','exp-preview',expLabels()[t]);
+    return _fetchPreview(`/api/exports/${t}/${aid}?format=preview${expCompanyQuery()}`,'exp-meta','exp-preview',expLabels()[t]);
   }
-  return _renderPdfPreview(t, aid, 'exp-meta', 'exp-preview', expLabels()[t]);
+  return _renderPdfPreview(t, aid, 'exp-meta', 'exp-preview', expLabels()[t], undefined, expCompanyQuery());
 }
 function expRenderPreview(data){ _renderExportRows('exp-meta','exp-preview',data,expLabels()[expCurrentType()]); }
-function expDownloadCurrent(format){ return exportType(expCurrentType(), format); }
-function expPrintCurrent(){ return _printExportPdf(expCurrentType(), expCurrentAid()); }
+function expDownloadCurrent(format){ return exportType(expCurrentType(), format, undefined, expCompanyQuery()); }
+function expPrintCurrent(){ return _printExportPdf(expCurrentType(), expCurrentAid(), expCompanyQuery()); }
 
 // ── Shared export-preview helpers (Export Center / Pre-Trade / DBF) ──
 // Render a row matrix (array-of-arrays; first row = headers) into a
@@ -19473,12 +19511,12 @@ async function _fetchPreview(path, metaId, previewId, fallbackLabel){
 // "Preview" matches the printed output exactly. Tracks the blob URL per
 // container so re-previewing revokes the previous one (no URL leak).
 const _pdfPreviewUrls = {};
-async function _renderPdfPreview(type, aid, metaId, previewId, label, height){
+async function _renderPdfPreview(type, aid, metaId, previewId, label, height, extraQuery){
   const meta=document.getElementById(metaId), root=document.getElementById(previewId);
   const ifH=height||'600px';
   await withOverlay('Loading preview…', async()=>{
     try{
-      const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+      const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1${extraQuery||''}`,{headers:{'Authorization':'Bearer '+T}});
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||`HTTP ${r.status}`);}
       const blob=await r.blob();
       if(_pdfPreviewUrls[previewId]){ try{URL.revokeObjectURL(_pdfPreviewUrls[previewId]);}catch(_){} }
@@ -19494,10 +19532,10 @@ async function _renderPdfPreview(type, aid, metaId, previewId, label, height){
 }
 
 // Open a report's PDF inline and fire the print dialog (Export endpoints).
-async function _printExportPdf(type, aid){
+async function _printExportPdf(type, aid, extraQuery){
   if(!aid){alert('Select '+termAuction(false,true)+' first');return}
   await withOverlay('Preparing print…', async()=>{
-    const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1`,{headers:{'Authorization':'Bearer '+T}});
+    const r=await fetch(B+`/api/exports/${type}/${aid}?format=pdf&inline=1${extraQuery||''}`,{headers:{'Authorization':'Bearer '+T}});
     if(!r.ok){const e=await r.json().catch(()=>({}));alert('Print failed: '+(e.error||`HTTP ${r.status}`));return;}
     const blob=await r.blob();const url=URL.createObjectURL(blob);const w=window.open(url);
     if(w) w.addEventListener('load',()=>{try{w.focus();w.print();}catch(_){}});
@@ -19594,7 +19632,7 @@ function dbfDownloadCurrent(format){
   if(format==='xlsx') params.format='xlsx';
   return downloadDbf(dbfCurrentType(), params);
 }
-async function exportType(type,format,aidArg){format=format||'xlsx';
+async function exportType(type,format,aidArg,extraQuery){format=format||'xlsx';
   // aidArg lets callers (e.g. the Price Import snapshot banner via
   // piQuickExport) pass an explicit trade id; otherwise fall back to the
   // Export Center / Payments tab selectors.
@@ -19604,7 +19642,7 @@ async function exportType(type,format,aidArg){format=format||'xlsx';
   await withOverlay(`Exporting ${label} (${format.toUpperCase()})…`, async () => {
     // CSV exports ignore format query param — server picks ext from EXPORT_TYPES.
     // Keep format in URL for consistency but download filename uses actual ext.
-    const r=await fetch(B+`/api/exports/${type}/${aid}?format=${format}`,{headers:{'Authorization':'Bearer '+T}});
+    const r=await fetch(B+`/api/exports/${type}/${aid}?format=${format}${extraQuery||''}`,{headers:{'Authorization':'Bearer '+T}});
     if(!r.ok){
       const errBody = await r.json().catch(() => ({}));
       const msg = errBody.error || `HTTP ${r.status}`;
