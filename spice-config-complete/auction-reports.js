@@ -256,8 +256,9 @@ async function lotSlipPdf(db, auctionId, _cfg, extra) {
       const ty = ry + 2;
       doc.rect(xOrigin, ty, halfW, ROW_H + 2).fillAndStroke('#FFF3CD', '#E0B020');
       doc.fillColor('#000').font('Helvetica-Bold').fontSize(9);
-      // Distribute totals: 'Total' label in LOT col, then BAG, QTY (PRICE blank)
-      const cells = ['Total', String(totBag), fmtQty(totQty), ''];
+      // Distribute totals: 'Total (n lots)' in the LOT col, then BAG, QTY
+      // (PRICE blank). The lot count mirrors the XLSX Lot Slip totals row.
+      const cells = [`Total (${rows.length})`, String(totBag), fmtQty(totQty), ''];
       let cx = xOrigin;
       cells.forEach((v, ci) => {
         const align = ci === 0 ? 'center' : 'right';

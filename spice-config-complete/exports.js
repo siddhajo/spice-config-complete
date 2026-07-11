@@ -176,11 +176,14 @@ function auctionMeta(db, auctionId) {
 }
 
 // Grand-total row for the lot-list sheets (Lot Slip / Price List family):
-// the LOT column shows the count of lots, and BAG / QTY carry their sums.
-// The 'TOTAL' label lands in the first non-numeric column automatically.
+// the LOT column shows the count of lots, and BAG / QTY / AMOUNT carry their
+// sums. The 'TOTAL' label lands in the first non-numeric column automatically.
+// Values for columns a given sheet doesn't have (e.g. AMOUNT on the Price
+// List) are simply ignored by createExcelBuffer's grand-total mapping, so a
+// single helper stays consistent with the PDF totals across all these sheets.
 function lotSheetTotals(rows) {
   const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-  return { label: 'TOTAL', values: { lot: rows.length, bag: sum('bag'), qty: sum('qty') } };
+  return { label: 'TOTAL', values: { lot: rows.length, bag: sum('bag'), qty: sum('qty'), amount: sum('amount') } };
 }
 
 // ── Export Type 1: Lot Slip (before trade) ───────────────────

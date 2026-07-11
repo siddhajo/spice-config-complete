@@ -7790,16 +7790,19 @@ app.get('/api/purchases/pdf/:auctionId/:sellerName', requireView, async (req, re
 // the app (ASP when Kerala+e-Trade, else ISP from company_settings).
 function enrichPurchaseForPDF(invoice, cfg, db, auctionId) {
   if (!invoice) return invoice;
-  // Stamp auction date + e-TRADE no
-  if (!invoice.invoiceDate && auctionId) {
-    const auction = db.get('SELECT date FROM auctions WHERE id = ?', [auctionId]);
-    if (auction && auction.date) {
-      const d = new Date(auction.date);
-      if (!isNaN(d)) invoice.invoiceDate = d.toLocaleDateString('en-GB');
-    }
+  // Stamp auction date + trade no. Fetch the auction once so both the date and
+  // the "e-TRADE No" come from the same read. The "e-TRADE No" is the trade
+  // number (auctions.ano), NOT the auctions primary-key id — fall back to the
+  // raw id only if ano is somehow missing.
+  const auction = auctionId ? db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) : null;
+  if (!invoice.invoiceDate && auction && auction.date) {
+    const d = new Date(auction.date);
+    if (!isNaN(d)) invoice.invoiceDate = d.toLocaleDateString('en-GB');
   }
   if (!invoice.invoiceDate) invoice.invoiceDate = new Date().toLocaleDateString('en-GB');
-  if (!invoice.eTradeNo) invoice.eTradeNo = String(auctionId || '');
+  if (!invoice.eTradeNo) invoice.eTradeNo = (auction && auction.ano != null && String(auction.ano).trim())
+    ? String(auction.ano)
+    : String(auctionId || '');
 
   // Buyer block — ISPL or ASP depending on active context
   const isASP = cfg.business_mode === 'e-Trade' && String(cfg.business_state || '').toUpperCase() === 'KERALA';

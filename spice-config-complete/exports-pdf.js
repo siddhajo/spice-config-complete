@@ -17,7 +17,7 @@ const PDFDocument = require('pdfkit');
 const auctionReports = require('./auction-reports');
 const {
   fmtMoney, fmtQty, fmtPrice,
-  getCompanyHeader, drawCompanyHeader,
+  getCompanyHeader, drawCompanyHeader, xlsxNumFmtForHeader,
 } = require('./report-formatters');
 
 // Manually truncate `text` to fit `maxWidth` using doc.widthOfString. PDFKit
@@ -529,7 +529,6 @@ const COLS = {
     { header: 'LITRE', key: 'litre', width: 10 },
   ],
   lot_slip_after: [
-    { header: 'STATE', key: 'state', width: 12 },
     { header: 'LOT', key: 'lot', width: 8 },
     { header: 'NAME', key: 'name', width: 30 },
     { header: 'BAG', key: 'bag', width: 6 },
@@ -563,13 +562,12 @@ const COLS = {
     { header: 'BIDDER', key: 'bidder', width: 20 },
   ],
   price_list_before: [
-    { header: 'TNO',   key: 'trade_no', width: 10 },
-    { header: 'DATE',  key: 'date',     width: 12 },
-    { header: 'LOT',   key: 'lot',      width: 10 },
-    { header: 'BAG',   key: 'bag',      width: 8  },
-    { header: 'QTY',   key: 'qty',      width: 14 },
-    { header: 'PRICE', key: 'price',    width: 10 },
-    { header: 'CODE',  key: 'code',     width: 10 },
+    { header: 'LOT',   key: 'lot',   width: 10 },
+    { header: 'NAME',  key: 'name',  width: 30 },
+    { header: 'BAG',   key: 'bag',   width: 8  },
+    { header: 'QTY',   key: 'qty',   width: 14 },
+    { header: 'PRICE', key: 'price', width: 10 },
+    { header: 'CODE',  key: 'code',  width: 10 },
   ],
   bank_payment: [
     // PDF-only display columns — restructured for portrait so all data fits
@@ -810,6 +808,14 @@ const TOTAL_KEYS = {
   sales_register:    ['bag', 'qty', 'amount', 'lorry', 'gunny', 'igst', 'cgst', 'sgst', 'ins', 'invamt'],
 };
 
+// Lot-list sheets show a count of lots in the LOT column of the totals row
+// (matching the XLSX exports). Maps type → the column key holding the count.
+const TOTAL_COUNT_KEY = {
+  lot_slip_after:    'lot',
+  price_list:        'lot',
+  price_list_before: 'lot',
+};
+
 const TITLES = {
   lot_slip:        'Lot Slip',
   lot_slip_after:  'Lot Slip (After Trade)',
@@ -901,7 +907,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
 
     case 'lot_slip_after':
       return db.all(
-        `SELECT state, lot_no as lot, name, bags as bag, qty, price, amount, code
+        `SELECT lot_no as lot, name, bags as bag, qty, price, amount, code
          FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''}
          ORDER BY lot_no`, extra.state ? [auctionId, extra.state] : [auctionId]);
 
@@ -934,19 +940,14 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT lot_no as lot, bags as bag, qty, price, code, buyer as bidder
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
-    case 'price_list_before': {
-      const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
-      const tradeNo = a.ano || '';
-      const tradeDate = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
-      // PRICE blanked when 0 so the column reads empty instead of "0.00",
-      // matching CODE's blank-when-unset behaviour.
+    case 'price_list_before':
+      // NAME (seller) replaces the old TNO / DATE columns. PRICE blanked when
+      // 0 so the column reads empty instead of "0.00".
       return db.all(
-        `SELECT lot_no as lot, bags as bag, qty,
+        `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 COALESCE(code,'') AS code
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
-      ).map(r => ({ trade_no: tradeNo, date: tradeDate, ...r }));
-    }
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
     case 'bank_payment': {
       const { getBankPaymentData } = require('./calculations');
@@ -958,6 +959,9 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         ...r,
         address_combined: [r.address1, r.address2, r.pin]
           .filter(s => s != null && String(s).trim() !== '').join(', '),
+        // The XLSX bank file carries the lot numbers in BENEFICI_B. The PDF
+        // has no BENEFICI_B column, so surface the same lots in REMARKS.
+        remarks: r.lots || '',
       }));
     }
 
@@ -1009,11 +1013,24 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       // Mode-aware discount column — see exports.js exportPaymentSummary.
       const mode = (cfg && cfg.business_mode || 'e-Trade').toLowerCase();
       const discountCol = (mode === 'auction') ? 'advance' : 'refund';
+      // e-Trade + Tamil Nadu: sort sellers by name asc, then lot_no asc within
+      // each seller (matches the XLSX Payment Summary). Rows stay contiguous
+      // per seller so the subtotal grouping is unaffected.
+      const _tnETrade = mode === 'e-trade'
+        && String(cfg && cfg.business_state || '').toUpperCase().includes('TAMIL');
+      const _payOrder = _tnETrade
+        ? 'name COLLATE NOCASE, CAST(lot_no AS INTEGER), lot_no'
+        : 'state, name';
+      // Policy discount is display-only and shown only when "Calculate
+      // Discount" (flag_pay_calc_discount) is ON — mirrors the XLSX/screen.
+      const showPolicyDisc = mode !== 'e-trade'
+        || cfg.flag_pay_calc_discount === true
+        || String(cfg.flag_pay_calc_discount || '').toLowerCase() === 'true';
       const rows = db.all(
         `SELECT name as poolername, lot_no as lot, bags as bag, qty, price, amount,
           pqty, prate, puramt, ${discountCol} as lot_discount, balance as payable
          FROM lots WHERE auction_id = ? AND amount > 0
-         ORDER BY state, name`, [auctionId]);
+         ORDER BY ${_payOrder}`, [auctionId]);
       // Enrich to match the XLSX Payment Summary exactly so both formats
       // reconcile to the rupee: discount = per-lot policy discount + any manual
       // debit_notes (spread onto the seller's FIRST row); TDS = Section-194Q
@@ -1030,7 +1047,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       const tdsCtx = paymentTdsContext(db, auctionId);
       const seen = new Set();
       return rows.map(r => {
-        const lotDisc = Number(r.lot_discount) || 0;
+        const lotDisc = showPolicyDisc ? (Number(r.lot_discount) || 0) : 0;
         const manualDisc = seen.has(r.poolername) ? 0 : (Number(debitMap[r.poolername]) || 0);
         seen.add(r.poolername);
         const total = (Number(r.payable) || 0) - manualDisc;   // pre-TDS payable
@@ -1199,12 +1216,23 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   }
 
   const totalKeys = TOTAL_KEYS[type] || [];
-  const totals = totalKeys.length && rows.length ? (() => {
-    const t = sumKeys(rows.filter(r => !r._isSubtotal), totalKeys);
-    // Place "TOTAL" in the first non-serial column so the label is visible.
-    // If column[0] is the SL.NO column, the label goes in column[1] instead.
-    const labelCol = (columns[0] && columns[0].key === '_sn') ? columns[1] : columns[0];
-    if (labelCol) t[labelCol.key] = 'TOTAL';
+  const countKey = TOTAL_COUNT_KEY[type];
+  const totals = (totalKeys.length || countKey) && rows.length ? (() => {
+    const dataRows = rows.filter(r => !r._isSubtotal);
+    const t = sumKeys(dataRows, totalKeys);
+    if (countKey) {
+      // Count of lots in the LOT column; place the "TOTAL" label in the first
+      // non-numeric, non-count column so the two never collide (mirrors XLSX).
+      t[countKey] = dataRows.length;
+      const labelCol = columns.find(c =>
+        c.key !== '_sn' && c.key !== countKey && !xlsxNumFmtForHeader(c.header));
+      if (labelCol) t[labelCol.key] = 'TOTAL';
+    } else {
+      // Place "TOTAL" in the first non-serial column so the label is visible.
+      // If column[0] is the SL.NO column, the label goes in column[1] instead.
+      const labelCol = (columns[0] && columns[0].key === '_sn') ? columns[1] : columns[0];
+      if (labelCol) t[labelCol.key] = 'TOTAL';
+    }
     return t;
   })() : null;
 
