@@ -175,6 +175,14 @@ function auctionMeta(db, auctionId) {
   } catch (_) { return []; }
 }
 
+// Grand-total row for the lot-list sheets (Lot Slip / Price List family):
+// the LOT column shows the count of lots, and BAG / QTY carry their sums.
+// The 'TOTAL' label lands in the first non-numeric column automatically.
+function lotSheetTotals(rows) {
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  return { label: 'TOTAL', values: { lot: rows.length, bag: sum('bag'), qty: sum('qty') } };
+}
+
 // ── Export Type 1: Lot Slip (before trade) ───────────────────
 async function exportLotSlip(db, auctionId, state) {
   const rows = db.all(
@@ -193,18 +201,18 @@ async function exportLotSlip(db, auctionId, state) {
   ];
   return createExcelBuffer('LotSlip', cols, rows, {
     db, title: 'Lot Slip', metaLines: auctionMeta(db, auctionId),
+    grandTotal: lotSheetTotals(rows),
   });
 }
 
 // ── Export Type 2: Lot Slip After Trade (with price/buyer) ───
 async function exportLotSlipAfter(db, auctionId, state) {
   const rows = db.all(
-    `SELECT state, lot_no as lot, name, bags as bag, qty, price, amount, code
+    `SELECT lot_no as lot, name, bags as bag, qty, price, amount, code
      FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''}
      ORDER BY lot_no`, state ? [auctionId, state] : [auctionId]
   );
   const cols = [
-    { header: 'STATE', key: 'state', width: 12 },
     { header: 'LOT', key: 'lot', width: 8 },
     { header: 'NAME', key: 'name', width: 30 },
     { header: 'BAG', key: 'bag', width: 6 },
@@ -215,6 +223,7 @@ async function exportLotSlipAfter(db, auctionId, state) {
   ];
   return createExcelBuffer('LotSlipAfter', cols, rows, {
     db, title: 'Lot Slip (After Trade)', metaLines: auctionMeta(db, auctionId),
+    grandTotal: lotSheetTotals(rows),
   });
 }
 
@@ -282,10 +291,6 @@ async function exportLotName(db, auctionId) {
 // during the auction. PRICE is blanked when 0 (lot not yet priced) so the
 // column reads empty rather than "0.00".
 async function exportPriceListBefore(db, auctionId) {
-  const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
-  const tradeNo = a.ano || '';
-  const tradeDate = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
-
   // e-Trade / Tamil Nadu wants a bare grid: no brand band (logo + title +
   // meta rows) and lot numbers zero-padded to 3 digits (e.g. "007").
   const cfg = getSettingsFlat(db);
@@ -293,7 +298,7 @@ async function exportPriceListBefore(db, auctionId) {
     && String(cfg.business_state || '').toUpperCase().includes('TAMIL NADU');
 
   const rawRows = db.all(
-    `SELECT lot_no as lot, bags as bag, qty,
+    `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
             CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
             COALESCE(code,'') AS code
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
@@ -303,21 +308,22 @@ async function exportPriceListBefore(db, auctionId) {
     return /^\d+$/.test(s) ? s.padStart(3, '0') : s;
   };
   const rows = rawRows.map(r => ({
-    trade_no: tradeNo, date: tradeDate, ...r,
+    ...r,
     lot: bare ? padLot(r.lot) : r.lot,
   }));
+  // NAME (seller) replaces the old TNO / DATE columns.
   const cols = [
-    { header: 'TNO',   key: 'trade_no', width: 10 },
-    { header: 'DATE',  key: 'date',     width: 12 },
-    { header: 'LOT',   key: 'lot',      width: 10, text: bare },
-    { header: 'BAG',   key: 'bag',      width: 8  },
-    { header: 'QTY',   key: 'qty',      width: 14 },
-    { header: 'PRICE', key: 'price',    width: 10 },
-    { header: 'CODE',  key: 'code',     width: 10 },
+    { header: 'LOT',   key: 'lot',   width: 10, text: bare },
+    { header: 'NAME',  key: 'name',  width: 30 },
+    { header: 'BAG',   key: 'bag',   width: 8  },
+    { header: 'QTY',   key: 'qty',   width: 14 },
+    { header: 'PRICE', key: 'price', width: 10 },
+    { header: 'CODE',  key: 'code',  width: 10 },
   ];
   return createExcelBuffer('PriceListBefore', cols, rows, {
     db, title: 'Price List (Before)', metaLines: auctionMeta(db, auctionId),
     noBrandBand: bare,
+    grandTotal: lotSheetTotals(rows),
   });
 }
 
@@ -337,6 +343,7 @@ async function exportPriceList(db, auctionId) {
   ];
   return createExcelBuffer('PriceList', cols, rows, {
     db, title: 'Price List', metaLines: auctionMeta(db, auctionId),
+    grandTotal: lotSheetTotals(rows),
   });
 }
 
@@ -491,7 +498,9 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
       BENEFIARYN:  String(p.beneficiaryName || '').toUpperCase(),
       BENEFIARYB:  beneIfsc,
       BENEFIARYE:  senderEmail,
-      BENEFICI_B:  '',
+      // Lot numbers this payment covers (sorted, de-duplicated) so the bank
+      // file itself carries the lot reference, not just the REMARKS text.
+      BENEFICI_B:  p.lots || '',
       REMARKS:     `${ano} ${String(p.beneficiaryName || '').toUpperCase()}${shortTag ? ' ' + shortTag : ''} PAYMENT ${amount.toFixed(2)} Credited${p.lots ? ` for lot${p.lots.includes(',') ? 's' : ''} ${p.lots}` : ''}`,
       CLIENTCODE:  '',
     };
@@ -747,11 +756,20 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
     whereExtra = ` AND UPPER(TRIM(name)) IN (${placeholders})`;
     for (const n of filterNames) params.push(n.toUpperCase());
   }
+  // e-Trade + Tamil Nadu: sort sellers by name ascending and, within each
+  // seller, by lot number ascending. Other contexts keep the state-then-name
+  // order. Rows stay contiguous per seller either way, so the per-seller
+  // subtotal grouping below is unaffected.
+  const _tnETrade = mode === 'e-trade'
+    && String(cfg && cfg.business_state || '').toUpperCase().includes('TAMIL');
+  const _payOrder = _tnETrade
+    ? 'name COLLATE NOCASE, CAST(lot_no AS INTEGER), lot_no'
+    : 'state, name';
   let rows = db.all(
     `SELECT name as poolername, lot_no as lot, bags as bag, qty, price, amount,
       pqty, prate, puramt, ${discountCol} as lot_discount, balance as payable
      FROM lots WHERE auction_id = ? AND amount > 0${whereExtra}
-     ORDER BY state, name`, params
+     ORDER BY ${_payOrder}`, params
   );
   // Optional per-seller lot-picks AND already-exported exclusions.
   // Same shape as exportBankPayment:

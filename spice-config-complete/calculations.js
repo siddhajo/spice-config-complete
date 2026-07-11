@@ -864,7 +864,12 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // discSql params (if any) appear in the SELECT, so they precede auctionId.
   const params = useIspDisc ? [rollFlag, dealerDays, discDays, discPct, auctionId] : [auctionId];
   if (state) { query += ' AND l.state = ?'; params.push(state); }
-  query += ' GROUP BY l.name, l.cr ORDER BY l.state, l.name';
+  // e-Trade + Tamil Nadu: order sellers by name ascending (all lots are TN,
+  // so the state key is moot). Other contexts keep the state-then-name order.
+  const _tnETrade = mode === 'e-trade'
+    && String(cfg && cfg.business_state || '').toUpperCase().includes('TAMIL');
+  query += ' GROUP BY l.name, l.cr ORDER BY '
+    + (_tnETrade ? 'l.name COLLATE NOCASE' : 'l.state, l.name');
   const sellers = db.all(query, params);
 
   // Fetch this auction's identifier (ano) so we can match debit_notes.
