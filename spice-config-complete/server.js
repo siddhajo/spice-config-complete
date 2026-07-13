@@ -3135,9 +3135,9 @@ app.post('/api/traders', requireTraderWrite, (req, res) => {
       existing: dup,
     });
   }
-  const info = db.run(`INSERT INTO traders (name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [t.name,t.cr||'',t.pan||'',t.tel||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'']);
+  const info = db.run(`INSERT INTO traders (name,cr,pan,tel,email,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [t.name,t.cr||'',t.pan||'',t.tel||'',t.email||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'']);
   // If the client sent a banks array (new multi-bank UI), persist them.
   // Otherwise honor the legacy single-bank fields already inserted above.
   if (Array.isArray(t.banks)) {
@@ -3159,8 +3159,8 @@ app.put('/api/traders/:id', requireTraderWrite, (req, res) => {
       existing: dup,
     });
   }
-  db.run(`UPDATE traders SET name=?,cr=?,pan=?,tel=?,aadhar=?,padd=?,ppla=?,pin=?,pstate=?,pst_code=?,ifsc=?,acctnum=?,holder_name=? WHERE id=?`,
-    [t.name,t.cr||'',t.pan||'',t.tel||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'',req.params.id]);
+  db.run(`UPDATE traders SET name=?,cr=?,pan=?,tel=?,email=?,aadhar=?,padd=?,ppla=?,pin=?,pstate=?,pst_code=?,ifsc=?,acctnum=?,holder_name=? WHERE id=?`,
+    [t.name,t.cr||'',t.pan||'',t.tel||'',t.email||'',t.aadhar||'',t.padd||'',t.ppla||'',t.pin||'',t.pstate||'',t.pst_code||'',t.ifsc||'',t.acctnum||'',t.holder_name||'',req.params.id]);
   if (Array.isArray(t.banks)) {
     syncTraderBanks(db, parseInt(req.params.id), t.banks);
   }

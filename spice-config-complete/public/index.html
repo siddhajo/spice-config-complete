@@ -3780,7 +3780,16 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('bank_payment')" title="Export bulk RTGS/NEFT file for bank portal upload">📤 Export Bank Payment</button>
+            <!-- Export Bank Payment: dropdown lets the operator pick the new
+                 (PurchaseAmt/TDS/PaymentAmt/Discount) or the legacy 13-col
+                 RTGS/NEFT sheet. Both feed the same /api/exports route. -->
+            <div class="bankpay-dd" style="position:relative;display:inline-block">
+              <button class="btn btn-a" style="height:38px;padding:0 14px;font-weight:600" onclick="toggleBankPayMenu(event,'full')" title="Export bulk RTGS/NEFT file for bank portal upload — pick New or Old format">📤 Export Bank Payment ▾</button>
+              <div id="bankpay-menu-full" class="bankpay-menu" style="display:none;position:absolute;z-index:60;top:42px;left:0;min-width:220px;background:#fff;border:1px solid var(--spice-line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);overflow:hidden">
+                <button class="bankpay-opt" style="display:block;width:100%;text-align:left;padding:10px 14px;border:0;background:#fff;cursor:pointer;font-weight:600;line-height:1.35" onclick="chooseBankPay('full','bank_payment_new')">New format<br><span style="font-weight:400;font-size:11px;color:#6b7280">PurchaseAmt · TDS · PaymentAmt · Discount</span></button>
+                <button class="bankpay-opt" style="display:block;width:100%;text-align:left;padding:10px 14px;border:0;border-top:1px solid var(--spice-line);background:#fff;cursor:pointer;font-weight:600;line-height:1.35" onclick="chooseBankPay('full','bank_payment')">Old format<br><span style="font-weight:400;font-size:11px;color:#6b7280">Classic 13-column RTGS/NEFT</span></button>
+              </div>
+            </div>
             <button class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="exportType('payment')" title="Per-lot detailed payment breakdown">📊 Export Payment XLSX</button>
           </div>
 
@@ -3791,7 +3800,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
                the Actions → Pick lots modal) to /api/exports so the generated
                file honours the same filters as the on-screen selection. -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
-            <button id="pay-bulk-export-bank" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedBankPayment()" title="Bank-import RTGS/NEFT file for just the ticked sellers (honours per-seller lot picks)">📥 Bank Pay (Selected) <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span></button>
+            <div id="pay-bulk-export-bank" class="bankpay-dd" style="display:none;position:relative">
+              <button class="btn" style="height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="toggleBankPayMenu(event,'sel')" title="Bank-import file for just the ticked sellers (honours per-seller lot picks) — pick New or Old format">📥 Bank Pay (Selected) <span id="pay-sel-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px"></span> ▾</button>
+              <div id="bankpay-menu-sel" class="bankpay-menu" style="display:none;position:absolute;z-index:60;top:42px;left:0;min-width:220px;background:#fff;border:1px solid var(--spice-line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);overflow:hidden">
+                <button class="bankpay-opt" style="display:block;width:100%;text-align:left;padding:10px 14px;border:0;background:#fff;cursor:pointer;font-weight:600;color:#1f2937;line-height:1.35" onclick="chooseBankPay('sel','bank_payment_new')">New format<br><span style="font-weight:400;font-size:11px;color:#6b7280">PurchaseAmt · TDS · PaymentAmt · Discount</span></button>
+                <button class="bankpay-opt" style="display:block;width:100%;text-align:left;padding:10px 14px;border:0;border-top:1px solid var(--spice-line);background:#fff;cursor:pointer;font-weight:600;color:#1f2937;line-height:1.35" onclick="chooseBankPay('sel','bank_payment')">Old format<br><span style="font-weight:400;font-size:11px;color:#6b7280">Classic 13-column RTGS/NEFT</span></button>
+              </div>
+            </div>
             <button id="pay-bulk-export" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="exportSelectedPaymentXlsx()" title="Detailed Payment XLSX for just the ticked sellers (honours per-seller lot picks)">📊 Payment XLSX (Selected)</button>
             <button id="pay-bulk-print" class="btn btn-a" style="display:none;height:38px;padding:0 16px;font-weight:600" onclick="printSelectedPayments()" title="One merged PDF payment statement, a page per ticked seller">🖨 Print Selected</button>
             <button id="pay-bulk-wa" class="btn feat-whatsapp" style="display:none;height:38px;padding:0 16px;background:#25D366;color:#fff;font-weight:600" onclick="whatsappSelectedPayments()" title="WhatsApp a payment-credited message to each ticked seller, one at a time">💬 WhatsApp Selected</button>
@@ -5321,6 +5336,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <div class="fg"><label>CR / GSTIN</label><div style="display:flex;gap:6px"><input id="t-cr" style="flex:1"><button class="btn btn-a" type="button" onclick="gstLookup('t')" style="white-space:nowrap;padding:6px 10px">Fetch from GST</button></div></div>
     <div class="fg"><label>PAN</label><input id="t-pan"></div>
     <div class="fg"><label>Phone</label><input id="t-tel"></div>
+    <div class="fg"><label>Email</label><input id="t-email" type="email" placeholder="seller@example.com" title="Used as the beneficiary email (BENEFIARYE) in the new Bank Payment export"></div>
     <div class="fg"><label>Aadhar</label><input id="t-aadhar"></div>
     <div class="fg"><label>Address</label><input id="t-padd"></div>
     <div class="fg"><label>Place</label><input id="t-ppla"></div>
@@ -12077,8 +12093,8 @@ function applyClientSidePagination(pager, pagerHostId, gotoFn, rows){
 // Traders now support MULTIPLE bank accounts via a repeating section in the
 // modal. The flat trader fields here cover everything EXCEPT banking — that's
 // collected separately from the #t-banks-container rows at save time.
-const T_FIELDS=['name','cr','pan','tel','aadhar','padd','ppla','pstate','pst_code','pin'];
-const T_IDS={name:'t-name',cr:'t-cr',pan:'t-pan',tel:'t-tel',aadhar:'t-aadhar',padd:'t-padd',ppla:'t-ppla',
+const T_FIELDS=['name','cr','pan','tel','email','aadhar','padd','ppla','pstate','pst_code','pin'];
+const T_IDS={name:'t-name',cr:'t-cr',pan:'t-pan',tel:'t-tel',email:'t-email',aadhar:'t-aadhar',padd:'t-padd',ppla:'t-ppla',
   pstate:'t-pstate',pst_code:'t-pstcode',pin:'t-pin'};
 
 // Paginated sellers list. Module-scope state tracks current page + last
@@ -18452,6 +18468,33 @@ function _collectSelectedPaymentNames(){
 function exportSelectedBankPayment(){
   _payDownloadSelected('bank_payment', document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
 }
+// ── Bank Payment format picker (New vs Old) ─────────────────────
+// The full-export and selected-export buttons are dropdowns; each opens a
+// two-option menu ('bankpay-menu-full' / 'bankpay-menu-sel'). Selecting an
+// option routes to the matching /api/exports type — bank_payment_new (the
+// PurchaseAmt/TDS/PaymentAmt/Discount sheet) or bank_payment (legacy 13-col).
+function _closeBankPayMenus(){
+  document.querySelectorAll('.bankpay-menu').forEach(m => { m.style.display = 'none'; });
+}
+function toggleBankPayMenu(ev, which){
+  if (ev) ev.stopPropagation();
+  const menu = document.getElementById('bankpay-menu-' + which);
+  if (!menu) return;
+  const isOpen = menu.style.display === 'block';
+  _closeBankPayMenus();
+  if (isOpen) return;
+  menu.style.display = 'block';
+  // Dismiss on the next outside click (defer so this same click doesn't fire).
+  setTimeout(() => document.addEventListener('click', _closeBankPayMenus, { once: true }), 0);
+}
+function chooseBankPay(which, type){
+  _closeBankPayMenus();
+  if (which === 'sel'){
+    _payDownloadSelected(type, document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
+  } else {
+    exportType(type);
+  }
+}
 // Delete Selected → removes the underlying lots (and any debit notes) for
 // the ticked sellers in this trade. Payments is a derived view, so a row
 // "delete" really clears that seller's lots. Trade-scoped + irreversible.
@@ -19374,7 +19417,7 @@ window.addEventListener('resize', () => {
 });
 
 // ── Exports ───────────────────────────────────────────────
-const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',
+const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',bank_payment_new:'Bank Payment (New)',
   pooler_register:'Pooler Register',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',
   payment:'Payment Summary',payment_partywise:'Payment Summary (Party-wise)'};
 // Export types that only support a specific format (no XLSX/PDF choice).
@@ -19402,7 +19445,7 @@ function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
-const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'payment_partywise']);
+const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's

@@ -358,9 +358,46 @@ async function exportPriceList(db, auctionId) {
 //   BENEFICI_B | REMARKS    | CLIENTCODE
 // Header on row 1, data from row 2. Bank software auto-ingests this
 // shape — adding a brand band would break the import.
-async function exportBankPayment(db, auctionId, cfg, _state, opts) {
-  const { getBankPaymentData, formatLotList } = require('./calculations');
+// Ordinal form of the trade number for the new-format REMARKS
+// ("14" → "14TH", "1" → "1ST", "22" → "22ND", "3" → "3RD"). Non-numeric
+// ano values pass through unchanged.
+function _ordinalTrade(n) {
+  const num = parseInt(n, 10);
+  if (!Number.isFinite(num)) return String(n == null ? '' : n);
+  const v = num % 100;
+  const suffix = (v >= 11 && v <= 13) ? 'TH'
+    : (num % 10 === 1) ? 'ST'
+    : (num % 10 === 2) ? 'ND'
+    : (num % 10 === 3) ? 'RD' : 'TH';
+  return `${num}${suffix}`;
+}
+
+// Shared data prep for both Bank Payment layouts (the legacy 13-column
+// RTGS/NEFT sheet and the new PURCHASEAMT/TDS/PAYMENTAMT/DISCOUNT sheet).
+// Runs getBankPaymentData, attaches each seller's display discount from the
+// Payments summary, then applies the optional seller-name filter and the
+// per-seller lot-pick / already-exported exclusion recompute. Every returned
+// row carries: amount (net after TDS), payable (pre-TDS), tds, discount,
+// lots, and bank routing — enough for either layout to render its columns.
+function _prepareBankPayments(db, auctionId, cfg, opts) {
+  const { getBankPaymentData, getPaymentSummary, formatLotList } = require('./calculations');
   let payments = getBankPaymentData(db, auctionId, cfg);
+  // Per-seller display discount (policy discount + manual debit notes),
+  // summed across cr splits and keyed by upper-cased seller name — the same
+  // figure the Payments tab shows in its Discount column. Only the new
+  // layout renders it; the legacy layout leaves it untouched.
+  const discByName = {};
+  try {
+    for (const s of getPaymentSummary(db, auctionId, null, cfg)) {
+      const k = String(s.name || '').trim().toUpperCase();
+      discByName[k] = (discByName[k] || 0) + (Number(s.total_discount) || 0);
+    }
+  } catch (_) { /* summary optional — fall back to 0 discount */ }
+  payments = payments.map(p => ({
+    ...p,
+    discount: discByName[String(p.name || '').trim().toUpperCase()] || 0,
+  }));
+
   // Optional seller-name filter — when the user clicks "Export Bank
   // Payment (Selected)" in the Payments tab, only the ticked sellers'
   // rows should appear in the bank upload file. Match against `p.name`
@@ -386,8 +423,6 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
   // For each seller in either map we re-query SUM(balance) with the
   // appropriate WHERE clauses and override the payments[] row in
   // place. RTGS/NEFT is re-picked from the new amount (₹2L threshold).
-  // REMARKS is rebuilt later at row.map time using p.amount, so just
-  // updating p.amount + p.transactionType here is enough.
   const lotPicks = (opts && opts.lots && typeof opts.lots === 'object') ? opts.lots : null;
   const excludeLots = (opts && opts.excludeLots && typeof opts.excludeLots === 'object') ? opts.excludeLots : null;
   if (lotPicks || excludeLots) {
@@ -446,17 +481,27 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
         .map(Number).filter(Number.isFinite);
       const subUntagged = Number(sub.lot_count || 0) > Number(sub.bank_lot_count || 0);
       const subBank = (subBankIds.length === 1 && !subUntagged) ? bankById[subBankIds[0]] : null;
+      // Scale the seller's full-set TDS + discount down to the picked subset
+      // by the payable ratio so the new-format money columns stay coherent
+      // for partial exports. `amount` keeps the legacy semantics (subset
+      // balance, no TDS netting) so the old layout is byte-for-byte unchanged.
+      const prev = payments[idx];
+      const fullPayable = Number(prev.payable) || 0;
+      const ratio = fullPayable > 0 ? (rawAmount / fullPayable) : 0;
       payments[idx] = {
-        ...payments[idx],
+        ...prev,
         amount: roundedAmount,
+        payable: rawAmount,
+        tds: (Number(prev.tds) || 0) * ratio,
+        discount: (Number(prev.discount) || 0) * ratio,
         transactionType: isRTGS ? 'RTGS' : 'NEFT',
         // Re-derive the covered-lots list from the same picked/excluded
         // subset so REMARKS lists exactly the lots this row pays for.
         lots: formatLotList(sub.lot_nos),
         ...(subBank ? {
-          ifsc: subBank.ifsc || payments[idx].ifsc,
-          accountNo: subBank.acctnum || payments[idx].accountNo,
-          beneficiaryName: subBank.holder_name || payments[idx].beneficiaryName,
+          ifsc: subBank.ifsc || prev.ifsc,
+          accountNo: subBank.acctnum || prev.accountNo,
+          beneficiaryName: subBank.holder_name || prev.beneficiaryName,
         } : {}),
       };
     }
@@ -466,13 +511,17 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
     // picked) shouldn't appear at all.
     payments = payments.filter(p => Number(p.amount) > 0);
   }
+  return payments;
+}
 
-  // Sender-side context (state-aware): debit account, IFSC for BT/LBT
-  // detection, and the email used in BENEFIARYE.
+async function exportBankPayment(db, auctionId, cfg, _state, opts) {
+  const payments = _prepareBankPayments(db, auctionId, cfg, opts);
+
+  // Sender-side context (state-aware): debit account + IFSC for BT/LBT
+  // detection. BENEFIARYE uses the seller's own email (per row below).
   const isKL = String(cfg.business_state || cfg.state || '').toUpperCase().includes('KERALA');
   const senderAcct  = (isKL ? cfg.bank_kl_acct  : cfg.bank_tn_acct)  || cfg.bank_tn_acct  || cfg.bank_kl_acct  || '';
   const senderIfsc  = (isKL ? cfg.bank_kl_ifsc  : cfg.bank_tn_ifsc)  || cfg.bank_tn_ifsc  || cfg.bank_kl_ifsc  || '';
-  const senderEmail = (isKL ? cfg.kl_email      : cfg.tn_email)      || cfg.tn_email      || cfg.kl_email      || '';
   const senderBankPrefix = String(senderIfsc).slice(0, 4).toUpperCase();
   // Short tag inserted into REMARKS (e.g. "VSTL" → "5 ANN MARIA SPICES VSTL PAYMENT 5945275.00 Credited").
   // Falls back to the leading word of trade_name when short_name isn't set.
@@ -500,7 +549,8 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
       BENEFICI_A:  p.accountNo || '',
       BENEFIARYN:  String(p.beneficiaryName || '').toUpperCase(),
       BENEFIARYB:  beneIfsc,
-      BENEFIARYE:  senderEmail,
+      // Seller's own email; blank when none on file (no sender-email fallback).
+      BENEFIARYE:  p.email || '',
       // Lot numbers this payment covers (sorted, de-duplicated) so the bank
       // file itself carries the lot reference, not just the REMARKS text.
       BENEFICI_B:  p.lots || '',
@@ -526,6 +576,82 @@ async function exportBankPayment(db, auctionId, cfg, _state, opts) {
     { key: 'BENEFICI_B',  header: 'BENEFICI_B',  width: 12 },
     { key: 'REMARKS',     header: 'REMARKS',     width: 60 },
     { key: 'CLIENTCODE',  header: 'CLIENTCODE',  width: 14 },
+  ];
+  ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
+  cols.forEach((c, i) => {
+    if (c.numFmt) ws.getColumn(i + 1).numFmt = c.numFmt;
+  });
+  // Header row 1 — plain bold, no fill (so bank importers don't choke).
+  const head = ws.getRow(1);
+  cols.forEach((c, i) => { head.getCell(i + 1).value = c.header; });
+  head.font = { bold: true };
+  // Data rows from row 2.
+  rows.forEach(r => ws.addRow(r));
+  return wb.xlsx.writeBuffer();
+}
+
+// ── Export Type 4a: Bank Payment (new layout) ────────────────
+// Alternate bank-import sheet requested alongside the legacy 13-column
+// format — the operator picks old vs new from the Payments-tab dropdown.
+// 12 columns, no leading TRANSACT_A/MESSAGETYP/DEBITACCOU and no trailing
+// CLIENTCODE. The single PAYMENTAMO is broken out into four money columns:
+//   PURCHASEAMT = pre-TDS payable        PAYMENTAMT = payable − TDS (credited)
+//   TDS         = withheld 194Q TDS      DISCOUNT   = display-only trade discount
+// then TRANSACT_B | VALUEDATE | BENEFICI_A (acct) | BENEFIARYN (name) |
+//      BENEFIARYB (IFSC) | BENEFIARYE (email) | BENEFICI_B (lots) | REMARKS.
+// REMARKS reads "<Nth> TRADE PAYMENT | <credited>.00" (amount rounded).
+async function exportBankPaymentNew(db, auctionId, cfg, _state, opts) {
+  const payments = _prepareBankPayments(db, auctionId, cfg, opts);
+
+  // BENEFIARYE = the seller's own email (traders.email), set per row below.
+  // Left blank when the seller has no email on file — no sender-email fallback.
+  const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+  const tradeOrd = _ordinalTrade(a.ano);
+  const valueDate = fmtUserDate(String(a.date || '').slice(0, 10));
+  // Money rounding mirrors the legacy `amount`: whole rupees when flag_round
+  // is on, otherwise 2-decimal (guarding against float noise either way).
+  const roundMoney = v => {
+    const n = Number(v) || 0;
+    return cfg.flag_round ? Math.round(n) : Math.round(n * 100) / 100;
+  };
+
+  const rows = payments.map(p => {
+    const payable = Number(p.payable) || 0;
+    const tds = Number(p.tds) || 0;
+    const paymentAmt = roundMoney(payable - tds);
+    return {
+      PURCHASEAMT: roundMoney(payable),
+      TDS:         roundMoney(tds),
+      PAYMENTAMT:  paymentAmt,
+      DISCOUNT:    roundMoney(Number(p.discount) || 0),
+      TRANSACT_B:  'INR',
+      VALUEDATE:   valueDate,
+      BENEFICI_A:  p.accountNo || '',
+      BENEFIARYN:  String(p.beneficiaryName || '').toUpperCase(),
+      BENEFIARYB:  String(p.ifsc || '').toUpperCase(),
+      BENEFIARYE:  p.email || '',
+      BENEFICI_B:  p.lots || '',
+      REMARKS:     `${tradeOrd} TRADE PAYMENT | ${Math.round(paymentAmt).toFixed(2)}`,
+    };
+  });
+
+  // Build the sheet directly (bypass createExcelBuffer's brand-band) so the
+  // bank importer sees a bare header-on-row-1 sheet.
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('BANK_PAYMENT');
+  const cols = [
+    { key: 'PURCHASEAMT', header: 'PURCHASEAMT', width: 14, numFmt: '0.00' },
+    { key: 'TDS',         header: 'TDS',         width: 10, numFmt: '0.00' },
+    { key: 'PAYMENTAMT',  header: 'PAYMENTAMT',  width: 14, numFmt: '0.00' },
+    { key: 'DISCOUNT',    header: 'DISCOUNT',    width: 12, numFmt: '0.00' },
+    { key: 'TRANSACT_B',  header: 'TRANSACT_B',  width: 10 },
+    { key: 'VALUEDATE',   header: 'VALUEDATE',   width: 12 },
+    { key: 'BENEFICI_A',  header: 'BENEFICI_A',  width: 22 },
+    { key: 'BENEFIARYN',  header: 'BENEFIARYN',  width: 32 },
+    { key: 'BENEFIARYB',  header: 'BENEFIARYB',  width: 16 },
+    { key: 'BENEFIARYE',  header: 'BENEFIARYE',  width: 28 },
+    { key: 'BENEFICI_B',  header: 'BENEFICI_B',  width: 12 },
+    { key: 'REMARKS',     header: 'REMARKS',     width: 60 },
   ];
   ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
   cols.forEach((c, i) => {
@@ -1197,6 +1323,7 @@ const EXPORT_TYPES = {
   price_list:     { fn: exportPriceList,     name: 'PriceList' },
   bank_payment_before:{ fn: exportBankPaymentBefore, name: 'BankPaymentBefore', needsCfg: true },
   bank_payment:   { fn: exportBankPayment,   name: 'BankPayment', needsCfg: true },
+  bank_payment_new:{ fn: exportBankPaymentNew, name: 'BankPaymentNew', needsCfg: true },
   pooler_register:{ fn: exportPoolerRegister,name: 'PoolerRegister' },
   full_file:      { fn: exportFullFile,      name: 'FullFile' },
   collection:     { fn: exportCollection,    name: 'Collection' },
@@ -1381,7 +1508,7 @@ async function exportIndividualRegister(db, kind, opts = {}) {
 module.exports = {
   EXPORT_TYPES,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
-  exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentBefore,
+  exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentNew, exportBankPaymentBefore,
   exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList, exportPlanterList,
   exportSalesTaxes, exportPaymentSummary, exportPaymentPartyWise, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,

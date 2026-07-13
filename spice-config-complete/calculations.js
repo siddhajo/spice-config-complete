@@ -959,6 +959,7 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
       GROUP_CONCAT(l.lot_no) as lot_nos,
       MAX(t.id) AS trader_id,
       MAX(t.ifsc) AS t_ifsc, MAX(t.acctnum) AS t_acctnum, MAX(t.holder_name) AS t_holder,
+      MAX(t.email) AS t_email,
       MAX(t.padd) AS padd, MAX(t.ppla) AS ppla, MAX(t.pin) AS pin,
       -- Per-lot bank routing: distinct non-null bank_ids across this
       -- seller's payable lots, plus counts so we can tell whether they
@@ -1048,7 +1049,16 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
       address1: p.padd || '',
       address2: p.ppla || '',
       pin: p.pin || '',
+      // Seller's own email — the beneficiary email (BENEFIARYE) in the
+      // new-format Bank Payment sheet. Empty for sellers with none on file.
+      email: p.t_email || '',
       amount,
+      // Pre-TDS payable and the withheld TDS, surfaced so the new-format
+      // Bank Payment sheet can render its PURCHASEAMT / TDS / PAYMENTAMT
+      // columns (PAYMENTAMT = payable − tds). The legacy layout ignores
+      // both. 'before' mode has no TDS, so payable is the raw puramt.
+      payable: (useBefore ? (Number(p.puramt) || 0) : (Number(p.payable) || 0)),
+      tds,
       lots,
       remarks: `${auction ? auction.ano : ''} ${p.name} PAYMENT ${rawAmount.toFixed(2)} Credited${lots ? ` for lot${lots.includes(',') ? 's' : ''} ${lots}` : ''}`,
       holderName: holderNm,
