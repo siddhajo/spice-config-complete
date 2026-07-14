@@ -2118,6 +2118,17 @@ body[data-role="admin"] .btn.needs-admin{display:inline-flex !important}
 body[data-perm-user-manage="1"]    .side-item.needs-user-manage{display:flex !important}
 body[data-perm-settings-write="1"] .side-item.needs-settings-write{display:flex !important}
 
+/* Administration group: every item inside is admin- or dev-gated
+   (Settings, Users, Backup, Import Old Data + the dev-only Formulas /
+   Fix Data). Hide the whole group — its "Administration" label included —
+   unless the user can see at least one of them, so non-admins never get a
+   bare header with nothing under it. Revealed by either admin capability
+   or the spiceDev console flag (body.spice-dev-on, set in _applySpiceDevMenu). */
+.side-group-admin{display:none}
+body[data-perm-user-manage="1"]    .side-group-admin,
+body[data-perm-settings-write="1"] .side-group-admin,
+body.spice-dev-on                  .side-group-admin{display:block}
+
 /* ── Comfort Mode ──────────────────────────────────────
    Toggleable larger-text mode for older / vision-impaired users.
    Activated via the topbar A↑ button; persisted in localStorage.
@@ -2736,39 +2747,6 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           Insights
         </button>
-        <button class="side-item needs-settings-write" data-tab="settings" onclick="go('settings')">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          Settings
-        </button>
-        <!-- Formulas reference page (dev-only). Hidden by default; reveal
-             for the current browser by running `spiceDev(true)` in the JS
-             console. Target tab (tc-formulas) is not yet wired up — clicks
-             will silently no-op until the corresponding loader is added. -->
-        <button id="side-formulas" class="side-item" data-tab="formulas" onclick="go('formulas')" style="display:none">
-          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><path d="M14.5 19.5l2 2 4-4"/></svg>
-          Formulas
-        </button>
-        <!-- Fix Data — gentle, no-SQL editor for the end user. Same
-             spiceDev(true) reveal as Formulas; enable it once on the
-             machine and it persists. Read-only until "Edit mode" is
-             flipped; every change spells out the exact before→after and
-             asks again. Server endpoints (/api/data/*) are admin-only,
-             whitelisted to the 8 business tables, and snapshot a backup
-             before every write. -->
-        <button id="side-fixdata" class="side-item" data-tab="fixdata" onclick="go('fixdata')" style="display:none">
-          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-          Fix Data
-        </button>
-        <button class="side-item needs-user-manage" data-tab="users" onclick="go('users')">
-          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Users
-        </button>
-        <!-- Backup & Restore — admin only. Target tab (tc-backup) is not
-             yet wired up; clicks no-op until added. -->
-        <button class="side-item needs-user-manage" data-tab="backup" onclick="go('backup')">
-          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Backup
-        </button>
       </div>
       <div class="side-group">
         <div class="side-group-lbl">Master Data</div>
@@ -2877,11 +2855,47 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
           Spice Board
         </button>
+      </div>
+      <div class="side-group side-group-admin">
+        <div class="side-group-lbl">Administration</div>
+        <button class="side-item needs-settings-write" data-tab="settings" onclick="go('settings')">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </button>
+        <button class="side-item needs-user-manage" data-tab="users" onclick="go('users')">
+          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Users
+        </button>
+        <!-- Backup & Restore — admin only. Target tab (tc-backup) is not
+             yet wired up; clicks no-op until added. -->
+        <button class="side-item needs-user-manage" data-tab="backup" onclick="go('backup')">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Backup
+        </button>
         <!-- Import Old Data — admin only. Target tab (tc-importold) not
              yet wired; clicks no-op until added. -->
         <button class="side-item needs-user-manage" data-tab="importold" onclick="go('importold')">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 14l-5 5-5-5M12 19V3"/></svg>
           Import Old Data
+        </button>
+        <!-- Formulas reference page (dev-only). Hidden by default; reveal
+             for the current browser by running `spiceDev(true)` in the JS
+             console. Target tab (tc-formulas) is not yet wired up — clicks
+             will silently no-op until the corresponding loader is added. -->
+        <button id="side-formulas" class="side-item" data-tab="formulas" onclick="go('formulas')" style="display:none">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/><path d="M14.5 19.5l2 2 4-4"/></svg>
+          Formulas
+        </button>
+        <!-- Fix Data — gentle, no-SQL editor for the end user. Same
+             spiceDev(true) reveal as Formulas; enable it once on the
+             machine and it persists. Read-only until "Edit mode" is
+             flipped; every change spells out the exact before→after and
+             asks again. Server endpoints (/api/data/*) are admin-only,
+             whitelisted to the 8 business tables, and snapshot a backup
+             before every write. -->
+        <button id="side-fixdata" class="side-item" data-tab="fixdata" onclick="go('fixdata')" style="display:none">
+          <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          Fix Data
         </button>
       </div>
     </aside>
@@ -8000,6 +8014,10 @@ function _applySpiceDevMenu(){
     const el = document.getElementById(id);
     if (el) el.style.display = on ? '' : 'none';
   });
+  // Reveal the Administration group container when dev mode is on, so a
+  // dev without admin perms can still reach the revealed Formulas/Fix Data
+  // (the group is hidden by default — see .side-group-admin CSS).
+  document.body.classList.toggle('spice-dev-on', on);
 }
 window.spiceDev = function(on){
   if (on) localStorage.setItem('spice_dev', '1');
