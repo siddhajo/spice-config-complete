@@ -3911,6 +3911,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="">All Branches</option>
           </select>
           <button class="btn btn-g btn-sm" onclick="openTradeSummaryPdf()" id="rep-pdf-btn" disabled>📄 Open PDF</button>
+          <button class="btn btn-o btn-sm no-print" onclick="printWidget('#rep-trade-summary','Trade Summary')" title="Print the on-screen summary">🖨 Print</button>
         </div>
         <p style="color:var(--spice-text-mute);font-size:13px;margin:6px 0 16px">Per-branch and per-seller breakdown for the selected <span data-term-auction="singular-lower">trade</span>.</p>
         <div id="rep-summary-totals" style="display:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px"></div>
@@ -3928,6 +3929,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <h2 style="margin:0;flex:1">Branch Comparison (Lifetime)</h2>
           <span id="rep-branch-stamp" style="font-size:11.5px;color:var(--spice-text-hint)"></span>
           <button class="btn btn-sm" onclick="loadBranchComparison()">↻ Refresh</button>
+          <button class="btn btn-o btn-sm no-print" onclick="printBranchComparison()" title="Print the data tables">🖨 Print</button>
+          <button class="btn btn-o btn-sm no-print" onclick="printBranchComparison()" title="Save the data tables as PDF">📄 PDF</button>
         </div>
         <p style="color:var(--spice-text-mute);font-size:13px;margin:0 0 16px">How each branch has performed across every <span data-term-auction="singular-lower">auction</span> in the database.</p>
         <div id="rep-branch-body">
@@ -4062,6 +4065,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-a" onclick="previewLorry(lorryCurrentType())">Preview</button>
           <button class="btn btn-a" onclick="downloadLorry(lorryCurrentType(),'xlsx')">XLSX</button>
           <button class="btn btn-orange" onclick="downloadLorry(lorryCurrentType(),'pdf')">PDF</button>
+          <button class="btn btn-o" onclick="printLorry()" title="Open the report in the browser print dialog">🖨 Print</button>
+          <button class="btn feat-whatsapp" onclick="openLorryWhatsapp()" style="background:#25D366;color:#fff;font-weight:600">💬 WhatsApp</button>
         </div>
 
         <div style="margin-top:14px;padding:10px 12px;background:var(--spice-saffron-lt);border-radius:8px;font-size:12px;color:var(--text2);line-height:1.5">
@@ -4070,6 +4075,31 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
       </div>
     </div>
+
+    <!-- Lorry report → WhatsApp. Enter a phone number and tap Send; the
+         currently selected report's PDF is delivered via the WhatsApp Cloud
+         API when configured, otherwise the PDF downloads and a pre-filled
+         wa.me chat opens for the operator to attach it. Lives OUTSIDE
+         #tc-lorry so `.modal-bg.show` isn't suppressed by the tab's
+         display:none. Gated in the UI by flag_whatsapp (the button that
+         opens it carries .feat-whatsapp). -->
+    <div class="modal-bg" id="lorry-wa-modal"><div class="modal" style="max-width:440px">
+      <h2>Send Lorry Report via WhatsApp</h2>
+      <p style="font-size:13px;color:var(--spice-text-mute);margin-bottom:14px">
+        Sending <strong id="lorry-wa-report"></strong> as a PDF. Enter the recipient's WhatsApp number and tap Send.
+      </p>
+      <div class="fg"><label>Recipient name <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+        <input type="text" id="lorry-wa-name" placeholder="e.g. Driver / Transporter" autocomplete="off">
+      </div>
+      <div class="fg"><label>WhatsApp number</label>
+        <input type="tel" id="lorry-wa-phone" placeholder="10-digit mobile (e.g. 98765 43210)" autocomplete="off" inputmode="numeric">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Indian numbers assume +91 automatically. Include the country code for others.</div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-o" onclick="hideModal('lorry-wa-modal')">Cancel</button>
+        <button class="btn" id="lorry-wa-send" onclick="sendLorryWhatsapp()" style="background:#25D366;color:#fff;font-weight:600">Send</button>
+      </div>
+    </div></div>
 
     <!-- TDS -->
     <div class="tc" id="tc-tds">
@@ -4081,8 +4111,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-g" onclick="loadTDS()">Load</button>
           <button class="btn btn-a" onclick="exportTDS('xlsx')">Export XLSX</button>
           <button class="btn btn-orange" onclick="exportTDS('pdf')">Export PDF</button>
+          <button class="btn btn-o no-print" onclick="printWidget('#tds-table','TDS Returns')" title="Print the on-screen table">🖨 Print</button>
         </div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Invoice</th><th>Date</th><th>Name</th><th>PAN</th><th>Assess Value</th><th>TDS</th></tr></thead><tbody id="tds-list"></tbody></table></div>
+        <div style="overflow-x:auto"><table id="tds-table"><thead><tr><th>Invoice</th><th>Date</th><th>Name</th><th>PAN</th><th>Assess Value</th><th>TDS</th></tr></thead><tbody id="tds-list"></tbody></table></div>
       </div>
     </div>
 
@@ -4670,6 +4701,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
           <button class="btn btn-g" onclick="loadJournal()">Load</button>
           <button class="btn btn-a" onclick="exportJournal()">Export XLSX</button>
+          <button class="btn btn-o no-print" onclick="printWidget('#jr-table','Journal')" title="Print the on-screen journal">🖨 Print</button>
+          <button class="btn btn-o no-print" onclick="printWidget('#jr-table','Journal')" title="Save the on-screen journal as PDF">📄 PDF</button>
         </div>
         <div style="overflow-x:auto;max-height:500px"><table id="jr-table"><thead id="jr-head"></thead><tbody id="jr-body"></tbody></table></div>
       </div>
@@ -4702,6 +4735,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-g" onclick="loadRegister()">Load</button>
           <button class="btn btn-a" onclick="exportRegister('xlsx')">Export XLSX</button>
           <button class="btn btn-orange" onclick="exportRegister('pdf')">Export PDF</button>
+          <button class="btn btn-o no-print" onclick="printWidget('#reg-table','Register')" title="Print the on-screen register">🖨 Print</button>
         </div>
         <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Pick a <span data-term-auction="singular">Trade</span> for a single <span data-term-auction="singular-lower">trade</span>, or leave it on “All <span data-term-auction="plural-lower">trades</span>” and set a From/To date range. The date range is ignored when a specific <span data-term-auction="singular-lower">trade</span> is selected.</div>
         <div style="overflow-x:auto;max-height:520px"><table id="reg-table"><thead id="reg-head"></thead><tbody id="reg-body"></tbody></table></div>
@@ -9012,7 +9046,10 @@ async function loadStats(auctionId){
             <div class="dash-snap-t2">${snapWho.t2}</div>
           </div>
         </div>
-        ${picker}
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          ${picker}
+          ${_wpBtns('Snapshot — '+String(snapWho.t1||'').replace(/'/g,'')) }
+        </div>
       </div>
       <div class="dash-snap-matrix">
         <table>
@@ -9063,6 +9100,7 @@ async function loadStats(auctionId){
           <button role="tab" aria-selected="false" onclick="dashBreakdownTab('dealer',this)">Buyer-wise</button>
           <button role="tab" aria-selected="false" onclick="dashBreakdownTab('branch',this)">Branch-wise</button>
         </div>
+        ${_wpBtns('Breakdown')}
       </div>
       <div class="bd-pane on" id="dash-bd-planter">${bdPaneShell('planter')}</div>
       <div class="bd-pane" id="dash-bd-dealer">${bdPaneShell('dealer')}</div>
@@ -9084,7 +9122,10 @@ async function loadStats(auctionId){
     <div class="card" style="padding:0;margin-bottom:20px">
       <div style="padding:18px 22px 12px;border-bottom:1px solid var(--spice-line);display:flex;justify-content:space-between;align-items:center">
         <h2 style="font-size:17px;font-weight:700;margin:0;color:var(--spice-text-main)">Per-${termAuction(false, true)} breakdown</h2>
-        <span style="font-size:12px;color:var(--spice-text-hint)">${PT.length} trade${PT.length===1?'':'s'}${isAllMode ? ' · click a row to drill in' : ' · click the selected row to clear'}</span>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--spice-text-hint)">${PT.length} trade${PT.length===1?'':'s'}${isAllMode ? ' · click a row to drill in' : ' · click the selected row to clear'}</span>
+          ${_wpBtns('Per-'+termAuction(false, true)+' breakdown')}
+        </div>
       </div>
       <div class="dash-pt-scroll">
         <table style="width:100%">
@@ -15007,6 +15048,58 @@ async function downloadLorry(type,format){
   });
 }
 
+// Print the selected lorry report — fetch its server PDF and hand off to
+// the browser print dialog (Lorry has no on-screen table, so this mirrors
+// the invoice/document print path rather than the printWidget() DOM path).
+async function printLorry(){
+  const type=lorryCurrentType();
+  const aid=document.getElementById('lorry-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  const label=LORRY_LABELS[type]||type;
+  await withOverlay(`Generating ${label}…`, async () => {
+    const blob=await _fetchPdfBlob(`/api/lorry-reports/${type}/${aid}?format=pdf`);
+    await triggerBrowserPrint(blob, `${type}_${anoForAid(aid)}.pdf`);
+  });
+}
+
+// ── Lorry report → WhatsApp ───────────────────────────────────
+// Opens the phone-entry modal for the currently selected auction + report
+// type. Requires an auction to be chosen first (same guard as Preview and
+// the XLSX/PDF downloads). The button that calls this is gated by
+// flag_whatsapp via the .feat-whatsapp class.
+function openLorryWhatsapp(){
+  const aid=document.getElementById('lorry-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  const type=lorryCurrentType();
+  const lbl=document.getElementById('lorry-wa-report');
+  if(lbl) lbl.textContent=`${LORRY_LABELS[type]||type} — ${termAuction(false,false)} ${anoForAid(aid)}`;
+  const ph=document.getElementById('lorry-wa-phone'); if(ph) ph.value='';
+  const nm=document.getElementById('lorry-wa-name'); if(nm) nm.value='';
+  showModal('lorry-wa-modal');
+}
+// Fetch the selected lorry report PDF and deliver it over WhatsApp. Reuses
+// the shared _waSendDocument helper: the WhatsApp Cloud API when the server
+// has Meta credentials, otherwise a download + pre-filled wa.me chat so the
+// operator drags the PDF in.
+async function sendLorryWhatsapp(){
+  const aid=document.getElementById('lorry-auction')?.value;
+  if(!aid){alert('Select ' + termAuction(false, true) + ' first');return}
+  const digits=(document.getElementById('lorry-wa-phone')?.value||'').replace(/\D/g,'');
+  if(digits.length<10){alert('Enter a valid WhatsApp number (at least 10 digits)');return}
+  const type=lorryCurrentType();
+  const label=LORRY_LABELS[type]||type;
+  const name=(document.getElementById('lorry-wa-name')?.value||'').trim();
+  const ano=anoForAid(aid);
+  hideModal('lorry-wa-modal');
+  try{
+    const blob=await withOverlay(`Building ${label}…`, () => _fetchPdfBlob(`/api/lorry-reports/${type}/${aid}?format=pdf`));
+    const company=await _getCompanyName();
+    const summary=`the ${label} lorry report for ${termAuction(false,true)} ${ano} is attached.`;
+    const msg=`${ano} ${company} ${label.toUpperCase()} (LORRY REPORT)`.trim();
+    await _waSendDocument({ blob, filename:`${type}_${ano}.pdf`, phone:digits, params:[name||'there', summary, company], message:msg });
+  }catch(e){ showError(e); }
+}
+
 // ── Spice Board Reports ───────────────────────────────────
 // Three statutory cardamom-auction reports + one CSV export:
 //   buyers_statement | form_d | form_c → preview + xlsx + pdf + print
@@ -16947,6 +17040,106 @@ async function triggerBrowserPrint(blob, fallbackName) {
   setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 120000);
+}
+
+// ── Print / Save-as-PDF for a single on-screen data widget ─────
+// Client-side "download PDF / print" for the dashboard & report tables.
+// Clones the target widget, drops interactive chrome (buttons, tabs,
+// scroll caps), wraps it in a standalone document that reuses the app's
+// own stylesheet plus a print override, and opens the browser print
+// dialog — where "Save as PDF" is a destination. A widget's Print and
+// PDF buttons both call this: the OS dialog is the only way a browser
+// can produce a PDF (it can't write one silently), so both land there.
+// `target` is a CSS selector or an element; `title` is the printed
+// report heading. Mirrors the window.open + onafterprint pattern used
+// by leBuildReceiptHtml().
+// `opts.unhide` = selector of collapsed regions to force-show before
+// printing (e.g. a "Show data table" panel). `opts.drop` = extra
+// selectors to remove (e.g. chart canvases, since only data tables print).
+async function printWidget(target, title, opts){
+  opts = opts || {};
+  const el = (typeof target === 'string') ? document.querySelector(target) : target;
+  if(!el){ toast('Nothing to print'); return; }
+  const clone = el.cloneNode(true);
+  // Force-open any collapsed sections so their content prints (Insights
+  // sections collapse via a data-collapsed attribute — clear it on the
+  // clone root and every descendant).
+  clone.removeAttribute && clone.removeAttribute('data-collapsed');
+  clone.querySelectorAll('[data-collapsed]').forEach(n=>n.removeAttribute('data-collapsed'));
+  // Reveal any requested hidden regions (collapsed data tables, etc.).
+  if(opts.unhide){ clone.querySelectorAll(opts.unhide).forEach(n=>{ n.style.display=''; n.removeAttribute('hidden'); }); }
+  // Strip controls that make no sense on paper (+ any caller-supplied drops).
+  clone.querySelectorAll('.no-print,[data-noprint],button,select,input,.bd-tabs,.ins-chev,.pw-btns' + (opts.drop ? ','+opts.drop : '')).forEach(n=>n.remove());
+  // Reuse the app's own CSS (head + injected) so tables/cards keep their look.
+  const styles = Array.from(document.querySelectorAll('style')).map(s=>s.outerHTML).join('');
+  let company=''; try{ company = await _getCompanyName(); }catch(_){}
+  let when=''; try{ when = new Date().toLocaleString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch(_){}
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title||'Report')}</title>
+    ${styles}
+    <style>
+      @page{margin:14mm}
+      html,body{background:#fff!important;margin:0;padding:0}
+      body{padding:0 4mm;color:#111}
+      /* Expand every scroll region so the whole table prints, not just the
+         viewport slice the on-screen card shows. */
+      [class*="scroll"],.ins-list-scroll,.ins-branch-scroll,.dash-pt-scroll{max-height:none!important;overflow:visible!important}
+      .card,.ins-section{box-shadow:none!important;border:none!important;padding:0!important;margin:0 0 8px!important;background:#fff!important}
+      .pw-doc-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:2px solid #0E7C5A;padding:0 0 8px;margin:0 0 14px}
+      .pw-doc-co{font-size:18px;font-weight:800;color:#0E7C5A;letter-spacing:.2px}
+      .pw-doc-title{font-size:14px;font-weight:700;color:#111;margin-top:2px}
+      .pw-doc-when{font-size:11px;color:#555;white-space:nowrap}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #d0d7de;padding:6px 9px;font-size:12px}
+      thead th{background:#F1F5F9!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      tr{break-inside:avoid}
+      @media print{ .pw-btns,.no-print{display:none!important} }
+    </style></head>
+    <body>
+      <div class="pw-doc-head">
+        <div><div class="pw-doc-co">${esc(company||'')}</div><div class="pw-doc-title">${esc(title||'Report')}</div></div>
+        <div class="pw-doc-when">${esc(when)}</div>
+      </div>
+      ${clone.outerHTML}
+    </body></html>`;
+  const w = window.open('','_blank','width=920,height=760');
+  if(!w){ toast('Allow pop-ups to print / save PDF'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
+  let printed=false;
+  const doPrint=()=>{
+    if(printed || w.closed) return; printed=true;
+    try{
+      w.focus();
+      const close=()=>{ try{ if(!w.closed) w.close(); }catch(_){} };
+      w.onafterprint = close;
+      if(w.matchMedia){ const m=w.matchMedia('print'); m.addEventListener && m.addEventListener('change',e=>{ if(!e.matches) close(); }); }
+      w.print();
+    }catch(_){}
+  };
+  w.onload = doPrint;
+  setTimeout(doPrint, 600); // fallback if onload already fired before write settled
+}
+
+// Print + PDF button pair for a widget header. `title` is the report
+// heading; `closest` is the selector of the widget container to clone
+// (default `.card`). Both buttons open the same print dialog — see
+// printWidget() — so PDF = pick "Save as PDF" there.
+function _wpBtns(title, closest){
+  const c = closest || '.card';
+  const t = String(title||'Report').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  return `<span class="pw-btns no-print" style="display:inline-flex;gap:6px;flex-shrink:0">
+    <button class="btn btn-o btn-sm" onclick="event.stopPropagation();printWidget(this.closest('${c}'),'${t}')" title="Print this report">🖨 Print</button>
+    <button class="btn btn-o btn-sm" onclick="event.stopPropagation();printWidget(this.closest('${c}'),'${t}')" title="Save this report as PDF">📄 PDF</button>
+  </span>`;
+}
+
+// Branch Comparison is chart-first with its numbers tucked in collapsed
+// "Show data table" panels. Print only the data tables (per the data-only
+// rule) — force the panels open and drop the chart canvases + toggles.
+function printBranchComparison(){
+  printWidget('#rep-branch-card', 'Branch Comparison (Lifetime)', {
+    unhide: '.rep-section-body, .bc-data-table',
+    drop:   'canvas, .bc-chart-wrap, .bc-toggle-data',
+  });
 }
 
 // Shared: fetch a PDF from an endpoint and hand off to triggerBrowserPrint.
@@ -19159,12 +19352,13 @@ async function _renderInsights(){
   // Click anywhere on the head toggles the section open/closed. Each
   // section opts in via `id` so callers can group related sections
   // (KPI vs Chart vs Branches…) and keep their state independently.
-  const sectionHead = (icon, title, sub, theme, id) => {
+  const sectionHead = (icon, title, sub, theme, id, actions) => {
     const t = _INS_THEMES[theme] || _INS_THEMES.emerald;
     return `
       <div class="ins-section-head" onclick="toggleInsightsSection('${id}', this)" title="Click to collapse / expand">
         <div class="ins-section-icon" style="background:${_insGrad(theme)};--ins-glow:${t.glow}">${icon}</div>
         <div class="ins-section-title"><h3>${esc(title)}</h3><div class="sub">${esc(sub)}</div></div>
+        ${actions || ''}
         <div class="ins-chev" aria-hidden="true">▾</div>
       </div>`;
   };
@@ -19263,7 +19457,7 @@ async function _renderInsights(){
     <!-- Per-branch cards -->
     ${data.perBranch.length ? `
     <div class="ins-section" ${sectionAttrs('branches')}>
-      ${sectionHead('🏪', 'Per-branch summary', 'Rolled up across every trade in the date range.', 'teal', 'branches')}
+      ${sectionHead('🏪', 'Per-branch summary', 'Rolled up across every trade in the date range.', 'teal', 'branches', _wpBtns('Per-branch summary','.ins-section'))}
       <div class="ins-section-body">
         <div class="ins-branch-scroll ins-scroll">
           <div class="ins-branch-grid">
@@ -19309,7 +19503,7 @@ async function _renderInsights(){
         </div>
       </div>
       <div class="ins-section" style="margin-bottom:0" ${sectionAttrs('leaderboard')}>
-        ${sectionHead('🏆', 'Top buyer activity', 'Ranked by value across all trades in range.', 'pink', 'leaderboard')}
+        ${sectionHead('🏆', 'Top buyer activity', 'Ranked by value across all trades in range.', 'pink', 'leaderboard', _wpBtns('Top buyer activity','.ins-section'))}
         <div class="ins-section-body">
           <div class="ins-list-scroll ins-scroll" style="padding:0 12px">${buyerLeaderboard(data.buyerActivity)}</div>
         </div>
