@@ -271,6 +271,9 @@ function generSalesIspXML(rows, cfg, opts = {}) {
     const dateval     = toTallyDate(row.date);
     const partyName   = xe(row.partyName);
     const buyerAddrLines = _addrLines(row.address, row.place);
+    // E-way bill CONSIGNEEADDRESS prefers the buyer's ship-to (consignee)
+    // address when configured; otherwise falls back to the bill-to address.
+    const consigneeAddr = String(row.consigneeAddress || '').trim() || (buyerAddrLines[0] || '');
     const partyGstin  = xe(row.partyGstin);
     const partyState  = xe(findState(row.partyGstin));
     const partyPin    = xe(row.pin || '');
@@ -407,7 +410,7 @@ ${dispatchLines.map(l => `<DISPATCHFROMADDRESS>${xe(l)}</DISPATCHFROMADDRESS>`).
 <CONSIGNORADDRESS>${xe(consignorAddrFlat)}</CONSIGNORADDRESS>
 </CONSIGNORADDRESS.LIST>
 <CONSIGNEEADDRESS.LIST TYPE="String">
-<CONSIGNEEADDRESS>${xe(buyerAddrLines[0] || '')}</CONSIGNEEADDRESS>
+<CONSIGNEEADDRESS>${xe(consigneeAddr)}</CONSIGNEEADDRESS>
 </CONSIGNEEADDRESS.LIST>
 <DOCUMENTTYPE>Tax Invoice</DOCUMENTTYPE>
 <SUBTYPE>Supply</SUBTYPE>
@@ -1472,7 +1475,7 @@ function generRDPurchaseXML(rows, cfg, opts = {}) {
   // refs so it lines up with the abbreviation already used in invoice
   // numbering elsewhere in the app.
   const seasonShort= opts.seasonShort || cfgGet(cfg, 'season_short', '26-27');
-  const detailed   = cfgBool(cfg, 'tally_detailed', true);
+  const detailed   = cfgBool(cfg, 'tally_detailed_purchase', false);
   const tlyrnd     = cfgBool(cfg, 'tally_round_enabled', true);
   const opt        = cfgBool(cfg, 'tally_optional', false);
   // RD vouchers go to the ASP company. The intra/inter test must therefore
@@ -1833,7 +1836,7 @@ ${TAGS.DEEMYES}
 function generURDPurchaseXML(rows, cfg, opts = {}) {
   const company   = opts.companyName || cfgGet(cfg, 'tally_company_name', cfgGet(cfg, 'short_name', 'Ideal Spices Private Limited'));
   const season    = opts.season || cfgGet(cfg, 'tally_season', cfgGet(cfg, 'season_code', '2026-27'));
-  const detailed  = cfgBool(cfg, 'tally_detailed', true);
+  const detailed  = cfgBool(cfg, 'tally_detailed_purchase', false);
   const tlyrnd    = cfgBool(cfg, 'tally_round_enabled', true);
   const opt       = cfgBool(cfg, 'tally_optional', false);
   const amazing   = cfgBool(cfg, 'tally_amazing_mode', false);
@@ -2219,7 +2222,8 @@ const ASP_STATE_SQL = `UPPER(COALESCE(i.state,'')) = 'KERALA'`;
  */
 function buildSalesIspRows(db, auctionId, cfg) {
   const stmt = db.prepare(`
-    SELECT i.*, b.add1, b.add2, b.pla AS buyer_pla, b.pin AS buyer_pin, b.cpin AS buyer_cpin
+    SELECT i.*, b.add1, b.add2, b.pla AS buyer_pla, b.pin AS buyer_pin, b.cpin AS buyer_cpin,
+           b.cadd1 AS buyer_cadd1, b.cadd2 AS buyer_cadd2, b.cpla AS buyer_cpla
     FROM invoices i
     LEFT JOIN buyers b ON b.buyer = i.buyer
     WHERE i.auction_id = ? AND ${ISP_STATE_SQL}
@@ -2351,6 +2355,9 @@ function buildSalesIspRows(db, auctionId, cfg) {
       address: [r.add1, r.add2].filter(Boolean).join(', '),
       place: r.place || r.buyer_pla || '',
       pin: r.buyer_pin || '',
+      // Ship-to (consignee) address, when the buyer has one configured. Used
+      // for the e-way bill CONSIGNEEADDRESS; blank falls back to bill-to.
+      consigneeAddress: [r.buyer_cadd1, r.buyer_cadd2].filter(Boolean).join(', '),
       partyGstin: r.gstin || '',
       lots: lotRows.map(l => ({
         lot: l.lot,

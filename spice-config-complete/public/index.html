@@ -11702,7 +11702,7 @@ const TALLY_GROUPS = [
     'tally_season','tally_separator','tally_inv_prefix','tally_ainv_prefix',
   ]},
   { id:'tally-flags', title:'Behaviour Flags', icon:'⚙', keys:[
-    'tally_amazing_mode','tally_detailed','tally_dispatch_from','tally_ship_to',
+    'tally_amazing_mode','tally_detailed','tally_detailed_purchase','tally_dispatch_from','tally_ship_to',
     'tally_round_enabled','tally_optional','tally_dn_exempt',
     'tally_local_transport','tally_local_insurance',
     'tally_tcs_enabled','tally_tds_enabled','tally_sample_stock',
@@ -13259,10 +13259,10 @@ function openBuyerEdit(b){
   document.getElementById('buyer-modal-title').textContent='Edit Buyer';
   document.getElementById('b-id').value=b.id;
   B_FIELDS.forEach(f=>{const el=document.getElementById(B_IDS[f]);if(el)el.value=b[f]||''});
-  // Show the GSTIN-derived sale type (matches the buyers list), not the stale
-  // stored b.sale — saving then persists the corrected value.
+  // Show the stored Sale Type so manual edits persist across save/reload. Only
+  // fall back to the GSTIN-derived value when nothing is stored yet (legacy rows).
   const saleEl=document.getElementById('b-sale');
-  if(saleEl){const ds=deriveBuyerSale(b);if(ds)saleEl.value=ds}
+  if(saleEl){const stored=String(b.sale||'').trim();saleEl.value=stored||deriveBuyerSale(b)||'L'}
   showModal('buyer-modal');
 }
 // Clone: pre-fill all fields from an existing buyer. The primary key
@@ -19630,7 +19630,7 @@ window.addEventListener('resize', () => {
 
 // ── Exports ───────────────────────────────────────────────
 const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',bank_payment_new:'Bank Payment (New)',
-  pooler_register:'Pooler Register',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',
+  pooler_register:'Pooler Register',pooler_list_consolidated:'Pooler List Consolidated (Party-wise)',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',dealer_list_partywise:'Dealer List (Party-wise)',
   payment:'Payment Summary',payment_partywise:'Payment Summary (Party-wise)'};
 // Export types that only support a specific format (no XLSX/PDF choice).
 // e.g., Praman (e-Trade) and the e-Auction Spices Board CSV are both
@@ -19657,7 +19657,7 @@ function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
-const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise']);
+const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise', 'pooler_list_consolidated', 'dealer_list_partywise']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's

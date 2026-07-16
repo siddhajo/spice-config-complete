@@ -267,7 +267,8 @@ const DEFAULTS = [
 
   // Mode toggles (mirror the macro checkboxes)
   { key: 'tally_amazing_mode',    value: 'false',          category: 'tally', label: 'Amazing (generate as ASP / sister company)',type: 'boolean' },
-  { key: 'tally_detailed',        value: 'true',           category: 'tally', label: 'Detailed Inv (one inventory entry per lot)',type: 'boolean' },
+  { key: 'tally_detailed',          value: 'true',         category: 'tally', label: 'Detailed Inv — Sales (one inventory entry per lot)',    type: 'boolean' },
+  { key: 'tally_detailed_purchase', value: 'false',        category: 'tally', label: 'Detailed Inv — Purchase (one inventory entry per lot)', type: 'boolean' },
   { key: 'tally_dispatch_from',   value: 'true',           category: 'tally', label: 'Dispatch (include Dispatch-From block)',    type: 'boolean' },
   { key: 'tally_round_enabled',   value: 'true',           category: 'tally', label: 'Round (Round On/Off ledger)',               type: 'boolean' },
   { key: 'tally_tcs_enabled',     value: 'false',          category: 'tally', label: 'TCS (apply on Sales when applicable)',      type: 'boolean' },
@@ -654,6 +655,10 @@ function initCompanySettings(db) {
     const relabel = db.prepare('UPDATE company_settings SET label = ? WHERE key = ? AND label != ?');
     relabel.run('Insurance (₹/₹1000)',       'insurance',       'Insurance (₹/₹1000)');
     relabel.run('Local Insurance (₹/₹1000)', 'local_insurance', 'Local Insurance (₹/₹1000)');
+    // Detailed-inventory flag split into separate Sales/Purchase toggles: the
+    // legacy 'tally_detailed' now controls Sales only, so clarify its label.
+    // The new 'tally_detailed_purchase' key is seeded (default off) above.
+    relabel.run('Detailed Inv — Sales (one inventory entry per lot)', 'tally_detailed', 'Detailed Inv — Sales (one inventory entry per lot)');
   } catch (e) { /* non-fatal */ }
 
   // Migration: the Seller YouTube Link moved out of "Integrations" into its

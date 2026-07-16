@@ -711,6 +711,53 @@ async function exportPoolerRegister(db, auctionId) {
   });
 }
 
+// ── Export: Pooler List Consolidated (Party-wise) ────────────
+// One aggregated row per pooler (party) — NO per-lot breakdown. Rolls up the
+// Pooler Register's lots into a single line per pooler: lot count and summed
+// Qty / Amount (sale) and PQty / PurAmt (purchase). Same sold-lot scope as the
+// Pooler Register (amount > 0) so the totals reconcile to the rupee.
+async function exportPoolerListConsolidated(db, auctionId) {
+  const rows = db.all(
+    `SELECT state, name as poolername, branch as br,
+       COUNT(*) as lots,
+       SUM(COALESCE(qty,0))    as qty,
+       SUM(COALESCE(amount,0)) as amount,
+       SUM(COALESCE(pqty,0))   as pqty,
+       SUM(COALESCE(puramt,0)) as puramt
+     FROM lots WHERE auction_id = ? AND amount > 0
+     GROUP BY state, name, branch
+     ORDER BY name`, [auctionId]
+  );
+  // Sequential SL.NO, one per party row.
+  rows.forEach((r, i) => { r._sn = i + 1; });
+  const cols = [
+    { header: 'SL.NO',  key: '_sn',        width: 6  },
+    { header: 'STATE',  key: 'state',      width: 12 },
+    { header: 'NAME',   key: 'poolername', width: 30 },
+    { header: 'BRANCH', key: 'br',         width: 15 },
+    { header: 'LOTS',   key: 'lots',       width: 8  },
+    { header: 'QTY',    key: 'qty',        width: 12 },
+    { header: 'AMOUNT', key: 'amount',     width: 14 },
+    { header: 'PQTY',   key: 'pqty',       width: 12 },
+    { header: 'PURAMT', key: 'puramt',     width: 14 },
+  ];
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = {
+    label: 'GRAND TOTAL',
+    values: {
+      lots:   sum('lots'),
+      qty:    sum('qty'),
+      amount: sum('amount'),
+      pqty:   sum('pqty'),
+      puramt: sum('puramt'),
+    },
+  };
+  return createExcelBuffer('PoolerListConsolidated', cols, rows, {
+    db, title: 'Pooler List Consolidated (Party-wise)',
+    metaLines: auctionMeta(db, auctionId), grandTotal,
+  });
+}
+
 // ── Export Type 6: Full File ─────────────────────────────────
 async function exportFullFile(db, auctionId) {
   const rows = db.all(`SELECT * FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
@@ -790,6 +837,44 @@ async function exportDealerList(db, auctionId) {
   ];
   return createExcelBuffer('DealerList', cols, grouped, {
     db, title: 'Dealer List', metaLines: auctionMeta(db, auctionId),
+  });
+}
+
+// ── Export: Dealer List (Party-wise) ─────────────────────────
+// Consolidated roster of registered dealers: one aggregated row per dealer
+// (party) with lot count and summed Bags / Qty — instead of the lot-wise
+// Dealer List's per-lot rows + subtotals. Same qualification as the Dealer
+// List (GSTIN-bearing seller, qty > 0), so it stays pre-trade safe (no
+// dependency on price/amount). Grouped by state + name + GSTIN.
+async function exportDealerListPartywise(db, auctionId) {
+  const rows = db.all(
+    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
+       COUNT(*) as lots,
+       SUM(COALESCE(bags,0)) as bags,
+       SUM(COALESCE(qty,0))  as qty
+     FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
+     GROUP BY state, name, SUBSTR(cr, 7, 15)
+     ORDER BY state, name`, [auctionId]
+  );
+  // Sequential SL.NO, one per party row.
+  rows.forEach((r, i) => { r._sn = i + 1; });
+  const cols = [
+    { header: 'SL.NO', key: '_sn',   width: 6  },
+    { header: 'STATE', key: 'state', width: 12 },
+    { header: 'NAME',  key: 'name',  width: 30 },
+    { header: 'GSTIN', key: 'gstin', width: 18 },
+    { header: 'LOTS',  key: 'lots',  width: 8  },
+    { header: 'BAGS',  key: 'bags',  width: 8  },
+    { header: 'QTY',   key: 'qty',   width: 12 },
+  ];
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = {
+    label: 'GRAND TOTAL',
+    values: { lots: sum('lots'), bags: sum('bags'), qty: sum('qty') },
+  };
+  return createExcelBuffer('DealerListPartywise', cols, rows, {
+    db, title: 'Dealer List (Party-wise)',
+    metaLines: auctionMeta(db, auctionId), grandTotal,
   });
 }
 
@@ -1325,10 +1410,12 @@ const EXPORT_TYPES = {
   bank_payment:   { fn: exportBankPayment,   name: 'BankPayment', needsCfg: true },
   bank_payment_new:{ fn: exportBankPaymentNew, name: 'BankPaymentNew', needsCfg: true },
   pooler_register:{ fn: exportPoolerRegister,name: 'PoolerRegister' },
+  pooler_list_consolidated:{ fn: exportPoolerListConsolidated, name: 'PoolerListConsolidated' },
   full_file:      { fn: exportFullFile,      name: 'FullFile' },
   collection:     { fn: exportCollection,    name: 'Collection' },
   trade_report:   { fn: exportTradeReport,   name: 'TradeReport' },
   dealer_list:    { fn: exportDealerList,    name: 'DealerList' },
+  dealer_list_partywise:{ fn: exportDealerListPartywise, name: 'DealerListPartywise' },
   planter_list:   { fn: exportPlanterList,   name: 'PlanterList' },
   sales_taxes:    { fn: exportSalesTaxes,    name: 'SalesTaxes' },
   payment:        { fn: exportPaymentSummary,name: 'Payment',        needsCfg: true },
