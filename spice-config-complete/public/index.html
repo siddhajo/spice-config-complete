@@ -2788,6 +2788,14 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
       </div>
       <div class="side-group">
         <div class="side-group-lbl">Transactions</div>
+        <!-- Pre-Invoice — read-only preview of every sales invoice that would
+             be generated (bill-to, ship-to, amounts) + exact-PDF preview.
+             Nothing is generated or numbered from here. Placed above Sales
+             Invoices as the natural "preview before you generate" step. -->
+        <button class="side-item" data-tab="preinvoice" onclick="go('preinvoice')">
+          <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          Pre-Invoice
+        </button>
         <button class="side-item" data-tab="invoices" onclick="go('invoices')">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
           Sales Invoices
@@ -3506,6 +3514,40 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
         <div style="overflow-x:auto"><table><thead><tr><th>Lot</th><th>Name</th><th>Branch</th><th>Bags</th><th>Qty</th><th>Price</th><th>Amount</th><th>Buyer</th><th>PurAmt</th><th>Payable</th><th>Actions</th></tr></thead><tbody id="lots-list"></tbody></table></div>
         <div id="lots-pager" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px;color:var(--text2);flex-wrap:wrap"></div>
+      </div>
+    </div>
+
+    <!-- PRE-INVOICE — read-only preview of every sales invoice that WOULD be
+         generated for an auction (bill-to, ship-to, amounts, taxes) plus a
+         one-click exact-PDF preview. Nothing is generated or numbered here. -->
+    <div class="tc" id="tc-preinvoice">
+      <div class="card">
+        <h2>Pre-Invoice <span style="font-weight:400;font-size:12px;color:var(--text3)">Preview how each sales invoice will look — before you generate. Nothing is saved.</span></h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+          <div class="fg" style="margin:0;min-width:180px"><label>Auction</label>
+            <select id="pi-auction" onchange="loadPreInvoiceBuyers()" style="width:100%;height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px"></select>
+          </div>
+          <div class="fg" style="margin:0"><label>Sale Type</label>
+            <select id="pi-sale" onchange="loadPreInvoiceBuyers()" style="height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px">
+              <option value="">All sale types</option>
+              <option value="L">Local (L)</option>
+              <option value="I">Inter-state (I)</option>
+              <option value="E">Export (E)</option>
+              <option value="W">Withdrawn (W)</option>
+              <option value="N">N/A (N)</option>
+            </select>
+          </div>
+          <div class="fg" style="margin:0;min-width:240px"><label>Buyer</label>
+            <select id="pi-buyer" onchange="renderPreInvoiceSelected()" style="width:100%;height:38px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:13px"></select>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;height:38px;font-size:13px;font-weight:600;cursor:pointer">
+            <input type="checkbox" id="pi-no-ti" onchange="renderPreInvoiceSelected()" style="width:16px;height:16px;cursor:pointer">
+            No Transport &amp; Insurance
+          </label>
+          <button class="btn btn-g" onclick="loadPreInvoiceBuyers()" style="height:38px;padding:0 16px;font-weight:600">Reload</button>
+          <span id="pi-count" style="font-size:12px;color:var(--text3);margin-left:auto"></span>
+        </div>
+        <div id="pi-list"><div style="color:var(--text3);font-size:13px;padding:16px;text-align:center">Select an auction and a buyer to preview the sales invoice.</div></div>
       </div>
     </div>
 
@@ -8507,7 +8549,7 @@ function go(tab){
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el=document.getElementById('tc-'+tab);if(el)el.classList.add('active');
   const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,formulas:loadFormulas,fixdata:loadFixData,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
-    auctions:loadAuctions,lots:loadLotAuctions,invoices:loadInvAuctions,purchases:loadPurAuctions,
+    auctions:loadAuctions,lots:loadLotAuctions,preinvoice:loadPreInvoice,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
     bills:loadBillAuctions,debit:loadDebitNotes,debitplanter:loadDebitNotesPlanter,journals:loadJournalDefault,registers:loadRegisterDefault,tally:loadTallyAuctions,
     spicesboard:loadSpiceBoard,
@@ -25637,6 +25679,154 @@ async function previewInvoice(type){
     renderPreview(d.invoice,type);
     showModal('preview-modal');
   }catch(e){showError(e)}}
+
+// ── PRE-INVOICE SCREEN ─────────────────────────────────────────
+// A read-only screen listing every sales invoice that WOULD be generated for
+// the selected auction — bill-to, ship-to, amounts and taxes exactly as they
+// will print — with a one-click exact-PDF preview per buyer. Nothing is
+// generated, numbered, or saved.
+const PI_SALE_LABEL = { L:'Local', I:'Inter-state', E:'Export', W:'Withdrawn', N:'N/A' };
+function loadPreInvoice(){
+  return fillAucSelect('pi-auction').then(() => loadPreInvoiceBuyers());
+}
+// Step 1 — fetch the (cheap) buyer list for the auction + sale filter and fill
+// the Buyer dropdown, then render whichever buyer is selected. Default to the
+// first buyer so the screen shows one invoice, not every one.
+async function loadPreInvoiceBuyers(){
+  const aid = document.getElementById('pi-auction')?.value;
+  const list = document.getElementById('pi-list');
+  const countEl = document.getElementById('pi-count');
+  const sel = document.getElementById('pi-buyer');
+  if (countEl) countEl.textContent = '';
+  if (!aid) { if(list) list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:16px;text-align:center">Select an auction.</div>'; if(sel) sel.innerHTML=''; return; }
+  const sale = document.getElementById('pi-sale')?.value || '';
+  const noTI = document.getElementById('pi-no-ti')?.checked ? '1' : '0';
+  let data;
+  try {
+    data = await j(`/api/invoices/preview-all/${aid}?sale=${encodeURIComponent(sale)}&noTI=${noTI}`);
+  } catch(e) {
+    if (list) list.innerHTML = `<div style="color:var(--red);font-size:13px;padding:16px;text-align:center">Failed to load: ${esc(e.message||e)}</div>`;
+    return;
+  }
+  const buyers = (data && data.buyers) || [];
+  if (!buyers.length) {
+    if (sel) sel.innerHTML = '';
+    if (list) list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:16px;text-align:center">No buyers to preview for this selection. Make sure lots have buyer codes and prices assigned.</div>';
+    return;
+  }
+  const prev = sel ? sel.value : '';
+  if (sel) {
+    sel.innerHTML = buyers.map(b => `<option value="${esc(b.code)}">${esc(b.name)}${b.buyerCode?` (${esc(b.buyerCode)})`:''} · ${esc(b.saleType)}</option>`).join('')
+      + `<option value="__all__">— View all buyers (${buyers.length}) —</option>`;
+    // Preserve the prior selection when still valid; otherwise show the first.
+    if (prev && (prev === '__all__' || buyers.some(b => b.code === prev))) sel.value = prev;
+    else sel.value = buyers[0].code;
+  }
+  renderPreInvoiceSelected();
+}
+// Step 2 — build + render the full pre-invoice card(s) for the selected buyer
+// (or every buyer when "View all buyers" is chosen).
+async function renderPreInvoiceSelected(){
+  const aid = document.getElementById('pi-auction')?.value;
+  const list = document.getElementById('pi-list');
+  const countEl = document.getElementById('pi-count');
+  const sel = document.getElementById('pi-buyer');
+  const val = sel ? sel.value : '';
+  if (!aid || !val) return;
+  const sale = document.getElementById('pi-sale')?.value || '';
+  const noTI = document.getElementById('pi-no-ti')?.checked ? '1' : '0';
+  if (list) list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:16px;text-align:center">Building pre-invoice…</div>';
+  const q = (val === '__all__') ? '&all=1' : `&buyer=${encodeURIComponent(val)}`;
+  let data;
+  try {
+    data = await j(`/api/invoices/preview-all/${aid}?sale=${encodeURIComponent(sale)}&noTI=${noTI}${q}`);
+  } catch(e) {
+    if (list) list.innerHTML = `<div style="color:var(--red);font-size:13px;padding:16px;text-align:center">Failed to load: ${esc(e.message||e)}</div>`;
+    return;
+  }
+  const previews = (data && data.previews) || [];
+  if (!previews.length) {
+    if (list) list.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:16px;text-align:center">Nothing to preview for this buyer.</div>';
+    return;
+  }
+  if (countEl) countEl.textContent = (val === '__all__') ? `${previews.length} invoice${previews.length===1?'':'s'}` : '';
+  list.innerHTML = previews.map((p, i) => piCard(p, aid, noTI, i)).join('');
+}
+// Build one preview card. Shows Bill-To + Ship-To (consignee, falling back to
+// the buyer) and the full money breakdown that the invoice will carry.
+function piCard(p, aid, noTI, idx){
+  const b = p.buyer || {};
+  const s = p.summary || {};
+  const money = v => '₹' + (Number(v)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const nBags = v => Math.round(Number(v)||0).toLocaleString('en-IN');
+  const nQty  = v => (Number(v)||0).toLocaleString('en-IN',{minimumFractionDigits:3,maximumFractionDigits:3});
+  const billName = b.buyer1 || b.buyer || p.buyerCode || '—';
+  const billAddr = [b.add1, b.add2, b.pla, b.state].map(x=>String(x||'').trim()).filter(Boolean).join(', ');
+  // Consignee (ship-to) uses c* fields; blank consignee → same as bill-to.
+  const hasConsignee = String(b.cbuyer1||'').trim() || String(b.cadd1||'').trim();
+  const shipName = hasConsignee ? (b.cbuyer1 || billName) : billName;
+  const shipAddr = hasConsignee
+    ? [b.cadd1, b.cadd2, b.cpla, b.cstate].map(x=>String(x||'').trim()).filter(Boolean).join(', ')
+    : billAddr;
+  const shipGst = hasConsignee ? (b.cgstin || b.gstin || '') : (b.gstin || '');
+  const row = (label, val, opts) => `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;${opts&&opts.strong?'font-weight:700':''}"><span style="color:var(--text2)">${label}</span><span style="font-family:monospace">${val}</span></div>`;
+  const taxRows = s.isInterState
+    ? row('IGST', money(s.igst))
+    : row('CGST', money(s.cgst)) + row('SGST', money(s.sgst));
+  const tiRows = (Number(s.transportCost)||Number(s.insuranceCost))
+    ? row('Transport', money(s.transportCost)) + row('Insurance', money(s.insuranceCost))
+    : (s.noTI ? '<div style="color:var(--text3);font-size:11px;padding:2px 0">No transport &amp; insurance</div>' : '');
+  const addlRow = (Number(s.addlCharge)>0) ? row(esc(s.addlChargeName||'Additional'), money(s.addlCharge)) : '';
+  return `<div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;background:#fff">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-weight:700;font-size:15px">${esc(billName)}</span>
+      <span style="font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;background:var(--spice-cardamom-lt);color:var(--spice-cardamom)">${esc(PI_SALE_LABEL[p.saleType]||p.saleType)} (${esc(p.saleType)})</span>
+      <span style="font-size:11px;color:var(--text3)">${(p.lineItems||[]).length} lot${(p.lineItems||[]).length===1?'':'s'} · ${esc(b.code||p.buyerCode)}</span>
+      <span style="margin-left:auto;font-weight:800;font-size:16px;color:var(--spice-cardamom)">${money(s.grandTotal)}</span>
+      <button class="btn btn-g" style="height:32px;padding:0 12px;font-size:12px;font-weight:600" onclick="piPreviewPdf('${esc(aid)}','${esc(String(p.buyerCode).replace(/'/g,"\\'"))}','${esc(p.saleType)}',${noTI==='1'?'true':'false'})">👁 Preview Invoice</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px">
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px">
+        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px">Bill To</div>
+        <div style="font-weight:600;font-size:13px">${esc(billName)}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${esc(billAddr||'—')}</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:3px">GSTIN: <span style="font-family:monospace">${esc(b.gstin||'—')}</span></div>
+      </div>
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px">
+        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:4px">Ship To (Consignee)</div>
+        <div style="font-weight:600;font-size:13px">${esc(shipName)}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px">${esc(shipAddr||'—')}</div>
+        <div style="font-size:11.5px;color:var(--text2);margin-top:3px">GSTIN: <span style="font-family:monospace">${esc(shipGst||'—')}</span></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;max-width:420px">
+      ${row('Bags', nBags(s.totalBags))}
+      ${row('Quantity (kg)', nQty(s.totalQty))}
+      ${row('Cardamom value', money(s.totalAmount))}
+      ${row('Gunny', money(s.gunnyCost))}
+      ${tiRows}
+      ${taxRows}
+      ${addlRow}
+      ${row('Round off', money(s.roundDiff))}
+      <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px">${row('Grand Total', money(s.grandTotal), {strong:true})}</div>
+    </div>
+  </div>`;
+}
+// Open the EXACT sales-invoice PDF (same renderer as Generate) for one buyer,
+// stamped "PREVIEW". Reuses the preview-pdf endpoint — no persistence.
+async function piPreviewPdf(aid, buyerCode, saleType, noTI){
+  await withOverlay('Building pre-invoice…', async () => {
+    const r = await fetch(B + `/api/invoices/preview-pdf/${aid}`, { method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+      body: JSON.stringify({ saleType, buyerCode, noTI: !!noTI }) });
+    if (!r.ok) { let m='Pre-invoice failed'; try { const e=await r.json(); if(e.error) m=e.error; } catch(_){} toast(m); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url);
+    if (!w) toast('Allow pop-ups to view the pre-invoice');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+}
 
 function renderPreview(inv,type){
   const s=inv.summary;

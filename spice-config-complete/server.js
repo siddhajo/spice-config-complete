@@ -9684,6 +9684,116 @@ app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
   res.json({ preview: true, invoice });
 });
 
+// PRE-INVOICE PDF — renders the EXACT sales-invoice PDF (same builder + same
+// renderer as the real Generate flow) for visual verification, WITHOUT
+// persisting anything: no invoices INSERT, no lots.invo/sale UPDATE, and no
+// invoice number consumed (a "PREVIEW" placeholder is stamped on the doc).
+// Body: { saleType, buyerCode, includeTransportInsurance }.
+app.post('/api/invoices/preview-pdf/:auctionId', requireView, async (req, res) => {
+  try {
+    const db = getDb(); const cfg = getSettingsFlat(db);
+    const { saleType, buyerCode } = req.body;
+    // Per-invoice Transport & Insurance switch — default ON when omitted, so
+    // the preview mirrors what Generate would produce. `noTI` (from the
+    // Pre-Invoice screen's "No Transport & Insurance" checkbox) is accepted as
+    // the inverse for convenience.
+    const includeTI = (req.body.noTI === true || String(req.body.noTI || '').toLowerCase() === 'true' || Number(req.body.noTI) === 1)
+      ? false
+      : (req.body.includeTransportInsurance !== false);
+    if (!saleType || !buyerCode) return res.status(400).json({ error: 'saleType and buyerCode are required' });
+
+    // Same uncalculated-lot top-up the JSON preview + Generate flows do, so the
+    // previewed figures match exactly what Generate would produce. This only
+    // fills derived calc fields on already-priced lots; it never touches
+    // invoice numbers or the invoices table.
+    const uncalc = db.all(`SELECT * FROM lots WHERE auction_id = ? AND amount > 0 AND (puramt IS NULL OR puramt = 0)`, [req.params.auctionId]);
+    for (const lot of uncalc) {
+      const c = calculateLot(lot, cfg);
+      db.run(`UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+        [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]);
+    }
+
+    const invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg, { includeTI });
+    if (!invoice) return res.status(404).json({ error: `No lots found for buyer "${buyerCode}" in this auction.` });
+    const auction = db.get('SELECT * FROM auctions WHERE id = ?', [req.params.auctionId]);
+    const invoiceDate = (auction && auction.date) || new Date().toISOString().slice(0, 10);
+
+    // Placeholder invoice number — nothing is reserved or stored.
+    const pdf = await generateSalesInvoicePDF(invoice, cfg, saleType, 'PREVIEW', invoiceDate);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="PreInvoice_${saleType}_${String(buyerCode).replace(/[^A-Za-z0-9]/g,'')}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('Pre-invoice PDF error:', e);
+    res.status(500).json({ error: 'Pre-invoice generation failed: ' + e.message });
+  }
+});
+
+// PRE-INVOICE — powers the Pre-Invoice screen. Always returns the lightweight
+// `buyers` list (one entry per party, with its effective sale type) so the
+// screen can offer a party selector. `previews` (the full bill-to/ship-to/
+// amounts) is built ONLY for the selected buyer (?buyer=CODE) or for the whole
+// list on explicit ?all=1 — so viewing one party doesn't build every invoice.
+// Nothing is generated, numbered, or persisted. Query: ?sale=L&noTI=0&buyer=X.
+app.get('/api/invoices/preview-all/:auctionId', requireView, (req, res) => {
+  try {
+    const db = getDb(); const cfg = getSettingsFlat(db);
+    const aid = req.params.auctionId;
+    const saleFilter = String(req.query.sale || '').trim().toUpperCase();
+    // "No Transport & Insurance" toggle → includeTI is its inverse (default ON).
+    const includeTI = !(req.query.noTI === '1' || String(req.query.noTI || '').toLowerCase() === 'true');
+    const buyerParam = String(req.query.buyer || '').trim();
+    const wantAll = req.query.all === '1' || String(req.query.all || '').toLowerCase() === 'true';
+
+    // Every buyer with priced, non-reserved lots — resolve each one's effective
+    // sale type (a sale stamped on the lots wins, else the buyer default, else
+    // Local; mirrors eligible-buyers' COALESCE) and apply the sale-type filter.
+    const buyerCodes = db.all(
+      `SELECT DISTINCT l.buyer FROM lots l
+        WHERE l.auction_id = ? AND l.buyer IS NOT NULL AND l.buyer != ''
+          AND l.amount > 0 AND UPPER(COALESCE(l.code, '')) != 'WD'
+        ORDER BY l.buyer`, [aid]).map(r => r.buyer);
+
+    const buyers = [];
+    for (const code of buyerCodes) {
+      const lotSale = db.get(`SELECT sale FROM lots WHERE auction_id = ? AND buyer = ? AND amount > 0 AND sale IS NOT NULL AND sale != '' LIMIT 1`, [aid, code]);
+      const bRow = db.get('SELECT buyer1, code, sale FROM buyers WHERE buyer = ? LIMIT 1', [code]);
+      const eff = String((lotSale && lotSale.sale) || (bRow && bRow.sale) || 'L').toUpperCase();
+      if (saleFilter && eff !== saleFilter) continue;
+      buyers.push({ code, name: (bRow && bRow.buyer1) || code, buyerCode: (bRow && bRow.code) || '', saleType: eff });
+    }
+
+    // Decide which buyers to fully build a preview for.
+    const toBuild = buyerParam
+      ? buyers.filter(b => b.code === buyerParam)
+      : (wantAll ? buyers : []);
+
+    const previews = [];
+    if (toBuild.length) {
+      // Only top up uncalculated priced lots when we're actually building a
+      // preview — keeps the buyers-list call side-effect-free.
+      const uncalc = db.all(`SELECT * FROM lots WHERE auction_id = ? AND amount > 0 AND (puramt IS NULL OR puramt = 0)`, [aid]);
+      for (const lot of uncalc) {
+        const c = calculateLot(lot, cfg);
+        db.run(`UPDATE lots SET pqty=?,prate=?,puramt=?,com=?,sertax=?,cgst=?,sgst=?,igst=?,advance=?,balance=?,bilamt=?,refund=?,refud=?,isp_pqty=?,isp_prate=?,isp_puramt=?,asp_pqty=?,asp_prate=?,asp_puramt=? WHERE id=?`,
+          [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]);
+      }
+      for (const b of toBuild) {
+        const inv = buildSalesInvoice(db, aid, b.code, b.saleType, cfg, { includeTI });
+        if (!inv) continue;
+        // Surface the T&I toggle state so the card can label a suppressed
+        // Transport/Insurance line (the summary itself only zeroes the amounts).
+        const summary = Object.assign({}, inv.summary, { noTI: !includeTI });
+        previews.push({ buyerCode: b.code, saleType: b.saleType, buyer: inv.buyer, summary, lineItems: inv.lineItems });
+      }
+    }
+    res.json({ buyers, previews });
+  } catch (e) {
+    console.error('Pre-invoice preview-all error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ══════════════════════════════════════════════════════════════
 // PAYMENTS (PAYCHECK.PRG)
 // ══════════════════════════════════════════════════════════════
