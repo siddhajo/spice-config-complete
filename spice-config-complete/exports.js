@@ -758,6 +758,45 @@ async function exportPoolerListConsolidated(db, auctionId) {
   });
 }
 
+// ── Export: Pooler List Consolidated — Pre-Trade (Party-wise) ──
+// Pre-trade sibling of exportPoolerListConsolidated: one aggregated row per
+// pooler (party) with lot count + summed Bags / Qty and NO money columns, so
+// it works BEFORE prices are imported (lots carry no amount/puramt until price
+// import — same reasoning as the Dealer List / Planter List pre-trade exports).
+// Qualifies on a real (qty>0) lot instead of amount>0. Grouped by state, name,
+// branch so the party rows match the post-trade Pooler List Consolidated.
+async function exportPoolerListConsolidatedBefore(db, auctionId) {
+  const rows = db.all(
+    `SELECT state, name as poolername, branch as br,
+       COUNT(*) as lots,
+       SUM(COALESCE(bags,0)) as bags,
+       SUM(COALESCE(qty,0))  as qty
+     FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
+     GROUP BY state, name, branch
+     ORDER BY name`, [auctionId]
+  );
+  // Sequential SL.NO, one per party row.
+  rows.forEach((r, i) => { r._sn = i + 1; });
+  const cols = [
+    { header: 'SL.NO',  key: '_sn',        width: 6  },
+    { header: 'STATE',  key: 'state',      width: 12 },
+    { header: 'NAME',   key: 'poolername', width: 30 },
+    { header: 'BRANCH', key: 'br',         width: 15 },
+    { header: 'LOTS',   key: 'lots',       width: 8  },
+    { header: 'BAGS',   key: 'bags',       width: 8  },
+    { header: 'QTY',    key: 'qty',        width: 12 },
+  ];
+  const sum = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+  const grandTotal = {
+    label: 'GRAND TOTAL',
+    values: { lots: sum('lots'), bags: sum('bags'), qty: sum('qty') },
+  };
+  return createExcelBuffer('PoolerListConsolidatedBefore', cols, rows, {
+    db, title: 'Pooler List Consolidated (Party-wise)',
+    metaLines: auctionMeta(db, auctionId), grandTotal,
+  });
+}
+
 // ── Export Type 6: Full File ─────────────────────────────────
 async function exportFullFile(db, auctionId) {
   const rows = db.all(`SELECT * FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
@@ -1411,6 +1450,7 @@ const EXPORT_TYPES = {
   bank_payment_new:{ fn: exportBankPaymentNew, name: 'BankPaymentNew', needsCfg: true },
   pooler_register:{ fn: exportPoolerRegister,name: 'PoolerRegister' },
   pooler_list_consolidated:{ fn: exportPoolerListConsolidated, name: 'PoolerListConsolidated' },
+  pooler_list_consolidated_before:{ fn: exportPoolerListConsolidatedBefore, name: 'PoolerListConsolidatedBefore' },
   full_file:      { fn: exportFullFile,      name: 'FullFile' },
   collection:     { fn: exportCollection,    name: 'Collection' },
   trade_report:   { fn: exportTradeReport,   name: 'TradeReport' },
@@ -1596,7 +1636,8 @@ module.exports = {
   EXPORT_TYPES,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
   exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentNew, exportBankPaymentBefore,
-  exportPoolerRegister, exportFullFile, exportCollection, exportTradeReport, exportDealerList, exportPlanterList,
+  exportPoolerRegister, exportPoolerListConsolidated, exportPoolerListConsolidatedBefore,
+  exportFullFile, exportCollection, exportTradeReport, exportDealerList, exportDealerListPartywise, exportPlanterList,
   exportSalesTaxes, exportPaymentSummary, exportPaymentPartyWise, exportTDSReturn, exportTallyPurchase,
   exportSalesJournal, exportPurchaseJournal,
   exportPurchaseRegister, exportSalesRegister, exportIndividualRegister,

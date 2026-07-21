@@ -19699,14 +19699,16 @@ function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
-const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise', 'pooler_list_consolidated', 'dealer_list_partywise']);
+const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise', 'pooler_list_consolidated', 'pooler_list_consolidated_before', 'dealer_list_partywise']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's
 // auction selector (#exp-auction) via exportType's fallback.
 const PRETRADE_EXP_LABELS={lot_slip:'Lot Slip',lot_buyer:'Lot Buyer',lot_name:'Lot Name',
-  praman_csv:'e-Trade CSV (Praman)',price_list_before:'Price List (Before)',dealer_list:'Dealer List',
-  planter_list:'Planter List (Grade 1)',full_file:'Full File'};
+  praman_csv:'e-Trade CSV (Praman)',price_list_before:'Price List (Before)',
+  dealer_list:'Dealer List',dealer_list_partywise:'Dealer List (Party-wise)',
+  planter_list:'Planter List (Grade 1)',pooler_list_consolidated_before:'Pooler List Consolidated (Party-wise)',
+  full_file:'Full File'};
 // Render a single export card (label + format buttons). Shared by the
 // Export Center and the Pre-Trade Exports section so both honour the
 // CSV-only / XLSX-only format rules identically.
