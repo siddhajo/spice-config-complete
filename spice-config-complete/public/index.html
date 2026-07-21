@@ -19699,7 +19699,7 @@ function pretradeLabels(){ return _modeExportLabels(PRETRADE_EXP_LABELS); }
 // Full File has too many columns to fit any printable PDF page — only XLSX.
 // Lot Payment + Bank Payment (Before) are XLSX-only too: there's no PDF
 // renderer for them, so we don't offer a PDF button that would 500.
-const EXP_XLSX_ONLY = new Set(['full_file', 'lot_payment', 'bank_payment_before', 'bank_payment_new', 'payment_partywise', 'pooler_list_consolidated', 'pooler_list_consolidated_before', 'dealer_list_partywise']);
+const EXP_XLSX_ONLY = new Set(['full_file', 'bank_payment_before', 'bank_payment_new']);
 // "Before trade" snapshot reports — the same set surfaced in the Price
 // Import modal, grouped here as a Pre-Trade Exports section so operators
 // can grab them from the Exports screen too. Shares the Export Center's

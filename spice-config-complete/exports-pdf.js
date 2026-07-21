@@ -172,7 +172,7 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
 
   function isNumericCol(col) {
     const h = (col.header || '').toUpperCase();
-    return /^(QTY|BAG|BAGS|PRICE|RATE|AMOUNT|PQTY|PRATE|PURAMT|CGST|SGST|IGST|TCS|TOTAL|DISCOUNT|PAYABLE|ADVANCE|BALANCE|LITRE|LOTS|TDS|ASSESS_VALUE|COST|NET|GUNNY|TRANSPORT|INSURANCE|CARDAMOM|CARDAMOM_COST|GUNNY_COST|ROUND|BILAMT|COM|GST5|VALUE|RECEIPT|INVAMT|LORRY|INS)$/.test(h);
+    return /^(QTY|BAG|BAGS|PRICE|RATE|AMOUNT|PQTY|PRATE|PURAMT|PURCHAMT|PUR\.AMT|CGST|SGST|IGST|TCS|TOTAL|DISCOUNT|PAYABLE|ADVANCE|BALANCE|LITRE|LOTS|TDS|ASSESS_VALUE|COST|NET|GUNNY|TRANSPORT|INSURANCE|CARDAMOM|CARDAMOM_COST|GUNNY_COST|ROUND|BILAMT|COM|GST5|VALUE|RECEIPT|INVAMT|LORRY|INS)$/.test(h);
   }
 
   // Label cells on summary/total rows (e.g. "GRAND TOTAL", "Withdrawn") often
@@ -643,6 +643,61 @@ const COLS = {
     { header: 'BAGS',  key: 'bags', width: 6  },
     { header: 'QTY',   key: 'qty',  width: 12 },
   ],
+  dealer_list_partywise: [
+    // Party-wise: one aggregated row per dealer (bags/qty, no money).
+    { header: 'SL.NO', key: '_sn',   width: 6  },
+    { header: 'STATE', key: 'state', width: 12 },
+    { header: 'NAME',  key: 'name',  width: 30 },
+    { header: 'GSTIN', key: 'gstin', width: 18 },
+    { header: 'LOTS',  key: 'lots',  width: 8  },
+    { header: 'BAGS',  key: 'bags',  width: 8  },
+    { header: 'QTY',   key: 'qty',   width: 12 },
+  ],
+  pooler_list_consolidated: [
+    // Party-wise roll-up of sold lots — lot count + Qty/Amount/PQty/PurAmt.
+    { header: 'SL.NO',  key: '_sn',        width: 6  },
+    { header: 'STATE',  key: 'state',      width: 12 },
+    { header: 'NAME',   key: 'poolername', width: 26 },
+    { header: 'BRANCH', key: 'br',         width: 14 },
+    { header: 'LOTS',   key: 'lots',       width: 8  },
+    { header: 'QTY',    key: 'qty',        width: 12 },
+    { header: 'AMOUNT', key: 'amount',     width: 14 },
+    { header: 'PQTY',   key: 'pqty',       width: 12 },
+    { header: 'PURAMT', key: 'puramt',     width: 14 },
+  ],
+  pooler_list_consolidated_before: [
+    // Pre-trade party-wise roster — bags/qty only, no money.
+    { header: 'SL.NO',  key: '_sn',        width: 6  },
+    { header: 'STATE',  key: 'state',      width: 12 },
+    { header: 'NAME',   key: 'poolername', width: 30 },
+    { header: 'BRANCH', key: 'br',         width: 14 },
+    { header: 'LOTS',   key: 'lots',       width: 8  },
+    { header: 'BAGS',   key: 'bags',       width: 8  },
+    { header: 'QTY',    key: 'qty',        width: 12 },
+  ],
+  payment_partywise: [
+    // Party-wise payment summary — one aggregated row per seller.
+    { header: 'SL.NO',    key: '_sn',            width: 6  },
+    { header: 'SELLER',   key: 'name',           width: 30 },
+    { header: 'LOTS',     key: 'lot_count',      width: 8  },
+    { header: 'QTY',      key: 'total_qty',      width: 12 },
+    { header: 'PUR.AMT',  key: 'total_puramt',   width: 14 },
+    { header: 'TDS',      key: 'total_tds',      width: 12 },
+    { header: 'PAYABLE',  key: 'total_payable',  width: 14 },
+    { header: 'DISCOUNT', key: 'total_discount', width: 14 },
+  ],
+  lot_payment: [
+    // Post-auction payment summary, one row per lot (branch → seller order).
+    { header: 'BRANCH',      key: 'branch',      width: 14 },
+    { header: 'LOT',         key: 'lot',         width: 6  },
+    { header: 'QTY',         key: 'qty',         width: 10 },
+    { header: 'RATE',        key: 'rate',        width: 10 },
+    { header: 'COST',        key: 'cost',        width: 14 },
+    { header: 'PQTY',        key: 'pqty',        width: 10 },
+    { header: 'PRATE',       key: 'prate',       width: 10 },
+    { header: 'PURCHAMT',    key: 'purchamt',    width: 14 },
+    { header: 'SELLER NAME', key: 'seller_name', width: 24 },
+  ],
   sales_taxes: [
     { header: 'STATE', key: 'state', width: 10 }, { header: 'SALE', key: 'sale', width: 6 },
     { header: 'INVO', key: 'invo', width: 8 }, { header: 'TRADERNAME', key: 'tradername', width: 22 },
@@ -799,7 +854,11 @@ const TOTAL_KEYS = {
   full_file:       ['bags', 'qty', 'amount', 'pqty', 'puramt', 'cgst', 'sgst', 'igst', 'advance', 'balance'],
   collection:      ['bag', 'qty'],
   dealer_list:     ['bags', 'qty'],
+  dealer_list_partywise: ['lots', 'bags', 'qty'],
   planter_list:    ['bags', 'qty'],
+  pooler_list_consolidated:        ['lots', 'qty', 'amount', 'pqty', 'puramt'],
+  pooler_list_consolidated_before: ['lots', 'bags', 'qty'],
+  payment_partywise: ['lot_count', 'total_qty', 'total_puramt', 'total_tds', 'total_payable', 'total_discount'],
   sales_taxes:     ['bag', 'qty', 'cardamom_cost', 'gunny_cost', 'cgst', 'sgst', 'igst', 'tcs', 'transport', 'insurance', 'total'],
   payment:         ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'payable'],
   tally_purchase:  ['bag', 'qty', 'amount', 'cgst', 'sgst', 'igst', 'discount', 'bilamt'],
@@ -828,9 +887,14 @@ const TITLES = {
   full_file:       'Full File',
   collection:      'Collection / Lorry',
   dealer_list:     'Dealer List',
+  dealer_list_partywise: 'Dealer List (Party-wise)',
   planter_list:    'Planter List (Grade 1)',
+  pooler_list_consolidated:        'Pooler List Consolidated (Party-wise)',
+  pooler_list_consolidated_before: 'Pooler List Consolidated (Party-wise)',
+  lot_payment:     'Lot Payment Summary',
   sales_taxes:     'Sales & Taxes',
   payment:         'Payment Summary',
+  payment_partywise: 'Payment Summary (Party-wise)',
   tally_purchase:  'Tally Purchase',
   tds_return:      'TDS Return',
   purchase_register: 'Purchase Register',
@@ -895,6 +959,12 @@ const ROW_PREPROCESS = {
     subtotalKeys: ['bag', 'qty', 'amount', 'pqty', 'puramt', 'tds', 'payable', 'discount'],
     subtotalLabelKey: 'poolername',
   },
+  // Party-wise consolidations — one row per party, flat sequential SL.NO (no
+  // grouping/subtotals; the grand-total strip carries the sums).
+  dealer_list_partywise:           { serialKey: '_sn' },
+  pooler_list_consolidated:        { serialKey: '_sn' },
+  pooler_list_consolidated_before: { serialKey: '_sn' },
+  payment_partywise:               { serialKey: '_sn' },
 };
 
 async function getRowsForType(db, type, auctionId, cfg, extra) {
@@ -970,6 +1040,32 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT state, lot_no as lot, name as poolername, branch as br, qty, price, amount, pqty, prate, puramt
          FROM lots WHERE auction_id = ? AND amount > 0 ORDER BY name`, [auctionId]);
 
+    case 'pooler_list_consolidated':
+      // Party-wise roll-up of SOLD lots (amount > 0), one row per pooler.
+      // Mirrors the XLSX exportPoolerListConsolidated query. See exports.js.
+      return db.all(
+        `SELECT state, name as poolername, branch as br,
+           COUNT(*) as lots,
+           SUM(COALESCE(qty,0))    as qty,
+           SUM(COALESCE(amount,0)) as amount,
+           SUM(COALESCE(pqty,0))   as pqty,
+           SUM(COALESCE(puramt,0)) as puramt
+         FROM lots WHERE auction_id = ? AND amount > 0
+         GROUP BY state, name, branch
+         ORDER BY name`, [auctionId]);
+
+    case 'pooler_list_consolidated_before':
+      // Pre-trade party-wise roster — bags/qty only, no money (works before
+      // prices import). Mirrors the XLSX exportPoolerListConsolidatedBefore query.
+      return db.all(
+        `SELECT state, name as poolername, branch as br,
+           COUNT(*) as lots,
+           SUM(COALESCE(bags,0)) as bags,
+           SUM(COALESCE(qty,0))  as qty
+         FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
+         GROUP BY state, name, branch
+         ORDER BY name`, [auctionId]);
+
     case 'full_file':
       return db.all(`SELECT * FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
@@ -988,6 +1084,29 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
           bags, qty
          FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
          ORDER BY state, name, lot_no`, [auctionId]);
+
+    case 'dealer_list_partywise':
+      // Party-wise roster of registered dealers — one aggregated row per
+      // dealer (bags/qty, no money), pre-trade safe. Mirrors the XLSX
+      // exportDealerListPartywise query. See exports.js.
+      return db.all(
+        `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
+           COUNT(*) as lots,
+           SUM(COALESCE(bags,0)) as bags,
+           SUM(COALESCE(qty,0))  as qty
+         FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
+         GROUP BY state, name, SUBSTR(cr, 7, 15)
+         ORDER BY state, name`, [auctionId]);
+
+    case 'lot_payment':
+      // Fully-populated post-auction payment summary, one row per lot ordered
+      // by branch then seller. Mirrors the XLSX exportLotPayment query.
+      return db.all(
+        `SELECT COALESCE(branch,'') AS branch,
+                lot_no AS lot, qty, price AS rate, amount AS cost,
+                pqty, prate, puramt AS purchamt,
+                COALESCE(name,'') AS seller_name
+         FROM lots WHERE auction_id = ? ORDER BY branch, name, lot_no`, [auctionId]);
 
     case 'planter_list':
       // Lot-wise roster of Grade 1 planters — one row per lot, grouped by
@@ -1054,6 +1173,14 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         const tds = tdsCtx.share(r.poolername, r.puramt);
         return { ...r, discount: lotDisc + manualDisc, tds, payable: total - tds };
       });
+    }
+
+    case 'payment_partywise': {
+      // One aggregated row per seller — figures come straight from
+      // getPaymentSummary so the PDF matches the XLSX / on-screen view.
+      // Mirrors the XLSX exportPaymentPartyWise. See exports.js.
+      const { getPaymentSummary } = require('./calculations');
+      return getPaymentSummary(db, auctionId, (extra && extra.state) || '', cfg);
     }
 
     case 'tally_purchase': {
