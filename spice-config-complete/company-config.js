@@ -277,7 +277,7 @@ const DEFAULTS = [
   { key: 'tally_dn_exempt',       value: 'false',          category: 'tally', label: 'Exempted (Debit Note: skip GST tax ledgers)', type: 'boolean' },
   { key: 'tally_local_transport', value: 'true',           category: 'tally', label: 'Local Transport (use local transport rate)', type: 'boolean' },
   { key: 'tally_local_insurance', value: 'true',           category: 'tally', label: 'Local Insurance (use local insurance rate)', type: 'boolean' },
-  { key: 'tally_ship_to',         value: 'false',          category: 'tally', label: 'Ship To (override consignee with separate Ship-To party)', type: 'boolean' },
+  { key: 'tally_ship_to',         value: 'false',          category: 'tally', label: "Ship To (buyer address = ship-to/consignee address)", type: 'boolean' },
 
   // Sales Account Ledgers (Cardamom)
   { key: 'tally_sales_inter',     value: 'Cardamom Sales 5%',          category: 'tally', label: 'Cardamom Inter-State Sales',  type: 'text' },
@@ -659,6 +659,11 @@ function initCompanySettings(db) {
     // legacy 'tally_detailed' now controls Sales only, so clarify its label.
     // The new 'tally_detailed_purchase' key is seeded (default off) above.
     relabel.run('Detailed Inv — Sales (one inventory entry per lot)', 'tally_detailed', 'Detailed Inv — Sales (one inventory entry per lot)');
+    // tally_ship_to was repurposed: it now makes BASICBUYERADDRESS on the
+    // sales voucher use the buyer's ship-to (consignee) address instead of
+    // bill-to. The old "override consignee with separate Ship-To party"
+    // label no longer describes the behaviour.
+    relabel.run('Ship To (buyer address = ship-to/consignee address)', 'tally_ship_to', 'Ship To (buyer address = ship-to/consignee address)');
   } catch (e) { /* non-fatal */ }
 
   // Migration: the Seller YouTube Link moved out of "Integrations" into its

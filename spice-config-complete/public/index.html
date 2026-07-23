@@ -15261,15 +15261,17 @@ async function loadPurEligibleSellers(){
   const dd=document.getElementById('gp-seller');if(!dd)return;
   if(!aid){dd.innerHTML='<option value="">— Select seller —</option>';return}
   try{
-    const sellers=await j(`/api/purchases/eligible-sellers/${aid}`);
+    // excludeGenerated=1 → only dealers who don't yet have a purchase invoice
+    // for this trade (so the picker never offers an already-generated seller).
+    const sellers=await j(`/api/purchases/eligible-sellers/${aid}?excludeGenerated=1`);
     if(!sellers.length){
-      dd.innerHTML='<option value="">— No registered dealers —</option>';
-      const h=document.getElementById('gp-hint');if(h)h.innerHTML='<span style="color:var(--amber)">⚠ No sellers with GSTIN in this auction. Use Bills of Supply tab for agriculturists.</span>';
+      dd.innerHTML='<option value="">— None pending —</option>';
+      const h=document.getElementById('gp-hint');if(h)h.innerHTML='<span style="color:var(--text3)">All registered dealers in this ' + termAuction(false, true) + ' already have a purchase invoice. Delete one to regenerate, or use Bills of Supply for agriculturists.</span>';
       return;
     }
     dd.innerHTML='<option value="">— Select seller —</option>'+sellers.map(s=>
       `<option value="${esc(s.name)}">${esc(s.name)} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`).join('');
-    const h=document.getElementById('gp-hint');if(h)h.textContent=`${sellers.length} dealer(s) with GSTIN`;
+    const h=document.getElementById('gp-hint');if(h)h.textContent=`${sellers.length} dealer(s) pending`;
   }catch(e){console.warn(e)}
 }
 
@@ -18204,6 +18206,11 @@ async function loadPurchases(opts){
           + iconBtn('del','Delete purchase',`delPurchase(${p.id})`) }
     ]
   });
+  // Reset the Delete-Selected toolbar after every (re)load — including the
+  // reload after a bulk delete. The re-mounted rows are fresh + unticked, but
+  // no checkbox 'change' event fires, so recompute the ticked count now;
+  // otherwise the button and its stale "34" counter linger after deletion.
+  if (typeof syncPurchaseMaster === 'function') syncPurchaseMaster();
 }
 
 function openPurchaseEdit(p){

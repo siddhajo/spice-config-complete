@@ -7287,6 +7287,14 @@ app.get('/api/invoices/pdf/:id', requireView, async (req, res) => {
     // Optional dispatched-through override from print modal (URL-encoded)
     const dispatchedThrough = req.query.dispatchedThrough || '';
     if (dispatchedThrough) invoice.dispatchedThrough = dispatchedThrough;
+    // Persist the value the operator gave at print time so the Tally export
+    // can emit it as <BASICSHIPPEDBY>. Only write when non-blank (a cleared
+    // field shouldn't wipe a previously-saved value) and when it actually
+    // changed, to avoid needless writes on repeat previews.
+    if (dispatchedThrough && dispatchedThrough !== stored.disp_through) {
+      try { db.run('UPDATE invoices SET disp_through=? WHERE id=?', [dispatchedThrough, stored.id]); }
+      catch (e) { /* non-fatal — PDF still renders */ }
+    }
 
     // Cross-reference the ASP invoice number so the ISP PDF can show it
     // under "Other References" as ASP/I-{asp}/{season}. Imported invoices
@@ -7458,6 +7466,12 @@ app.post('/api/invoices/pdf-bulk', requireView, async (req, res) => {
         };
       }
       if (dispatchedThrough) invoice.dispatchedThrough = dispatchedThrough;
+      // Persist the batch dispatched-through onto each invoice so the Tally
+      // export can emit it as <BASICSHIPPEDBY>. Only on non-blank + change.
+      if (dispatchedThrough && dispatchedThrough !== stored.disp_through) {
+        try { db.run('UPDATE invoices SET disp_through=? WHERE id=?', [dispatchedThrough, stored.id]); }
+        catch (e) { /* non-fatal */ }
+      }
       // ASP cross-reference for ISP invoices — see single endpoint for
       // rationale. Prefer stored invoices.asp_invo (imported), fall back
       // to lots (generated).
@@ -7714,16 +7728,30 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
   res.json({ success: true, invoice: s });
 });
 
-// List eligible sellers for purchase invoices (with GSTIN, amount > 0)
+// List eligible sellers for purchase invoices (with GSTIN, amount > 0).
+// ?excludeGenerated=1 hides dealers who ALREADY have a purchase invoice for
+// this trade, so the single-generate picker lists only sellers still needing
+// one. Match on seller NAME (purchases has no lot FK), case/space-insensitive.
 app.get('/api/purchases/eligible-sellers/:auctionId', requireView, (req, res) => {
+  const aid = req.params.auctionId;
+  const excludeGenerated = req.query.excludeGenerated === '1' || req.query.excludeGenerated === 'true';
+  const params = [aid];
+  let notGen = '';
+  if (excludeGenerated) {
+    notGen = ` AND NOT EXISTS (
+                 SELECT 1 FROM purchases p
+                  WHERE p.auction_id = ?
+                    AND UPPER(TRIM(p.name)) = UPPER(TRIM(lots.name)) )`;
+    params.push(aid);
+  }
   res.json(getDb().all(
     `SELECT name, COUNT(*) as lot_count, SUM(qty) as total_qty, SUM(amount) as total_amount, MAX(cr) as cr
      FROM lots
      WHERE auction_id = ? AND name IS NOT NULL AND name != ''
-       AND UPPER(cr) LIKE 'GSTIN%' AND amount > 0
+       AND UPPER(cr) LIKE 'GSTIN%' AND amount > 0${notGen}
      GROUP BY name
      ORDER BY name`,
-    [req.params.auctionId]
+    params
   ));
 });
 

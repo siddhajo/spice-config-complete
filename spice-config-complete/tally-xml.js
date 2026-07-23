@@ -274,6 +274,14 @@ function generSalesIspXML(rows, cfg, opts = {}) {
     // E-way bill CONSIGNEEADDRESS prefers the buyer's ship-to (consignee)
     // address when configured; otherwise falls back to the bill-to address.
     const consigneeAddr = String(row.consigneeAddress || '').trim() || (buyerAddrLines[0] || '');
+    // BASICBUYERADDRESS: when tally_ship_to is enabled, report the buyer's
+    // ship-to (consignee) address instead of bill-to. Falls back to bill-to
+    // when the buyer has no consignee address configured. The party's own
+    // ADDRESS.LIST (ledger/bill-to mailing address) is left unchanged.
+    const shipToLines = _addrLines(row.consigneeAddress, row.consigneePlace);
+    const basicBuyerAddrLines = (shipToOverride && shipToLines.length)
+      ? shipToLines
+      : buyerAddrLines;
     const partyGstin  = xe(row.partyGstin);
     const partyState  = xe(findState(row.partyGstin));
     const partyPin    = xe(row.pin || '');
@@ -319,7 +327,7 @@ ${buyerAddrLines.map(l => `<ADDRESS>${xe(l)}</ADDRESS>`).join('\n')}
 <PARTYPINCODE>${partyPin}</PARTYPINCODE>
 <BASICBUYERNAME>${partyName}</BASICBUYERNAME>
 <BASICBUYERADDRESS.LIST TYPE="String">
-${buyerAddrLines.map(l => `<BASICBUYERADDRESS>${xe(l)}</BASICBUYERADDRESS>`).join('\n')}
+${basicBuyerAddrLines.map(l => `<BASICBUYERADDRESS>${xe(l)}</BASICBUYERADDRESS>`).join('\n')}
 </BASICBUYERADDRESS.LIST>`;
 
     if (dispatchEnabled) {
@@ -2356,8 +2364,17 @@ function buildSalesIspRows(db, auctionId, cfg) {
       place: r.place || r.buyer_pla || '',
       pin: r.buyer_pin || '',
       // Ship-to (consignee) address, when the buyer has one configured. Used
-      // for the e-way bill CONSIGNEEADDRESS; blank falls back to bill-to.
+      // for the e-way bill CONSIGNEEADDRESS and, when tally_ship_to is on, the
+      // voucher BASICBUYERADDRESS; blank falls back to bill-to.
       consigneeAddress: [r.buyer_cadd1, r.buyer_cadd2].filter(Boolean).join(', '),
+      consigneePlace: r.buyer_cpla || '',
+      // <BASICSHIPPEDBY>: the "Dispatched Through" value the operator entered
+      // in the print modal, persisted on the invoice at PDF-download time.
+      // Falls back to the config default (same chain the ISP PDF uses) when
+      // the invoice has no saved value.
+      shippedBy: String(r.disp_through || '').trim()
+        || cfgGet(cfg, 'dispatched_through_isp', '')
+        || cfgGet(cfg, 'dispatched_through', ''),
       partyGstin: r.gstin || '',
       lots: lotRows.map(l => ({
         lot: l.lot,

@@ -982,6 +982,11 @@ async function initDb() {
     // ASP↔ISP linkage pass (matched on trade + buyer). Generated invoices
     // keep the link on lots.asp_invo. Surfaced as the "ASP Inv#" column.
     "ALTER TABLE invoices ADD COLUMN asp_invo TEXT DEFAULT ''",
+    // Per-invoice "Dispatched Through" value entered in the print modal at
+    // PDF-download time. Persisted so the Tally export can emit it as
+    // <BASICSHIPPEDBY>; blank rows fall back to the config
+    // dispatched_through_isp/_asp default at export time.
+    "ALTER TABLE invoices ADD COLUMN disp_through TEXT DEFAULT ''",
     // ── modified_at / modified_by audit columns ──────────────────
     // WHEN a row last changed and WHO changed it. Stamped automatically
     // by the AFTER INSERT/UPDATE triggers created below (no call site is
