@@ -5737,6 +5737,60 @@ function lvGateState(db, auctionId) {
   return row.lots_validated_at ? 'clean' : 'never';
 }
 
+// ── Trade-stage gate (guided sidebar) ────────────────────────
+// Returns the workflow stage 1-4 the sidebar reveals menus by, for the
+// trade the topbar global picker currently drives:
+//   1  trade exists          → Lot Entry
+//   2  lot_count > 0          → Price tools, Price Check, Payments, Exports
+//                               (+ Lots once the lots pass Validate Lots —
+//                                see signals.lotsValidated / data-req-validated)
+//   3  ≥1 lot has a price     → Sales/Purchase/Bill/Debit-Note transactions
+//   4  ≥1 transaction doc     → Tally, Registers, Journals, TDS, Spice Board, Lorry
+// Everything is derived from data already stored — no schema change. The
+// server's real GENERATION gates (price-check / lot-validation) still apply
+// on write; this endpoint only drives sidebar VISIBILITY.
+app.get('/api/auctions/:id/stage', requireView, (req, res) => {
+  const db = getDb();
+  const aid = parseInt(req.params.id, 10);
+  if (!aid) return res.status(400).json({ error: 'Invalid auction id' });
+  const auction = db.get('SELECT id, ano FROM auctions WHERE id = ?', [aid]);
+  if (!auction) return res.status(404).json({ error: 'Auction not found' });
+  const ano = auction.ano;
+
+  const lotCount = db.get('SELECT COUNT(*) AS c FROM lots WHERE auction_id = ?', [aid]).c;
+  // Lots screen (Price Import lives there) is gated behind Validate Lots:
+  // it reveals only once the lot-validation gate is clean. When the
+  // flag_lot_validation feature is OFF, lvGateState() returns 'off', so the
+  // gate auto-satisfies and the Lots screen reveals as usual (no dead step).
+  const lvState = lvGateState(db, aid);
+  const lotsValidated = lvState === 'clean' || lvState === 'off';
+  // Transactions module unlocks the moment any single lot carries a price.
+  const hasPricedLot = db.get(
+    'SELECT COUNT(*) AS c FROM lots WHERE auction_id = ? AND COALESCE(price,0) > 0', [aid]
+  ).c > 0;
+  // A transaction "exists" once any doc has been generated for this trade.
+  // invoices/purchases key on auction_id; bills/debit_notes(-planter) key on ano.
+  const hasDocs =
+    db.get('SELECT COUNT(*) AS c FROM invoices WHERE auction_id = ?', [aid]).c > 0 ||
+    db.get('SELECT COUNT(*) AS c FROM purchases WHERE auction_id = ?', [aid]).c > 0 ||
+    db.get('SELECT COUNT(*) AS c FROM bills WHERE auction_id = ?', [aid]).c > 0 ||
+    db.get('SELECT COUNT(*) AS c FROM debit_notes WHERE ano = ?', [ano]).c > 0 ||
+    db.get('SELECT COUNT(*) AS c FROM debit_notes_planter WHERE ano = ?', [ano]).c > 0;
+
+  // Monotonic climb — each stage requires all the ones below it.
+  let stage = 1;                                   // trade exists
+  if (lotCount > 0)                       stage = 2;
+  if (stage >= 2 && hasPricedLot)         stage = 3;
+  if (stage >= 3 && hasDocs)              stage = 4;
+
+  res.json({
+    auctionId: aid,
+    ano,
+    stage,
+    signals: { lotCount, lotsValidated, hasPricedLot, hasDocs },
+  });
+});
+
 // Clean a stored GSTIN the same way the Dealer List does, so the
 // validation's "will this lot appear in the Dealer List?" verdict matches
 // the report exactly. Storage is inconsistent: "GSTIN.<15>", "gstin <15>",

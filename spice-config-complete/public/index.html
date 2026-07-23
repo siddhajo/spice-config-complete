@@ -1072,6 +1072,49 @@ tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--spice-cream)}
 .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
 
+/* Price Entry grid — coloured header (overrides the element-level th{}
+   background/colour above, which would otherwise paint each cell cream). */
+.pe-grid-table thead th{
+  background:var(--spice-cardamom);color:#fff;
+  padding:8px;font-size:11px;letter-spacing:.4px;border-bottom:none
+}
+
+/* ── Per-screen guide banner (plain-English help for every tab) ─
+   ONE shared banner lives at the top of .content, OUTSIDE the
+   tab-content (#tc-*) divs — so the per-tab loaders that rewrite
+   innerHTML can never wipe it. go() repaints it from SCREEN_GUIDE
+   on every tab change. Collapsed state persists per-tab. */
+.screen-guide{
+  margin:0 0 16px;border:1px solid var(--spice-cardamom);
+  border-left:4px solid var(--spice-cardamom);
+  background:var(--spice-cardamom-lt,#DCFCE7);
+  border-radius:10px;padding:12px 16px;color:var(--spice-text-main)
+}
+.screen-guide-head{
+  display:flex;align-items:center;gap:8px;
+  font-weight:700;font-size:14px;color:var(--spice-cardamom-dk)
+}
+.screen-guide-head .sg-title{flex:1}
+.screen-guide-toggle{
+  border:none;background:transparent;cursor:pointer;font-weight:700;
+  color:var(--spice-cardamom-dk);font-size:12px;font-family:inherit;
+  display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:6px
+}
+.screen-guide-toggle:hover{background:rgba(0,0,0,.06)}
+.screen-guide-body{margin-top:10px;font-size:13.5px;line-height:1.55}
+.screen-guide-body ol{margin:0;padding-left:22px}
+.screen-guide-body li{margin:3px 0}
+.screen-guide-warn{
+  margin-top:10px;padding:8px 12px;border-radius:8px;
+  background:var(--spice-turmeric-lt,#FEF3C7);
+  border:1px solid var(--spice-turmeric,#F59E0B);
+  color:#92400E;font-weight:600;font-size:12.5px
+}
+.screen-guide.collapsed{padding:8px 16px;background:transparent}
+.screen-guide.collapsed .screen-guide-body{display:none}
+body[data-comfort="1"] .screen-guide-body{font-size:15.5px}
+body[data-comfort="1"] .screen-guide-head{font-size:16px}
+
 /* ── Stat Cards ──────────────────────────────────────────── */
 /* ── Dashboard: KPI tiles + hero + quick actions ──────── */
 .greeting{margin-bottom:28px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
@@ -1974,6 +2017,10 @@ body[data-perm-delete="1"]         .btn.needs-delete,
 body[data-perm-delete-all="1"]     .btn.needs-delete-all,
 body[data-perm-user-manage="1"]    .btn.needs-user-manage,
 body[data-perm-export="1"]         .btn.needs-export{display:inline-flex !important}
+/* Guided-flow "Show all menus" topbar toggle — inline-flex so the
+   checkbox and label sit on one line (display:initial above would
+   collapse a <label> to plain inline). */
+body[data-perm-user-manage="1"]    label.sg-showall{display:inline-flex !important}
 /* Icon-only action buttons (per-row delete/revert) — restore to inline-flex */
 body[data-perm-delete="1"]         .icon-btn.needs-delete,
 body[data-perm-invoice-revert="1"] .icon-btn.needs-invoice-revert{display:inline-flex !important}
@@ -1988,6 +2035,25 @@ body[data-perm-delete-all="1"]     div.needs-delete-all{display:block !important
    and the server's permission gates protect any deep-link access. */
 body[data-role="lot_entry"] .side-item:not([data-tab="lotentry"]):not(.sb-collapse-btn),
 body[data-role="lot_entry"] .side-group-lbl{display:none !important}
+
+/* ── Guided-flow stage lock ─────────────────────────────────────
+   A menu whose trade hasn't reached its unlock stage yet stays
+   visible but greyed with a 🔒. A capture-phase click handler shows
+   the unlock hint as a toast instead of navigating (see
+   applyTradeStageLocks / the click interceptor). `.locked` is only
+   applied by JS to items that already passed their feature-flag /
+   permission / business-mode gates, so those still win — an item its
+   flag turned off is display:none and never reaches this state. */
+.side-item.locked{opacity:.42;cursor:default}
+.side-item.locked:hover{background:transparent;color:inherit}
+.side-item.locked::after{
+  content:'🔒';margin-left:auto;font-size:12px;line-height:1;opacity:.85;
+}
+/* Collapsed (icons-only) sidebar repurposes ::after as the hover
+   tooltip, so hide the trailing lock glyph there when not hovering —
+   the dimmed icon alone signals locked, and hover still shows the name. */
+.sidebar.collapsed .side-item.locked:not(:hover)::after,
+html.sidebar-collapsed .sidebar .side-item.locked:not(:hover)::after{content:none}
 
 /* ── Lot Selection grid (Lot Entry alloc card) ──────────────────
    Per-lot chips showing every lot number in the user's branch
@@ -2704,6 +2770,12 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <select id="global-aid" onchange="onGlobalAidChange()" title="Pick the active trade — this selection flows into every screen" style="height:34px;padding:0 28px 0 12px;border:1.5px solid var(--green);border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:var(--spice-text-main);min-width:230px;max-width:340px;cursor:pointer">
           <option value="">— none —</option>
         </select>
+        <!-- Admin escape hatch for the guided-flow stage gate: reveals every
+             menu regardless of the current trade's stage. Only shown to
+             users with the user-manage capability (.needs-user-manage). -->
+        <label class="needs-user-manage sg-showall" title="Admin: reveal every menu regardless of the guided-flow stage" style="align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--text2);cursor:pointer;white-space:nowrap;user-select:none">
+          <input type="checkbox" id="topbar-showall" onchange="onTradeShowAll(this.checked)" style="cursor:pointer;margin:0"> Show all menus
+        </label>
       </div>
       <span id="sync-indicator" class="sync-pill sync-ok" title="Last successful sync"></span>
       <!-- Licence countdown pill — hidden by default; shown by
@@ -2762,26 +2834,33 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
           Auctions
         </button>
-        <button class="side-item" data-tab="lots" onclick="go('lots')">
+        <button class="side-item" data-tab="lots" data-min-stage="2" data-req-validated="1" onclick="go('lots')">
           <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/></svg>
           Lots
         </button>
         <!-- Price List Mapping — gated by flag_price_list_mapping. Target
              tab (tc-plmap) not yet wired. -->
-        <button class="side-item feat-price-list-mapping" data-tab="plmap" onclick="go('plmap')">
+        <button class="side-item feat-price-list-mapping" data-tab="plmap" data-min-stage="2" onclick="go('plmap')">
           <svg viewBox="0 0 24 24"><path d="M9 11H5a2 2 0 0 0-2 2v7h7v-9z"/><path d="M21 11h-4v9h4a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2z"/><path d="M14 4l-4 4 4 4"/></svg>
           Price List Mapping
         </button>
         <!-- Price Check — gated by flag_price_check. Target tab
              (tc-pricecheck) not yet wired. -->
-        <button class="side-item feat-price-check" data-tab="pricecheck" onclick="go('pricecheck')">
+        <button class="side-item feat-price-check" data-tab="pricecheck" data-min-stage="2" onclick="go('pricecheck')">
           <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
           Price Check
+        </button>
+        <!-- Price Entry — fast price-only editable grid. Type a price + Enter
+             saves the lot and jumps to the next; one Save & Calculate All at
+             the end. Needs lot_write to edit prices. -->
+        <button class="side-item needs-lot-write" data-tab="priceentry" data-min-stage="2" onclick="go('priceentry')">
+          <svg viewBox="0 0 24 24"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          Price Entry
         </button>
         <!-- Lot Entry — fast desktop entry form. Visible only when the
              user has the lot_entry_view permission. Target tab
              (tc-lotentry) not yet wired. -->
-        <button class="side-item needs-lot-entry-view" data-tab="lotentry" onclick="go('lotentry')">
+        <button class="side-item needs-lot-entry-view" data-tab="lotentry" data-min-stage="1" onclick="go('lotentry')">
           <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           Lot Entry
         </button>
@@ -2792,31 +2871,31 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
              be generated (bill-to, ship-to, amounts) + exact-PDF preview.
              Nothing is generated or numbered from here. Placed above Sales
              Invoices as the natural "preview before you generate" step. -->
-        <button class="side-item" data-tab="preinvoice" onclick="go('preinvoice')">
+        <button class="side-item" data-tab="preinvoice" data-min-stage="3" onclick="go('preinvoice')">
           <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
           Pre-Invoice
         </button>
-        <button class="side-item" data-tab="invoices" onclick="go('invoices')">
+        <button class="side-item" data-tab="invoices" data-min-stage="3" onclick="go('invoices')">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
           Sales Invoices
         </button>
-        <button class="side-item state-kerala-only" data-tab="purchases" onclick="go('purchases')">
+        <button class="side-item state-kerala-only" data-tab="purchases" data-min-stage="3" onclick="go('purchases')">
           <svg viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0"/></svg>
           Purchases
         </button>
-        <button class="side-item feat-bills state-kerala-only" data-tab="bills" onclick="go('bills')">
+        <button class="side-item feat-bills state-kerala-only" data-tab="bills" data-min-stage="3" onclick="go('bills')">
           <svg viewBox="0 0 24 24"><path d="M20 14v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8z"/><path d="M14 2v6h6M9 15h4M9 18h6M9 12h2"/></svg>
           Bills of Supply
         </button>
-        <button class="side-item feat-debit-notes state-kerala-only" data-tab="debit" onclick="go('debit')">
+        <button class="side-item feat-debit-notes state-kerala-only" data-tab="debit" data-min-stage="3" onclick="go('debit')">
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes
         </button>
-        <button class="side-item feat-debit-note-planter state-kerala-only" data-tab="debitplanter" onclick="go('debitplanter')">
+        <button class="side-item feat-debit-note-planter state-kerala-only" data-tab="debitplanter" data-min-stage="3" onclick="go('debitplanter')">
           <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h2M12 15h2"/></svg>
           Debit Notes - Planter
         </button>
-        <button class="side-item hide-etrade-kerala" data-tab="payments" onclick="go('payments')">
+        <button class="side-item hide-etrade-kerala" data-tab="payments" data-min-stage="2" onclick="go('payments')">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
           Payments
         </button>
@@ -2830,27 +2909,27 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
           Reports Hub
         </button>
-        <button class="side-item" data-tab="exports" onclick="go('exports')">
+        <button class="side-item" data-tab="exports" data-min-stage="2" onclick="go('exports')">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           Exports
         </button>
-        <button class="side-item" data-tab="lorry" onclick="go('lorry')">
+        <button class="side-item" data-tab="lorry" data-min-stage="4" onclick="go('lorry')">
           <svg viewBox="0 0 24 24"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7zM5.5 18.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0zM18.5 18.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"/></svg>
           Lorry
         </button>
-        <button class="side-item" data-tab="tds" onclick="go('tds')">
+        <button class="side-item" data-tab="tds" data-min-stage="4" onclick="go('tds')">
           <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
           TDS Returns
         </button>
-        <button class="side-item" data-tab="journals" onclick="go('journals')">
+        <button class="side-item" data-tab="journals" data-min-stage="4" onclick="go('journals')">
           <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           Journals
         </button>
-        <button class="side-item" data-tab="registers" onclick="go('registers')">
+        <button class="side-item" data-tab="registers" data-min-stage="4" onclick="go('registers')">
           <svg viewBox="0 0 24 24"><path d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z"/></svg>
           Registers
         </button>
-        <button class="side-item" data-tab="tally" onclick="go('tally')">
+        <button class="side-item" data-tab="tally" data-min-stage="4" onclick="go('tally')">
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
           To Tally
         </button>
@@ -2859,7 +2938,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
              .mode-eauction-only CSS class (see applyModeLabels()). When
              the saved mode is anything else the entry collapses to
              display:none and the tab content stays unreachable. -->
-        <button class="side-item mode-eauction-only" data-tab="spicesboard" onclick="go('spicesboard')">
+        <button class="side-item mode-eauction-only" data-tab="spicesboard" data-min-stage="4" onclick="go('spicesboard')">
           <svg viewBox="0 0 24 24"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
           Spice Board
         </button>
@@ -2906,10 +2985,24 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           Fix Data
         </button>
       </div>
+      <!-- Help / how-to guide. Opens the static /help.html in an isolated
+           overlay iframe (not a routed tab) so its styles never touch the
+           app and it can't break the go() router. -->
+      <div class="side-group">
+        <div class="side-group-lbl">Help</div>
+        <button class="side-item" onclick="var o=document.getElementById('help-ov');var f=o.querySelector('iframe');if(!f.getAttribute('src'))f.setAttribute('src','/help.html');o.style.display='flex'">
+          <svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          How-to Guide
+        </button>
+      </div>
     </aside>
 
     <div class="content">
     <div class="toast" id="toast"></div>
+
+    <!-- Per-screen guide banner — repainted by go() from SCREEN_GUIDE.
+         Sits above every tab; loaders can't wipe it (lives outside #tc-*). -->
+    <div id="screen-guide" class="screen-guide" style="display:none"></div>
 
     <!-- DASHBOARD -->
     <div class="tc active" id="tc-dash"><div class="stats" id="stats"></div></div>
@@ -3380,6 +3473,29 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div id="auction-import-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
         <div style="overflow-x:auto"><table><thead><tr><th><span data-term-auction="singular">Trade</span> No</th><th>Date</th><th>Type</th><th>Lots</th><th>Actions</th></tr></thead><tbody id="auctions-list"></tbody></table></div>
       </div>
+    </div>
+
+    <!-- PRICE ENTRY — fast on-screen price typing (Price-only editable grid).
+         Type a price, Enter jumps to the next lot; one Save & Calculate at the
+         end. A focused alternative to opening the Edit modal per lot. -->
+    <div class="tc" id="tc-priceentry">
+      <div class="card" style="padding:14px 18px">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="fg" style="max-width:300px;margin:0"><label>Select Auction</label>
+            <select id="pe-auction" onchange="loadPriceEntryGrid()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+          </div>
+          <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
+            <button class="btn btn-o" style="height:38px;padding:0 14px;font-weight:600" onclick="loadPriceEntryGrid()" title="Reload lots from the server">🔄 Refresh</button>
+            <button id="pe-save-calc" class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="peSaveAndCalculate()">💾 Save &amp; Calculate All</button>
+          </div>
+        </div>
+        <div style="font-size:12.5px;color:var(--text2);margin-top:8px;line-height:1.5">
+          Type a price and press <b>Enter</b> (or Tab) to save it and jump to the next lot. Only the <b>Price</b> column is editable — every other field is read-only, so there's no risk of changing the wrong thing. When you're done, click <b>Save &amp; Calculate All</b> to compute commission, tax and payable for the whole trade.
+          <span id="pe-pc-note" style="display:none;color:#a16207"> Price Check is ON for this install — you'll need to re-verify prices before generating invoices.</span>
+        </div>
+        <div id="pe-summary" style="font-size:12px;color:var(--text3);margin-top:6px"></div>
+      </div>
+      <div class="card"><div id="pe-grid" style="overflow-x:auto"></div></div>
     </div>
 
     <!-- LOTS -->
@@ -8543,11 +8659,168 @@ async function fdBulkUpdate(){
   setTimeout(()=>{ const f=bg.querySelector('#fd-bu-val'); if(f) f.focus(); }, 30);
 }
 
+// ── Per-screen guide banner ───────────────────────────────────────
+// Plain-English "what do I do here" for every tab, rendered into the shared
+// #screen-guide banner by renderScreenGuide() on each go(). Text is mode-neutral
+// ("trade", "seller", "buyer") so it reads correctly in both e-Auction and
+// e-Trade. Tabs with no entry simply show no banner.
+const SCREEN_GUIDE = {
+  dash: { title: 'Dashboard — your day at a glance',
+    steps: ['Shows totals for the selected trade: lots, bags, quantity and value.',
+            'Pick a different trade from the box at the top to switch the figures.',
+            'Use the sidebar on the left to open any screen.'] },
+  insights: { title: 'Insights — deeper trade analytics',
+    steps: ['Compare branches, grades and sellers across your trades.',
+            'Read-only — nothing here changes your data.'] },
+  settings: { title: 'Settings — rates, flags & company details',
+    steps: ['Pick a category on the left (Rates, Flags, Company, Branches…).',
+            'Change the values or switch a flag on/off.',
+            'Click the green “Save Changes” button — this is the important step.'],
+    warn: 'Changing a flag or rate does NOTHING until you press “Save Changes”. After you save, the app automatically recalculates every unlocked lot for you.' },
+  formulas: { title: 'Formulas — how every number is worked out',
+    steps: ['A read-only reference of every calculation the app does.',
+            'The values in {curly braces} come straight from your Settings.',
+            'Use it to cross-check a figure — nothing here can be edited.'] },
+  fixdata: { title: 'Fix Data — gentle corrections without SQL',
+    steps: ['Pick the record type, find the row, and correct the value.',
+            'Save the change. Use this only for genuine data fixes.'],
+    warn: 'Changes here are direct edits to your records. Double-check before saving.' },
+  users: { title: 'Users — who can log in',
+    steps: ['Add a user, set a username and password, and choose their role.',
+            'The role decides which screens and buttons they can use.',
+            'Click Save to apply.'] },
+  backup: { title: 'Backup — keep your data safe',
+    steps: ['Take a backup before big changes or at the end of a trade day.',
+            'Download keeps a copy on this computer.'],
+    warn: 'Restoring a backup replaces current data. Be sure before you confirm.' },
+  traders: { title: 'Sellers — your supplier master',
+    steps: ['Search by name or code to find a seller.',
+            'Add a new seller, or click a row to edit bank and contact details.',
+            'Save when done.'],
+    warn: 'Correct bank details here flow straight into the payment file — check the account number and IFSC.' },
+  buyers: { title: 'Buyers — your customer master',
+    steps: ['Search to find a buyer, or add a new one.',
+            'Click a row to edit GSTIN, address and consignee details.',
+            'Save when done.'] },
+  auctions: { title: 'Trades — create & manage a trade day',
+    steps: ['Create a new trade with its date and crop type.',
+            'Once created, it becomes selectable in the trade box at the top.',
+            'All other screens work on the trade you have selected.'] },
+  lots: { title: 'Lots — review & adjust the lots in a trade',
+    steps: ['Pick the trade at the top, then review its lots.',
+            'Edit grade, price, buyer or quantity on a row if needed.',
+            'The amount recalculates as you change quantity or price.'],
+    warn: 'If you change the company state, or set grades/buyers in bulk, the app recalculates those lots automatically and shows a confirmation. If numbers ever look stale, re-open the trade.' },
+  plmap: { title: 'Price List Mapping — match an uploaded price list',
+    steps: ['Upload the price-list file.',
+            'Map its columns to lots, then apply.'] },
+  pricecheck: { title: 'Price Check — verify prices against a list',
+    steps: ['Upload the reference price file.',
+            'Review the flagged differences before applying.'] },
+  priceentry: { title: 'Price Entry — type prices fast, one lot at a time',
+    steps: ['Pick the trade. Only the Price column is editable — every other field is read-only.',
+            'Type a price and press Enter (or Tab) to save it and jump to the next lot.',
+            'When done, click “Save & Calculate All” to compute commission, tax and payable.'] },
+  lotentry: { title: 'Lot Entry — enter lots from the trade floor',
+    steps: ['Select the trade and branch.',
+            'Type each lot: seller, bags, quantity, price — amount fills in for you.',
+            'The entry saves as you go; print receipts from the toolbar.'],
+    warn: 'Pick the correct branch before you start — it is stamped on every lot you enter.' },
+  preinvoice: { title: 'Pre-Invoice — preview an invoice before you generate',
+    steps: ['Pick the trade and a buyer to preview the sales invoice exactly as it will print.',
+            'Toggle “No Transport & Insurance”, or choose “View all buyers” to scan every invoice.',
+            'Click “Preview Invoice” for the exact PDF. Nothing is saved or numbered here.'] },
+  invoices: { title: 'Sales Invoices — generate GST invoices',
+    steps: ['Pick the trade, then generate the sales invoices.',
+            'Open any invoice to view or download the PDF.'],
+    warn: 'Invoices use your current Settings (GST %, company state, bank). If you just changed those, save Settings first so the figures are right.' },
+  purchases: { title: 'Purchases — purchase vouchers',
+    steps: ['Pick the trade to see its purchase entries.',
+            'Open a row to view or print the purchase document.'] },
+  bills: { title: 'Bills of Supply — non-GST bills',
+    steps: ['Pick the trade and generate the bills of supply.',
+            'Open any bill to view or download.'] },
+  debit: { title: 'Debit Notes',
+    steps: ['Pick the trade and create the debit note(s).',
+            'Open a note to view or download the PDF.'] },
+  debitplanter: { title: 'Planter Debit Notes',
+    steps: ['Pick the trade and create the planter debit note(s).',
+            'Open a note to view or download the PDF.'] },
+  payments: { title: 'Payments — what each seller is paid',
+    steps: ['Pick the trade to see the payment summary per seller.',
+            'Check the figures, then export the bank payment file.'],
+    warn: 'Payment figures come from the lots and your Settings. If you changed a rate or flag, save Settings (it recalculates) before exporting.' },
+  reports: { title: 'Reports Hub — trade summaries',
+    steps: ['Pick a trade, then open a report (summary, branch comparison…).',
+            'Use the branch filter to narrow the figures.',
+            'Click the PDF button to print or save a report.'] },
+  exports: { title: 'Exports — data files & printable reports',
+    steps: ['Pick the trade, choose the export you need. Pre-Trade Exports work before prices import.',
+            'Preview shows the exact PDF (or a table for spreadsheet-only files), then download.'] },
+  spicesboard: { title: 'Spices Board — e-Auction portal files',
+    steps: ['Pick the trade to build the Spices Board e-Auction files.',
+            'Download the file to upload to the portal.'] },
+  lorry: { title: 'Lorry — dispatch & transport',
+    steps: ['Pick the trade to view its lorry/dispatch details.',
+            'Generate the document you need.'] },
+  tds: { title: 'TDS Returns',
+    steps: ['Pick the period and review the TDS/TCS figures.',
+            'Export the return when the figures are correct.'] },
+  journals: { title: 'Journals — accounting entries',
+    steps: ['Pick the trade to see its journal entries.',
+            'Review before exporting to Tally.'] },
+  registers: { title: 'Registers — statutory registers',
+    steps: ['Pick the trade/period to view the register.',
+            'Export or print as needed.'] },
+  tally: { title: 'To Tally — export vouchers as XML',
+    steps: ['Pick the trade — sales, purchases and notes are bundled.',
+            'Download the Tally XML and import it in Tally.'],
+    warn: 'Export only after the trade’s figures are final. If you changed Settings, save first so the vouchers carry the right numbers.' },
+  importold: { title: 'Import Old Data — bring in past records',
+    steps: ['Upload the old data file.',
+            'Review the preview, then confirm the import.',
+            'The History panel below lists recent imports.'],
+    warn: 'Importing adds records to your live data. Take a backup first.' },
+};
+
+// Repaint the shared #screen-guide banner for the given tab. Called by
+// go() on every tab change. Hides the banner for any tab with no entry.
+function renderScreenGuide(tab){
+  const host = document.getElementById('screen-guide');
+  if (!host) return;
+  const g = SCREEN_GUIDE[tab];
+  if (!g) { host.style.display = 'none'; host.innerHTML = ''; return; }
+  // Per-tab collapsed memory — a screen the user already gets stays shrunk.
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('guideCollapsed:' + tab) === '1'; } catch(_){}
+  host.className = 'screen-guide' + (collapsed ? ' collapsed' : '');
+  host.style.display = '';
+  const steps = (g.steps || []).map(s => `<li>${esc(s)}</li>`).join('');
+  const warn = g.warn ? `<div class="screen-guide-warn">⚠ ${esc(g.warn)}</div>` : '';
+  host.innerHTML =
+    `<div class="screen-guide-head">` +
+      `<span>❔</span><span class="sg-title">${esc(g.title)}</span>` +
+      `<button class="screen-guide-toggle" onclick="toggleScreenGuide('${tab}')">` +
+        `${collapsed ? 'Show ▾' : 'Hide ▴'}</button>` +
+    `</div>` +
+    `<div class="screen-guide-body"><ol>${steps}</ol>${warn}</div>`;
+}
+// Collapse/expand the current screen's guide and remember the choice.
+function toggleScreenGuide(tab){
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('guideCollapsed:' + tab) === '1'; } catch(_){}
+  const next = !collapsed;
+  try { localStorage.setItem('guideCollapsed:' + tab, next ? '1' : '0'); } catch(_){}
+  renderScreenGuide(tab);
+}
+
 function go(tab){
   window._currentTab = tab;
   document.querySelectorAll('.side-item').forEach(t=>t.classList.toggle('active',t.dataset.tab===tab));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   const el=document.getElementById('tc-'+tab);if(el)el.classList.add('active');
+  // Repaint the shared per-screen guide banner for this tab (no-op if absent).
+  if (typeof renderScreenGuide === 'function') { try { renderScreenGuide(tab); } catch(_){} }
   const loaders={dash:loadStats,insights:loadInsights,settings:loadSettings,formulas:loadFormulas,fixdata:loadFixData,users:loadUsers,traders:()=>searchTraders(''),buyers:()=>searchBuyers(''),
     auctions:loadAuctions,lots:loadLotAuctions,preinvoice:loadPreInvoice,invoices:loadInvAuctions,purchases:loadPurAuctions,
     payments:loadPayAuctions,reports:loadReports,exports:loadExpAuctions,tds:()=>{},lorry:loadLorryAuctions,
@@ -8557,6 +8830,9 @@ function go(tab){
     // on tab open. File picker + buttons remain idle until the user picks
     // a sheet and clicks Verify.
     pricecheck: () => { if (typeof loadPriceCheckAuctions === 'function') loadPriceCheckAuctions(); },
+    // Price Entry — fast price-only editable grid. Fills the auction picker
+    // then loads that trade's lots for inline pricing.
+    priceentry: () => { if (typeof loadPriceEntry === 'function') loadPriceEntry(); },
     // Lot Entry — populates the trade picker + branch dropdown, reads
     // Settings → Lot Entry defaults (sample weight, moisture flag,
     // etc.), and starts the auto-refresh poller. Loader checks for
@@ -8592,6 +8868,10 @@ function go(tab){
   }
   // Auto-close sidebar on mobile after selection
   if(window.innerWidth<=900){const sb=document.getElementById('sidebar');const ov=document.getElementById('sb-overlay');if(sb)sb.classList.remove('open');if(ov)ov.classList.remove('open')}
+  // Guided-flow gate re-evaluates on tab change (cheap — cached unless the
+  // active trade changed). Re-paints locks in case a background action moved
+  // the stage while the user was on another screen.
+  if(typeof refreshTradeStage==='function'){ try{ refreshTradeStage(); }catch(_){} }
 }
 function toggleSidebar(){
   document.getElementById('sidebar').classList.toggle('open');
@@ -14534,6 +14814,9 @@ async function confirmLotValidate(){
     hideModal('lot-validate-modal');
     // If the picked trade matches the Price Import gate, clear it.
     if(String(_piGateAid)===String(aid)){ _piGateClean=true; const g=document.getElementById('pi-validate-gate'); if(g) g.style.display='none'; piAckChanged(); }
+    // Validate Lots is a guided-flow unlock action (reveals Lots) — re-fetch
+    // the stage if the validated trade is the active one.
+    if(String(_currentTradeId())===String(aid) && typeof refreshTradeStage==='function'){ try{ refreshTradeStage(true); }catch(_){} }
   }catch(e){
     btn.disabled=false;btn.textContent='Mark Validated';
     alert((e&&e.message)||'Could not validate');
@@ -14719,10 +15002,15 @@ async function refreshGlobalAidList(){
     _globalAidList = Array.isArray(list) ? list : [];
   } catch (_) { _globalAidList = []; }
   const wrap = document.getElementById('global-aid-wrap');
+  // Restore the admin "Show all menus" toggle to match the stored choice.
+  const _showAllCb = document.getElementById('topbar-showall');
+  if (_showAllCb) { try { _showAllCb.checked = localStorage.getItem('tradeStageShowAll') === '1'; } catch (_) {} }
   if (!_globalAidList.length) {
     // Hide the chip entirely when there's nothing to pick from.
     if (wrap) wrap.style.display = 'none';
     sel.innerHTML = '<option value="">— none —</option>';
+    // No trades yet → stage 0: keep every trade-gated menu locked.
+    if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
     return;
   }
   if (wrap) wrap.style.display = 'inline-flex';
@@ -14736,6 +15024,9 @@ async function refreshGlobalAidList(){
   const next = inList ? saved : String(_globalAidList[0].id);
   sel.value = next;
   _persistGlobalAid(next);
+  // Evaluate the guided-flow gate for the now-current trade (force: the id
+  // may be unchanged across a reload but the sidebar still needs painting).
+  if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
 }
 
 // Push the global selection into a target <select> when it has a
@@ -14773,6 +15064,9 @@ function onGlobalAidChange(){
       try { el.dispatchEvent(new Event('change')); } catch (_) {}
     }
   } finally { _globalAidSyncing = false; }
+  // Guided-flow gate follows the active trade — re-evaluate the sidebar
+  // stage whenever the topbar trade changes.
+  if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(); } catch (_) {} }
 }
 
 // Reverse sync — when a per-tab selector changes (user picks inside
@@ -14792,6 +15086,108 @@ document.addEventListener('change', (e) => {
     _persistGlobalAid(aid);
   }
 }, true);
+
+// ══════════════════════════════════════════════════════════════
+// Guided-flow sidebar stage gate
+// ══════════════════════════════════════════════════════════════
+// The topbar global picker (#global-aid) chooses the "current trade".
+// As that trade climbs stages 1→4 (server: /api/auctions/:id/stage) the
+// matching sidebar items unlock. Locked items stay visible but greyed
+// with a 🔒; clicking one explains what unlocks it (toast) instead of
+// navigating. The lot_entry role and an admin "Show all menus" toggle
+// both bypass the whole gate.
+//   1 trade exists   → Lot Entry
+//   2 ≥1 lot         → Price List Mapping, Price Check, Price Entry, Payments, Exports
+//   2 + validated    → Lots (holds Price Import; data-req-validated)
+//   3 ≥1 lot priced  → Pre-Invoice, Sales Invoices, Purchases, Bills, Debit Notes
+//   4 ≥1 doc         → To Tally, Registers, Journals, TDS, Spice Board, Lorry
+// An item tagged data-req-validated ALSO needs the trade's lots to have
+// passed "Validate Lots" (signals.lotsValidated) — auto-satisfied when
+// the flag_lot_validation feature is OFF.
+const TRADE_STAGE_MSG = {
+  1: 'Create or select a trade to unlock this.',
+  2: 'Enter at least one lot for this trade to unlock this.',
+  3: 'Enter a price for at least one lot to unlock this.',
+  4: 'Generate a transaction (invoice / purchase) to unlock this.',
+};
+const TRADE_VALIDATE_MSG = 'Validate this trade’s lots (Lot Entry → Validate Lots) to unlock this.';
+window._tradeStage = 0;
+window._tradeSignals = {};        // last /stage signals (lotsValidated, …)
+let _stagedTradeId = undefined;   // last id we fetched a stage for
+
+// The active trade is whatever the topbar global picker holds.
+function _currentTradeId(){
+  try { return (document.getElementById('global-aid')?.value || '').trim(); }
+  catch(_) { return ''; }
+}
+
+// Fetch + apply the current trade's stage. `force` re-fetches even when the
+// trade id is unchanged (used after actions that can advance the stage).
+async function refreshTradeStage(force){
+  const id = _currentTradeId();
+  if(!force && id === _stagedTradeId){ applyTradeStageLocks(); return; }
+  _stagedTradeId = id;
+  let stage = 0;
+  let signals = {};
+  if(id){
+    try{
+      const d = await j(`/api/auctions/${id}/stage`);
+      // Guard against a stale response after a rapid trade switch.
+      if(_currentTradeId() !== id) return;
+      stage = Number(d && d.stage) || 1;
+      signals = (d && d.signals) || {};
+    }catch(_){ stage = 1; signals = { lotsValidated: true }; }   // lookup failed — fail open
+  }
+  window._tradeStage = stage;
+  window._tradeSignals = signals;
+  document.body.setAttribute('data-trade-stage', String(stage));
+  applyTradeStageLocks();
+}
+
+// Toggle `.locked` on every stage-tagged item against the current stage.
+// lot_entry role and the admin "Show all" toggle both bypass the gate.
+function applyTradeStageLocks(){
+  const showAll = (function(){ try{ return localStorage.getItem('tradeStageShowAll')==='1'; }catch(_){ return false; } })();
+  const bypass  = showAll || window._userRole === 'lot_entry';
+  const stage   = bypass ? Infinity : (window._tradeStage || 0);
+  const sig     = window._tradeSignals || {};
+  // Fail-open when the signal is missing so a transient stage-lookup error
+  // never hides Lots (the server still enforces the real import gate).
+  const validated = bypass ? true : (sig.lotsValidated !== false);
+  document.querySelectorAll('.side-item[data-min-stage]').forEach(it=>{
+    const need = Number(it.dataset.minStage) || 0;
+    let locked = false, msg = '';
+    if(need > stage){
+      locked = true; msg = TRADE_STAGE_MSG[need] || 'Not available yet.';
+    } else if(it.dataset.reqValidated === '1' && !validated){
+      // Passed the numeric-stage gate but still awaiting Validate Lots.
+      locked = true; msg = TRADE_VALIDATE_MSG;
+    }
+    it.classList.toggle('locked', locked);
+    if(locked) it.setAttribute('title', msg);
+    else       it.removeAttribute('title');
+  });
+}
+
+// Admin escape hatch — reveal every menu regardless of trade stage.
+function onTradeShowAll(on){
+  try{ localStorage.setItem('tradeStageShowAll', on ? '1' : '0'); }catch(_){}
+  applyTradeStageLocks();
+}
+
+// Capture-phase interceptor: a click on a locked menu explains what unlocks
+// it (toast) rather than navigating. Runs before the button's inline go().
+document.addEventListener('click', function(e){
+  const it = e.target.closest && e.target.closest('.side-item.locked');
+  if(it){
+    e.preventDefault(); e.stopPropagation();
+    // The title we set while locking already holds the correct reason
+    // (numeric-stage message OR the Validate-Lots message).
+    const msg = it.getAttribute('title') || 'Not available yet.';
+    if(typeof toast === 'function') toast('🔒 ' + msg);
+  }
+}, true);
+
 function loadLotAuctions(){fillAucSelect('lot-auction').then(()=>loadLots())}
 function loadInvAuctions(){fillAucSelect('inv-auction').then(()=>{loadInvoices();loadInvEligibleBuyers()})}
 function loadPurAuctions(){fillAucSelect('pur-auction').then(()=>{loadPurchases();loadPurEligibleSellers()})}
@@ -15004,6 +15400,9 @@ async function doGenerateAll(){
     if(kind==='invoices')loadInvoices();
     else if(kind==='purchases')loadPurchases();
     else loadBills();
+    // Generating a doc is a guided-flow unlock action (reveals Tally/
+    // Registers/… at stage 4) — re-fetch the stage for the active trade.
+    if(String(_currentTradeId())===String(aid) && typeof refreshTradeStage==='function'){ try{ refreshTradeStage(true); }catch(_){} }
   }catch(e){showError(e)}
   finally{submitBtn.disabled=false;submitBtn.textContent='Generate All'}
 }
@@ -16516,6 +16915,9 @@ async function saveLot(){
     if(!r.ok){const d=await r.json().catch(()=>({}));const err=new Error(d.error||'Save failed');err.status=r.status;throw err;}
     toast('Lot updated ✓');
     loadLots();
+    // Editing a lot can change price (guided-flow stage 2→3) and clears the
+    // validation gate — re-fetch the active trade's stage.
+    if(typeof refreshTradeStage==='function'){ try{ refreshTradeStage(true); }catch(_){} }
   }catch(e){
     // Save failed — show error and re-open the modal pre-filled so the user can retry.
     showError(e);
@@ -23694,6 +24096,10 @@ async function leSaveLot(){
       }
     }
     toast(_le.editingLotId ? `Lot ${lotNo} updated ✓` : `Lot ${lotNo} saved ✓`);
+    // First lot saved for this trade advances the guided-flow stage (1→2)
+    // and any lot change clears the validation gate — re-fetch if it's the
+    // active trade.
+    if(String(_currentTradeId())===String(aid) && typeof refreshTradeStage==='function'){ try{ refreshTradeStage(true); }catch(_){} }
     const wasEditing = !!_le.editingLotId;
     _le.editingLotId = null;
     document.getElementById('le-edit-banner').style.display = 'none';
@@ -25682,6 +26088,141 @@ async function previewInvoice(type){
     showModal('preview-modal');
   }catch(e){showError(e)}}
 
+// ── PRICE ENTRY — fast, price-only editable grid ──────────────────
+// A focused alternative to opening the Edit modal per lot: every lot listed
+// with ONLY the Price column editable. Type a price + Enter → saves that lot
+// and jumps to the next. Read-only everywhere else, so there's no risk of
+// changing the wrong field. One "Save & Calculate All" at the end recomputes
+// commission/tax/payable and (when Price Check is on) nudges a re-verify.
+let _pe = { aid: null, lots: [], dirty: {} };
+// Price Check on/off — read from _sdata.flags the same way the rest of the
+// client does (see applyFeatureFlags / flag_pay_calc_discount lookups).
+function _peFlagPriceCheck(){
+  const f = ((window._sdata && _sdata.flags) || []).find(x => x && x.key === 'flag_price_check');
+  return !!f && String(f.value).toLowerCase() === 'true';
+}
+function _peFmt(n){ return (Number(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// Bags are counts — show as whole numbers (no decimals).
+function _peBags(n){ return Math.round(Number(n)||0).toLocaleString('en-IN'); }
+
+function loadPriceEntry(){
+  const note = document.getElementById('pe-pc-note');
+  if (note) note.style.display = _peFlagPriceCheck() ? 'inline' : 'none';
+  fillAucSelect('pe-auction').then(() => loadPriceEntryGrid());
+}
+async function loadPriceEntryGrid(){
+  const aid = document.getElementById('pe-auction').value;
+  _pe.aid = aid; _pe.dirty = {};
+  const grid = document.getElementById('pe-grid');
+  const sumEl = document.getElementById('pe-summary');
+  if (!aid) { grid.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Select a trade to price its lots.</div>'; if (sumEl) sumEl.textContent = ''; return; }
+  grid.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3)">Loading…</div>';
+  let lots;
+  try { lots = await j(`/api/lots/${aid}`); }
+  catch (e) { grid.innerHTML = '<div style="padding:24px;color:#b91c1c">Failed to load lots.</div>'; return; }
+  // Withdrawn (WD) lots ARE shown — they're part of the trade record and appear
+  // in the registers — but render as read-only zero-price rows (withdrawal
+  // forces price/amount to 0, so there's nothing to enter).
+  _pe.lots = Array.isArray(lots) ? lots : [];
+  renderPriceEntryGrid();
+}
+function renderPriceEntryGrid(){
+  const grid = document.getElementById('pe-grid');
+  const sumEl = document.getElementById('pe-summary');
+  if (!_pe.lots.length) {
+    grid.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No lots to price in this trade yet. Enter lots first.</div>';
+    if (sumEl) sumEl.textContent = '';
+    return;
+  }
+  const rows = _pe.lots.map((l, i) => {
+    const isWD = String(l.code||'').trim().toUpperCase() === 'WD';
+    const amt = isWD ? 0 : (Number(l.qty)||0) * (Number(l.price)||0);
+    const locked = !!(l.locked_at);   // locked lots are edited by admins in the modal only
+    const readonly = locked || isWD;  // WD lots carry no price — visible but not editable
+    return `<tr data-row="${i}"${isWD ? ' style="opacity:.55"' : ''}>
+      <td style="padding:6px 8px;white-space:nowrap;font-weight:600">${esc(l.lot_no)}</td>
+      <td style="padding:6px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(l.name||'')}</td>
+      <td style="padding:6px 8px;text-align:right">${esc(l.branch||'')}</td>
+      <td style="padding:6px 8px;text-align:right">${_peBags(l.bags)}</td>
+      <td style="padding:6px 8px;text-align:right">${_peFmt(l.qty)}</td>
+      <td style="padding:6px 8px;text-align:right"><input type="number" step="0.01" min="0" inputmode="decimal" data-peprice="${i}" value="${isWD ? '' : (l.price ? Number(l.price).toFixed(2) : '')}" placeholder="${isWD ? '—' : '0.00'}" ${readonly ? `disabled title="${isWD ? 'Withdrawn lot — carries no price' : 'Locked lot — edit via the Lots tab'}"` : ''} onkeydown="pePriceKey(event,${i})" oninput="pePriceInput(${i})" onblur="pePriceSave(${i})" style="width:110px;text-align:right;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px${readonly ? ';background:#f3f4f6;color:var(--text3)' : ''}"></td>
+      <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums" data-peamt="${i}">${_peFmt(amt)}</td>
+      <td data-pestatus="${i}" style="padding:6px 4px;width:26px;text-align:center;color:var(--text3)">${isWD ? '<span title="Withdrawn" style="color:#b91c1c;font-weight:700;font-size:10px">WD</span>' : (locked ? '🔒' : '')}</td>
+    </tr>`;
+  }).join('');
+  grid.innerHTML = `<table class="pe-grid-table" style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr>
+      <th style="border-top-left-radius:6px">Lot</th><th>Seller</th><th style="text-align:right">Branch</th>
+      <th style="text-align:right">Bags</th><th style="text-align:right">Qty</th>
+      <th style="text-align:right">Price ₹/kg</th><th style="text-align:right">Amount</th><th style="border-top-right-radius:6px"></th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  _peRenderSummary();
+}
+function _peRenderSummary(){
+  const sumEl = document.getElementById('pe-summary'); if (!sumEl) return;
+  // WD lots are shown but can't be priced, so keep them out of the priced/total
+  // ratio — otherwise it could never read "all priced".
+  const sellable = _pe.lots.filter(l => String(l.code||'').trim().toUpperCase() !== 'WD');
+  const total = sellable.length;
+  const priced = sellable.filter(l => Number(l.price) > 0).length;
+  const dirty = Object.keys(_pe.dirty).length;
+  sumEl.innerHTML = `${priced}/${total} lots priced` + (dirty ? ` · <b style="color:#a16207">${dirty} unsaved</b>` : (total ? ' · all saved' : ''));
+}
+function pePriceInput(i){
+  const inp = document.querySelector(`[data-peprice="${i}"]`); if (!inp) return;
+  const price = parseFloat(inp.value);
+  const l = _pe.lots[i];
+  const amt = (Number(l.qty)||0) * (Number.isFinite(price) ? price : 0);
+  const amtEl = document.querySelector(`[data-peamt="${i}"]`); if (amtEl) amtEl.textContent = _peFmt(amt);
+  _pe.dirty[i] = true;
+  const st = document.querySelector(`[data-pestatus="${i}"]`); if (st && !_pe.lots[i].locked_at) { st.textContent = '•'; st.style.color = '#a16207'; }
+  _peRenderSummary();
+}
+function pePriceKey(e, i){
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Advance focus immediately (no wait on the network). Focusing the next
+    // input blurs this one, whose onblur=pePriceSave(i) does the single save.
+    const nx = document.querySelector(`[data-peprice="${i+1}"]`);
+    if (nx && !nx.disabled) { nx.focus(); if (nx.select) nx.select(); }
+    else pePriceSave(i);   // last row — nothing to blur into, so save here
+  }
+}
+async function pePriceSave(i){
+  if (!_pe.dirty[i]) return;   // nothing changed since last save
+  const inp = document.querySelector(`[data-peprice="${i}"]`); if (!inp) return;
+  const l = _pe.lots[i];
+  const raw = inp.value.trim();
+  const price = raw === '' ? 0 : parseFloat(raw);
+  const st = document.querySelector(`[data-pestatus="${i}"]`);
+  if (!Number.isFinite(price) || price < 0) { if (st) { st.textContent = '✕'; st.style.color = '#b91c1c'; } return; }
+  const amount = (Number(l.qty)||0) * price;
+  try {
+    await j(`/api/lots/${l.id}`, { method: 'PUT', body: JSON.stringify({ price, amount }) });
+    l.price = price; l.amount = amount; delete _pe.dirty[i];
+    if (st) { st.textContent = '✓'; st.style.color = 'var(--green)'; }
+    _peRenderSummary();
+  } catch (e) {
+    if (st) { st.textContent = '✕'; st.style.color = '#b91c1c'; }
+    toast((e && e.message) || 'Save failed');
+  }
+}
+// Save any unsaved rows, then Calculate All for the whole trade.
+async function peSaveAndCalculate(){
+  if (!_pe.aid) { toast('Select a trade first'); return; }
+  const btn = document.getElementById('pe-save-calc');
+  try {
+    await withBusy(btn, async () => {
+      for (const k of Object.keys(_pe.dirty)) { await pePriceSave(Number(k)); }
+      const d = await j(`/api/lots/calculate/${_pe.aid}`, { method: 'POST' });
+      toast(`Saved prices · calculated ${d.calculated} lots`);
+      await loadPriceEntryGrid();
+      if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
+      if (_peFlagPriceCheck()) toast('Prices changed — re-verify in Price Check before generating invoices.');
+    });
+  } catch (e) { showError(e); }
+}
+
 // ── PRE-INVOICE SCREEN ─────────────────────────────────────────
 // A read-only screen listing every sales invoice that WOULD be generated for
 // the selected auction — bill-to, ship-to, amounts and taxes exactly as they
@@ -26795,5 +27336,16 @@ async function impUndo(logId, filename, moduleKey, insertedCount){
 function _escImp(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 </script>
+
+<!-- In-app how-to guide overlay. Self-contained (no app JS deps); loads the
+     static /help.html in an isolated iframe. Placed at end of <body> so no
+     sidebar transform can clip its position:fixed. -->
+<div id="help-ov" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(9,20,14,.55);flex-direction:column">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 18px;background:#137a4d;color:#fff;font-weight:700;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif">
+    <span>📖 How-to Guide</span>
+    <button type="button" onclick="document.getElementById('help-ov').style.display='none'" style="background:rgba(255,255,255,.22);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;padding:7px 16px;cursor:pointer">✕ Close</button>
+  </div>
+  <iframe title="How-to Guide" style="flex:1;width:100%;border:0;background:#fff"></iframe>
+</div>
 </body>
 </html>

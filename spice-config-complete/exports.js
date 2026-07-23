@@ -306,6 +306,12 @@ async function exportPriceListBefore(db, auctionId) {
             COALESCE(code,'') AS code
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
   );
+  // Trade No (ano) + Date repeat on every row as leading identifier columns
+  // (DD/MM/YYYY, matching the brand-band meta). Kept textual so a re-import
+  // never re-interprets the date string as an Excel serial.
+  const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+  const tradeNo = auc.ano == null ? '' : String(auc.ano);
+  const dateStr = String(auc.date || '').slice(0, 10).split('-').reverse().join('/');
   const padLot = (v) => {
     const s = String(v == null ? '' : v).trim();
     return /^\d+$/.test(s) ? s.padStart(3, '0') : s;
@@ -313,9 +319,12 @@ async function exportPriceListBefore(db, auctionId) {
   const rows = rawRows.map(r => ({
     ...r,
     lot: bare ? padLot(r.lot) : r.lot,
+    trade_no: tradeNo,
+    date: dateStr,
   }));
-  // NAME (seller) replaces the old TNO / DATE columns.
   const cols = [
+    { header: 'TRADE NO', key: 'trade_no', width: 10, text: true },
+    { header: 'DATE',     key: 'date',     width: 12, text: true },
     { header: 'LOT',   key: 'lot',   width: 10, text: bare },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'BAG',   key: 'bag',   width: 8  },

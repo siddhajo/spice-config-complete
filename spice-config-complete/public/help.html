@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How-to Guide — Spice Config</title>
+<style>
+  :root{
+    --paper:#F3F6F1; --card:#FFFFFF; --ink:#132019; --muted:#5a6c62; --line:#dbe4dc;
+    --green:#137a4d; --green-deep:#0e5e3b; --green-soft:#e7f3ec; --blue:#2463a6; --blue-soft:#e6eff8;
+    --amber:#d98a1f; --amber-deep:#b06e12; --amber-soft:#fbefd8;
+    --red:#c0392b; --red-line:#EF4444; --red-soft:#FEE2E2; --red-ink:#7F1D1D;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:24px 18px 56px}
+  h1{font-size:1.55rem;margin:0 0 2px;font-weight:800;letter-spacing:-.01em}
+  .tagline{margin:0 0 20px;color:var(--muted);font-weight:600}
+
+  .rule{display:flex;align-items:center;gap:16px;background:linear-gradient(120deg,#0e5e3b,#137a4d);color:#fff;border-radius:16px;padding:16px 20px;margin-bottom:12px}
+  .rule .k{flex:0 0 auto;font-size:1.9rem}
+  .rule b{display:block;font-size:1.25rem;line-height:1.15}
+  .rule span{color:#d3ecdd;font-size:.95rem;font-weight:600}
+  .flow{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-bottom:26px}
+  .fchip{display:flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:11px;padding:7px 12px;font-weight:700;font-size:.92rem}
+  .fchip .n{width:22px;height:22px;border-radius:6px;background:var(--green);color:#fff;font-weight:800;display:grid;place-items:center;font-size:.76rem}
+  .fchip.blue .n{background:var(--blue)}
+  .arw{color:#9fb3a6;font-weight:800}
+
+  .grp-lbl{font-size:.74rem;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--green-deep);margin:26px 0 10px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:11px}
+  .tile{text-align:left;cursor:pointer;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 15px;display:flex;gap:12px;align-items:flex-start;font-family:inherit;transition:border-color .12s,transform .06s}
+  .tile:hover{border-color:var(--green);transform:translateY(-1px)}
+  .tile:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+  .tile .ic{flex:0 0 auto;font-size:1.5rem;line-height:1}
+  .tile b{display:block;font-size:1.02rem;margin-bottom:2px}
+  .tile span{color:var(--muted);font-size:.86rem;font-weight:600;line-height:1.3}
+  .tile.hot{border-color:var(--red-line);background:linear-gradient(180deg,#fff6f5,#fff)}
+  .tile.hot:hover{border-color:var(--red)}
+
+  /* poster (detail) */
+  #poster{display:none;max-width:1000px;margin:0 auto}
+  .back{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 15px;font-weight:700;font-size:.95rem;color:var(--ink);cursor:pointer;font-family:inherit;margin-bottom:18px}
+  .back:hover{border-color:var(--green)}
+  .p-head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .p-head .ic{font-size:2.3rem}
+  .p-head h2{margin:0;font-size:1.55rem;font-weight:800}
+  .p-purpose{margin:0 0 12px;color:var(--muted);font-size:1.05rem;font-weight:600}
+  .flag-chip{display:inline-flex;align-items:center;gap:7px;background:var(--amber-soft);border:1px solid #eac681;color:#8a5a12;border-radius:100px;padding:6px 13px;font-size:.84rem;font-weight:700;margin:0 0 16px}
+
+  .psplit{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:24px;align-items:start}
+  .pcol-mock{position:sticky;top:8px}
+
+  /* ===== illustrated app mockup ===== */
+  .mock{position:relative;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:0 8px 24px -16px rgba(9,30,20,.4)}
+  .mock-bar{display:flex;align-items:center;gap:10px;background:var(--green);color:#fff;padding:9px 13px;font-weight:700;font-size:.88rem;border-radius:13px 13px 0 0}
+  .mock-bar .mb-menu{opacity:.85}
+  .mock-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:14px 12px 12px;background:#f3f6f3;border-bottom:1px solid var(--line)}
+  .mt-chip{position:relative;display:inline-flex;align-items:center;gap:5px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:.78rem;font-weight:700;color:#33453b}
+  .mt-chip.green{background:var(--green);color:#fff;border-color:var(--green)}
+  .mt-chip.blue{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .mt-chip.red{background:#fff;border-color:var(--red-line);color:var(--red)}
+  .mt-chip.amber{background:var(--amber-soft);border-color:#eac681;color:#8a5a12}
+  .mt-sel{position:relative;display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;padding:5px 10px;font-size:.78rem;color:#475}
+  .mt-search{position:relative;flex:1;min-width:110px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:.78rem;color:#9aa89f}
+  .pin{position:absolute;top:-10px;left:-10px;width:22px;height:22px;border-radius:50%;background:var(--amber);color:#fff;font-weight:800;font-size:.76rem;display:grid;place-items:center;box-shadow:0 0 0 2px #fff,0 2px 4px rgba(0,0,0,.25);z-index:2}
+  .pin.inl{position:static;display:inline-grid;width:20px;height:20px;box-shadow:0 0 0 2px #fff;vertical-align:middle;margin:0 3px}
+  .mock-body{padding:14px 12px 12px}
+  table.mk{width:100%;border-collapse:collapse;font-size:.76rem}
+  table.mk th{background:#f4f6f4;text-align:left;padding:6px 8px;border:1px solid var(--line);font-size:.66rem;text-transform:uppercase;letter-spacing:.03em;color:#5c6b62}
+  table.mk td{padding:6px 8px;border:1px solid var(--line);color:#33453b}
+  table.mk tr.amb td{background:#fff7ed} table.mk tr.unm td{background:#fef2f2} table.mk tr.ok td{background:#fff}
+  .badge{display:inline-block;font-size:.64rem;font-weight:800;padding:2px 7px;border-radius:100px}
+  .badge.g{background:#dcfce7;color:#15803d} .badge.a{background:#ffedd5;color:#a16207} .badge.r{background:#fee2e2;color:#c00}
+  .mk-dd{position:relative;display:inline-flex;align-items:center;gap:5px;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;font-size:.72rem;color:#475;background:#fff}
+  .mk-form{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .mk-fld{position:relative;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  .mk-fld .l{font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#5c6b62}
+  .mk-fld .v{font-size:.84rem;font-weight:700;color:#33453b}
+  .mk-fld .pin{top:-10px;left:auto;right:-10px}
+  .mk-cards{display:flex;flex-wrap:wrap;gap:8px}
+  .mk-card{flex:1;min-width:80px;border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fbfdfb}
+  .mk-card .cv{font-size:1.15rem;font-weight:800;color:var(--green);font-variant-numeric:tabular-nums}
+  .mk-card .cl{font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;color:#5c6b62}
+  .mk-note{font-size:.8rem;color:var(--muted);background:#f8faf8;border:1px dashed var(--line);border-radius:9px;padding:10px 12px;line-height:1.5}
+  .mk-menu{border:1px solid var(--line);border-radius:9px;margin-top:8px;box-shadow:0 6px 18px -12px rgba(0,0,0,.4)}
+  .mk-menu div{position:relative;padding:8px 11px;font-size:.76rem;font-weight:600;color:#33453b;border-bottom:1px solid var(--line);background:#fff}
+  .mk-menu div:first-child{border-radius:9px 9px 0 0} .mk-menu div:last-child{border-bottom:0;border-radius:0 0 9px 9px}
+  .mk-menu .pin{left:auto;right:8px;top:50%;transform:translateY(-50%)}
+  .mk-cardbox{position:relative;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+  .mk-cardbox .h{font-weight:800;font-size:.82rem;margin-bottom:6px;display:flex;align-items:center;gap:7px}
+  .mk-cardbox .pin{top:-10px;left:auto;right:-10px}
+  .mk-inline{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+  .mk-bulk{position:relative;border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:8px 10px;margin-top:8px;font-size:.74rem;color:#475;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .mock-cap{text-align:center;font-size:.74rem;color:var(--muted);margin:10px 0 0;font-style:italic}
+
+  /* ===== tour highlight ===== */
+  .mock.tour [data-p]{opacity:.4;transition:opacity .2s,box-shadow .2s}
+  .mock.tour [data-p].on{opacity:1;cursor:pointer;box-shadow:0 0 0 3px #fff,0 0 0 6px var(--amber);animation:tourpulse 1.5s infinite}
+  .mock.tour [data-p].on::after{content:'▼';position:absolute;left:50%;top:-25px;transform:translateX(-50%);color:var(--amber);font-size:16px;font-weight:900;text-shadow:0 1px 2px rgba(0,0,0,.25);animation:tourbob 1s infinite;pointer-events:none;z-index:3}
+  .mock.tour .mk-menu [data-p].on::after,.mock.tour .mk-dd.on::after{top:auto;bottom:-24px;content:'▲'}
+  @keyframes tourpulse{0%,100%{box-shadow:0 0 0 3px #fff,0 0 0 6px var(--amber)}50%{box-shadow:0 0 0 3px #fff,0 0 0 11px rgba(217,138,31,0)}}
+  @keyframes tourbob{0%,100%{margin-top:0}50%{margin-top:6px}}
+  @media (prefers-reduced-motion: reduce){ .mock.tour [data-p].on{animation:none} .mock.tour [data-p].on::after{animation:none} }
+
+  /* ===== coach (one step at a time) ===== */
+  .coach{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:16px 18px;box-shadow:0 4px 14px -10px rgba(9,30,20,.3)}
+  .coach-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+  .coach-count{font-size:.72rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--green-deep)}
+  .dots{display:flex;gap:6px;flex-wrap:wrap}
+  .dot{width:11px;height:11px;border-radius:50%;background:#d7e0d8;cursor:pointer;border:none;padding:0}
+  .dot.on{background:var(--amber);transform:scale(1.15)} .dot.done{background:var(--green)}
+  .coach-body{display:flex;gap:13px;align-items:flex-start;min-height:5.2em}
+  .coach-num{flex:0 0 auto;width:34px;height:34px;border-radius:50%;background:var(--amber);color:#fff;font-weight:800;font-size:1.15rem;display:grid;place-items:center;box-shadow:0 2px 0 var(--amber-deep)}
+  .coach-tx{font-size:1.06rem;line-height:1.5;padding-top:3px}
+  .coach-tx b{color:var(--ink)}
+  .tap-hint{font-size:.82rem;color:#8a5a12;background:var(--amber-soft);border:1px solid #eac681;border-radius:8px;padding:7px 11px;margin-top:12px;display:flex;align-items:center;gap:8px;font-weight:600}
+  .coach-nav{display:flex;gap:10px;margin-top:14px}
+  .cbtn{padding:11px 14px;border-radius:11px;border:1px solid var(--line);background:#fff;font-weight:800;font-size:.98rem;cursor:pointer;font-family:inherit;color:var(--ink)}
+  .cbtn:disabled{opacity:.4;cursor:default}
+  .cbtn.primary{flex:1;background:var(--green);color:#fff;border-color:var(--green)}
+  .cbtn.done{background:var(--amber);border-color:var(--amber);color:#fff}
+  .warn{display:flex;align-items:flex-start;gap:11px;background:var(--red-soft);border:1px solid var(--red-line);border-radius:13px;padding:13px 15px;margin-top:14px;color:var(--red-ink);font-weight:600;font-size:.92rem;line-height:1.5}
+  .warn .w{font-size:1.25rem;line-height:1}
+  .warn b{font-weight:800}
+  .banner-demo{display:flex;align-items:center;gap:10px;background:var(--red-soft);border:1px solid var(--red-line);border-radius:10px;padding:10px 12px;color:var(--red-ink);font-weight:700;font-size:.82rem}
+  .banner-demo .w{font-size:1.15rem}
+  .foot{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:.82rem}
+
+  @media (max-width:820px){ .psplit{grid-template-columns:1fr;gap:16px} .pcol-mock{position:static} }
+  @media (max-width:560px){ .mk-form{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== HOME ===== -->
+  <div id="home">
+    <h1>How-to Guide</h1>
+    <p class="tagline">Tap the screen you're on, then step through it — the guide points an arrow at each button as you go.</p>
+    <div class="rule">
+      <span class="k">🔒</span>
+      <div><b>Prices first. Invoices last.</b>
+        <span>Never change a price after the invoice is made — unless you make the invoice again.</span></div>
+    </div>
+    <div class="flow">
+      <div class="fchip"><span class="n">1</span>Enter lots</div><span class="arw">→</span>
+      <div class="fchip"><span class="n">2</span>Set prices</div><span class="arw">→</span>
+      <div class="fchip"><span class="n">3</span>Set buyers</div><span class="arw">→</span>
+      <div class="fchip blue"><span class="n">4</span>Generate invoices</div><span class="arw">→</span>
+      <div class="fchip blue"><span class="n">5</span>Print</div><span class="arw">→</span>
+      <div class="fchip blue"><span class="n">6</span>Pay sellers</div>
+    </div>
+    <div id="tilewrap"></div>
+    <div class="foot">Pick a screen above · prices first, invoices last</div>
+  </div>
+
+  <!-- ===== POSTER ===== -->
+  <div id="poster">
+    <button class="back" onclick="showHome()">← All screens</button>
+    <div id="poster-body"></div>
+    <div class="foot" style="margin-top:26px">Spice e-Trade · <a href="#" onclick="showHome();return false" style="color:var(--green-deep);font-weight:700">back to all screens</a></div>
+  </div>
+
+</div>
+
+<script>
+const GROUPS = [
+  ['⭐ Start here','start'],['Overview','overview'],['Sellers, buyers & trades','master'],
+  ['Trade operations','ops'],['Bills & invoices','txn'],['Reports & exports','reports'],['Settings & admin','admin'],
+];
+const chip=(t,o={})=>({t,...o});
+const sel=(t,o={})=>({sel:t,...o});
+const search=(t,o={})=>({search:t,...o});
+
+// Pins use pin:N where N === the step number that acts on that element.
+const S = [
+// ================= START HERE =================
+{ id:'flow', g:'start', ic:'🗺️', name:'The right order', purpose:'Do every trade day in this order.',
+  mock:{ title:'Trade day', body:{note:'1 Enter lots  →  2 Set prices  →  3 Set buyers  →  4 Generate invoices  →  5 Print  →  6 Pay sellers'} },
+  steps:[
+    '**Enter lots** — add every lot in **Lot Entry** (or import in **Lots**). Field staff can add them from the phone.',
+    '**Set prices** — in **Lots**, use **Price Import** or **Calculate All**. Get the prices right now.',
+    '**Set buyers** — in **Lots**, use **Set Buyer** so every lot has a buyer.',
+    '**Generate invoices** — in **Sales Invoices**, click **Generate for All Buyers**.',
+    '**Print** the invoices, then go to **Payment Summary** to **pay the sellers**.',
+  ],
+  warn:'Finish the prices before you make invoices. Changing a price after invoicing is the #1 mistake — see "Wrong price after invoice?".' },
+
+{ id:'fixprice', g:'start', ic:'⚠️', name:'Wrong price after invoice?', hot:true,
+  purpose:'You changed a price after the invoice was made. Fix it in 3 steps.',
+  mock:{ title:'Sales Invoices', banner:true,
+    toolbar:[sel('Trade 12'), chip('↩ Revert',{red:1,pin:1}), chip('⚡ Generate',{green:1,pin:3})],
+    body:{table:{head:['Inv#','Buyer','Amount'],rows:[['INV-2','K STORES','₹4,20,000'],['INV-3','A TRADERS','₹1,10,500']]}} },
+  steps:[
+    'On the buyer\'s invoice row, click **↩ Revert**. This deletes that one invoice and re-enables its lots.',
+    'Go back to **Lots**, check the price is now correct, then **Lock** the lot.',
+    'Return to **Sales Invoices** and click **⚡ Generate** again. The red banner clears by itself once the new invoice is saved.',
+  ],
+  warn:'Can\'t generate again? After the first run the app locks re-runs so you don\'t make duplicates. Use **Revert** (above), or an admin clicks **🔓 Allow regeneration** — see "Admin-only unlocks".' },
+
+// ================= OVERVIEW =================
+{ id:'dash', g:'overview', ic:'📊', name:'Dashboard', purpose:'See today\'s numbers at a glance.',
+  mock:{ title:'Dashboard',
+    toolbar:[chip('7 days',{pin:2}),chip('14 days'),chip('30 days')],
+    body:{cards:[['12','Trades'],['438','Lots'],['390','Sold'],['₹1.2Cr','Value']]} },
+  steps:[
+    'Read the big cards at the top — **Trades, Lots, Sold, Value, Payable, Outstanding**.',
+    'Switch the trend chart with **7 days / 14 days / 30 days**.',
+    'Scroll down to see a **card for each branch**.',
+  ],
+  warn:'The numbers only refresh when you **reload the page** — they don\'t update on their own.' },
+
+{ id:'insights', g:'overview', ic:'📈', name:'Insights', purpose:'Study performance by date, branch and buyer.',
+  mock:{ title:'Insights',
+    toolbar:[sel('From 01 Jul'),sel('To 13 Jul'),chip('Apply',{green:1,pin:1}),chip('This Month',{pin:2}),chip('Year')],
+    body:{note:'Sections: Headline metrics · Branch contribution · Per-trade details · Outstanding by buyer · Top buyers. Tap a section title to open or close it.'} },
+  steps:[
+    'Set the **From** and **To** dates, then click **Apply**.',
+    'Or use a quick button — **7 Days, This Month, Last Month, Quarter, Year**.',
+    'Click any **section title** to open or close its detail.',
+  ],
+  warn:'A collapsed section hides its data — if something looks missing, click the section title to open it again.' },
+
+// ================= MASTER =================
+{ id:'traders', g:'master', ic:'👤', name:'Sellers', purpose:'Add and manage sellers.',
+  mock:{ title:'Sellers',
+    toolbar:[chip('+ Add Seller',{green:1,pin:1}),search('Search sellers…',{pin:2}),chip('Import XLS/XLSX',{pin:3}),chip('Download Template',{pin:3})],
+    body:{table:{head:['Name','Phone','GSTIN'],rows:[['R MURUGAN','98xxxx12','33AA…P1Z'],['K STORES','90xxxx55','—']]}} },
+  steps:[
+    'Click **+ Add Seller**, fill the form, and save.',
+    'Or search the list with the **search box** to find one.',
+    'To add many at once, click **Download Template** first, fill it, then **Import XLS/XLSX**.',
+    'To remove: tick the sellers and click **🗑 Delete Selected**.',
+  ],
+  warn:'For import, use the **template** — if the column names don\'t match, those rows are skipped.' },
+
+{ id:'buyers', g:'master', ic:'🧑‍💼', name:'Buyers', purpose:'Add and manage buyers.',
+  mock:{ title:'Buyers',
+    toolbar:[chip('+ Add Buyer',{green:1,pin:1}),search('Search buyers…',{pin:2}),chip('Import XLS/XLSX',{pin:3}),chip('Download Template',{pin:3})],
+    body:{table:{head:['Code','Trade name','GSTIN'],rows:[['V001','VSTL','33BB…Q2Z'],['A014','A TRADERS','29CC…R3Z']]}} },
+  steps:[
+    'Click **+ Add Buyer**, fill the code, trade name, GSTIN, and save.',
+    'Search the list with the **search box**.',
+    'Bulk add: **Download Template** → fill → **Import XLS/XLSX**.',
+    'To remove: tick the buyers and click **🗑 Delete Selected**.',
+  ],
+  warn:'A buyer\'s **GSTIN** decides how its invoice is taxed — enter it correctly.' },
+
+{ id:'auctions', g:'master', ic:'📅', name:'Trades', purpose:'Create and open a trade.',
+  mock:{ title:'Trades',
+    toolbar:[chip('+ New Trade',{green:1,pin:1}),search('Search by number…',{pin:2}),chip('Import Lots from XLS/XLSX',{pin:3}),chip('Download Template')],
+    body:{table:{head:['Trade No','Date','Lots'],rows:[['12','13 Jul','438'],['11','06 Jul','402']]}} },
+  steps:[
+    'Click **+ New Trade**, set the number and date, and save.',
+    'Find an old one with **Search by number**.',
+    'Load its lot list with **Import Lots from XLS/XLSX**.',
+  ],
+  warn:'**Import lots before you set prices.** Re-importing the lot list overwrites any prices already set.' },
+
+// ================= TRADE OPERATIONS =================
+{ id:'lots', g:'ops', ic:'📦', name:'Lots', purpose:'Price, assign buyers and finalise lots.',
+  mock:{ title:'Lots',
+    toolbar:[sel('Trade 12'),chip('📥 Price Import',{pin:1}),chip('Calculate All',{green:1,pin:1}),chip('👤 Set Buyer',{pin:2}),chip('✅ Validate',{pin:3}),chip('🔒 Lock Selected',{amber:1,pin:4})],
+    body:{table:{head:['Lot','Name','Qty','Price','Buyer'],rows:[['12','R MURUGAN','640','₹410','VSTL'],['13','K STORES','520','₹—','—']]}} },
+  steps:[
+    'Set prices: click **📥 Price Import** to load a sheet, or **Calculate All** to compute them.',
+    'Tick the lots, then **👤 Set Buyer** to assign a buyer.',
+    'Click **✅ Validate** to check every lot is complete.',
+    'When prices are final, tick the lots and **🔒 Lock Selected** so they can\'t change.',
+  ],
+  warn:'Get prices **and** buyers right **before** you Lock — locked lots won\'t recalculate.' },
+
+{ id:'lotentry', g:'ops', ic:'⌨️', name:'Lot Entry', purpose:'Type lots fast at the desk.',
+  mock:{ title:'Lot Entry',
+    toolbar:[sel('Trade 12',{pin:1}),sel('Branch — Bodi'),chip('✓ Save & Next',{green:1,pin:3}),chip('✅ Validate Lots',{pin:4})],
+    body:{form:[['Lot no','012'],['Seller','R MURUGAN',2],['Bags','12'],['Net Wt (kg)','640'],['Price','410']]} },
+  steps:[
+    'Pick the **Trade** and **Branch** at the top.',
+    'Fill the lot fields — **Lot no, Seller, Bags, Net Wt, Price**.',
+    'Press **✓ Save & Next** (or Enter) to save and start the next lot.',
+    'When done, click **✅ Validate Lots** to check the day\'s tally.',
+  ],
+  warn:'**Save & Next** keeps the **same seller** for the next lot — tap **Clear** when you switch to a different seller.' },
+
+{ id:'priceentry', g:'ops', ic:'🔢', name:'Price Entry', purpose:'Type prices straight onto the lots, one after another.',
+  mock:{ title:'Price Entry',
+    toolbar:[sel('Auction 12',{pin:1}),chip('🔄 Refresh'),chip('💾 Save & Calculate All',{green:1,pin:4})],
+    body:{table:{head:['Lot','Seller','Qty','Price ₹/kg','Amount'],rows:[['12','R MURUGAN','640','410','₹2,62,400'],['13','K STORES','520','—','—']]}} },
+  steps:[
+    'Pick the **Auction** at the top — its lots load in a grid.',
+    'Click the **Price** box on a lot, type the rate, and press **Enter** (or Tab) to save it and jump to the next lot.',
+    'Only the **Price** column can be edited — every other field is read-only, so nothing else changes by mistake.',
+    'When every lot is priced, click **💾 Save & Calculate All** to compute commission, tax and payable for the whole auction.',
+  ],
+  warn:'A faster alternative to **Price Import** when you\'re keying prices by hand. If **Price Check** is ON, you still re-verify prices before generating invoices.' },
+
+{ id:'plmap', g:'ops', ic:'🏷️', name:'Price List Mapping', hot:true, flag:1,
+  purpose:'Fill in the buyer CODE for each lot — pick the right one when it\'s unclear.',
+  mock:{ title:'Price List Mapping',
+    toolbar:[chip('📄 From a file'),chip('📊 From a trade',{green:1,pin:1}),sel('Trade 12',{pin:2}),chip('Assign buyers',{green:1,pin:6})],
+    body:{resolve:{
+      cards:[['Matched','24','g'],['Ambiguous','3','a'],['Unmatched','1','r']],
+      rows:[
+        ['12','R MURUGAN','ok','VSTL',''],
+        ['13','K STORES','amb','pick ▾','K STO · K STORES / K.S. TRADERS',4],
+        ['14','NEW SHOP','unm','pick ▾','—'],
+      ],
+      bulk:{t:'Map CODE to selected lots → type a lot list, pick a CODE, Apply',pin:5} }} },
+  steps:[
+    'Click **📊 From a trade** (use **📄 From a file** only to annotate an Excel sheet without touching lots).',
+    'Choose the trade — the table loads with a badge on each lot: **green = matched, orange = ambiguous, red = unmatched**.',
+    'Green rows are done. For an **orange** or **red** row, look at the **Candidates** column to see the possible buyers.',
+    'Open that row\'s **Picked CODE** dropdown (or click a candidate) and choose the correct buyer.',
+    'Doing many at once? In **Map CODE to selected lots**, type a lot list (e.g. 13, 40-60), pick a **CODE**, and **Apply**.',
+    'When every row has a code, click **Assign buyers** to write them onto the lots.',
+  ],
+  warn:'The sheet must have both a **CODE** and a **TRADE NAME** column. A row stays **red/unmatched** when no buyer name matches — pick it by hand, or add that buyer in **Buyers** first.' },
+
+{ id:'pricecheck', g:'ops', ic:'✔️', name:'Price Check', flag:1, purpose:'Check an outside price sheet matches the app.',
+  mock:{ title:'Price Check',
+    toolbar:[sel('Trade 12 (optional)'),chip('Choose .xlsx',{pin:1}),chip('1. Verify Prices',{green:1,pin:2}),chip('2. Download Annotated File',{amber:1,pin:3})],
+    body:{table:{head:['Lot','App price','Sheet price'],rows:[['12','₹410','₹410'],['13','₹520','₹500']]},mismatch:1} },
+  steps:[
+    'Pick the **Trade** (optional) and choose your **.xlsx** file.',
+    'Click **1. Verify Prices** — any price that doesn\'t match turns **red**.',
+    'Click **2. Download Annotated File** to save the sheet with the mismatches flagged.',
+    'Fix the wrong prices in **Lots**, then verify again if you like.',
+  ],
+  warn:'Your file needs a **LOT** column and a **price** column (SERVER PRICE, else PRICE). Without them it can\'t compare.' },
+
+// ================= TRANSACTIONS =================
+{ id:'preinvoice', g:'txn', ic:'👁️', name:'Pre-Invoice', purpose:'Preview an invoice before you generate it.',
+  mock:{ title:'Pre-Invoice',
+    toolbar:[sel('Trade 12',{pin:1}),sel('All sale types'),sel('K STORES',{pin:2}),chip('No Transport & Insurance'),chip('👁 Preview Invoice',{green:1,pin:3})],
+    body:{table:{head:['Buyer','Sale','Grand Total'],rows:[['K STORES','Local (L)','₹4,20,000'],['A TRADERS','Inter-state (I)','₹1,10,500']]}} },
+  steps:[
+    'Pick the **trade** and a **buyer** to preview that buyer\'s sales invoice exactly as it will print — bill-to, ship-to, amounts and taxes.',
+    'Choose **View all buyers** to scan every invoice, or tick **No Transport & Insurance** to see the figures without those charges.',
+    'Click **👁 Preview Invoice** for the exact PDF.',
+  ],
+  warn:'Nothing here is saved, numbered or generated — it is a safe preview. Use **Sales Invoices** to actually generate.' },
+
+{ id:'invoices', g:'txn', ic:'🧾', name:'Sales Invoices', purpose:'Make and print buyer invoices.',
+  mock:{ title:'Sales Invoices',
+    toolbar:[sel('Trade 12',{pin:1}),chip('+ Generate Invoice',{pin:2}),chip('⚡ Generate for All Buyers',{green:1,pin:2}),chip('🖨 Print Selected',{blue:1,pin:3})],
+    body:{table:{head:['Inv#','Buyer','Qty','Total','Action'],rows:[['INV-2','K STORES','520','₹4,20,000','↩ Revert'],['INV-3','A TRADERS','140','₹1,10,500','↩ Revert']]}} },
+  steps:[
+    'Pick the **Trade** at the top.',
+    'Click **⚡ Generate for All Buyers** (or **+ Generate Invoice** for just one buyer).',
+    'Tick the invoices you want and click **🖨 Print Selected**.',
+    'Made a mistake on one? Click **↩ Revert** on its row to delete it and free its lots, then generate again.',
+  ],
+  warn:'A **red banner** means a price changed after these invoices were made — click **Revert**, then **Generate** again so they show the real prices. (See "Wrong price after invoice?")' },
+
+{ id:'purchases', g:'txn', ic:'📥', name:'Purchases', purpose:'Record purchases from dealers.',
+  mock:{ title:'Purchases',
+    toolbar:[sel('Trade 12',{pin:1}),chip('+ Generate Purchase',{pin:2}),chip('⚡ Generate for All Dealers',{green:1,pin:2}),chip('🖨 Print Selected',{blue:1,pin:3}),chip('📱 WhatsApp Selected')],
+    body:{table:{head:['Pur#','Dealer','Qty','Total'],rows:[['PUR-4','M TRADERS','300','₹2,40,000']]}} },
+  steps:[
+    'Pick the **Trade**.',
+    'Click **⚡ Generate for All Dealers** (or **+ Generate Purchase** for one dealer).',
+    'Tick rows and **🖨 Print Selected**, or **📱 WhatsApp Selected** if WhatsApp is set up.',
+  ] },
+
+{ id:'bills', g:'txn', ic:'📄', name:'Bills of Supply', flag:1, purpose:'Bills for sellers without GST.',
+  mock:{ title:'Bills of Supply',
+    toolbar:[sel('Trade 12',{pin:1}),chip('+ Generate Bill',{pin:2}),chip('⚡ Generate for All Agri Sellers',{green:1,pin:2}),chip('🖨 Print Selected',{blue:1,pin:3})],
+    body:{table:{head:['Bill#','Seller','Qty','Total'],rows:[['BOS-7','R MURUGAN','640','₹2,62,400']]}} },
+  steps:[
+    'Pick the **Trade**.',
+    'Click **⚡ Generate for All Agri Sellers** (or **+ Generate Bill** for one).',
+    'Tick rows and click **🖨 Print Selected**.',
+  ],
+  warn:'These are for **sellers without a GSTIN** (agriculturists). Registered sellers go under **Purchases** instead.' },
+
+{ id:'debit', g:'txn', ic:'➖', name:'Debit Notes', flag:1, purpose:'Adjustment notes against purchases.',
+  mock:{ title:'Debit Notes',
+    toolbar:[sel('Trade 12',{pin:1}),chip('+ Generate Debit Note',{pin:2}),chip('⚡ Generate All',{green:1,pin:2}),chip('🖨 Print Selected',{blue:1,pin:3})],
+    body:{table:{head:['DN#','Dealer','Amount'],rows:[['DN-3','M TRADERS','₹4,800']]}} },
+  steps:[
+    'Pick the **Trade**.',
+    'Click **⚡ Generate All** (or **+ Generate Debit Note** for one purchase).',
+    'Tick rows and click **🖨 Print Selected**.',
+  ] },
+
+{ id:'debitplanter', g:'txn', ic:'➖', name:'Planter Debit Notes', flag:1, purpose:'Adjustment notes for planters (non-GST sellers).',
+  mock:{ title:'Planter Debit Notes',
+    toolbar:[sel('Trade 12',{pin:1}),chip('+ Generate Debit Note',{pin:2}),chip('⚡ Generate All',{green:1,pin:2}),chip('🖨 Print Selected',{blue:1,pin:3})],
+    body:{table:{head:['DN#','Planter','Amount'],rows:[['DN-P1','R MURUGAN','₹3,200']]}} },
+  steps:[
+    'Pick the **Trade**.',
+    'Click **⚡ Generate All** (or **+ Generate Debit Note** for one planter).',
+    'Tick rows and click **🖨 Print Selected**.',
+  ] },
+
+{ id:'payments', g:'txn', ic:'💰', name:'Payment Summary', purpose:'Pay the sellers.',
+  mock:{ title:'Payment Summary',
+    toolbar:[sel('Trade 12',{pin:1}),sel('All sellers'),chip('📤 Export All ▾',{green:1,pin:2}),chip('🖨 Print',{blue:1}),chip('📱 WhatsApp')],
+    body:{menu:[['📤 Bank Payment file',3],['🧾 Payment Voucher',4],['📊 Payment XLSX'],['📄 Payment PDF']],
+      table:{head:['Seller','Lots','Payable'],rows:[['R MURUGAN','3','₹2,58,000'],['K STORES','2','₹1,04,000']]}} },
+  steps:[
+    'Pick the **Trade**.',
+    'Click **📤 Export All ▾** to open the menu.',
+    'Choose **Bank Payment file** for the bank (RTGS/NEFT upload).',
+    'Choose **Payment Voucher** to give each seller their slip (or **🖨 Print** / **📱 WhatsApp**).',
+  ],
+  warn:'A seller shows **"Paid"** only after **both** the Bank Payment file **and** the Voucher have been exported.' },
+
+// ================= REPORTS & EXPORTS =================
+{ id:'reports', g:'reports', ic:'📊', name:'Reports Hub', purpose:'Open trade summaries and jump to reports.',
+  mock:{ title:'Reports Hub',
+    toolbar:[sel('Trade 12',{pin:1}),sel('Branch — All'),chip('📄 Open PDF',{green:1,pin:2})],
+    body:{note:'Shortcut tiles: Journals · To Tally · Exports — tap one to jump straight there.'} },
+  steps:[
+    'Pick a **Trade** (and a branch if you want).',
+    'Click **📄 Open PDF** to view that trade\'s summary.',
+    'Use the **tiles** to jump to Journals, To Tally, or Exports.',
+  ],
+  warn:'Pick a trade first — the **Open PDF** button stays off until you do.' },
+
+{ id:'exports', g:'reports', ic:'⬇️', name:'Exports', purpose:'Download reports as Excel / PDF / DBF.',
+  mock:{ title:'Exports',
+    toolbar:[sel('Trade 12',{pin:1})],
+    body:{note:'Sections: Pre-trade Exports · Export Center (Excel / PDF / Print) · DBF Exports (pick a Module → download). Open a section, choose a report, then Preview or download.'} },
+  steps:[
+    'Pick a **Trade** at the top.',
+    'Open a section (**Pre-trade**, **Export Center**, or **DBF**).',
+    'Choose a report, then **Preview** and download as **Excel / PDF / Print**.',
+    'For **DBF**, pick the **Module** and click download.',
+  ],
+  warn:'**Pre-trade exports stay locked** until you run **Price Import** for that trade.' },
+
+{ id:'spicesboard', g:'reports', ic:'🌿', name:'Spices Board', purpose:'Build the Spices Board e-Auction portal files.',
+  mock:{ title:'Spices Board',
+    toolbar:[sel('Trade 12',{pin:1}),chip('Build files',{green:1,pin:2}),chip('⬇️ Download',{blue:1,pin:3})],
+    body:{note:'Generates the Spices Board e-Auction CSV / reports for the selected trade, ready to upload to the portal.'} },
+  steps:[
+    'Pick a **Trade** at the top.',
+    'Build the **Spices Board** files for that trade.',
+    'Download the file, then upload it to the Spices Board portal.',
+  ] },
+
+{ id:'lorry', g:'reports', ic:'🚚', name:'Lorry', purpose:'Lorry & lot-slip reports for the floor.',
+  mock:{ title:'Lorry',
+    toolbar:[sel('Trade 12',{pin:1}),sel('Report — Lot Slip',{pin:2}),chip('Preview'),chip('Excel'),chip('PDF',{blue:1,pin:3}),chip('Print')],
+    body:{note:'Reports: Lot Slip · Lot Buyer · Buyer Lot Lorry (auto-splits buyers into Intra-state / Inter-state).'} },
+  steps:[
+    'Pick a **Trade**.',
+    'Pick the **Report** you want.',
+    'Click **Preview**, or download as **Excel / PDF / Print**.',
+  ] },
+
+{ id:'tds', g:'reports', ic:'🧮', name:'TDS Returns', purpose:'TDS data for tax filing.',
+  mock:{ title:'TDS Returns',
+    toolbar:[sel('From 01 Jul',{pin:1}),sel('To 13 Jul'),chip('This Month'),chip('Load',{green:1,pin:2}),chip('Export XLSX',{pin:3}),chip('Export PDF')],
+    body:{table:{head:['Seller','Amount','TDS'],rows:[['R MURUGAN','₹2,62,400','₹2,624']]}} },
+  steps:[
+    'Set the **From** and **To** dates (or a quick button like **This Month**).',
+    'Click **Load** to fetch the matching records.',
+    'Click **Export XLSX** or **Export PDF** to download.',
+  ] },
+
+{ id:'journals', g:'reports', ic:'📓', name:'Journals', purpose:'Sales & purchase registers.',
+  mock:{ title:'Journals',
+    toolbar:[sel('Type — Sales',{pin:1}),sel('Trade 12',{pin:2}),chip('Load',{green:1,pin:3}),chip('Export XLSX',{pin:3})],
+    body:{note:'Types: Sales (JOUR) · Purchase – Dealer (PUJOUR) · Purchase – Agri (PPUJOUR). Sales adds a type filter: Local / Inter-state / Export / Withdrawn.'} },
+  steps:[
+    'Pick the **Journal Type** — Sales, Purchase (Dealer), or Purchase (Agri).',
+    'Pick the **Trade** (for Sales you can also filter by type).',
+    'Click **Load**, then **Export XLSX**.',
+  ] },
+
+{ id:'registers', g:'reports', ic:'📗', name:'Registers', purpose:'Lot-wise / invoice-wise summaries.',
+  mock:{ title:'Registers',
+    toolbar:[sel('Type — Sales',{pin:1}),sel('Trade 12 · or dates',{pin:2}),chip('Load',{green:1,pin:4}),chip('Export XLSX'),chip('Export PDF')],
+    body:{note:'Types: Purchase (lot-wise) · Sales (invoice-wise) · Pooler · Sellers Individual · Merchants Individual. Individual types add a Party picker.'} },
+  steps:[
+    'Pick the **Register Type**.',
+    'Pick a **Trade**, or leave it on **All trades** and set **From / To** dates.',
+    'For an "Individual" type, also pick the **Party**.',
+    'Click **Load**, then **Export XLSX / PDF**.',
+  ],
+  warn:'If you pick a **specific trade**, the date range is ignored — the trade wins.' },
+
+{ id:'tally', g:'reports', ic:'🔁', name:'To Tally', purpose:'Make Tally import files (XML).',
+  mock:{ title:'To Tally',
+    toolbar:[sel('Trade 12',{pin:1})],
+    body:{boxes:[['📚 Party Ledgers','Sales · RD Purchase · URD Purchase — Preview → Download XML',2],['🧾 Vouchers','Sales · RD · URD — Download XML',3]]} },
+  steps:[
+    'Pick the **Trade**.',
+    'Open **📚 Party Ledgers** and **Download XML** for each ledger.',
+    'Then open the **🧾 Voucher** sections and **Download XML** for each.',
+    'Import the files into Tally in that same order.',
+  ],
+  warn:'Import the **Ledgers first, then the Vouchers** — Tally rejects a voucher if its ledger isn\'t there yet.' },
+
+// ================= SETTINGS & ADMIN =================
+{ id:'settings', g:'admin', ic:'⚙️', name:'Settings', purpose:'Company details, rates and features.',
+  mock:{ title:'Settings',
+    toolbar:[search('Search settings…',{pin:1}),chip('Save Changes',{green:1,pin:3}),chip('Export'),chip('Import')],
+    body:{note:'Left: category list (Company, Address, Branches, Rates, Flags, Tally, Integrations…). Right: the fields for the chosen category.'} },
+  steps:[
+    'Find a setting fast with **Search settings**, or pick a **category** on the left.',
+    'Edit the fields on the right (text, colour, checkbox, dropdown).',
+    'Click **Save Changes** at the top.',
+  ],
+  warn:'**Nothing saves until you click Save Changes** — there is no auto-save.' },
+
+{ id:'flags', g:'admin', ic:'🔧', name:'Turn features on / off', purpose:'Some features stay hidden until an admin switches them on.',
+  mock:{ title:'Settings → Flags',
+    toolbar:[search('Search settings…',{pin:1}),chip('Save Changes',{green:1,pin:3})],
+    body:{table:{head:['Feature (Settings → Flags)','Turns on'],rows:[
+      ['Price List Mapping','the Price List Mapping tab'],
+      ['Price Check','the Price Check tab + price gate'],
+      ['Bills of Supply','the Bills tab'],
+      ['Debit Notes','the Debit Notes tab'],
+      ['WhatsApp Share Buttons','the 📱 WhatsApp buttons'],
+      ['Lots → Set Buyer','the 👤 Set Buyer button on Lots'],
+      ['Discount In Payments','the discount column in Payments'],
+    ]}} },
+  steps:[
+    'Open **Settings** and pick the **Flags** category on the left.',
+    'Tick a feature to switch it **on**, untick to switch it **off**.',
+    'Click **Save Changes** — the tab or button appears (or disappears) right away.',
+  ],
+  warn:'If a teammate says **"I can\'t find a button/tab"**, check here first — it\'s usually just switched off. A few are region-only (e.g. **Print Selected Purchase** is Kerala/ASP only).' },
+
+{ id:'adminunlocks', g:'admin', ic:'🔓', name:'Admin-only unlocks', hot:true,
+  purpose:'A few actions only an admin can do — and some appear only at the right moment.',
+  mock:{ title:'Sales Invoices (admin view)',
+    toolbar:[chip('🔓 Allow regeneration',{amber:1,pin:1}),chip('🔓 Unlock Selected',{amber:1,pin:2}),chip('↩ Revert',{red:1,pin:3}),chip('🗑 Delete All',{red:1,pin:4})],
+    body:{note:'The amber unlock buttons stay hidden for non-admins, and "Allow regeneration" only appears once every party in the trade is already generated (the "generation locked" state).'} },
+  steps:[
+    '**🔓 Allow regeneration** — on **Sales Invoices / Purchases / Bills / Debit Notes**. It stays hidden until *every* buyer/dealer/seller in the trade already has a document (the trade is "generation locked"). An admin clicks it to allow **one** more generate — best right after a **Revert**.',
+    '**🔓 Unlock Selected** — on **Lots**. A **locked** lot can\'t be edited; an admin ticks it and unlocks so prices can change again.',
+    '**↩ Revert** — on an invoice/purchase/bill row: deletes that one document and frees its lots (needs revert permission).',
+    '**🗑 Delete All / full reset** — on the **Backup** screen: wipes invoices, masters, or every trade. Admin only; a snapshot is taken first.',
+  ],
+  warn:'Don\'t see these? You need an **admin** login. Everyday roles (lot_entry, operator) don\'t get the unlock, revert, or delete-all buttons — ask an admin.' },
+
+{ id:'integrations', g:'admin', ic:'🔌', name:'Settings → Integrations', purpose:'Connect the optional extras.',
+  mock:{ title:'Settings → Integrations',
+    body:{boxes:[['🔎 GST lookup','Paste API key → auto-fills a buyer from their GSTIN. Shows credits left + Recharge link.',2],['💬 WhatsApp','Enter Meta token + Phone ID → send bills & receipts.',3]]} },
+  steps:[
+    'Open **Settings → Integrations**.',
+    '**GST lookup** — paste your API key; it then fills a buyer\'s details from their GSTIN.',
+    '**WhatsApp** — enter the Meta token and Phone number ID to send bills on WhatsApp.',
+    'Click **Save Changes** (each card also has its own Save / Connect).',
+  ],
+  warn:'Both are **optional** — leave them blank and the app still works. If WhatsApp stops, its login expired — connect again. GST lookup needs **credits** — use the Recharge link when low.' },
+
+{ id:'users', g:'admin', ic:'👥', name:'Users', purpose:'Staff logins and roles.',
+  mock:{ title:'Users',
+    toolbar:[chip('+ Add User',{green:1,pin:1})],
+    body:{table:{head:['Username','Role','Actions'],rows:[['vk','operator','Change Role · Reset Password'],['rs','lot_entry','Change Role · Reset Password']]}} },
+  steps:[
+    'Click **+ Add User**.',
+    'Set the **Username, Password and Role** (lot_entry, operator, manager, admin), then **Create User**.',
+    'On a user\'s row, use **Change Role** or **Reset Password** as needed.',
+  ],
+  warn:'**Reset Password signs that user out of every device** — they set a new one at their next login.' },
+
+{ id:'backup', g:'admin', ic:'💾', name:'Backup', purpose:'Back up or restore all data.',
+  mock:{ title:'Backup',
+    toolbar:[chip('Download Backup',{green:1,pin:1}),chip('Save Auto Backup',{pin:2}),chip('Restore from File…',{red:1,pin:3})],
+    body:{note:'Also here: Auto Backup (interval + how many to keep) and the App Activity Log (who changed what).'} },
+  steps:[
+    'Click **Download Backup** to save a full copy of the database.',
+    'Turn on **Auto Backup** — set the interval and how many to keep — then **Save Auto Backup**.',
+    'To recover, click **Restore from File…** and upload a backup.',
+    'Check the **App Activity Log** to see who changed what.',
+  ],
+  warn:'**Restore replaces ALL current data.** Always **Download Backup** first so you have a way back.' },
+
+{ id:'importold', g:'admin', ic:'📤', name:'Import Old Data', purpose:'Load data from old files.',
+  mock:{ title:'Import Old Data',
+    toolbar:[sel('Module — Sellers',{pin:1}),chip('☑ Dry-run',{amber:1}),chip('1. Preview',{pin:3}),chip('2. Verify',{pin:3}),chip('3. Run Import',{green:1,pin:4})],
+    body:{note:'Modules: Sales Invoices · Purchases · Bills · Debit Notes · Sellers · Buyers.'} },
+  steps:[
+    'Pick the **Module** (what kind of data this file holds).',
+    'Upload the **.xlsx / .xls** file.',
+    'Click **1. Preview** to detect the columns, then **2. Verify** to check for problems.',
+    'Untick **Dry-run**, then click **3. Run Import** to actually load it.',
+  ],
+  warn:'**Dry-run is ON by default** (it only checks, doesn\'t save). Untick it when you\'re ready to really import. An **Undo** is available for ~30 minutes after.' },
+];
+
+// ---------- render ----------
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function md(s){return esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');}
+function pinEl(n){return n?('<i class="pin">'+n+'</i>'):'';}
+function pinInl(n){return n?('<i class="pin inl">'+n+'</i>'):'';}
+function dp(n){return n?(' data-p="'+n+'"'):'';}
+
+function renderToolbar(items){
+  if(!items||!items.length) return '';
+  let h='<div class="mock-tools">';
+  for(const it of items){
+    if(it.sel){ h+='<span class="mt-sel"'+dp(it.pin)+'>'+pinEl(it.pin)+esc(it.sel)+' ▾</span>'; }
+    else if(it.search){ h+='<span class="mt-search"'+dp(it.pin)+'>'+pinEl(it.pin)+'🔍 '+esc(it.search)+'</span>'; }
+    else { const cls=it.green?'green':it.blue?'blue':it.red?'red':it.amber?'amber':''; h+='<span class="mt-chip '+cls+'"'+dp(it.pin)+'>'+pinEl(it.pin)+esc(it.t)+'</span>'; }
+  }
+  return h+'</div>';
+}
+function renderBody(b){
+  if(!b) return '';
+  let h='<div class="mock-body">';
+  if(b.cards){ h+='<div class="mk-cards">'+b.cards.map(c=>'<div class="mk-card"><div class="cv">'+esc(c[0])+'</div><div class="cl">'+esc(c[1])+'</div></div>').join('')+'</div>'; }
+  if(b.form){ h+='<div class="mk-form">'+b.form.map(f=>'<div class="mk-fld"'+dp(f[2])+'>'+pinEl(f[2])+'<div class="l">'+esc(f[0])+'</div><div class="v">'+esc(f[1])+'</div></div>').join('')+'</div>'; }
+  if(b.menu){ h+='<div class="mk-menu">'+b.menu.map(m=>{const lbl=Array.isArray(m)?m[0]:m;const p=Array.isArray(m)?m[1]:0;return '<div'+dp(p)+'>'+esc(lbl)+pinEl(p)+'</div>';}).join('')+'</div>'; }
+  if(b.table){ h+=renderTable(b.table, b.mismatch); }
+  if(b.resolve){ h+=renderResolve(b.resolve); }
+  if(b.boxes){ h+=b.boxes.map(x=>'<div class="mk-cardbox"'+dp(x[2])+'>'+pinEl(x[2])+'<div class="h">'+esc(x[0])+'</div><div style="font-size:.78rem;color:var(--muted)">'+esc(x[1])+'</div></div>').join(''); }
+  if(b.tfcard){ h+=renderTfCard(); }
+  if(b.note){ h+='<div class="mk-note">'+esc(b.note)+'</div>'; }
+  return h+'</div>';
+}
+function renderTable(t,mismatchRow){
+  let h='<table class="mk"><thead><tr>'+t.head.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>';
+  t.rows.forEach((r,i)=>{ const cls=(mismatchRow!=null&&i===mismatchRow)?' class="unm"':''; h+='<tr'+cls+'>'+r.map(c=>'<td>'+esc(c)+'</td>').join('')+'</tr>'; });
+  return h+'</tbody></table>';
+}
+function renderResolve(rv){
+  let h='<div class="mk-cards" style="margin-bottom:9px">'+rv.cards.map(c=>'<div class="mk-card"><div class="cv" style="color:'+(c[2]==='g'?'#15803d':c[2]==='a'?'#a16207':'#c00')+'">'+esc(c[1])+'</div><div class="cl">'+esc(c[0])+'</div></div>').join('')+'</div>';
+  h+='<table class="mk"><thead><tr><th>Lot</th><th>Buyer name</th><th>Status</th><th>Picked CODE</th><th>Candidates</th></tr></thead><tbody>';
+  for(const r of rv.rows){
+    const st=r[2]; const cls=st==='amb'?'amb':st==='unm'?'unm':'ok';
+    const badge=st==='amb'?'<span class="badge a">AMBIGUOUS</span>':st==='unm'?'<span class="badge r">UNMATCHED</span>':'<span class="badge g">MATCHED</span>';
+    const picked= st==='ok'? esc(r[3]) : '<span class="mk-dd"'+dp(r[5])+'>'+pinInl(r[5])+esc(r[3])+'</span>';
+    h+='<tr class="'+cls+'"><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td><td>'+badge+'</td><td>'+picked+'</td><td style="color:#666">'+esc(r[4])+'</td></tr>';
+  }
+  h+='</tbody></table>';
+  if(rv.bulk){ h+='<div class="mk-bulk"'+dp(rv.bulk.pin)+'>'+pinEl(rv.bulk.pin)+esc(rv.bulk.t)+'</div>'; }
+  return h;
+}
+function renderTfCard(){
+  return '<div class="mk-cardbox" style="margin:0"><div class="h">📡 Trade Fair sync <span class="badge a" style="margin-left:auto">Not connected</span></div>'
+    +'<div class="mk-inline"><span class="mk-dd" style="min-width:140px">📱 10-digit mobile</span><span class="mt-chip blue"'+dp(2)+'>'+pinEl(2)+'Send OTP</span></div>'
+    +'<div class="mk-inline"><span class="mk-dd" style="min-width:140px">🔢 OTP from SMS</span><span class="mt-chip green"'+dp(3)+'>'+pinEl(3)+'Verify &amp; Connect</span></div>'
+    +'<div class="mk-inline" style="margin:0"><span class="mt-chip"'+dp(4)+'>'+pinEl(4)+'Test connection</span><span class="mt-chip blue"'+dp(5)+'>'+pinEl(5)+'📡 Open Sync →</span></div></div>';
+}
+
+function renderTiles(){
+  let html='';
+  for(const [label,gid] of GROUPS){
+    const items=S.filter(s=>s.g===gid); if(!items.length) continue;
+    html+='<div class="grp-lbl">'+esc(label)+'</div><div class="tiles">';
+    for(const s of items){
+      html+='<button class="tile'+(s.hot?' hot':'')+'" onclick="openPoster(\''+s.id+'\')"><span class="ic">'+s.ic+'</span><span><b>'+esc(s.name)+'</b><span>'+esc(s.purpose)+'</span></span></button>';
+    }
+    html+='</div>';
+  }
+  document.getElementById('tilewrap').innerHTML=html;
+}
+
+// ----- the guided tour -----
+let _tour = null;   // {s, i, n, pins:Set}
+function openPoster(id){
+  const s=S.find(x=>x.id===id); if(!s) return;
+  _tour={ s:s, i:0, n:s.steps.length, pins:collectPins(s.mock) };
+  let head='<div class="p-head"><span class="ic">'+s.ic+'</span><h2>'+esc(s.name)+'</h2></div><p class="p-purpose">'+esc(s.purpose)+'</p>';
+  if(s.flag){ head+='<div class="flag-chip">🔧 Optional — an admin turns this on in <b>Settings → Flags</b></div>'; }
+
+  let mockHtml='';
+  if(s.mock){
+    mockHtml='<div class="mock tour" onclick="tourClick(event)">';
+    mockHtml+='<div class="mock-bar"><span class="mb-menu">☰</span><span>'+esc(s.mock.title||s.name)+'</span></div>';
+    if(s.mock.banner){ mockHtml+='<div style="padding:10px 12px 0"><div class="banner-demo"><span class="w">⚠</span><span>Prices changed after these invoices were generated — please regenerate them.</span></div></div>'; }
+    mockHtml+=renderToolbar(s.mock.toolbar);
+    mockHtml+=renderBody(s.mock.body);
+    mockHtml+='</div><p class="mock-cap">Illustration — your screen will show your real data.</p>';
+  }
+
+  const coach=
+    '<div class="coach">'
+    +'<div class="coach-top"><span class="coach-count" id="coach-count"></span><div class="dots" id="coach-dots"></div></div>'
+    +'<div class="coach-body"><div class="coach-num" id="coach-num"></div><div class="coach-tx" id="coach-tx"></div></div>'
+    +'<div id="coach-hint"></div>'
+    +'<div class="coach-nav"><button class="cbtn" id="coach-back" onclick="tourPrev()">← Back</button><button class="cbtn primary" id="coach-next" onclick="tourNext()">Next →</button></div>'
+    +'</div>'
+    +(s.warn?'<div class="warn"><span class="w">⚠</span><span>'+md(s.warn)+'</span></div>':'');
+
+  const bodyHtml = s.mock
+    ? head+'<div class="psplit"><div class="pcol-mock">'+mockHtml+'</div><div class="pcol-steps">'+coach+'</div></div>'
+    : head+coach;
+  document.getElementById('poster-body').innerHTML=bodyHtml;
+  document.getElementById('home').style.display='none';
+  document.getElementById('poster').style.display='block';
+  window.scrollTo(0,0);
+  renderTour();
+}
+function renderTour(){
+  if(!_tour) return;
+  const {s,i,n,pins}=_tour, num=i+1;
+  const mock=document.querySelector('#poster .mock');
+  if(mock){ const els=mock.querySelectorAll('[data-p]'); els.forEach(el=>{ el.classList.toggle('on', el.getAttribute('data-p')===String(num)); }); }
+  document.getElementById('coach-count').textContent='Step '+num+' of '+n;
+  document.getElementById('coach-num').textContent=num;
+  document.getElementById('coach-tx').innerHTML=md(s.steps[i]);
+  document.getElementById('coach-dots').innerHTML=Array.from({length:n},(_,k)=>'<button class="dot'+(k===i?' on':(k<i?' done':''))+'" onclick="tourGo('+k+')" aria-label="Step '+(k+1)+'"></button>').join('');
+  const hint=document.getElementById('coach-hint');
+  hint.innerHTML = pins.has(num) ? '<div class="tap-hint">👆 The arrow on the picture points at the button for this step — tap it, or press Next.</div>' : '';
+  document.getElementById('coach-back').disabled = i===0;
+  const next=document.getElementById('coach-next');
+  if(i===n-1){ next.textContent='Done ✓'; next.classList.add('done'); } else { next.textContent='Next →'; next.classList.remove('done'); }
+}
+function tourNext(){ if(!_tour) return; if(_tour.i>=_tour.n-1){ showHome(); return; } _tour.i++; renderTour(); }
+function tourPrev(){ if(!_tour||_tour.i===0) return; _tour.i--; renderTour(); }
+function tourGo(k){ if(!_tour) return; _tour.i=Math.max(0,Math.min(_tour.n-1,k)); renderTour(); }
+function tourClick(e){ const t=e.target.closest('[data-p]'); if(t && t.classList.contains('on')) tourNext(); }
+
+// Gather every pin number used anywhere in a mock spec.
+function collectPins(mock){
+  const set=new Set(); if(!mock) return set;
+  (mock.toolbar||[]).forEach(it=>{ if(it.pin) set.add(it.pin); });
+  const b=mock.body||{};
+  (b.form||[]).forEach(f=>{ if(f[2]) set.add(f[2]); });
+  (b.menu||[]).forEach(m=>{ if(Array.isArray(m)&&m[1]) set.add(m[1]); });
+  (b.boxes||[]).forEach(x=>{ if(x[2]) set.add(x[2]); });
+  if(b.resolve){ (b.resolve.rows||[]).forEach(r=>{ if(r[5]) set.add(r[5]); }); if(b.resolve.bulk&&b.resolve.bulk.pin) set.add(b.resolve.bulk.pin); }
+  if(b.tfcard){ [2,3,4,5].forEach(x=>set.add(x)); }
+  return set;
+}
+function showHome(){ _tour=null; document.getElementById('poster').style.display='none'; document.getElementById('home').style.display='block'; window.scrollTo(0,0); }
+
+document.addEventListener('keydown',function(e){
+  if(document.getElementById('poster').style.display!=='block' || !_tour) return;
+  if(e.key==='ArrowRight'){ e.preventDefault(); tourNext(); }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); tourPrev(); }
+});
+renderTiles();
+</script>
+</body>
+</html>

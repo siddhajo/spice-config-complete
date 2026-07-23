@@ -562,6 +562,8 @@ const COLS = {
     { header: 'BIDDER', key: 'bidder', width: 20 },
   ],
   price_list_before: [
+    { header: 'TRADE NO', key: 'trade_no', width: 10 },
+    { header: 'DATE',     key: 'date',     width: 14 },
     { header: 'LOT',   key: 'lot',   width: 10 },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'BAG',   key: 'bag',   width: 8  },
@@ -1010,14 +1012,20 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT lot_no as lot, bags as bag, qty, price, code, buyer as bidder
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
-    case 'price_list_before':
-      // NAME (seller) replaces the old TNO / DATE columns. PRICE blanked when
-      // 0 so the column reads empty instead of "0.00".
+    case 'price_list_before': {
+      // Trade No (ano) + Date (DD/MM/YYYY) repeat on every row as leading
+      // identifier columns. PRICE blanked when 0 so the column reads empty
+      // instead of "0.00".
+      const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
+      const tradeNo = auc.ano == null ? '' : String(auc.ano);
+      const dateStr = String(auc.date || '').slice(0, 10).split('-').reverse().join('/');
       return db.all(
         `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 COALESCE(code,'') AS code
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+      ).map(r => ({ ...r, trade_no: tradeNo, date: dateStr }));
+    }
 
     case 'bank_payment': {
       const { getBankPaymentData } = require('./calculations');
