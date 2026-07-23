@@ -7690,7 +7690,12 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
   const _gen = _checkGenerationGate(db, 'purchases', auctionIdForGate);
   if (!_gen.allowed) return res.status(412).json(_gen.error);
   const { sellerName, invoiceNo } = req.body;
-  const invoice = buildPurchaseInvoice(db, req.params.auctionId, sellerName, cfg);
+  // ispView: store the SAME ISP planter figures (isp_puramt / isp_prate) the
+  // registered-dealer purchase invoice PDF prints, so the stored purchases row
+  // equals the invoice / the Purchases screen. Without this the generate path
+  // stored the active-context (ASP/legacy) PurAmt while the PDF showed ISP,
+  // leaving the stored value out of step with what's displayed and printed.
+  const invoice = buildPurchaseInvoice(db, req.params.auctionId, sellerName, cfg, { ispView: true });
   if (!invoice) return res.status(404).json({ error: 'No data for this seller' });
   
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [req.params.auctionId]);
@@ -7755,7 +7760,9 @@ app.post('/api/purchases/generate-all/:auctionId', requireInvoiceWrite, (req, re
   
   for (const row of sellers) {
     try {
-      const invoice = buildPurchaseInvoice(db, req.params.auctionId, row.name, cfg);
+      // ispView: store ISP planter figures so the stored row matches the
+      // invoice PDF + Purchases screen (see the single-generate note above).
+      const invoice = buildPurchaseInvoice(db, req.params.auctionId, row.name, cfg, { ispView: true });
       if (!invoice) { errors.push({ seller: row.name, error: 'Build failed' }); continue; }
       const s = invoice.summary;
       const invoNo = String(nextNo);
@@ -9757,7 +9764,8 @@ app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
   
   let invoice;
   if (type === 'purchase') {
-    invoice = buildPurchaseInvoice(db, req.params.auctionId, buyerCode, cfg); // buyerCode = sellerName for purchase
+    // ispView so the preview matches the generated invoice / PDF (ISP figures).
+    invoice = buildPurchaseInvoice(db, req.params.auctionId, buyerCode, cfg, { ispView: true }); // buyerCode = sellerName for purchase
   } else if (type === 'agri') {
     invoice = buildAgriBill(db, req.params.auctionId, buyerCode, cfg);
     if (invoice && invoice.error) return res.status(404).json({ error: invoice.error });
