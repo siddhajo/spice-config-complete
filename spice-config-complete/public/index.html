@@ -8202,9 +8202,14 @@ async function loadFormulas(){
 // stays hidden unless someone deliberately runs the console toggle.
 function _applySpiceDevMenu(){
   const on = localStorage.getItem('spice_dev') === '1';
+  // Reveal with `!important` so the dev items win over non-!important
+  // stylesheet rules (notably `.side-group.section-collapsed .side-item
+  // {display:none}`), matching how the permission-gated items reveal.
+  // Without this, a collapsed Administration group silently hid Formulas /
+  // Fix Data while Settings/Users (which use !important) stayed visible.
   ['side-formulas','side-fixdata'].forEach(id=>{
     const el = document.getElementById(id);
-    if (el) el.style.display = on ? '' : 'none';
+    if (el) el.style.setProperty('display', on ? 'flex' : 'none', 'important');
   });
   // Reveal the Administration group container when dev mode is on, so a
   // dev without admin perms can still reach the revealed Formulas/Fix Data
