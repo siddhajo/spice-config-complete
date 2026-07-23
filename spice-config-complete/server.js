@@ -7650,7 +7650,38 @@ app.get('/api/purchases', requireView, (req, res) => {
   const mw = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=purchases.auction_id)');
   q += mw.sql; p.push(...mw.params);
   q += ' ORDER BY date DESC LIMIT 500';
-  res.json(db.all(q, p));
+  const rows = db.all(q, p);
+
+  // Make the list's money columns match the downloaded purchase-invoice PDF
+  // exactly. The PDF rebuilds each invoice live from lots with the ISP planter
+  // view (isp_puramt / isp_prate) via buildPurchaseInvoice(..., {ispView:true}),
+  // while the stored purchases.amount froze the active-context value at
+  // generation (ASP figures in Kerala, or a pre-edit snapshot). Recompute the
+  // same way here so Amount / CGST / SGST / IGST / Round / Total on screen equal
+  // the invoice. TDS is left as stored — the PDF prints the stored value too
+  // (useStoredTds). Qty is left as stored. Falls back to the stored row when the
+  // lots are gone (deleted trade), matching the PDF route's own fallback.
+  const cfgP = getSettingsFlat(db);
+  for (const r of rows) {
+    if (!r.auction_id || !r.name) continue;
+    try {
+      const inv = buildPurchaseInvoice(db, r.auction_id, r.name, cfgP, { ispView: true, useStoredTds: true });
+      if (inv && inv.summary) {
+        const s = inv.summary;
+        // totalPuramt is a raw sum (isp_puramt) and can carry float noise —
+        // round to paise like every other stored money value so the JSON, the
+        // KPI totals and the PDF's 2-decimal display all agree.
+        const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+        r.amount = r2(s.totalPuramt);
+        r.cgst   = r2(s.totalCgst);
+        r.sgst   = r2(s.totalSgst);
+        r.igst   = r2(s.totalIgst);
+        r.rund   = r2(s.roundDiff);
+        r.total  = r2(s.grandTotal);
+      }
+    } catch (_) { /* keep the stored row's values */ }
+  }
+  res.json(rows);
 });
 
 app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) => {
