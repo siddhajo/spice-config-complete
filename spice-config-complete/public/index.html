@@ -863,8 +863,15 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 }
 .side-group.section-collapsed .side-group-lbl::before{transform:rotate(-90deg)}
 /* Hide the items when section is collapsed — pure CSS, no JS height calc.
-   Group label stays visible as the click target. */
-.side-group.section-collapsed .side-item{display:none}
+   Group label stays visible as the click target.
+   `!important` + the leading `.sidebar` are BOTH required so this wins over the
+   permission-gated show rules the Administration items carry, e.g.
+   `body[data-perm-user-manage="1"] .side-item.needs-user-manage{display:flex !important}`
+   (specificity 0-3-1). Without them the chevron flips but those items stay
+   visible and the section won't collapse. `.sidebar .side-group.section-collapsed
+   .side-item` is 4 classes (0-4-0), which outranks the 0-3-1 perm rules, so the
+   !important-vs-!important contest resolves in this rule's favour. */
+.sidebar .side-group.section-collapsed .side-item{display:none !important}
 .side-item{
   display:flex;align-items:center;gap:12px;
   padding:12px 14px;border-radius:10px;cursor:pointer;
@@ -2054,6 +2061,25 @@ body[data-role="lot_entry"] .side-group-lbl{display:none !important}
    the dimmed icon alone signals locked, and hover still shows the name. */
 .sidebar.collapsed .side-item.locked:not(:hover)::after,
 html.sidebar-collapsed .sidebar .side-item.locked:not(:hover)::after{content:none}
+
+/* ── Lot Entry inline clear (✕) for data fields ─────────────────
+   Wrap a field in .le-clr-wrap and drop a .le-clr button after the
+   input. The ✕ shows whenever the field is non-empty — driven by
+   :placeholder-shown, so it also reflects values set programmatically
+   (auto lot no, reseeded gunny wt, …). Native number spinners and the
+   WebKit search-cancel glyph are suppressed on wrapped inputs so the
+   ✕ has room and there's no double-X. Every wrapped field needs a
+   placeholder attribute. */
+.le-clr-wrap{position:relative;display:block;width:100%}
+.le-clr-wrap>input{padding-right:34px !important}
+.le-clr-wrap>input[type=number]{-moz-appearance:textfield}
+.le-clr-wrap>input[type=number]::-webkit-outer-spin-button,
+.le-clr-wrap>input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.le-clr-wrap>input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none;display:none}
+.le-clr{position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:22px;height:22px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border);border:none;padding:0;line-height:1;font-family:inherit;-webkit-appearance:none}
+.le-clr-wrap>input:not(:placeholder-shown)~.le-clr{display:flex}
+.le-clr-wrap>input:read-only~.le-clr{display:none}
+.le-clr:hover{background:var(--border2);color:var(--text2)}
 
 /* ── Lot Selection grid (Lot Entry alloc card) ──────────────────
    Per-lot chips showing every lot number in the user's branch
@@ -5193,7 +5219,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button type="button" class="btn btn-a needs-trader-write" onclick="leOpenNewSellerModal()" style="padding:2px 10px;font-size:11px;height:24px">+ New Seller</button>
           </div>
           <div id="le-seller-search-wrap" style="position:relative">
-            <input type="search" id="le-seller-search" placeholder="Search by name, phone, CR no, or PAN…" autocomplete="off" oninput="leSearchSeller(this.value)" onfocus="leSearchSeller(this.value)" style="width:100%;height:42px;padding:0 14px;border:1.5px solid var(--border);border-radius:8px;font-size:14px">
+            <span class="le-clr-wrap"><input type="search" id="le-seller-search" placeholder="Search by name, phone, CR no, or PAN…" autocomplete="off" oninput="leSearchSeller(this.value)" onfocus="leSearchSeller(this.value)" style="width:100%;height:42px;padding:0 14px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
             <div id="le-seller-results" style="display:none;position:absolute;top:46px;left:0;right:0;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.08);max-height:280px;overflow-y:auto;z-index:10"></div>
           </div>
           <div id="le-seller-card" style="display:none;padding:10px 14px;border:1.5px solid var(--green);background:var(--green-bg);border-radius:8px">
@@ -5215,7 +5241,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Lot No</div>
-            <input type="text" id="le-lotno" placeholder="auto" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-family:monospace;font-weight:600">
+            <span class="le-clr-wrap"><input type="text" id="le-lotno" placeholder="auto" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-family:monospace;font-weight:600"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Grade</div>
@@ -5228,11 +5254,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Bags</div>
-            <input type="number" id="le-bags" min="0" placeholder="0" oninput="leOnBagsInput()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+            <span class="le-clr-wrap"><input type="number" id="le-bags" min="0" placeholder="0" oninput="leOnBagsInput()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Litre Wt</div>
-            <input type="number" id="le-litre" min="0" placeholder="0" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+            <span class="le-clr-wrap"><input type="number" id="le-litre" min="0" placeholder="0" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
         </div>
 
@@ -5244,18 +5270,18 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div id="le-gunny-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Weight w/ Gunny</div>
-            <input type="number" id="le-wwg" step="0.001" min="0" placeholder="0.000" oninput="leCalcNetFromGunny()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px">
+            <span class="le-clr-wrap"><input type="number" id="le-wwg" step="0.001" min="0" placeholder="0.000" oninput="leCalcNetFromGunny()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:15px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Gunny Wt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— default × bags · editable</span></div>
-            <input type="number" id="le-gunny-wt" step="0.001" min="0" placeholder="0.000" oninput="leOnGunnyWtInput()" title="Total gunny (tare) weight. Defaults to default gunny weight × bags — type to override; Net Wt recalculates." style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:600">
+            <span class="le-clr-wrap"><input type="number" id="le-gunny-wt" step="0.001" min="0" placeholder="0.000" oninput="leOnGunnyWtInput()" title="Total gunny (tare) weight. Defaults to default gunny weight × bags — type to override; Net Wt recalculates." style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-weight:600"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Net Weight (kg)</div>
-            <input type="number" id="le-qty" step="0.001" min="0" placeholder="0.000" oninput="leCalcGross()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--green);border-radius:8px;font-size:16px;font-weight:700;color:var(--green)">
+            <span class="le-clr-wrap"><input type="number" id="le-qty" step="0.001" min="0" placeholder="0.000" oninput="leCalcGross()" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--green);border-radius:8px;font-size:16px;font-weight:700;color:var(--green)"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
           <div>
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Sample Wt</div>
@@ -5269,7 +5295,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
         <div id="le-moisture-wrap" style="display:none;margin-bottom:16px">
           <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Moisture %</div>
-          <input type="number" id="le-moisture" step="0.1" min="0" max="100" placeholder="e.g. 12.5" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px">
+          <span class="le-clr-wrap"><input type="number" id="le-moisture" step="0.1" min="0" max="100" placeholder="e.g. 12.5" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
         </div>
 
         <!-- e-Auction-only row. Each cell is independently hidden by
@@ -5283,11 +5309,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
           <div class="feat-crop-receipt">
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Crop Receipt <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0">— auto-increments</span></div>
-            <input type="text" id="le-crpt" placeholder="e.g. 01208" autocomplete="off" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:monospace">
+            <span class="le-clr-wrap"><input type="text" id="le-crpt" placeholder="e.g. 01208" autocomplete="off" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:monospace"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
           <div class="feat-reserved-price">
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Reserved Price</div>
-            <input type="number" id="le-reserved-price" step="any" min="0" placeholder="e.g. 1500" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px">
+            <span class="le-clr-wrap"><input type="number" id="le-reserved-price" step="any" min="0" placeholder="e.g. 1500" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
           </div>
         </div>
 
@@ -24187,6 +24213,21 @@ function leResetForm(){
   document.getElementById('le-save-btn-label').textContent = 'Save & Next';
   leSetLotNoLocked(false);
 }
+
+// Inline ✕ clear for Lot Entry fields. One delegated listener covers every
+// .le-clr button (including the conditionally-shown gunny/e-Auction fields):
+// clear the value, then re-fire `input` so the field's own oninput handler
+// (leCalcGross, leOnBagsInput, leSearchSeller, …) runs. Visibility is CSS-
+// driven (:placeholder-shown), so nothing else needs wiring.
+document.addEventListener('click', function(e){
+  var b = e.target.closest && e.target.closest('.le-clr'); if(!b) return;
+  var wrap = b.closest('.le-clr-wrap'); if(!wrap) return;
+  var inp = wrap.querySelector('input'); if(!inp) return;
+  if (inp.readOnly || inp.disabled) return;
+  inp.value = '';
+  inp.dispatchEvent(new Event('input', {bubbles:true}));
+  inp.focus();
+});
 
 // Lock/unlock the Lot No field. When editing an existing lot the lot
 // number is fixed — operators may correct every other field but not the

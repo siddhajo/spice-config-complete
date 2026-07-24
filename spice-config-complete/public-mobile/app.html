@@ -158,6 +158,15 @@ select:focus{border-color:var(--green)}
 .sx-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:20px;height:20px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border);border:none;padding:0;line-height:1;font-family:inherit}
 .sx-clear.show{display:flex}
 .sx-clear:hover{background:var(--border2);color:var(--text2)}
+/* Inline clear (✕) for lot-entry .ein data fields. The ✕ shows whenever the
+   field is non-empty — driven by :placeholder-shown so it also reflects
+   values set programmatically (grade default, reseeded gunny wt, etc.).
+   Every wrapped field therefore needs a placeholder attribute. */
+.eic{position:relative;display:block;width:100%}
+.eic .ein{padding-right:30px}
+.ein-clr{position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--text3);font-size:12px;font-weight:700;width:20px;height:20px;display:none;align-items:center;justify-content:center;border-radius:50%;background:var(--border);border:none;padding:0;line-height:1;font-family:inherit;-webkit-appearance:none}
+.eic .ein:not(:placeholder-shown)+.ein-clr{display:flex}
+.ein-clr:hover{background:var(--border2);color:var(--text2)}
 .le-progress{flex-shrink:0;background:var(--stat-bg);color:#fff;padding:11px 14px;font-size:12px;box-shadow:0 -3px 12px rgba(13,124,95,.25);position:relative;overflow:hidden}
 .le-progress::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent)}
 .le-progress.over{background:linear-gradient(135deg,#c0392b 0%,#962d22 50%,#7a241b 100%);box-shadow:0 -3px 12px rgba(192,57,43,.35)}
@@ -317,9 +326,9 @@ select:focus{border-color:var(--green)}
 
         <!-- Grade + Bags + Litre -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">
-          <div><div class="elb" id="elb-grade">GRADE</div><input type="text" id="le-grade" value="1" autocomplete="off" class="ein"></div>
-          <div><div class="elb" id="elb-bags">BAGS</div><input type="text" id="le-bags" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this);onBagsInput()"></div>
-          <div><div class="elb" id="elb-litre">LITRE WT</div><input type="text" id="le-litre" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"></div>
+          <div><div class="elb" id="elb-grade">GRADE</div><span class="eic"><input type="text" id="le-grade" value="1" autocomplete="off" placeholder=" " class="ein"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
+          <div><div class="elb" id="elb-bags">BAGS</div><span class="eic"><input type="text" id="le-bags" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this);onBagsInput()"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
+          <div><div class="elb" id="elb-litre">LITRE WT</div><span class="eic"><input type="text" id="le-litre" placeholder="0" inputmode="numeric" onfocus="showSaveBtn()" class="ein" oninput="sanitizeInt(this)"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
         </div>
 
         <!-- Weight w/ Gunny + total Gunny Weight — sits ABOVE Net Wt so the
@@ -328,19 +337,19 @@ select:focus{border-color:var(--green)}
              Gunny Wt is the read-only total tare (= default gunny weight ×
              bags); Net Wt below auto-derives as W/Gunny − Gunny Wt. -->
         <div id="le-gunny-wrap" style="display:none;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
-          <div><div class="elb">W/ GUNNY</div><input type="text" id="le-wwg" placeholder="0.000" inputmode="decimal" class="ein" oninput="sanitizeDec(this);calcNetFromGunny()"></div>
-          <div><div class="elb">GUNNY WT</div><input type="text" id="le-gunny-wt" inputmode="decimal" class="ein" style="background:var(--bg);color:var(--text3);font-weight:600" oninput="sanitizeDec(this);onGunnyWtInput()" title="Total gunny (tare) weight. Defaults to gunny weight × bags; in e-Trade type to override — Net Wt recalculates."></div>
+          <div><div class="elb">W/ GUNNY</div><span class="eic"><input type="text" id="le-wwg" placeholder="0.000" inputmode="decimal" class="ein" oninput="sanitizeDec(this);calcNetFromGunny()"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
+          <div><div class="elb">GUNNY WT</div><span class="eic"><input type="text" id="le-gunny-wt" placeholder=" " inputmode="decimal" class="ein" style="background:var(--bg);color:var(--text3);font-weight:600" oninput="sanitizeDec(this);onGunnyWtInput()" title="Total gunny (tare) weight. Defaults to gunny weight × bags; in e-Trade type to override — Net Wt recalculates."><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
         </div>
 
         <!-- Net + Sample + Gross -->
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px;margin-bottom:6px">
-          <div><div class="elb" id="elb-net">NET WT (KG)</div><input type="text" id="le-qty" placeholder="0.000" inputmode="decimal" onfocus="showSaveBtn()" class="ein qi" oninput="sanitizeDec(this);calcGrossWeight()"></div>
+          <div><div class="elb" id="elb-net">NET WT (KG)</div><span class="eic"><input type="text" id="le-qty" placeholder="0.000" inputmode="decimal" onfocus="showSaveBtn()" class="ein qi" oninput="sanitizeDec(this);calcGrossWeight()"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
           <div><div class="elb" id="elb-sample">SAMPLE</div><input type="text" id="le-sample" placeholder="0" readonly class="ein" style="background:var(--bg);color:var(--text3)"></div>
           <div><div class="elb" id="elb-gross">GROSS</div><input type="text" id="le-gross" placeholder="0" readonly class="ein" style="background:var(--bg);color:var(--green);font-weight:700"></div>
         </div>
 
         <!-- Moisture (conditional, compact) -->
-        <div id="le-moisture-wrap" style="display:none;margin-bottom:6px;margin-top:-2px"><div style="width:33%"><div class="elb" id="elb-moisture">MOISTURE %</div><input type="text" id="le-moisture" placeholder="0.0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"></div></div>
+        <div id="le-moisture-wrap" style="display:none;margin-bottom:6px;margin-top:-2px"><div style="width:33%"><div class="elb" id="elb-moisture">MOISTURE %</div><span class="eic"><input type="text" id="le-moisture" placeholder="0.0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div></div>
 
         <!-- e-Auction extras (Crop Receipt / Reserved Price).
              Each wrapper is independently toggled via cfgShowCropReceipt /
@@ -349,8 +358,8 @@ select:focus{border-color:var(--green)}
              auto-increments per save (saveLot resets to prior+1);
              Reserved Price is typed per lot with no auto-increment. -->
         <div id="le-eauction-row" style="display:none;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
-          <div id="le-crpt-wrap" style="display:none"><div class="elb">CROP RCPT</div><input type="text" id="le-crpt" placeholder="01208" autocomplete="off" class="ein"></div>
-          <div id="le-reserved-wrap" style="display:none"><div class="elb">RSRV PRICE</div><input type="text" id="le-reserved-price" placeholder="0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"></div>
+          <div id="le-crpt-wrap" style="display:none"><div class="elb">CROP RCPT</div><span class="eic"><input type="text" id="le-crpt" placeholder="01208" autocomplete="off" class="ein"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
+          <div id="le-reserved-wrap" style="display:none"><div class="elb">RSRV PRICE</div><span class="eic"><input type="text" id="le-reserved-price" placeholder="0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
         </div>
 
         <!-- Buttons -->
@@ -1085,6 +1094,18 @@ function attachSearchClear(inputId, onAfterClear){
   });
   sync();
 }
+// Inline ✕ clear for lot-entry .ein fields. One delegated listener covers every
+// .ein-clr (including conditionally-shown ones): clear the value, then re-fire
+// `input` so the field's own oninput (sanitize, gross/net recalc, …) runs.
+// Visibility is CSS-driven (:placeholder-shown), so no per-field wiring needed.
+document.addEventListener('click', function(e){
+  var b=e.target.closest && e.target.closest('.ein-clr'); if(!b)return;
+  var wrap=b.closest('.eic'); if(!wrap)return;
+  var inp=wrap.querySelector('.ein'); if(!inp)return;
+  inp.value='';
+  inp.dispatchEvent(new Event('input',{bubbles:true}));
+  inp.focus();
+});
 document.addEventListener('DOMContentLoaded', function(){
   attachSearchClear('le-name', function(){document.getElementById('le-res').style.display='none'});
   attachSearchClear('ml-search');
