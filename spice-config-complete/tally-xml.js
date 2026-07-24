@@ -1881,7 +1881,10 @@ function generURDPurchaseXML(rows, cfg, opts = {}) {
 
     const startVoucher = `<VOUCHER VCHTYPE="Purchase" ACTION="Create" OBJVIEW="Invoice Voucher View">`;
 
-    // Bill allocations (per lot)
+    // Bill allocations (per lot). AMOUNT uses the lot's purchase amount
+    // (isp_puramt via lot.amount) — the SAME figure the party
+    // LEDGERENTRIES total sums — so the bill-wise breakup ties out to the
+    // ledger amount instead of diverging on the separate `bilamt` value.
     let billAlloc = '';
     if (Array.isArray(row.lots)) {
       for (const lot of row.lots) {
@@ -1889,7 +1892,7 @@ function generURDPurchaseXML(rows, cfg, opts = {}) {
 <BILLALLOCATIONS.LIST>
 <NAME>${xe(`${row.ano}/${lot.lot}/${season}`)}</NAME>
 <BILLTYPE>New Ref</BILLTYPE>
-<AMOUNT>${tlyrnd ? r0(lot.bilamt || lot.amount) : r2(lot.bilamt || lot.amount)}</AMOUNT>
+<AMOUNT>${tlyrnd ? r0(lot.amount) : r2(lot.amount)}</AMOUNT>
 </BILLALLOCATIONS.LIST>`;
       }
     }
