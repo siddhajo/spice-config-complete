@@ -5336,6 +5336,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <span style="font-weight:700;font-size:14px">Recent entries — this <span data-term-auction="singular">trade</span></span>
           <span id="le-recent-count" style="font-weight:400;color:var(--text3);font-size:12px;margin-left:4px"></span>
           <span style="flex:1"></span>
+          <button id="le-print-all-filing-btn" type="button" onclick="event.stopPropagation();lePrintAllFiling()" class="le-toolbar-btn le-tb-secondary" title="Print every lot receipt in this trade, packed onto A4 sheets — for office filing (no selection needed)">
+            <span aria-hidden="true">🗂</span> Print All (Filing)
+          </button>
           <button id="le-print-selected-btn" type="button" onclick="event.stopPropagation();lePrintSelected()" class="le-toolbar-btn le-tb-primary" style="display:none">
             <span aria-hidden="true">🖨</span> Print Selected
             <span id="le-print-selected-count" class="le-tb-badge"></span>
@@ -5474,7 +5477,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <p id="le-print-summary" style="font-size:12px;color:var(--text3);margin:0 0 12px"></p>
 
         <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Format</div>
-        <div id="le-print-format-group" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+        <div id="le-print-format-group" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:8px;margin-bottom:14px">
           <label class="le-print-fmt" data-format="compact" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;background:#fff;transition:all .15s">
             <span style="font-weight:700;font-size:13px">Compact (Thermal)</span>
             <span style="font-size:11px;color:var(--text3);line-height:1.4">~80mm slip · monospace · lot # / bags / weight only · matches legacy receipt</span>
@@ -5482,6 +5485,10 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <label class="le-print-fmt" data-format="detailed" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;background:#fff;transition:all .15s">
             <span style="font-weight:700;font-size:13px">Detailed (~2.5×3.5")</span>
             <span style="font-size:11px;color:var(--text3);line-height:1.4">Compact slip with company header + seller bank details · lot / bag / qty / gross wt</span>
+          </label>
+          <label class="le-print-fmt" data-format="filing" style="display:flex;flex-direction:column;gap:4px;padding:12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;background:#fff;transition:all .15s">
+            <span style="font-weight:700;font-size:13px">Filing (A4 · packed)</span>
+            <span style="font-size:11px;color:var(--text3);line-height:1.4">Many receipts per A4 sheet · saves paper for office filing · all sellers in one document</span>
           </label>
         </div>
 
@@ -25532,9 +25539,33 @@ async function lePrintBySeller() {
   leOpenPrintModal();
 }
 
+// Print EVERY lot receipt in the current trade, packed onto A4 sheets for
+// office filing. Unlike Print Selected (which works off the current recent
+// PAGE), this fetches the whole trade's lots so nothing is missed across
+// pagination, then opens the print modal with the Filing format preselected.
+async function lePrintAllFiling() {
+  const aid = document.getElementById('le-auction') && document.getElementById('le-auction').value;
+  if (!aid) { toast('Pick a trade first'); return; }
+  let lots = [];
+  try {
+    const data = await j(`/api/lots/${aid}`);   // unpaginated → all lots, lot_no ASC
+    lots = Array.isArray(data) ? data : (Array.isArray(data.rows) ? data.rows : []);
+  } catch (e) { toast('Could not load lots for this trade'); return; }
+  if (!lots.length) { toast('No lots in this trade to print'); return; }
+  _le_pending_print = { lots, scope: 'selected' };
+  // Preselect the Filing format for this run without disturbing the user's
+  // saved default: leOpenPrintModal highlights from _le.receiptFormat, so
+  // set it just for the open, then restore. The actual print reads the
+  // selected card, so the user can still switch to Compact/Detailed.
+  const prevFmt = _le.receiptFormat;
+  _le.receiptFormat = 'filing';
+  leOpenPrintModal();
+  _le.receiptFormat = prevFmt;
+}
+
 function leOpenPrintModal() {
   if (!_le_pending_print) return;
-  const fmt = (_le.receiptFormat === 'compact') ? 'compact' : 'detailed';
+  const fmt = ['compact', 'filing'].includes(_le.receiptFormat) ? _le.receiptFormat : 'detailed';
   // Highlight the active format card. Click handlers update the
   // selection. Stored on the modal via data-format on each card.
   document.querySelectorAll('.le-print-fmt').forEach(card => {
@@ -25627,7 +25658,9 @@ async function leConfirmPrint() {
   // open a separate print window for each — lets the user dispatch
   // slips to different operators / printers without re-clicking.
   const scope = _le_pending_print.scope;
-  const batches = (scope === 'by-seller')
+  // Filing packs every seller into ONE A4 document, so it never splits per
+  // seller even when launched from "Print by Seller".
+  const batches = (scope === 'by-seller' && fmt !== 'filing')
     ? Object.values(lots.reduce((m, l) => {
         const k = l.trader_id != null ? `id:${l.trader_id}` : `name:${l.name || ''}`;
         (m[k] = m[k] || []).push(l); return m;
@@ -25841,6 +25874,9 @@ function leBuildReceiptHtml(format, lots, ctx) {
   if (format === 'compact') {
     return leBuildCompactHtml({ groups, co, dateStr, ano, printedAt, paperWidthMm, escapeHtml, isTrade });
   }
+  if (format === 'filing') {
+    return leBuildFilingHtml({ groups, co, dateStr, ano, printedAt, escapeHtml, isTrade });
+  }
   return leBuildDetailedHtml({ groups, co, dateStr, ano, printedAt, traderInfo, paperWidthMm, escapeHtml, isTrade });
 }
 
@@ -25948,6 +25984,101 @@ function leBuildCompactHtml(p) {
     .receipt { box-shadow:none; padding:0 }
   }
 </style></head><body>${sections}</body></html>`;
+}
+
+// ── Filing copy: many receipts packed onto A4 ───────────────────
+// Office-filing layout — the SAME per-seller receipt content as the
+// compact slip, but flowed into multiple columns on A4 so a whole
+// trade's receipts fit in a few sheets instead of one page each.
+// CSS multi-column (column-count) packs variable-height cards tightly;
+// break-inside:avoid keeps each seller's card whole. A run-once sheet
+// header (column-span:all) carries the company + trade + date so the
+// individual cards stay minimal.
+function leBuildFilingHtml(p) {
+  const { groups, co, dateStr, ano, printedAt, escapeHtml, isTrade } = p;
+  const { nickname, gstin } = co;
+  // Columns per A4 sheet. 3 is the density that keeps ~9px text legible
+  // while fitting a typical trade's sellers onto 3-5 sheets.
+  const COLS = 3;
+
+  const cards = groups.map(g => {
+    const rows = g.lots.map((l, i) => {
+      const wt = Number(l.qty || 0).toFixed(3);
+      return `<tr>
+        <td class="c">${i + 1}</td>
+        <td>${escapeHtml(l.lot_no || '')}</td>
+        <td class="r">${escapeHtml(String(l.bags || 0))}</td>
+        <td class="r">${wt}</td>
+      </tr>`;
+    }).join('');
+    const totalQty    = g.lots.reduce((s, l) => s + (Number(l.qty)        || 0), 0);
+    const totalBags   = g.lots.reduce((s, l) => s + (parseInt(l.bags, 10) || 0), 0);
+    const totalSample = g.lots.reduce((s, l) => s + (Number(l.sample_wt)  || 0), 0);
+    const totalGross  = g.lots.reduce((s, l) => s + (Number(l.gross_wt)   || 0), 0);
+    const sampleLine = (isTrade && totalSample > 0)
+      ? `<div class="xtra">Sample: <b>${totalSample.toFixed(3)} kg</b></div>` : '';
+    const grossLine = (isTrade && totalGross > 0)
+      ? `<div class="xtra">Gross: <b>${totalGross.toFixed(3)} kg</b></div>` : '';
+    return `<div class="card">
+      <div class="nm">${escapeHtml(g.name || '—')}</div>
+      ${g.branch ? `<div class="br">${escapeHtml(String(g.branch).toUpperCase())}</div>` : ''}
+      <table>
+        <thead><tr><th class="c">#</th><th>Lot</th><th class="r">Bags</th><th class="r">Wt(kg)</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="2">Total</td><td class="r">${totalBags}</td><td class="r">${totalQty.toFixed(3)}</td></tr></tfoot>
+      </table>
+      ${sampleLine}${grossLine}
+    </div>`;
+  }).join('');
+
+  const title = isTrade ? 'WEIGHT RECEIPTS — FILING COPY' : 'LOT RECEIPTS — FILING COPY';
+  const metaBits = [
+    `${isTrade ? 'P.No' : 'Trade'}: ${escapeHtml(String(ano))}`,
+    `Date: ${escapeHtml(dateStr)}`,
+    `${groups.length} seller${groups.length === 1 ? '' : 's'}`,
+    `Printed: ${escapeHtml(printedAt)}`,
+  ].join(' &nbsp;·&nbsp; ');
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Lot Receipts — Filing</title>
+<style>
+  @page { size: A4; margin: 8mm }
+  html, body { margin:0; padding:0; background:#eee; font-family: Arial, Helvetica, sans-serif; color:#000 }
+  body { padding:16px }
+  .sheet-hdr { column-span:all; -webkit-column-span:all; text-align:center; border-bottom:1.5px solid #000; padding-bottom:5px; margin-bottom:8px }
+  .sheet-hdr .co { font-weight:700; font-size:15px; letter-spacing:.4px }
+  .sheet-hdr .gst { font-size:10px; margin-top:1px }
+  .sheet-hdr .ttl { font-weight:700; font-size:11px; margin-top:3px }
+  .sheet-hdr .meta { font-size:10px; margin-top:2px; color:#333 }
+  .grid { column-count:${COLS}; column-gap:6mm }
+  .card { break-inside:avoid; -webkit-column-break-inside:avoid; page-break-inside:avoid;
+          border:1px solid #333; border-radius:4px; padding:5px 7px; margin:0 0 6px;
+          background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.12); font-size:9px; display:inline-block; width:100% }
+  .card .nm { font-weight:700; font-size:11px; line-height:1.2 }
+  .card .br { font-size:9px; color:#444; margin-top:1px }
+  .card table { width:100%; border-collapse:collapse; margin-top:4px }
+  .card th { border-bottom:1px solid #000; padding:1px 2px; font-size:8.5px; text-align:left }
+  .card td { padding:1px 2px }
+  .card td.r, .card th.r { text-align:right }
+  .card td.c, .card th.c { text-align:center }
+  .card tfoot td { border-top:1px solid #000; font-weight:700 }
+  .card .xtra { margin-top:2px; text-align:right; font-size:9px }
+  @media print {
+    html, body { background:#fff }
+    body { padding:0 }
+    .card { box-shadow:none }
+  }
+</style></head><body>
+  <div class="grid">
+    <div class="sheet-hdr">
+      <div class="co">${escapeHtml(nickname)}</div>
+      ${gstin ? `<div class="gst">GSTIN: ${escapeHtml(gstin)}</div>` : ''}
+      <div class="ttl">${title}</div>
+      <div class="meta">${metaBits}</div>
+    </div>
+    ${cards}
+  </div>
+</body></html>`;
 }
 
 // ── Detailed A4 receipt ─────────────────────────────────────────
