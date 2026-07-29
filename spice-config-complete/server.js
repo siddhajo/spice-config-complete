@@ -7407,6 +7407,72 @@ app.get('/api/invoices/purchase-pdf/:id', requireView, async (req, res) => {
   }
 });
 
+// Export selected Sales Invoices as an Excel (.xlsx) or a tabular PDF —
+// a compact summary (one row per invoice: Sale type, Inv no, Trade name,
+// GSTIN, Bags, Qty, Bill amount) with grand totals. This is the list-style
+// export (NOT the per-invoice document PDF that pdf-bulk produces).
+// Body: { ids:[...], format:'xlsx'|'pdf' }.
+app.post('/api/invoices/export-selected', requireExport, async (req, res) => {
+  try {
+    const { createExcelBuffer } = require('./exports');
+    const { renderTablePdf } = require('./exports-pdf');
+    const { getCompanyHeader } = require('./report-formatters');
+    const db = getDb();
+    const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : [])
+      .map(n => Number(n)).filter(Number.isFinite);
+    if (!ids.length) return res.status(400).json({ error: 'No invoices selected' });
+    const format = String(req.body.format || 'xlsx').toLowerCase();
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = db.all(
+      `SELECT sale, invo, buyer1, gstin, bag, qty, tot
+         FROM invoices WHERE id IN (${placeholders})
+        ORDER BY sale, invo`, ids);
+    if (!rows.length) return res.status(404).json({ error: 'No matching invoices found' });
+
+    const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+
+    if (format === 'pdf') {
+      const columns = [
+        { header: 'SALE',        key: 'sale',   width: 8  },
+        { header: 'INVO',        key: 'invo',   width: 10 },
+        { header: 'TRADE NAME',  key: 'buyer1', width: 30 },
+        { header: 'GSTIN',       key: 'gstin',  width: 18 },
+        { header: 'BAGS',        key: 'bag',    width: 8  },
+        { header: 'QTY',         key: 'qty',    width: 12 },
+        { header: 'BILL AMOUNT', key: 'tot',    width: 16 },
+      ];
+      const totals = { sale: 'TOTAL', bag: sum('bag'), qty: sum('qty'), tot: sum('tot') };
+      const buffer = await renderTablePdf({
+        title: 'Sales Invoices',
+        subtitle: `${rows.length} invoice(s)`,
+        columns, rows, totals,
+        companyHeader: getCompanyHeader(db),
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="SalesInvoices.pdf"');
+      return res.send(buffer);
+    }
+
+    const cols = [
+      { header: 'SALE TYPE',   key: 'sale',   width: 10 },
+      { header: 'INV NO',      key: 'invo',   width: 12 },
+      { header: 'TRADE NAME',  key: 'buyer1', width: 32 },
+      { header: 'GSTIN',       key: 'gstin',  width: 20 },
+      { header: 'BAGS',        key: 'bag',    width: 8  },
+      { header: 'QTY',         key: 'qty',    width: 12, numFmt: '#,##0.000' },
+      { header: 'BILL AMOUNT', key: 'tot',    width: 16, numFmt: '#,##0.00'  },
+    ];
+    const buffer = await createExcelBuffer('SalesInvoices', cols, rows, {
+      db, title: 'Sales Invoices',
+      grandTotal: { label: 'TOTAL', values: { bag: sum('bag'), qty: sum('qty'), tot: sum('tot') } },
+    });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="SalesInvoices.xlsx"');
+    res.send(Buffer.from(buffer));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Bulk Sales Invoice PDF — merges N invoices into a single PDF
 // Body: { ids: [1, 2, 3, ...] }
 // Returns: one PDF with each invoice on fresh page(s), in the order given.
@@ -9885,8 +9951,14 @@ app.get('/api/invoices/preview-all/:auctionId', requireView, (req, res) => {
     }
 
     // Decide which buyers to fully build a preview for.
+    // Match on the TRIMMED code both sides: `buyerParam` is already trimmed
+    // above, but `b.code` is the raw `lots.buyer` value — if that carries any
+    // stray leading/trailing whitespace, an exact `===` misses, so selecting
+    // that one buyer shows nothing while "View all" (which skips this filter)
+    // still builds it. Keep the original `b.code` for the build so the lot
+    // lookup — which queries the untrimmed value — keeps matching.
     const toBuild = buyerParam
-      ? buyers.filter(b => b.code === buyerParam)
+      ? buyers.filter(b => String(b.code).trim() === buyerParam)
       : (wantAll ? buyers : []);
 
     const previews = [];

@@ -1404,4 +1404,4 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   });
 }
 
-module.exports = { exportPdf, TITLES, COLS };
+module.exports = { exportPdf, renderTablePdf, TITLES, COLS };

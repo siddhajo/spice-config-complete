@@ -1643,6 +1643,7 @@ async function exportIndividualRegister(db, kind, opts = {}) {
 
 module.exports = {
   EXPORT_TYPES,
+  createExcelBuffer,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
   exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentNew, exportBankPaymentBefore,
   exportPoolerRegister, exportPoolerListConsolidated, exportPoolerListConsolidatedBefore,

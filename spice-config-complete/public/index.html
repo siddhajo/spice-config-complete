@@ -3800,6 +3800,11 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <!-- Print group -->
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="btn" style="height:38px;padding:0 16px;background:var(--spice-saffron);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(16,185,129,.28)" onclick="printSelectedInvoices()" title="Print all ticked invoices">🖨 Print Selected</button>
+            <!-- Export the ticked invoices as a summary list (one row per
+                 invoice) — Excel or a tabular PDF. Distinct from Print Selected,
+                 which merges the full per-invoice documents. -->
+            <button class="needs-export btn" style="height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedInvoices('xlsx')" title="Export ticked invoices to Excel (Sale type, Inv no, Trade name, GSTIN, Bags, Qty, Bill amount)">📊 Export Excel</button>
+            <button class="needs-export btn" style="height:38px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="exportSelectedInvoices('pdf')" title="Export ticked invoices as a summary-list PDF (Sale type, Inv no, Trade name, GSTIN, Bags, Qty, Bill amount)">📄 Export PDF</button>
             <!-- ASP-only: Print Selected Purchase. Hidden outside ASP context.
                  Visibility toggled by applyAspContextVisibility() at load + state switch. -->
             <button id="btn-print-asp-purchase" class="btn" style="display:none;height:38px;padding:0 16px;background:var(--spice-cardamom);color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(22,101,52,.22)" onclick="printSelectedPurchaseFromInvoices()" title="Print purchase-side mirror PDF for all ticked invoices (ASP context only)">🖨 Print Selected Purchase</button>
@@ -17925,6 +17930,30 @@ async function printSelectedInvoices(){
     `Invoices_Batch_${ids.length}.pdf`,
     { ids, dispatchedThrough }
   );
+}
+
+// Export the ticked invoices as a summary list — Excel (xlsx) or a tabular
+// PDF (one row per invoice + grand totals). Distinct from Print Selected,
+// which merges the full per-invoice document PDFs. Streams a file download.
+async function exportSelectedInvoices(format){
+  const body=document.getElementById('invoices-list');
+  if(!body){alert('No invoice list found');return}
+  const checked=Array.from(body.querySelectorAll('.inv-select-cb:checked'));
+  if(!checked.length){alert('Tick one or more invoices first (use the checkbox column)');return}
+  const ids=checked.map(cb=>Number(cb.value)).filter(Boolean);
+  const name = 'SalesInvoices.' + (format === 'pdf' ? 'pdf' : 'xlsx');
+  await withOverlay(`Exporting ${ids.length} invoice(s) (${(format||'xlsx').toUpperCase()})…`, async () => {
+    const r = await fetch(B + '/api/invoices/export-selected', {
+      method:'POST',
+      headers:{ 'Authorization':'Bearer '+T, 'Content-Type':'application/json' },
+      body: JSON.stringify({ ids, format: format || 'xlsx' })
+    });
+    if (!r.ok) { let m='Export failed'; try { const e=await r.json(); if(e.error) m=e.error; } catch(x){} toast(m); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  });
 }
 
 // ASP-only: Print purchase-view (ISPL-side mirror) PDFs for ticked sales
