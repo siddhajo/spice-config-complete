@@ -46,6 +46,9 @@ const {
   buildSalesPartyLedgerRows, buildRDPartyLedgerRows, buildURDPartyLedgerRows,
   listAuctionParties,
 } = require('./tally-xml');
+// Trade-fair sync client (tradefair.intelloinsights.com) — pulls auction
+// history + per-auction price-list .xlsx, fed through runLotImport.
+const tradeFair = require('./trade-fair');
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -4311,32 +4314,76 @@ app.get('/api/auctions/:id/next-lot/:branch', requireViewOrLotEntry, (req, res) 
 });
 
 // ── Import Auction + Lots from XLS/XLSX (replaces APPA.PRG) ──
-app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), requireLotsValidatedForPriceImport, async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  try {
-    const workbook = XLSX.readFile(req.file.path);
+// Core lot/price import — shared by the manual upload route
+// (/api/auctions/import) and the Trade Fair sync (/api/trade-fair/import).
+// Reads the .xls/.xlsx at `filePath`, applies mode 'full' (insert new lots)
+// or 'price' (update price/qty/code/buyer on existing lots), and returns the
+// summary object. Does NOT delete the file or touch any HTTP response —
+// callers own those.
+function runLotImport(db, filePath, body) {
+    body = body || {};
+    const workbook = XLSX.readFile(filePath);
     const ws = workbook.Sheets[workbook.SheetNames[0]];
     if (!ws) throw new Error('No worksheet found');
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    // Repair a too-narrow declared range. The trade-fair price-list export
+    // ships a bogus `!ref` (e.g. "A1:F206") that under-reports its width,
+    // even though real data runs out to column J — SheetJS trusts `!ref`
+    // and silently drops every column past F (RATE, buyer, seller...).
+    // Recompute the true bounding box from the actual cell addresses so
+    // every populated column is parsed. Harmless for well-formed files.
+    {
+      let maxC = -1, maxR = -1;
+      for (const k of Object.keys(ws)) {
+        if (k[0] === '!') continue;
+        const a = XLSX.utils.decode_cell(k);
+        if (a.c > maxC) maxC = a.c;
+        if (a.r > maxR) maxR = a.r;
+      }
+      if (maxC >= 0 && maxR >= 0) {
+        ws['!ref'] = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: maxC, r: maxR } });
+      }
+    }
+
+    // Header normaliser: trim, uppercase, collapse runs of spaces /
+    // underscores / dashes to a single space. So "LOT NO", "Lot_No",
+    // "LOT  NO " and "lot-no" all hash to "LOT NO" — header matching is
+    // tolerant of the cosmetic differences between export formats.
+    const normKey = (s) => String(s == null ? '' : s).trim().toUpperCase().replace(/[\s_\-]+/g, ' ');
+
+    // Some exports (notably the trade-fair price list) prepend title /
+    // banner rows above the real column header. sheet_to_json otherwise
+    // treats row 1 as the header → every row looks like it has no LOT.
+    // Scan the first 20 rows for the one carrying a LOT-like column and
+    // parse from there. Falls back to row 1 (the common case) when none
+    // matches, so existing files behave exactly as before.
+    const LOT_HEADERS = new Set(['LOT', 'LOT NO', 'LOTNO', 'LOT NUMBER']);
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    let headerRowIdx = 0;
+    for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+      if ((aoa[i] || []).some(c => LOT_HEADERS.has(normKey(c)))) { headerRowIdx = i; break; }
+    }
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', range: headerRowIdx });
     if (!rows.length) throw new Error('File is empty');
 
-    const db = getDb();
     // This import always creates/attaches auctions, so it must run under a
     // definite business mode — otherwise the new auctions are tagged blank
-    // and leak into BOTH e-Trade and e-Auction views. (The catch below
-    // unlinks the upload and returns this message as a 400.)
+    // and leak into BOTH e-Trade and e-Auction views. (Callers surface this
+    // as a 400.)
     if (!currentBusinessMode(db)) {
       throw new Error('Select a business mode (e-Trade or e-Auction) in Settings before importing. '
         + 'Imported auctions and lots are tagged with the mode that is active at import time.');
     }
-    const mode = req.body.mode || 'full'; // 'full' = new lots, 'price' = update price/buyer only
+    const mode = body.mode || 'full'; // 'full' = new lots, 'price' = update price/buyer only
 
+    // Match a column by any of the given synonyms, tolerant of spacing /
+    // underscore / dash / case differences (via normKey). So "RATE PER Kg"
+    // resolves the same as a literal "PRICE" synonym.
     const mapCol = (row, ...names) => {
       for (const n of names) { if (row[n] !== undefined) return String(row[n]).trim(); }
-      const keys = Object.keys(row);
-      for (const n of names) {
-        const found = keys.find(k => k.toUpperCase() === n.toUpperCase());
-        if (found && row[found] !== undefined) return String(row[found]).trim();
+      const want = names.map(normKey);
+      for (const k of Object.keys(row)) {
+        if (want.includes(normKey(k))) return row[k] !== undefined ? String(row[k]).trim() : '';
       }
       return '';
     };
@@ -4350,13 +4397,20 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
       if (!isFinite(v)) return 0;
       return (v < 0 ? -1 : 1) * Math.round(Math.abs(v) * 100) / 100;
     };
+    // Does the row have ANY of these columns (by normalised header)? Used by
+    // price-update mode to decide whether to touch a field, so synonyms like
+    // "RATE PER Kg" trigger an update the same way a literal "PRICE" does.
+    const hasCol = (row, ...names) => {
+      const want = names.map(normKey);
+      return Object.keys(row).some(k => want.includes(normKey(k))) || names.some(n => row[n] !== undefined);
+    };
 
     // If user specified ano/date in the form → that OVERRIDES every row (single-auction import)
     // Otherwise → resolve auction per row from its own ANO/DATE columns (multi-auction import)
-    const overrideAno = req.body.ano;
-    const overrideDate = normalizeDate(req.body.date);
-    const cropType = req.body.crop_type || mapCol(rows[0], 'CRPT', 'CROP_TYPE', 'CROPTYPE') || 'ASP';
-    const state = req.body.state || mapCol(rows[0], 'STATE') || 'TAMIL NADU';
+    const overrideAno = body.ano;
+    const overrideDate = normalizeDate(body.date);
+    const cropType = body.crop_type || mapCol(rows[0], 'CRPT', 'CROP_TYPE', 'CROPTYPE') || 'ASP';
+    const state = body.state || mapCol(rows[0], 'STATE') || 'TAMIL NADU';
 
     // Cache of resolved auctions so we don't query the DB for every row
     const auctionCache = new Map(); // key = "ano|date" → {id, ano, date}
@@ -4387,6 +4441,26 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
       }
       auctionCache.set(key, auc);
       return auc;
+    };
+
+    // Per-auction lot index keyed by NORMALISED lot number, so a price file
+    // that lists lots as 1,2,3 matches lots stored zero-padded as 001,002,003
+    // (and vice-versa) — see parseLotNo. Without this, the exact-string lookup
+    // silently skips every trade-fair price row. Lots with an alpha prefix
+    // (e.g. A001) match on prefix+number too.
+    const normLotKey = (v) => {
+      const p = parseLotNo(v);
+      return p ? `${p.prefix}|${p.num}` : String(v == null ? '' : v).trim().toUpperCase();
+    };
+    const lotIdxCache = new Map(); // auctionId → Map(normLotKey → {id, lot_no})
+    const getLotIdx = (auctionId) => {
+      if (lotIdxCache.has(auctionId)) return lotIdxCache.get(auctionId);
+      const idx = new Map();
+      for (const l of db.all('SELECT id, lot_no FROM lots WHERE auction_id = ?', [auctionId])) {
+        idx.set(normLotKey(l.lot_no), l);
+      }
+      lotIdxCache.set(auctionId, idx);
+      return idx;
     };
 
     // Pre-validate: if no form override AND no ANO column anywhere, bail early with a clear message
@@ -4424,16 +4498,18 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
         const auc = resolveAuction(rowAno, rowDate);
         const auctionId = auc.id;
         
-        const lotNo = mapCol(row, 'LOT', 'LOT_NO', 'LOTNO');
+        const lotNo = mapCol(row, 'LOT', 'LOT_NO', 'LOTNO', 'LOT NO', 'LOT NUMBER');
         if (!lotNo) { skipped++; skipReasons.push({row: rowNum, lot: '', reason: 'Missing LOT / LOT_NO column value'}); continue; }
-        
-        // (price mode continues below in original code)
-        const existing = db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [auctionId, lotNo]);
+
+        // Match against the existing lot by normalised lot number, so
+        // 1/01/001 all resolve to the same stored lot (price files often drop
+        // the zero-padding the app stores).
+        const existing = getLotIdx(auctionId).get(normLotKey(lotNo));
         if (!existing) { skipped++; skipReasons.push({row: rowNum, lot: lotNo, reason: `Lot ${lotNo} does not exist in Trade ${rowAno} (price-update requires existing lot)`}); continue; }
 
         try {
           // Parse each field from the row using generous synonyms so different XLSX layouts work
-          const price = mapNum(row, 'PRICE');
+          const price = mapNum(row, 'PRICE', 'RATE PER KG', 'RATE');
           const qty   = mapNum(row, 'QTY', 'QUANTITY', 'WEIGHT', 'WT');
           const bag   = mapNum(row, 'BAG', 'BAGS', 'NO_OF_BAGS');
           // If file didn't provide AMOUNT, compute qty × price (common in post-auction price sheets)
@@ -4443,18 +4519,21 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
           // Build UPDATE dynamically — only touch fields the file provided, so a sparse "price-only"
           // file doesn't wipe pre-existing bag/qty/buyer values
           const sets = []; const vals = [];
-          if (row.PRICE !== undefined || row.price !== undefined) { sets.push('price=?');  vals.push(price); }
-          if (amount)                                              { sets.push('amount=?'); vals.push(amount); }
-          if (row.QTY !== undefined || row.qty !== undefined)      { sets.push('qty=?');    vals.push(qty); }
-          if (row.BAG !== undefined || row.bag !== undefined ||
-              row.BAGS !== undefined || row.bags !== undefined)    { sets.push('bags=?');   vals.push(bag); }
+          if (price)                                       { sets.push('price=?');  vals.push(price); }
+          if (amount)                                      { sets.push('amount=?'); vals.push(amount); }
+          if (hasCol(row, 'QTY', 'QUANTITY', 'WEIGHT', 'WT')) { sets.push('qty=?'); vals.push(qty); }
+          if (hasCol(row, 'BAG', 'BAGS', 'NO_OF_BAGS'))       { sets.push('bags=?'); vals.push(bag); }
           const codeVal  = mapCol(row, 'CODE', 'BUYER_CODE');
           if (codeVal)                                             { sets.push('code=?');   vals.push(codeVal); }
 
           // Auto-resolve short CODE (e.g. RSH, TE, SL) to the full buyer record.
           // Priority: explicit BUYER/BIDDER column in file → matching buyers.code → matching buyers.ti → matching buyers.buyer
-          let resolvedBuyer  = mapCol(row, 'BUYER', 'BIDDER', 'BUYER_NAME');
-          let resolvedBuyer1 = mapCol(row, 'BUYER1', 'TRADE_NAME', 'TRADENAME');
+          // NOTE: buyer = the CODE/join key; buyer1 = the human trade name. A
+          // "NAME OF BUYER" / "BUYER NAME" column is a trade NAME, so it maps
+          // to buyer1 — never into the code field (buyer). The name→code
+          // resolution happens later via the Resolve Buyers step.
+          let resolvedBuyer  = mapCol(row, 'BUYER', 'BIDDER');
+          let resolvedBuyer1 = mapCol(row, 'BUYER1', 'TRADE_NAME', 'TRADENAME', 'BUYER_NAME', 'NAME OF BUYER');
           let resolvedSale   = mapCol(row, 'SALE', 'SALE_TYPE');
 
           if (codeVal && (!resolvedBuyer || !resolvedBuyer1)) {
@@ -4515,7 +4594,7 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
         const auc = resolveAuction(rowAno, rowDate);
         const auctionId = auc.id;
         
-        const lotNo = mapCol(row, 'LOT', 'LOT_NO', 'LOTNO');
+        const lotNo = mapCol(row, 'LOT', 'LOT_NO', 'LOTNO', 'LOT NO', 'LOT NUMBER');
         if (!lotNo) { skipped++; skipReasons.push({row: rowNum, lot: '', reason: 'Missing LOT / LOT_NO column value'}); continue; }
 
         const existing = db.get('SELECT id FROM lots WHERE auction_id = ? AND lot_no = ?', [auctionId, lotNo]);
@@ -4555,11 +4634,11 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
              mapNum(row, 'BAG', 'BAGS'),
              mapCol(row, 'LITRE', 'LITRE_WT'),
              mapNum(row, 'QTY', 'QUANTITY', 'NET_QTY'),
-             mapNum(row, 'PRICE', 'RATE'),
+             mapNum(row, 'PRICE', 'RATE', 'RATE PER KG'),
              mapNum(row, 'AMOUNT'),
              mapCol(row, 'CODE', 'BUYER_CODE'),
              mapCol(row, 'BUYER', 'BIDDER'),
-             mapCol(row, 'BUYER1', 'TRADE_NAME', 'TRADENAME'),
+             mapCol(row, 'BUYER1', 'TRADE_NAME', 'TRADENAME', 'BUYER_NAME', 'NAME OF BUYER'),
              mapCol(row, 'SALE', 'SALE_TYPE'),
              mapCol(row, 'INVO', 'INVOICE'),
              mapNum(row, 'PQTY', 'PUR_QTY'),
@@ -4593,18 +4672,457 @@ app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), req
     }
     auctionBreakdown.sort((a,b) => String(a.ano).localeCompare(String(b.ano), undefined, {numeric:true}));
 
-    fs.unlink(req.file.path, () => {});
-    res.json({ 
-      success: true, 
+    return {
+      success: true,
       imported, updated, skipped, total: rows.length,
       auctionCount: auctionBreakdown.length,
       auctionBreakdown,
-      skipReasons 
-    });
+      skipReasons,
+      // Actual header names parsed from the sheet — surfaced so a column that
+      // didn't map (price/buyer named differently than expected) is
+      // diagnosable from the UI without re-opening the file.
+      columns: Object.keys(rows[0] || {}),
+    };
+}
+
+// Manual price/lot import from an uploaded .xls/.xlsx file.
+app.post('/api/auctions/import', requireAuctionWrite, upload.single('file'), requireLotsValidatedForPriceImport, (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const result = runLotImport(getDb(), req.file.path, req.body);
+    fs.unlink(req.file.path, () => {});
+    res.json(result);
   } catch (e) {
     if (req.file) fs.unlink(req.file.path, () => {});
     res.status(400).json({ error: e.message });
   }
+});
+
+// ══════════════════════════════════════════════════════════════
+// TRADE FAIR SYNC (tradefair.intelloinsights.com)
+// ──────────────────────────────────────────────────────────────
+// Pull auction history + per-auction price-list .xlsx from the
+// trade-fair site (using a pasted _kcpmc_rails_session cookie, or an
+// in-app mobile+OTP login) and feed the price list straight through the
+// SAME import pipeline a manual upload uses (runLotImport, mode='price').
+// Config + secret cookie live in the trade_fair_config table; see
+// trade-fair.js for the client.
+// ══════════════════════════════════════════════════════════════
+
+// Resolve effective trade-fair config: process.env wins over the DB row
+// (lets a hosted deploy set TRADEFAIR_* vars; desktop pastes into the
+// Settings card). Returns the cookie too — callers keep it server-side and
+// never echo it to the browser.
+function _tfConfig(db) {
+  let row = {};
+  try { row = db.get('SELECT * FROM trade_fair_config WHERE id = 1') || {}; } catch (_) { row = {}; }
+  const envv = (k) => (process.env[k] && String(process.env[k]).trim()) || '';
+  const dbv  = (c) => (row[c] != null && String(row[c]).trim()) || '';
+  const pick = (k, c, dflt) => envv(k) || dbv(c) || (dflt || '');
+  const sessionCookie = pick('TRADEFAIR_COOKIE', 'session_cookie', '');
+  return {
+    baseUrl:     pick('TRADEFAIR_BASE_URL',     'base_url',     'https://tradefair.intelloinsights.com'),
+    historyPath: pick('TRADEFAIR_HISTORY_PATH', 'history_path', '/spices/admin/get_trade_fair_history'),
+    pricePath:   pick('TRADEFAIR_PRICE_PATH',   'price_path',   '/spices/reports/download_price_list_report_excel/'),
+    idField:     pick('TRADEFAIR_ID_FIELD',     'id_field',     'trade_session_id'),
+    priceParam:  pick('TRADEFAIR_PRICE_PARAM',  'price_param',  'auction_id'),
+    cookieName:  dbv('cookie_name') || '_kcpmc_rails_session',
+    sessionCookie,
+    enabled:     row.enabled == null ? 1 : Number(row.enabled),
+    cookieUpdatedAt: dbv('cookie_updated_at'),
+    updatedAt:   dbv('updated_at'),
+    cookieFromEnv: !!envv('TRADEFAIR_COOKIE'),
+    configured:  !!sessionCookie,
+  };
+}
+
+// Read the (possibly nested) id value used for the price-list download from
+// a history row, honouring the configured id_field with sensible fallbacks.
+function _tfRowId(cfg, r) {
+  let v = r[cfg.idField];
+  if (v == null) v = r.auction_id != null ? r.auction_id : r.trade_session_id;
+  if (v != null && typeof v === 'object') v = (v.id != null ? v.id : v.value);
+  return v == null ? '' : v;
+}
+
+// Non-secret status for the Settings card. NEVER returns the cookie — only
+// whether one is saved + when.
+app.get('/api/trade-fair/status', requireView, (req, res) => {
+  const cfg = _tfConfig(getDb());
+  res.json({
+    configured:      cfg.configured,
+    enabled:         !!cfg.enabled,
+    baseUrl:         cfg.baseUrl,
+    historyPath:     cfg.historyPath,
+    pricePath:       cfg.pricePath,
+    idField:         cfg.idField,
+    priceParam:      cfg.priceParam,
+    cookieName:      cfg.cookieName,
+    hasCookie:       cfg.configured,
+    cookieFromEnv:   cfg.cookieFromEnv,
+    cookieUpdatedAt: cfg.cookieUpdatedAt || null,
+    source:          cfg.cookieFromEnv ? 'env' : (cfg.configured ? 'db' : 'none'),
+  });
+});
+
+// Upsert trade-fair config. The session cookie is write-only: a blank/absent
+// value leaves the stored cookie UNCHANGED (so saving paths doesn't wipe it).
+// Saving a new cookie stamps cookie_updated_at.
+app.put('/api/trade-fair/config', requireSettingsWrite, (req, res) => {
+  const db = getDb();
+  const b = req.body || {};
+  const sets = [], vals = [];
+  const put = (col, val) => { sets.push(`${col} = ?`); vals.push(val); };
+  const putField = (col, val) => { if (val !== undefined) put(col, String(val).trim()); };
+  putField('base_url', b.baseUrl);
+  putField('history_path', b.historyPath);
+  putField('price_path', b.pricePath);
+  putField('id_field', b.idField);
+  putField('price_param', b.priceParam);
+  putField('cookie_name', b.cookieName);
+  if (b.enabled !== undefined) put('enabled', b.enabled ? 1 : 0);
+  // Secret cookie — only overwrite when a non-blank value is supplied.
+  if (typeof b.sessionCookie === 'string' && b.sessionCookie.trim()) {
+    put('session_cookie', b.sessionCookie.trim());
+    put('cookie_updated_at', new Date().toISOString());
+  } else if (b.clearCookie) {
+    put('session_cookie', '');
+    put('cookie_updated_at', '');
+  }
+  if (!sets.length) return res.json({ ok: true, updated: 0 });
+  try {
+    db.run(`UPDATE trade_fair_config SET ${sets.join(', ')}, updated_at = datetime('now','localtime') WHERE id = 1`, vals);
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, updated: sets.length });
+});
+
+// ── In-app OTP login ──────────────────────────────────────────
+// Two-step: /otp/send requests an OTP to the mobile and stashes the pre-auth
+// session+csrf here; /otp/verify submits the OTP, captures the AUTHENTICATED
+// cookie, and saves it as the trade-fair session — so the operator never has
+// to paste a cookie. Pending logins live in memory, keyed by mobile, and
+// expire after 10 minutes.
+const _tfPendingOtp = new Map();
+function _tfSweepPending() {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [k, v] of _tfPendingOtp) if (!v || v.at < cutoff) _tfPendingOtp.delete(k);
+}
+app.post('/api/trade-fair/otp/send', requireSettingsWrite, async (req, res) => {
+  const cfg = _tfConfig(getDb());
+  const mobile = String((req.body && req.body.mobile) || '').replace(/\D/g, '');
+  try {
+    _tfSweepPending();
+    const { session, csrf, otpExpiresAt } = await tradeFair.loginSendOtp(cfg, mobile);
+    _tfPendingOtp.set(mobile, { session, csrf, at: Date.now() });
+    res.json({ ok: true, otpExpiresAt });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+app.post('/api/trade-fair/otp/verify', requireSettingsWrite, async (req, res) => {
+  const db = getDb();
+  const cfg = _tfConfig(db);
+  const mobile = String((req.body && req.body.mobile) || '').replace(/\D/g, '');
+  const otp = String((req.body && req.body.otp) || '').trim();
+  const pending = _tfPendingOtp.get(mobile);
+  if (!pending) return res.status(400).json({ error: 'Send an OTP first — no pending login for this mobile number (or it expired).' });
+  try {
+    const { sessionCookie } = await tradeFair.loginVerifyOtp(cfg, mobile, otp, pending.session, pending.csrf);
+    if (!sessionCookie) throw new Error('Login succeeded but no session cookie came back.');
+    db.run(
+      `UPDATE trade_fair_config SET session_cookie = ?, cookie_updated_at = ?, updated_at = datetime('now','localtime') WHERE id = 1`,
+      [sessionCookie, new Date().toISOString()]
+    );
+    _tfPendingOtp.delete(mobile);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// List recent trade-fair auctions/sessions (newest first). Doubles as the
+// "test connection" probe — a bad/expired cookie surfaces here as a clear
+// session-expired error.
+app.get('/api/trade-fair/history', requireAuctionWrite, async (req, res) => {
+  const cfg = _tfConfig(getDb());
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 1000);
+  const search = req.query.search ? String(req.query.search) : '';
+  try {
+    const { rows, total } = await tradeFair.fetchHistory(cfg, { limit, search });
+    const auctions = rows.map(r => ({
+      idValue:        _tfRowId(cfg, r),
+      ano:            r.auction_number != null ? String(r.auction_number) : '',
+      sbAuction:      r.sb_auction_number || '',
+      date:           r.auction_date || '',
+      tradeType:      r.trade_type || '',
+      status:         r.trade_session_status || '',
+      lotCount:       r.auction_lot_count,
+      lotQty:         r.auction_lot_qty,
+      sellQty:        r.trade_session_sell_qty,
+      auctionId:      r.auction_id,
+      tradeSessionId: r.trade_session_id,
+    }));
+    res.json({ ok: true, total, count: auctions.length, idField: cfg.idField, priceParam: cfg.priceParam, auctions });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Download one auction's raw price-list .xlsx for inspection / manual import
+// — handy when the auto-import column mapping needs checking.
+app.get('/api/trade-fair/price-list', requireAuctionWrite, async (req, res) => {
+  const cfg = _tfConfig(getDb());
+  const idValue = req.query.id || req.query.idValue;
+  if (!idValue) return res.status(400).json({ error: 'Missing ?id= (the auction/session id)' });
+  try {
+    const { buffer, ext } = await tradeFair.downloadPriceList(cfg, idValue);
+    const name = `tradefair-price-${String(idValue).replace(/[^A-Za-z0-9._-]+/g, '')}${ext}`;
+    res.setHeader('Content-Type', ext === '.xls'
+      ? 'application/vnd.ms-excel'
+      : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.send(buffer);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Download a trade-fair auction's price list and run it through the
+// price-import pipeline (mode='price' by default). The operator maps the
+// trade-fair auction (idValue) onto an app trade (ano + date), which override
+// every row so prices land on the right lots. Respects the same
+// lot-validation gate as the manual upload.
+app.post('/api/trade-fair/import', requireAuctionWrite, async (req, res) => {
+  const db = getDb();
+  const cfg = _tfConfig(db);
+  const b = req.body || {};
+  const idValue = b.idValue != null ? b.idValue : b.id;
+  if (idValue == null || idValue === '') return res.status(400).json({ error: 'Missing idValue (the trade-fair auction/session id).' });
+
+  // Build the import body. Default to 'price' (update existing lots) — that's
+  // the post-auction price sync the trade-fair sheet is for.
+  const importBody = {
+    mode: b.mode === 'full' ? 'full' : 'price',
+    ano: b.ano != null ? String(b.ano).trim() : '',
+    date: b.date || '',
+    crop_type: b.crop_type,
+    state: b.state,
+  };
+
+  // The trade-fair auction number is NOT the app trade number, so the
+  // reliable mapping is the app trade's own id (picked from a dropdown in the
+  // UI). Resolve it to ano+date so runLotImport targets exactly that trade —
+  // and so the gate keys off the right auction.
+  if (b.auction_id) {
+    const auc = db.get('SELECT id, ano, date FROM auctions WHERE id = ?', [parseInt(b.auction_id, 10)]);
+    if (!auc) return res.status(404).json({ error: 'The selected app trade was not found.' });
+    importBody.auction_id = auc.id;
+    importBody.ano = String(auc.ano);
+    importBody.date = auc.date;
+  }
+  if (!importBody.ano) return res.status(400).json({ error: 'Pick which app trade to import these prices onto.' });
+
+  // Same lot-validation gate the manual upload enforces.
+  const block = lotValidationGateBlock(db, importBody);
+  if (block) return res.status(block.status).json(block.body);
+
+  let tmpPath = null;
+  try {
+    const { buffer, ext } = await tradeFair.downloadPriceList(cfg, idValue);
+    try { fs.mkdirSync(uploadDir, { recursive: true }); } catch (_) {}
+    tmpPath = path.join(uploadDir, 'tf-' + crypto.randomBytes(6).toString('hex') + ext);
+    fs.writeFileSync(tmpPath, buffer);
+    const result = runLotImport(db, tmpPath, importBody);
+    res.json({ ...result, source: 'trade-fair', idValue });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    if (tmpPath) fs.unlink(tmpPath, () => {});
+  }
+});
+
+// ── RESOLVE BUYERS (name → code) ──────────────────────────────
+// After a trade-fair price import, lots carry a buyer trade NAME in `buyer1`
+// but no CODE in `buyer` (buyer is the invoice join key). This resolves those
+// names against the Buyers master: each distinct unresolved name is matched
+// (1) / ambiguous (many) / unmatched (0). Unmatched names are left as-is.
+
+// Index the Buyers master by TRADE NAME (buyer1) ONLY. Resolve Buyers matches
+// the trade-fair buyer NAME against the buyers-master trade name, not the code
+// field. Case/whitespace-insensitive. Value = array of candidate buyers.
+function _buildBuyerNameIndex(db) {
+  const buyers = db.all('SELECT id, buyer, buyer1, code, ti, sale, gstin FROM buyers');
+  const idx = new Map();
+  for (const b of buyers) {
+    const k = String(b.buyer1 == null ? '' : b.buyer1).trim().toUpperCase();
+    if (!k) continue;
+    if (!idx.has(k)) idx.set(k, []);
+    const arr = idx.get(k);
+    if (!arr.some(x => x.id === b.id)) arr.push(b);
+  }
+  return idx;
+}
+
+// A lot is "resolved" when its buyer CODE (lots.buyer) is a real code in the
+// Buyers master. Lots imported from the trade fair carry only a buyer NAME —
+// in buyer1, or (from imports made before the name→buyer1 fix) stuck in the
+// buyer/code field — so their code isn't a valid master code and they need
+// resolving. The name to match on is buyer1 if present, else buyer.
+function _collectUnresolvedBuyers(db, auctionId) {
+  const validCodes = new Set(
+    db.all("SELECT DISTINCT UPPER(TRIM(buyer)) AS c FROM buyers WHERE TRIM(COALESCE(buyer,'')) <> ''").map(r => r.c)
+  );
+  const lots = db.all(
+    "SELECT id, lot_no, TRIM(COALESCE(buyer,'')) AS buyer, TRIM(COALESCE(buyer1,'')) AS buyer1 FROM lots WHERE auction_id = ?",
+    [auctionId]
+  );
+  const unresolved = [];
+  for (const l of lots) {
+    const resolved = l.buyer && validCodes.has(l.buyer.toUpperCase());
+    if (resolved) continue;
+    const name = l.buyer1 || l.buyer;   // prefer the name field
+    if (!name) continue;                // nothing to name-match on
+    unresolved.push({ lotId: l.id, lot_no: l.lot_no, name });
+  }
+  return { unresolved, validCodes };
+}
+
+// Preview: distinct unresolved buyer names on a trade + their matches.
+app.get('/api/auctions/:id/resolve-buyers', requireViewOrLotEntry, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid auction id' });
+  const db = getDb();
+  const auc = db.get('SELECT id, ano, date FROM auctions WHERE id = ?', [id]);
+  if (!auc) return res.status(404).json({ error: 'auction not found' });
+
+  const { unresolved } = _collectUnresolvedBuyers(db, id);
+  const groups = new Map(); // UPPER(name) -> { name, lots, lot_nos }
+  for (const u of unresolved) {
+    const key = u.name.toUpperCase();
+    if (!groups.has(key)) groups.set(key, { name: u.name, lots: 0, lot_nos: [] });
+    const g = groups.get(key);
+    g.lots++;
+    if (u.lot_no != null && String(u.lot_no).trim() !== '') g.lot_nos.push(String(u.lot_no).trim());
+  }
+  const idx = _buildBuyerNameIndex(db);   // match on trade name (buyer1) only
+  const names = Array.from(groups.values())
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(g => {
+      const cands = idx.get(g.name.toUpperCase()) || [];
+      const status = cands.length === 0 ? 'unmatched' : (cands.length === 1 ? 'matched' : 'ambiguous');
+      // Auto-pick: single → that one; ambiguous → first candidate with a
+      // non-blank code (else first).
+      let picked = null;
+      if (cands.length === 1) picked = cands[0];
+      else if (cands.length > 1) picked = cands.find(c => c.code && String(c.code).trim()) || cands[0];
+      return {
+        name: g.name,
+        lots: g.lots,
+        lot_nos: g.lot_nos,
+        status,
+        candidates: cands.map(b => ({ id: b.id, code: b.code, buyer: b.buyer, buyer1: b.buyer1, sale: b.sale, gstin: b.gstin })),
+        pickedBuyerId: picked ? picked.id : null,
+        pickedCode: picked ? (picked.code || '') : '',
+      };
+    });
+  // Lot-wise view (one entry per unresolved lot) — powers the lot-level
+  // picker. Reuses each name's match (status / candidates / auto-pick).
+  const _nameByKey = new Map();
+  names.forEach(n => _nameByKey.set(n.name.toUpperCase(), n));
+  const lots = unresolved.map(u => {
+    const nm = _nameByKey.get(u.name.toUpperCase()) || {};
+    return {
+      lotId: u.lotId,
+      lot_no: u.lot_no,
+      name: u.name,
+      status: nm.status || 'unmatched',
+      candidates: nm.candidates || [],
+      pickedBuyerId: nm.pickedBuyerId || null,
+      pickedCode: nm.pickedCode || '',
+    };
+  });
+  lots.sort((a, b) => {
+    const na = parseInt((String(a.lot_no).match(/\d+/) || ['0'])[0], 10);
+    const nb = parseInt((String(b.lot_no).match(/\d+/) || ['0'])[0], 10);
+    if (na !== nb) return na - nb;
+    return String(a.lot_no).localeCompare(String(b.lot_no));
+  });
+  res.json({
+    auctionId: id, ano: auc.ano, date: auc.date,
+    summary: {
+      names: names.length,
+      matched:   names.filter(n => n.status === 'matched').length,
+      ambiguous: names.filter(n => n.status === 'ambiguous').length,
+      unmatched: names.filter(n => n.status === 'unmatched').length,
+      lotsUnresolved: unresolved.length,
+    },
+    names,
+    lots,
+  });
+});
+
+// Apply picks: body { picks: [{ name, buyerId }] } and/or
+// { lotPicks: [{lotId, buyerId}] }. For each pick, stamp the chosen buyer's
+// code/name/sale onto matching still-unresolved lots on this trade. Picks with
+// no buyerId (unmatched/skipped) are ignored.
+app.post('/api/auctions/:id/resolve-buyers', requireLotWrite, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid auction id' });
+  const db = getDb();
+  const auc = db.get('SELECT id FROM auctions WHERE id = ?', [id]);
+  if (!auc) return res.status(404).json({ error: 'auction not found' });
+  const picks = Array.isArray(req.body && req.body.picks) ? req.body.picks : [];
+
+  const { unresolved } = _collectUnresolvedBuyers(db, id);
+  const idsByName = new Map(); // UPPER(name) -> [lotId,...]
+  for (const u of unresolved) {
+    const key = u.name.toUpperCase();
+    if (!idsByName.has(key)) idsByName.set(key, []);
+    idsByName.get(key).push(u.lotId);
+  }
+
+  let resolvedNames = 0, updatedLots = 0;
+  const skipped = [];
+  for (const p of picks) {
+    const name = String((p && p.name) || '').trim();
+    const buyerId = p && p.buyerId ? parseInt(p.buyerId, 10) : null;
+    if (!name || !buyerId) continue; // unmatched / left blank
+    const b = db.get('SELECT buyer, buyer1, code, sale FROM buyers WHERE id = ?', [buyerId]);
+    if (!b) { skipped.push({ name, reason: 'buyer not found' }); continue; }
+    const ids = idsByName.get(name.toUpperCase()) || [];
+    if (!ids.length) continue;
+    const ph = ids.map(() => '?').join(',');
+    db.run(
+      `UPDATE lots SET buyer = ?, buyer1 = ?, code = ?, sale = ? WHERE id IN (${ph})`,
+      [b.buyer || '', b.buyer1 || '', b.code || '', b.sale || 'L', ...ids]
+    );
+    resolvedNames++;
+    updatedLots += ids.length;
+  }
+  // Lot-level picks (from the lot-wise picker): body { lotPicks: [{lotId, buyerId}] }.
+  // Restricted to this trade's still-unresolved lot ids so a stale/forged id
+  // can't be written.
+  const lotPicks = Array.isArray(req.body && req.body.lotPicks) ? req.body.lotPicks : [];
+  if (lotPicks.length) {
+    const unresolvedIds = new Set(unresolved.map(u => u.lotId));
+    const byBuyer = new Map(); // buyerId -> [lotId,...]
+    for (const lp of lotPicks) {
+      const lotId = lp && lp.lotId ? parseInt(lp.lotId, 10) : null;
+      const buyerId = lp && lp.buyerId ? parseInt(lp.buyerId, 10) : null;
+      if (!lotId || !buyerId || !unresolvedIds.has(lotId)) continue;
+      if (!byBuyer.has(buyerId)) byBuyer.set(buyerId, []);
+      byBuyer.get(buyerId).push(lotId);
+    }
+    for (const [buyerId, ids] of byBuyer) {
+      const b = db.get('SELECT buyer, buyer1, code, sale FROM buyers WHERE id = ?', [buyerId]);
+      if (!b) { skipped.push({ buyerId, reason: 'buyer not found' }); continue; }
+      const ph = ids.map(() => '?').join(',');
+      db.run(`UPDATE lots SET buyer = ?, buyer1 = ?, code = ?, sale = ? WHERE id IN (${ph})`,
+        [b.buyer || '', b.buyer1 || '', b.code || '', b.sale || 'L', ...ids]);
+      updatedLots += ids.length;
+    }
+  }
+  res.json({ success: true, resolvedNames, updatedLots, skipped });
 });
 
 // ── Download Trade/Lots template XLSX ──────────────────────
@@ -5990,32 +6508,42 @@ app.post('/api/auctions/:id/validate-lots/confirm', requireLotWrite, (req, res) 
 // step that CREATES the lots to validate. Resolves the target auction from
 // auction_id (preferred) or ano+date. MUST be mounted AFTER upload.single
 // so req.body is populated.
-function requireLotsValidatedForPriceImport(req, res, next) {
-  const db = getDb();
-  if (!lvFlagOn(db)) return next();
-  if (String((req.body && req.body.mode) || '') !== 'price') return next();
-  let aid = req.body.auction_id ? parseInt(req.body.auction_id, 10) : null;
-  if (!aid && req.body.ano) {
-    const d = normalizeDate(req.body.date);
+// Shared lot-validation gate for price imports — returns a { status, body }
+// to send when the import must be blocked, or null when it may proceed. Used
+// by both the manual-upload middleware (below) and the Trade Fair sync
+// (/api/trade-fair/import), which posts JSON and so can't ride the middleware.
+function lotValidationGateBlock(db, body) {
+  body = body || {};
+  if (!lvFlagOn(db)) return null;
+  if (String(body.mode || '') !== 'price') return null;
+  let aid = body.auction_id ? parseInt(body.auction_id, 10) : null;
+  if (!aid && body.ano) {
+    const d = normalizeDate(body.date);
     const auc = d
-      ? db.get('SELECT id FROM auctions WHERE ano = ? AND date = ?', [req.body.ano, d])
-      : db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC LIMIT 1', [req.body.ano]);
+      ? db.get('SELECT id FROM auctions WHERE ano = ? AND date = ?', [body.ano, d])
+      : db.get('SELECT id FROM auctions WHERE ano = ? ORDER BY date DESC LIMIT 1', [body.ano]);
     if (auc) aid = auc.id;
   }
   if (!aid) {
-    return res.status(412).json({
+    return { status: 412, body: {
       error: 'Validate entered lots first',
       detail: 'Pick the specific trade (ANO + date) so its entered lots can be validated before price import.',
       gate: 'lot_validation',
-    });
+    } };
   }
-  if (lvGateState(db, aid) === 'clean') return next();
-  return res.status(412).json({
+  if (lvGateState(db, aid) === 'clean') return null;
+  return { status: 412, body: {
     error: 'Validate entered lots first',
     detail: 'Open Lot Entry → Validate Lots, resolve all errors and acknowledge the warnings, then import prices.',
     auctionId: aid,
     gate: 'lot_validation',
-  });
+  } };
+}
+
+function requireLotsValidatedForPriceImport(req, res, next) {
+  const block = lotValidationGateBlock(getDb(), req.body || {});
+  if (block) return res.status(block.status).json(block.body);
+  return next();
 }
 
 // Compute "gate-ready" from a verify summary. We use the same lenient

@@ -3678,6 +3678,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
           <div style="display:flex;gap:6px;padding:0 4px;border-left:2px solid var(--spice-line)">
             <button class="needs-lot-write btn btn-g" style="height:38px;padding:0 16px;font-weight:600" onclick="openPriceImport()">📥 Price Import</button>
+            <button class="needs-lot-write btn btn-o" style="height:38px;padding:0 16px;font-weight:600" onclick="openTradeFairSync()" title="Pull prices straight from tradefair.intelloinsights.com">📡 Trade Fair</button>
             <button class="btn btn-o feat-price-list-mapping" style="height:38px;padding:0 16px;font-weight:600" onclick="go('plmap')" title="Fill the CODE column on a Price List sheet from TRADE NAME">🗺 Price List Mapping</button>
           </div>
         </div>
@@ -6282,6 +6283,41 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   <div class="actions">
     <button class="btn btn-o" onclick="hideModal('price-import-modal')">Cancel</button>
     <button class="btn btn-g" id="pi-submit" onclick="doPriceImport()" disabled>Import Prices</button>
+  </div>
+</div></div>
+
+<!-- ═══ TRADE FAIR — SYNC PRICES ════════════════════════════ -->
+<!-- Lists recent trade-fair auctions and imports a chosen one's price
+     list onto an app trade. Opened from Settings → Integrations →
+     Trade Fair → "Open Sync", or the Lots-tab "📡 Trade Fair" button. -->
+<div class="modal-bg" id="trade-fair-sync-modal"><div class="modal" style="max-width:920px;display:flex;flex-direction:column;max-height:90vh">
+  <h2>📡 Trade Fair — Sync Prices</h2>
+  <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Pick a trade-fair auction and import its price list onto an app trade. Prices update existing lots (same as a manual price import), so enter the lots first.</p>
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12.5px">
+    <label>Show
+      <select id="tf-sync-limit" onchange="tfLoadHistory()" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;margin-left:4px">
+        <option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option>
+      </select> recent auctions
+    </label>
+    <button class="btn btn-o" style="padding:5px 12px;font-size:12px" onclick="tfLoadHistory()">↻ Refresh</button>
+  </div>
+  <div id="tf-sync-status" style="display:none;padding:8px 14px;border-radius:6px;font-size:12px;margin-bottom:10px"></div>
+  <div id="tf-sync-body" style="flex:1;overflow:auto;min-height:120px"></div>
+  <div class="actions"><button class="btn btn-o" onclick="hideModal('trade-fair-sync-modal')">Close</button></div>
+</div></div>
+
+<!-- ═══ RESOLVE BUYERS (name → code) ════════════════════════ -->
+<!-- Standalone modal opened from the Trade Fair sync's "Resolve buyers →"
+     button. Matches imported buyer trade-names to the Buyers master and
+     writes the code onto each lot (the invoice join key). -->
+<div class="modal-bg" id="resolve-buyers-modal"><div class="modal" style="max-width:1000px;display:flex;flex-direction:column;max-height:90vh">
+  <h2>🔗 Resolve Buyers <span id="rb-modal-trade" style="font-size:13px;font-weight:400;color:var(--text3)"></span></h2>
+  <p style="font-size:13px;color:var(--text2);margin-bottom:10px">Imported lots carry the buyer's <strong>trade name</strong> but no <strong>code</strong>. Match each to your Buyers master — the code is written onto the lots and is what invoices join on.</p>
+  <div id="pl-rb-body" style="flex:1;overflow:auto;min-height:120px"></div>
+  <div class="actions" style="align-items:center">
+    <span id="pl-rb-foot" style="flex:1;font-size:12.5px;color:var(--text2)"></span>
+    <button class="btn btn-o" onclick="hideModal('resolve-buyers-modal')">Close</button>
+    <button class="btn btn-g needs-lot-write" id="pl-rb-apply-btn" onclick="rbApply()">Assign Buyers</button>
   </div>
 </div></div>
 
@@ -11389,6 +11425,562 @@ async function _testWhatsapp(){
   } finally { if (btn) btn.disabled = false; }
 }
 
+// ── Trade Fair sync config card (Settings → Integrations) ──────────
+// Pulls auction history + per-auction price lists from
+// tradefair.intelloinsights.com using a mobile+OTP login (or a pasted
+// _kcpmc_rails_session cookie), stored server-side in trade_fair_config
+// (never returned to the browser). Runs the price list through the normal
+// price import (runLotImport, mode='price').
+const _tfInpStyle = 'width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font-size:12.5px;box-sizing:border-box';
+async function _renderTradeFairCard(){
+  const host = document.getElementById('trade-fair-config-host');
+  if (!host) return;
+  host.innerHTML = '<div style="padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:#f9fafb;font-size:12.5px;color:var(--text2)">Loading Trade Fair status…</div>';
+  let s;
+  try {
+    const r = await fetch(B + '/api/trade-fair/status', { headers: T ? { 'Authorization':'Bearer '+T } : {}, cache:'no-store' });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    s = await r.json();
+  } catch (e) {
+    host.innerHTML = `<div style="padding:14px 16px;border:1px solid #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;font-size:12.5px">Could not load Trade Fair status: ${esc(e.message||String(e))}</div>`;
+    return;
+  }
+  const tone = s.configured
+    ? {bd:'#a7f3d0',fg:'#065f46',icon:'✓',head:`Connected${s.cookieFromEnv?' (from env)':''}${s.cookieUpdatedAt?(' · '+esc(new Date(s.cookieUpdatedAt).toLocaleString())):''}`}
+    : {bd:'#e5e7eb',fg:'#374151',icon:'ℹ',head:'Not connected — log in with your mobile + OTP below'};
+  const fldRow = (label, id, val, ph) =>
+    `<div class="fg" style="margin:0"><label style="font-size:11.5px;font-weight:600;color:var(--text2)">${esc(label)}</label>
+       <input id="${id}" value="${esc(val||'')}" placeholder="${esc(ph||'')}" style="${_tfInpStyle}"></div>`;
+  host.innerHTML = `
+    <div style="padding:14px 16px;border:1px solid ${tone.bd};border-radius:10px;background:#fff;color:var(--text1)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:18px;line-height:1">📡</span>
+        <strong style="font-size:13.5px">Trade Fair sync</strong>
+        <span style="flex:1"></span>
+        <span style="font-size:11.5px;color:${tone.fg};font-weight:600">${tone.icon} ${esc(tone.head)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text3);line-height:1.5;margin-bottom:12px">
+        Pulls the auction price list straight from tradefair.intelloinsights.com and runs it through the normal price import.
+        Log in below with your registered mobile number — the OTP is sent to that phone. The session is saved and reused until it expires, then just log in again.
+      </div>
+
+      <!-- OTP login -->
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:10px;background:#f9fafb">
+        <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:8px">
+          <div class="fg" style="margin:0;flex:1;min-width:170px">
+            <label style="font-size:11.5px;font-weight:600;color:var(--text2)">Mobile number</label>
+            <input id="tf-mobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" style="${_tfInpStyle}">
+          </div>
+          <button type="button" id="tf-send-otp-btn" onclick="_tfSendOtp()" style="padding:8px 16px;border:none;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:700;font-size:12.5px;cursor:pointer">Send OTP</button>
+        </div>
+        <div id="tf-otp-row" style="display:none;gap:8px;align-items:end;flex-wrap:wrap">
+          <div class="fg" style="margin:0;flex:1;min-width:170px">
+            <label style="font-size:11.5px;font-weight:600;color:var(--text2)">Enter OTP</label>
+            <input id="tf-otp" type="tel" inputmode="numeric" maxlength="6" placeholder="OTP from SMS" style="${_tfInpStyle}">
+          </div>
+          <button type="button" id="tf-verify-otp-btn" onclick="_tfVerifyOtp()" style="padding:8px 16px;border:none;border-radius:6px;background:#16a34a;color:#fff;font-weight:700;font-size:12.5px;cursor:pointer">Verify &amp; Connect</button>
+        </div>
+        <div id="tf-otp-msg" style="font-size:12px;color:var(--text3);margin-top:8px"></div>
+      </div>
+
+      <details style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-size:11.5px;font-weight:600;color:var(--text2)">Advanced — endpoints, id mapping &amp; cookie fallback</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          ${fldRow('Base URL','tf-base-url',s.baseUrl,'https://tradefair.intelloinsights.com')}
+          ${fldRow('Cookie name','tf-cookie-name',s.cookieName,'_kcpmc_rails_session')}
+          ${fldRow('History path','tf-history-path',s.historyPath)}
+          ${fldRow('Price-list path','tf-price-path',s.pricePath)}
+          ${fldRow('Id field (history → value)','tf-id-field',s.idField,'trade_session_id')}
+          ${fldRow('Price query param','tf-price-param',s.priceParam,'auction_id')}
+        </div>
+        <div class="fg" style="margin:10px 0 0">
+          <label style="font-size:11.5px;font-weight:600;color:var(--text2)">Session cookie — fallback ${s.hasCookie?'<span style="color:#065f46">(saved — leave blank to keep)</span>':''}</label>
+          <textarea id="tf-cookie" rows="2" placeholder="optional: paste _kcpmc_rails_session if OTP login isn't available" style="${_tfInpStyle};font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical"></textarea>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.5">
+          The price-list download sends <code>?&lt;price param&gt;=&lt;id field value&gt;</code>. If downloads come back empty, switch the id field between <code>trade_session_id</code> and <code>auction_id</code>.
+        </div>
+        <div style="margin-top:10px">
+          <button type="button" id="tf-save-btn" onclick="_saveTradeFairConfig()" style="padding:8px 16px;border:none;border-radius:6px;background:#0ea5e9;color:#fff;font-weight:700;font-size:12.5px;cursor:pointer">Save settings</button>
+        </div>
+      </details>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" id="tf-test-btn" onclick="_testTradeFair()" ${s.configured?'':'disabled'} style="padding:8px 16px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#0f172a;font-weight:600;font-size:12.5px;cursor:${s.configured?'pointer':'not-allowed'};opacity:${s.configured?'1':'.5'}">Test connection</button>
+        <button type="button" onclick="openTradeFairSync()" ${s.configured?'':'disabled'} style="padding:8px 16px;border:1px solid #0ea5e9;border-radius:6px;background:#e0f2fe;color:#075985;font-weight:700;font-size:12.5px;cursor:${s.configured?'pointer':'not-allowed'};opacity:${s.configured?'1':'.5'}">📡 Open Sync →</button>
+        <span id="tf-card-msg" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+    </div>`;
+}
+// Send an OTP to the entered mobile, then reveal the OTP field.
+async function _tfSendOtp(){
+  const mobile = (document.getElementById('tf-mobile')||{}).value || '';
+  const msg = document.getElementById('tf-otp-msg');
+  const btn = document.getElementById('tf-send-otp-btn');
+  const digits = String(mobile).replace(/\D/g,'');
+  if (digits.length !== 10){ if(msg){msg.style.color='#991b1b';msg.textContent='Enter a valid 10-digit mobile number.';} return; }
+  if (btn) btn.disabled = true;
+  if (msg){ msg.style.color='var(--text3)'; msg.textContent='Sending OTP…'; }
+  try {
+    const r = await fetch(B + '/api/trade-fair/otp/send', { method:'POST', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify({ mobile: digits }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Could not send OTP');
+    const row = document.getElementById('tf-otp-row'); if (row) row.style.display='flex';
+    const otpEl = document.getElementById('tf-otp'); if (otpEl) otpEl.focus();
+    if (msg){ msg.style.color='#065f46'; msg.textContent='OTP sent — check your phone, then enter it below.'; }
+  } catch(e){
+    if (msg){ msg.style.color='#991b1b'; msg.textContent='Failed: '+(e.message||e); }
+  } finally { if (btn) btn.disabled = false; }
+}
+// Verify the OTP → server captures + saves the authenticated session.
+async function _tfVerifyOtp(){
+  const mobile = String((document.getElementById('tf-mobile')||{}).value||'').replace(/\D/g,'');
+  const otp = String((document.getElementById('tf-otp')||{}).value||'').trim();
+  const msg = document.getElementById('tf-otp-msg');
+  const btn = document.getElementById('tf-verify-otp-btn');
+  if (!otp){ if(msg){msg.style.color='#991b1b';msg.textContent='Enter the OTP.';} return; }
+  if (btn) btn.disabled = true;
+  if (msg){ msg.style.color='var(--text3)'; msg.textContent='Verifying…'; }
+  try {
+    const r = await fetch(B + '/api/trade-fair/otp/verify', { method:'POST', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify({ mobile, otp }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Verification failed');
+    if (msg){ msg.style.color='#065f46'; msg.textContent='✓ Connected.'; }
+    _renderTradeFairCard(); // re-render → shows Connected + enables Test/Sync
+  } catch(e){
+    if (msg){ msg.style.color='#991b1b'; msg.textContent='Failed: '+(e.message||e); }
+  } finally { if (btn) btn.disabled = false; }
+}
+async function _saveTradeFairConfig(){
+  const v = (id) => { const el=document.getElementById(id); return el?el.value:undefined; };
+  const body = {
+    sessionCookie: v('tf-cookie'),
+    cookieName:    v('tf-cookie-name'),
+    baseUrl:       v('tf-base-url'),
+    historyPath:   v('tf-history-path'),
+    pricePath:     v('tf-price-path'),
+    idField:       v('tf-id-field'),
+    priceParam:    v('tf-price-param'),
+  };
+  const msgEl = document.getElementById('tf-card-msg');
+  const btn = document.getElementById('tf-save-btn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch(B + '/api/trade-fair/config', { method:'PUT', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Save failed');
+    if (msgEl){ msgEl.textContent='Saved ✓'; msgEl.style.color='#065f46'; }
+    _renderTradeFairCard();
+  } catch (e) {
+    if (msgEl){ msgEl.textContent = e.message; msgEl.style.color='#991b1b'; }
+    if (btn) btn.disabled = false;
+  }
+}
+async function _testTradeFair(){
+  const msgEl = document.getElementById('tf-card-msg');
+  const btn = document.getElementById('tf-test-btn');
+  if (btn) btn.disabled = true;
+  if (msgEl){ msgEl.textContent='Contacting trade-fair site…'; msgEl.style.color='var(--text3)'; }
+  try {
+    const r = await fetch(B + '/api/trade-fair/history?limit=1', { headers:{'Authorization':'Bearer '+T} });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Test failed');
+    if (msgEl){ msgEl.textContent=`Connected ✓ — ${d.total!=null?d.total+' auctions visible':'history reachable'}`; msgEl.style.color='#065f46'; }
+  } catch (e) {
+    if (msgEl){ msgEl.textContent = 'Failed: '+e.message; msgEl.style.color='#991b1b'; }
+  } finally { if (btn) btn.disabled = false; }
+}
+
+// ── Trade Fair sync modal ─────────────────────────────────────────
+// Lists recent trade-fair auctions and imports a chosen one's price list
+// onto an app trade (mapped via a dropdown). Import goes through
+// /api/trade-fair/import → the same price-import pipeline as a manual
+// upload (mode='price').
+function openTradeFairSync(){
+  showModal('trade-fair-sync-modal');
+  tfLoadHistory();
+}
+// App trades cached for the row dropdowns, fetched when the modal opens.
+let _tfAppTrades = [];
+async function tfLoadHistory(){
+  const host = document.getElementById('tf-sync-body');
+  if (!host) return;
+  host.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">Loading recent auctions…</div>';
+  let d;
+  try {
+    const limit = parseInt((document.getElementById('tf-sync-limit')||{}).value,10) || 50;
+    const [trades, r] = await Promise.all([
+      fetch(B + '/api/auctions', { headers:{'Authorization':'Bearer '+T} }).then(x=>x.ok?x.json():[]).catch(()=>[]),
+      fetch(B + '/api/trade-fair/history?limit='+limit, { headers:{'Authorization':'Bearer '+T} }),
+    ]);
+    _tfAppTrades = Array.isArray(trades) ? trades : (trades.rows || []);
+    d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Could not load history');
+  } catch (e) {
+    host.innerHTML = `<div style="padding:16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;font-size:12.5px">${esc(e.message)}</div>`;
+    return;
+  }
+  if (!d.auctions || !d.auctions.length){ host.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">No auctions returned.</div>'; return; }
+  // Pre-pick each row's app trade: same lot count first, else the topbar
+  // (#global-aid) selected trade. Trade-fair numbers ≠ app trade numbers.
+  const selectedAid = (document.getElementById('global-aid')||{}).value || '';
+  const matchTrade = (a) => {
+    const byLots = _tfAppTrades.find(t => a.lotCount!=null && Number(t.lot_count)===Number(a.lotCount));
+    if (byLots) return String(byLots.id);
+    return selectedAid;
+  };
+  const tradeOpts = (sel) => '<option value="">— pick trade —</option>' + _tfAppTrades.map(t =>
+    `<option value="${t.id}" ${String(t.id)===String(sel)?'selected':''}>#${esc(String(t.ano))} · ${esc(t.date_fmt||t.date||'')} · ${t.lot_count||0} lots</option>`).join('');
+  let html = `<div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Using <code>${esc(d.priceParam)}</code> = <code>${esc(d.idField)}</code>. Pick which of <b>your</b> trades each trade-fair auction's prices import onto (auto-matched by lot count where possible).</div>`;
+  html += '<div style="overflow:auto;max-height:52vh"><table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="background:var(--bg);position:sticky;top:0">'
+    + ['Trade-fair No','Date','Type','Lots','Sold qty','→ Import onto your trade',''].map(h=>`<th style="text-align:left;padding:6px 8px;white-space:nowrap">${h}</th>`).join('')
+    + '</tr></thead><tbody>';
+  d.auctions.forEach((a,i)=>{
+    html += `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:5px 8px;font-weight:600">${esc(a.ano)||'—'}</td>
+      <td style="padding:5px 8px;white-space:nowrap">${esc(_tfToIso(a.date)||a.date)||'—'}</td>
+      <td style="padding:5px 8px">${esc(a.tradeType)||''}</td>
+      <td style="padding:5px 8px;text-align:right">${a.lotCount!=null?esc(String(a.lotCount)):''}</td>
+      <td style="padding:5px 8px;text-align:right">${a.sellQty!=null?esc(String(a.sellQty)):''}</td>
+      <td style="padding:5px 8px"><select id="tf-trade-${i}" style="min-width:230px;padding:5px 7px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#0f172a">${tradeOpts(matchTrade(a))}</select></td>
+      <td style="padding:5px 8px"><button class="btn btn-g" style="padding:5px 12px;font-size:12px;font-weight:700" onclick='tfImportAuction(${JSON.stringify(String(a.idValue))}, ${i})'>Import prices</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  if (!_tfAppTrades.length) html += '<div style="margin-top:10px;font-size:12px;color:#991b1b">No app trades found — create the trade and enter its lots first, then sync prices onto it.</div>';
+  host.innerHTML = html;
+}
+// Trade-fair dates come as dd-mm-yyyy / dd/mm/yyyy or already ISO. Map to
+// yyyy-mm-dd; pass through if unrecognised.
+function _tfToIso(v){
+  const s = String(v||'').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (m){ const y=m[3].length===2?'20'+m[3]:m[3]; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
+  return '';
+}
+async function tfImportAuction(idValue, i){
+  const sel = document.getElementById('tf-trade-'+i);
+  const auctionId = sel ? sel.value : '';
+  if (!auctionId){ alert('Pick which of your trades to import these prices onto.'); return; }
+  const label = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : auctionId;
+  const status = document.getElementById('tf-sync-status');
+  status.style.display='block'; status.style.background='#fef3c7'; status.style.color='#92400e';
+  status.textContent = `Downloading & importing prices onto ${label}…`;
+  try {
+    const r = await fetch(B + '/api/trade-fair/import', {
+      method:'POST', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'},
+      body: JSON.stringify({ idValue, auction_id: auctionId, mode:'price' })
+    });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error || (d.detail ? d.detail : 'Import failed'));
+    status.style.background='#dcfce7'; status.style.color='#065f46';
+    let html = `<div style="font-weight:700;margin-bottom:4px">✓ Updated ${d.updated||0} lot(s) on ${esc(label)} · ${d.skipped||0} skipped of ${d.total||0} rows</div>`;
+    if (d.columns && d.columns.length){
+      html += `<div style="font-size:11px;color:var(--text3);margin-bottom:4px">Columns detected: ${d.columns.map(c=>'<code>'+esc(c)+'</code>').join(', ')}</div>`;
+    }
+    if (d.skipped>0 && d.skipReasons && d.skipReasons.length){
+      html += `<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;color:#92400e">⚠ Why were rows skipped?</summary>`;
+      html += '<div style="margin-top:6px;max-height:200px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:6px;padding:8px"><table style="width:100%;font-size:11px"><thead><tr><th style="text-align:left;padding:3px 6px">Row</th><th style="text-align:left;padding:3px 6px">Lot</th><th style="text-align:left;padding:3px 6px">Reason</th></tr></thead><tbody>';
+      d.skipReasons.slice(0,50).forEach(sk=>{ html += `<tr><td style="padding:2px 6px">${sk.row}</td><td style="padding:2px 6px">${esc(sk.lot)||''}</td><td style="padding:2px 6px">${esc(sk.reason)}</td></tr>`; });
+      html += '</tbody></table></div></details>';
+    }
+    // Prices land with the buyer TRADE NAME but no code — offer to resolve
+    // those names to Buyers-master codes next. Stash id+label in globals.
+    window._rbAuctionId = auctionId;
+    window._rbLabel = label;
+    html += `<div style="margin-top:10px"><button class="btn btn-a" style="padding:6px 14px;font-weight:700" onclick="openResolveBuyers()">🔗 Resolve buyers →</button>
+      <span style="font-size:11px;color:var(--text3);margin-left:8px">Match imported buyer names to your Buyers master (assigns the code used on invoices).</span></div>`;
+    status.innerHTML = html;
+    if (typeof loadAuctions==='function') loadAuctions();
+  } catch (e) {
+    status.style.background='#fee2e2'; status.style.color='#991b1b';
+    status.textContent = 'Error: '+e.message;
+  }
+}
+
+// ── Resolve Buyers — standalone modal ─────────────────────────────
+// Opened from the Trade Fair sync's "🔗 Resolve buyers →" button. Loads the
+// distinct unresolved buyer names on a trade and lets the operator map each
+// to a Buyers-master record (green=1 match auto-picked, amber=ambiguous →
+// choose, red=no match → skipped). Apply writes the code/name/sale back onto
+// the lots. One row PER LOT so codes can be assigned per lot.
+async function openResolveBuyers(auctionId, label){
+  if (auctionId) window._rbAuctionId = auctionId;
+  if (label) window._rbLabel = label;
+  if (!window._rbAuctionId) { alert('No trade to resolve — import prices first.'); return; }
+  if (typeof hideModal === 'function') hideModal('trade-fair-sync-modal');
+  showModal('resolve-buyers-modal');
+  const ttl = document.getElementById('rb-modal-trade');
+  if (ttl) ttl.textContent = window._rbLabel ? ('· '+window._rbLabel) : '';
+  rbLoad();
+}
+async function rbLoad(){
+  const host = document.getElementById('pl-rb-body');
+  const foot = document.getElementById('pl-rb-foot');
+  const applyBtn = document.getElementById('pl-rb-apply-btn');
+  if (!host) return;
+  if (foot) foot.textContent = '';
+  host.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">Loading buyer names…</div>';
+  let d;
+  try {
+    const r = await fetch(B + '/api/auctions/'+window._rbAuctionId+'/resolve-buyers', { headers:{'Authorization':'Bearer '+T} });
+    d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Could not load buyer names');
+  } catch(e){
+    host.innerHTML = `<div style="padding:16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;font-size:12.5px">${esc(e.message||String(e))}</div>`;
+    if (applyBtn) applyBtn.style.display='none';
+    return;
+  }
+  if (!d.lots || !d.lots.length){
+    host.innerHTML = '<div style="padding:20px;text-align:center;color:#065f46;font-weight:600">✓ Nothing to resolve — every lot on this trade already has a buyer code.</div>';
+    if (applyBtn) applyBtn.style.display='none';
+    return;
+  }
+  if (applyBtn) applyBtn.style.display='';
+  const s = d.summary||{};
+  window._rbNames = d.names;
+  window._rbLots = d.lots;   // lot-wise rows (one per unresolved lot)
+  // Buyers master (id + code + trade name) for the bulk "map CODE to selected" toolbar.
+  if (!window._plBuyers) {
+    try { const rr = await fetch(B + '/api/buyers', { headers:{'Authorization':'Bearer '+T} }); window._plBuyers = rr.ok ? (await rr.json()) : []; } catch (_) { window._plBuyers = []; }
+  }
+  const card = (label, value, color) =>
+    '<div style="flex:1;min-width:120px;padding:10px 12px;border:1px solid '+color+';border-radius:8px;background:'+color+'1a">'+
+      '<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.4px">'+label+'</div>'+
+      '<div style="font-size:22px;font-weight:700;color:'+color+'">'+value+'</div>'+
+    '</div>';
+  let html = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+    card('Buyer names', s.names||0, '#374151')+
+    card('Matched',     s.matched||0, '#15803d')+
+    card('Ambiguous',   s.ambiguous||0, '#a16207')+
+    card('Unmatched',   s.unmatched||0, '#c00')+
+    card('Lots',        s.lotsUnresolved||0, '#0369a1')+
+    '</div>';
+  // Bulk toolbar — tick lots below, type/pick one CODE, apply to all ticked.
+  const _rbByCode = new Map();
+  for (const b of (window._plBuyers || [])) {
+    const c = String(b.code == null ? '' : b.code).trim();
+    if (c && !_rbByCode.has(c.toUpperCase())) _rbByCode.set(c.toUpperCase(), b);
+  }
+  const rbCodeOpts = Array.from(_rbByCode.values())
+    .map(b => '<option value="'+escAttr(b.code)+'">'+escAttr(b.buyer1 || b.buyer || '')+'</option>')
+    .join('');
+  html += '<div id="rb-bulk-bar" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#f8fafc">'+
+    '<div class="fg" style="margin:0;min-width:190px">'+
+      '<label style="font-size:11px">Find &amp; select lots</label>'+
+      '<input id="rb-lot-find" placeholder="Lot nos e.g. 5, 12, 40-60" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rbSelectByLots();}" '+
+        'title="Type comma-separated lot numbers (ranges like 40-60 work), press Enter — matching lot rows are ticked" '+
+        'style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;min-width:170px">'+
+    '</div>'+
+    '<div class="fg" style="margin:0;min-width:220px">'+
+      '<label style="font-size:11px">Map CODE to selected lots</label>'+
+      '<input id="rb-bulk-code" list="rb-bulk-codes" placeholder="Type or pick a CODE…" autocomplete="off" '+
+        'oninput="rbBulkPreview()" onkeydown="if(event.key===\'Enter\'){event.preventDefault();rbBulkApply();}" '+
+        'style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;min-width:200px">'+
+      '<datalist id="rb-bulk-codes">'+rbCodeOpts+'</datalist>'+
+    '</div>'+
+    '<button class="btn btn-g" id="rb-bulk-apply" onclick="rbBulkApply()" disabled>Apply to <span id="rb-bulk-count">0</span> selected</button>'+
+    '<button class="btn btn-o" id="rb-bulk-clear" onclick="rbClearBulk()" title="Clear the lot-nos box, the CODE box and untick every row">Clear</button>'+
+    '<span id="rb-bulk-preview" style="font-size:12px;color:var(--text2);flex:1;min-width:160px;padding-bottom:6px"></span>'+
+  '</div>';
+  html += '<div style="overflow:auto;max-height:520px;border:1px solid var(--border);border-radius:6px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f4f4f4;position:sticky;top:0">'+
+    '<th style="text-align:center;padding:4px 6px;border:1px solid #ddd;width:28px"><input type="checkbox" id="rb-sel-all" onclick="rbToggleAllSel(this.checked)" title="Select / clear all" style="cursor:pointer;width:15px;height:15px;vertical-align:middle;accent-color:var(--green)"></th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Lot</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Buyer name (from trade)</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Status</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Picked CODE</th>'+
+    '<th style="text-align:left;padding:4px 8px;border:1px solid #ddd">Candidates</th>'+
+    '</tr></thead><tbody>';
+  d.lots.forEach((n, i)=>{
+    const bg = n.status === 'unmatched' ? '#fef2f2'
+             : n.status === 'ambiguous' ? '#fff7ed'
+             : '#fff';
+    const badge = (typeof _plStatusBadge==='function') ? _plStatusBadge(n.status) : esc(n.status);
+    const isAmb = n.status === 'ambiguous';
+    const cands = (n.candidates || []).map(c => {
+      const lbl = '<b>'+escAttr(c.code||'(no code)')+'</b>'+
+        ' · '+escAttr(c.buyer||'')+
+        (c.sale ? ' · <span style="color:#666">'+escAttr(c.sale)+'</span>' : '');
+      if (isAmb) {
+        const on = Number(c.id) === Number(n.pickedBuyerId);
+        return '<span data-rb-cand-idx="'+i+'" data-rb-cand-bid="'+Number(c.id)+'" onclick="rbPickEl(this)" '+
+          'title="Click to pick this buyer for this lot" '+
+          'style="display:inline-block;padding:1px 6px;margin:1px 3px 1px 0;border:1px solid #ddd;border-radius:10px;cursor:pointer;font-size:11px;'+
+          'background:'+(on?'#dcfce7':'#fafafa')+';outline:'+(on?'2px solid #15803d':'none')+'">'+lbl+'</span>';
+      }
+      return '<span style="display:inline-block;padding:1px 6px;margin:1px 3px 1px 0;border:1px solid #ddd;border-radius:10px;background:#fafafa;font-size:11px">'+lbl+'</span>';
+    }).join('');
+    let pickedCell;
+    if (isAmb) {
+      const opts = (n.candidates || []).map(c =>
+        '<option value="'+Number(c.id)+'"'+(Number(c.id)===Number(n.pickedBuyerId)?' selected':'')+'>'+
+          escAttr((c.code||'(no code)')+' · '+(c.buyer||''))+'</option>'
+      ).join('');
+      pickedCell = '<select data-rb-idx="'+i+'" onchange="rbPick(this.getAttribute(\'data-rb-idx\'), this.value)" '+
+        'style="font-size:11px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;max-width:240px;font-weight:700;color:#15803d">'+opts+'</select>';
+    } else {
+      pickedCell = '<span style="font-weight:'+(n.pickedCode?'700':'400')+';color:'+(n.pickedCode?'#15803d':'#c00')+'">'+
+        escAttr(n.pickedCode || '— none —')+'</span>';
+    }
+    html += '<tr id="rb-row-'+i+'" style="background:'+bg+'">'+
+      '<td style="text-align:center;padding:3px 6px;border:1px solid #f0f0f0"><input type="checkbox" class="rb-sel-cb" data-rb-idx="'+i+'" data-rb-lots="'+escAttr(n.lot_no||'')+'" onclick="rbSelSync()" style="cursor:pointer;width:15px;height:15px;vertical-align:middle;accent-color:var(--green)"></td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;font-family:monospace;font-weight:600">'+escAttr(n.lot_no||'')+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0">'+escAttr(n.name)+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0;white-space:nowrap">'+badge+'</td>'+
+      '<td id="rb-picked-'+i+'" style="padding:3px 8px;border:1px solid #f0f0f0">'+pickedCell+'</td>'+
+      '<td style="padding:3px 8px;border:1px solid #f0f0f0">'+(cands || '<span style="color:#c00;font-style:italic">No buyer matches this trade name. Add it in the Buyers tab.</span>')+'</td>'+
+    '</tr>';
+  });
+  html += '</tbody></table></div>';
+  if (s.ambiguous){
+    html += '<div style="margin-top:10px;font-size:12px;color:#a16207;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px">'+
+      '<b>⚠ '+s.ambiguous+' name(s) are ambiguous</b> — more than one buyer shares the trade name. '+
+      'Pick the right buyer from the <b>Picked CODE</b> dropdown (or click a candidate) before you Assign. '+
+      'Untouched names default to the first candidate.</div>';
+  }
+  if (s.unmatched){
+    html += '<div style="margin-top:10px;font-size:12px;color:#c00;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px">'+
+      '<b>✗ '+s.unmatched+' name(s) have no matching buyer</b> — those lots are skipped; add the trade names to the Buyers master, then re-run.</div>';
+  }
+  host.innerHTML = html;
+}
+// Record the operator's buyer choice for an ambiguous lot; keep dropdown +
+// candidate badges in sync. `idx` indexes window._rbLots.
+function rbPick(idx, buyerId){
+  idx = parseInt(idx, 10);
+  const n = (window._rbLots || [])[idx];
+  if (!n) return;
+  buyerId = buyerId ? parseInt(buyerId, 10) : null;
+  const c = (n.candidates || []).find(x => Number(x.id) === buyerId);
+  n.pickedBuyerId = c ? c.id : null;
+  n.pickedCode = c ? (c.code || '') : '';
+  const sel = document.querySelector('select[data-rb-idx="'+idx+'"]');
+  if (sel && String(sel.value) !== String(buyerId)) sel.value = String(buyerId);
+  document.querySelectorAll('[data-rb-cand-idx="'+idx+'"]').forEach(el => {
+    const on = Number(el.getAttribute('data-rb-cand-bid')) === buyerId;
+    el.style.background = on ? '#dcfce7' : '#fafafa';
+    el.style.outline = on ? '2px solid #15803d' : 'none';
+  });
+}
+function rbPickEl(el){
+  rbPick(el.getAttribute('data-rb-cand-idx'), el.getAttribute('data-rb-cand-bid'));
+}
+async function rbApply(){
+  const foot = document.getElementById('pl-rb-foot');
+  const btn = document.getElementById('pl-rb-apply-btn');
+  // Assign every LOT that has a picked buyer. Unmatched lots are skipped.
+  const lotPicks = (window._rbLots || [])
+    .filter(n => n.pickedBuyerId && n.lotId)
+    .map(n => ({ lotId: n.lotId, buyerId: n.pickedBuyerId }));
+  if (!lotPicks.length){ if(foot){foot.style.color='#991b1b';foot.textContent='Nothing to assign — no lots have a picked buyer.';} return; }
+  if (btn) btn.disabled = true;
+  if (foot){ foot.style.color='var(--text3)'; foot.textContent='Assigning buyers…'; }
+  try {
+    const r = await fetch(B + '/api/auctions/'+window._rbAuctionId+'/resolve-buyers', { method:'POST', headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'}, body: JSON.stringify({ lotPicks }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error||'Assign failed');
+    if (foot){ foot.style.color='#065f46'; foot.textContent=`✓ Assigned buyers to ${d.updatedLots} lot(s).`; }
+    if (typeof loadAuctions==='function') loadAuctions();
+    rbLoad(); // refresh — resolved lots drop off the list
+  } catch(e){
+    if (foot){ foot.style.color='#991b1b'; foot.textContent = 'Error: '+(e.message||e); }
+  } finally { if (btn) btn.disabled = false; }
+}
+
+// ── Resolve-buyers bulk "map CODE to selected lots" ──────────────
+function rbSelCbs(){ return Array.prototype.slice.call(document.querySelectorAll('.rb-sel-cb')); }
+function rbToggleAllSel(on){ rbSelCbs().forEach(cb => { cb.checked = !!on; }); rbSelSync(); }
+function rbClearBulk(){
+  const f = document.getElementById('rb-lot-find'); if (f) f.value = '';
+  const c = document.getElementById('rb-bulk-code'); if (c) c.value = '';
+  const pv = document.getElementById('rb-bulk-preview'); if (pv) pv.textContent = '';
+  const allEl = document.getElementById('rb-sel-all'); if (allEl) allEl.checked = false;
+  rbToggleAllSel(false);
+}
+// Tick rows whose lot number is in the "find lots" box (supports ranges).
+function rbSelectByLots(){
+  const box = document.getElementById('rb-lot-find');
+  if (!box) return;
+  const raw = String(box.value||'').trim();
+  if (!raw) return;
+  const wanted = new Set();
+  raw.split(',').forEach(part => {
+    part = part.trim(); if (!part) return;
+    const rng = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rng) { let a=parseInt(rng[1],10), b=parseInt(rng[2],10); if(a>b){const t=a;a=b;b=t;} for(let k=a;k<=b;k++) wanted.add(String(k)); }
+    else wanted.add(part.replace(/^0+/,'')||part);
+  });
+  rbSelCbs().forEach(cb => {
+    const lot = String(cb.getAttribute('data-rb-lots')||'').trim();
+    const norm = lot.replace(/^0+/,'')||lot;
+    cb.checked = wanted.has(lot) || wanted.has(norm);
+  });
+  rbSelSync();
+}
+function rbSelSync(){
+  const cbs = rbSelCbs();
+  const ticked = cbs.filter(cb => cb.checked);
+  const countEl = document.getElementById('rb-bulk-count');
+  const applyEl = document.getElementById('rb-bulk-apply');
+  const allEl   = document.getElementById('rb-sel-all');
+  if (countEl) countEl.textContent = String(ticked.length);
+  if (applyEl) applyEl.disabled = ticked.length === 0;
+  if (allEl) {
+    allEl.checked = cbs.length > 0 && ticked.length === cbs.length;
+    allEl.indeterminate = ticked.length > 0 && ticked.length < cbs.length;
+  }
+}
+function rbBulkPreview(){
+  const input = document.getElementById('rb-bulk-code');
+  const prev  = document.getElementById('rb-bulk-preview');
+  if (!input || !prev) return;
+  const code = String(input.value || '').trim().toUpperCase();
+  if (!code) { prev.innerHTML = ''; return; }
+  const b = (window._plBuyers || []).find(x => String(x.code || '').trim().toUpperCase() === code);
+  if (b) {
+    prev.innerHTML = '→ <strong style="color:#15803d">'+esc(b.buyer1 || b.buyer || '(no trade name)')+'</strong>'+
+      '<span style="color:var(--text3)"> · CODE '+esc(b.code)+'</span>';
+  } else {
+    prev.innerHTML = '<span style="color:#c00">No buyer has CODE "'+esc(code)+'". Add it in the Buyers tab first.</span>';
+  }
+}
+function rbBulkApply(){
+  const input = document.getElementById('rb-bulk-code');
+  const prev  = document.getElementById('rb-bulk-preview');
+  const raw   = String((input && input.value) || '').trim();
+  if (!raw) { if (prev) prev.innerHTML = '<span style="color:#c00">Enter a CODE first.</span>'; return; }
+  const b = (window._plBuyers || []).find(x => String(x.code || '').trim().toUpperCase() === raw.toUpperCase());
+  if (!b) { if (prev) prev.innerHTML = '<span style="color:#c00">No buyer has CODE "'+esc(raw)+'". Add it in the Buyers tab first.</span>'; return; }
+  const code = String(b.code).trim();
+  const ticked = rbSelCbs().filter(cb => cb.checked);
+  if (!ticked.length) return;
+  ticked.forEach(cb => {
+    const idx = parseInt(cb.getAttribute('data-rb-idx'), 10);
+    const n = (window._rbLots || [])[idx];
+    if (!n) return;
+    n.pickedBuyerId = b.id;
+    n.pickedCode = code;
+    const cell = document.getElementById('rb-picked-'+idx);
+    if (cell) cell.innerHTML = '<span style="font-weight:700;color:#15803d">'+esc(code)+'</span>'+
+      ' <span style="font-size:10px;color:#64748b">(manual)</span>';
+    const tr = document.getElementById('rb-row-'+idx);
+    if (tr) tr.style.background = '#f0fdf4';
+    document.querySelectorAll('[data-rb-cand-idx="'+idx+'"]').forEach(el => {
+      const on = Number(el.getAttribute('data-rb-cand-bid')) === Number(b.id);
+      el.style.background = on ? '#dcfce7' : '#fafafa';
+      el.style.outline = on ? '2px solid #15803d' : 'none';
+    });
+    cb.checked = false;
+  });
+  rbSelSync();
+  if (input) input.value = '';
+  if (prev) prev.innerHTML = '';
+  if (typeof toast === 'function') toast('Mapped CODE '+code+' to '+ticked.length+' lot'+(ticked.length===1?'':'s')+' — click Assign Buyers to save');
+}
+
 function renderSettingsPanel(){
   const ck=_activeCat;
   if(!ck||!_cats[ck]){document.getElementById('settings-root').innerHTML='<div class="set-no-match">Select a category</div>';return}
@@ -11490,6 +12082,9 @@ function renderSettingsPanel(){
     // below the standard integration fields rather than via fld().
     if (ck === 'integrations') {
       html += '<div id="whatsapp-config-host" style="margin-top:18px"></div>';
+      // Trade Fair price-sync config card (own server-side table; cookie
+      // never reaches the browser) — renders below WhatsApp.
+      html += '<div id="trade-fair-config-host" style="margin-top:18px"></div>';
     }
   }
   document.getElementById('settings-root').innerHTML=html;
@@ -11498,6 +12093,7 @@ function renderSettingsPanel(){
   if (ck === 'integrations') {
     if (typeof _renderGstApiStatus === 'function') { try { _renderGstApiStatus(); } catch(_){} }
     if (typeof _renderWhatsappCard === 'function') { try { _renderWhatsappCard(); } catch(_){} }
+    if (typeof _renderTradeFairCard === 'function') { try { _renderTradeFairCard(); } catch(_){} }
   }
   // Reset dirty flag on panel render so stale dirty state doesn't trigger
   // a false "unsaved changes" warning when switching presets.
