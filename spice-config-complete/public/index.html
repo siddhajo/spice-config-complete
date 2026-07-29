@@ -3518,6 +3518,31 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <button id="pe-save-calc" class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="peSaveAndCalculate()">💾 Save &amp; Calculate All</button>
           </div>
         </div>
+
+        <!-- ── Assign buyer to ticked lots ──────────────────────────
+             Mirrors the Lots tab's "type lot numbers → tick → Set Buyer"
+             flow: type a lot list (supports ranges like 5-10), click Tick
+             to check those rows, type/pick a buyer code, then Set Buyer to
+             stamp it on every ticked lot. Clear resets the selection. -->
+        <div class="needs-lot-write" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Assign Buyer</span>
+          <input type="text" id="pe-pick-lots" placeholder="Tick lots: 12, 13, 15…" autocomplete="off"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();pePickLots()}"
+                 title="Enter lot numbers separated by comma / space / newline. Supports ranges like 5-10. Press Enter or click Tick."
+                 style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:180px">
+          <button type="button" class="btn btn-o" style="height:34px;padding:0 14px;font-weight:600" onclick="pePickLots()">Tick</button>
+          <div style="position:relative">
+            <input type="text" id="pe-buyer-code" list="pe-buyer-codes" placeholder="Buyer code…" autocomplete="off" oninput="peBuyerPreview()"
+                   style="height:34px;padding:0 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;min-width:150px">
+            <datalist id="pe-buyer-codes"></datalist>
+          </div>
+          <button type="button" class="btn" style="height:34px;padding:0 14px;background:var(--spice-cardamom);color:#fff;font-weight:600" onclick="peAssignBuyer()" title="Set the buyer code on every ticked lot — trade name + sale type auto-fill from the Buyers master">👤 Set Buyer <span id="pe-ticked-count" style="margin-left:4px;background:rgba(255,255,255,.25);padding:1px 6px;border-radius:10px;font-size:11px">0</span></button>
+          <button type="button" class="btn btn-o" style="height:34px;padding:0 14px;font-weight:600" onclick="peClearTicks()" title="Clear ticked lots and the inputs above">Clear</button>
+          <span id="pe-buyer-preview" style="font-size:12px;color:var(--text2);min-width:120px"></span>
+        </div>
+        </div>
+
         <div style="font-size:12.5px;color:var(--text2);margin-top:8px;line-height:1.5">
           Type a price and press <b>Enter</b> (or Tab) to save it and jump to the next lot. Only the <b>Price</b> column is editable — every other field is read-only, so there's no risk of changing the wrong thing. When you're done, click <b>Save &amp; Calculate All</b> to compute commission, tax and payable for the whole trade.
           <span id="pe-pc-note" style="display:none;color:#a16207"> Price Check is ON for this install — you'll need to re-verify prices before generating invoices.</span>
@@ -26282,7 +26307,7 @@ async function previewInvoice(type){
 // and jumps to the next. Read-only everywhere else, so there's no risk of
 // changing the wrong field. One "Save & Calculate All" at the end recomputes
 // commission/tax/payable and (when Price Check is on) nudges a re-verify.
-let _pe = { aid: null, lots: [], dirty: {} };
+let _pe = { aid: null, lots: [], dirty: {}, ticked: new Set(), buyers: [] };
 // Price Check on/off — read from _sdata.flags the same way the rest of the
 // client does (see applyFeatureFlags / flag_pay_calc_discount lookups).
 function _peFlagPriceCheck(){
@@ -26296,11 +26321,25 @@ function _peBags(n){ return Math.round(Number(n)||0).toLocaleString('en-IN'); }
 function loadPriceEntry(){
   const note = document.getElementById('pe-pc-note');
   if (note) note.style.display = _peFlagPriceCheck() ? 'inline' : 'none';
+  _peLoadBuyers();
   fillAucSelect('pe-auction').then(() => loadPriceEntryGrid());
+}
+// Fetch the buyers master once so the inline buyer-code box gets an
+// autocomplete datalist + a per-keystroke preview (mirrors the Lots-tab
+// Set Buyer flow). Cached on _pe.buyers.
+async function _peLoadBuyers(){
+  try { _pe.buyers = await j('/api/buyers') || []; }
+  catch (_) { _pe.buyers = []; }
+  const dl = document.getElementById('pe-buyer-codes');
+  if (dl) {
+    dl.innerHTML = (_pe.buyers || []).map(b =>
+      `<option value="${esc(b.buyer || '')}">${esc((b.buyer1 || b.buyer || '').toString())}${b.code ? ' · ' + esc(b.code) : ''}</option>`
+    ).join('');
+  }
 }
 async function loadPriceEntryGrid(){
   const aid = document.getElementById('pe-auction').value;
-  _pe.aid = aid; _pe.dirty = {};
+  _pe.aid = aid; _pe.dirty = {}; _pe.ticked = new Set();
   const grid = document.getElementById('pe-grid');
   const sumEl = document.getElementById('pe-summary');
   if (!aid) { grid.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Select a trade to price its lots.</div>'; if (sumEl) sumEl.textContent = ''; return; }
@@ -26328,8 +26367,10 @@ function renderPriceEntryGrid(){
     const locked = !!(l.locked_at);   // locked lots are edited by admins in the modal only
     const readonly = locked || isWD;  // WD lots carry no price — visible but not editable
     return `<tr data-row="${i}"${isWD ? ' style="opacity:.55"' : ''}>
+      <td style="padding:6px 8px;text-align:center"><input type="checkbox" class="pe-select-cb" data-pecheck="${l.id}"${_pe.ticked.has(l.id) ? ' checked' : ''}${locked ? ' disabled title="Locked lot — edit via the Lots tab"' : ''} onchange="peToggleTick(${l.id}, this.checked)"></td>
       <td style="padding:6px 8px;white-space:nowrap;font-weight:600">${esc(l.lot_no)}</td>
       <td style="padding:6px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(l.name||'')}</td>
+      <td style="padding:6px 8px;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis" title="${esc(l.buyer_name || l.buyer || '')}">${l.buyer ? esc(l.buyer) : '<span style=\"color:var(--text3)\">—</span>'}</td>
       <td style="padding:6px 8px;text-align:right">${esc(l.branch||'')}</td>
       <td style="padding:6px 8px;text-align:right">${_peBags(l.bags)}</td>
       <td style="padding:6px 8px;text-align:right">${_peFmt(l.qty)}</td>
@@ -26340,11 +26381,13 @@ function renderPriceEntryGrid(){
   }).join('');
   grid.innerHTML = `<table class="pe-grid-table" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr>
-      <th style="border-top-left-radius:6px">Lot</th><th>Seller</th><th style="text-align:right">Branch</th>
+      <th style="border-top-left-radius:6px;width:32px;text-align:center"><input type="checkbox" id="pe-select-all" onchange="peToggleAllTicks(this.checked)" title="Tick / untick all lots"></th>
+      <th>Lot</th><th>Seller</th><th>Buyer</th><th style="text-align:right">Branch</th>
       <th style="text-align:right">Bags</th><th style="text-align:right">Qty</th>
       <th style="text-align:right">Price ₹/kg</th><th style="text-align:right">Amount</th><th style="border-top-right-radius:6px"></th>
     </tr></thead><tbody>${rows}</tbody></table>`;
   _peRenderSummary();
+  _peUpdateTickUI();
 }
 function _peRenderSummary(){
   const sumEl = document.getElementById('pe-summary'); if (!sumEl) return;
@@ -26408,6 +26451,142 @@ async function peSaveAndCalculate(){
       if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
       if (_peFlagPriceCheck()) toast('Prices changed — re-verify in Price Check before generating invoices.');
     });
+  } catch (e) { showError(e); }
+}
+
+// ── Price Entry: bulk buyer assignment ─────────────────────────
+// Mirrors the Lots-tab "type lots → tick → Set Buyer" flow, scoped to the
+// Price Entry grid. Selection lives in _pe.ticked (lot ids); the grid
+// checkboxes read/write it on every paint, and the header select-all +
+// the count badge reflect it via _peUpdateTickUI().
+function _peUpdateTickUI(){
+  const n = _pe.ticked ? _pe.ticked.size : 0;
+  const badge = document.getElementById('pe-ticked-count');
+  if (badge) badge.textContent = String(n);
+  const master = document.getElementById('pe-select-all');
+  if (master) {
+    const boxes   = document.querySelectorAll('.pe-select-cb:not(:disabled)');
+    const checked = document.querySelectorAll('.pe-select-cb:not(:disabled):checked');
+    master.checked = boxes.length > 0 && checked.length === boxes.length;
+    master.indeterminate = checked.length > 0 && checked.length < boxes.length;
+  }
+}
+function peToggleTick(id, checked){
+  if (!_pe.ticked) _pe.ticked = new Set();
+  if (checked) _pe.ticked.add(id); else _pe.ticked.delete(id);
+  _peUpdateTickUI();
+}
+function peToggleAllTicks(checked){
+  if (!_pe.ticked) _pe.ticked = new Set();
+  document.querySelectorAll('.pe-select-cb:not(:disabled)').forEach(cb => {
+    cb.checked = !!checked;
+    const id = Number(cb.getAttribute('data-pecheck'));
+    if (checked) _pe.ticked.add(id); else _pe.ticked.delete(id);
+  });
+  _peUpdateTickUI();
+}
+// Type a lot list (supports ranges like 5-10) → tick the matching rows.
+function pePickLots(){
+  const input = document.getElementById('pe-pick-lots');
+  if (!input) return;
+  const raw = String(input.value || '').trim();
+  if (!raw) return;
+  const tokens = (typeof _expandLotNoTokens === 'function')
+    ? _expandLotNoTokens(raw)
+    : raw.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+  if (!tokens.length) return;
+  if (!_pe.lots.length) { toast('Select a trade first'); return; }
+  // Index lot_no → id under canonical / numeric / digits-only keys — same
+  // tolerance as the Lots + Lot Entry bulk-tick (handles "001", "1", "1A").
+  const byLotNo = new Map();
+  for (const l of _pe.lots) {
+    const s = String(l.lot_no == null ? '' : l.lot_no).trim();
+    if (!s) continue;
+    const canonical = s.toUpperCase();
+    byLotNo.set(canonical, l.id);
+    const num = Number(s);
+    if (Number.isFinite(num) && String(num) !== canonical) byLotNo.set(String(num), l.id);
+    const digits = s.replace(/\D+/g, '');
+    if (digits) { const dn = Number(digits); if (Number.isFinite(dn)) { const ds = String(dn); if (!byLotNo.has(ds)) byLotNo.set(ds, l.id); } }
+  }
+  const tryMatch = (token) => {
+    const k = String(token).toUpperCase();
+    if (byLotNo.has(k)) return byLotNo.get(k);
+    const num = Number(token);
+    if (Number.isFinite(num) && byLotNo.has(String(num))) return byLotNo.get(String(num));
+    const digits = String(token).replace(/\D+/g, '');
+    if (digits) { const dn = Number(digits); if (Number.isFinite(dn) && byLotNo.has(String(dn))) return byLotNo.get(String(dn)); }
+    return null;
+  };
+  const lockedIds = new Set(_pe.lots.filter(l => l.locked_at).map(l => l.id));
+  const matched = new Set(); const missing = []; let lockedSkipped = 0;
+  for (const t of tokens) {
+    const id = tryMatch(t);
+    if (id == null) { missing.push(t); continue; }
+    if (lockedIds.has(id)) { lockedSkipped++; continue; }  // can't reassign locked lots
+    matched.add(id);
+  }
+  for (const id of matched) _pe.ticked.add(id);
+  matched.forEach(id => { const cb = document.querySelector(`.pe-select-cb[data-pecheck="${id}"]`); if (cb && !cb.disabled) cb.checked = true; });
+  if (matched.size) input.value = '';
+  _peUpdateTickUI();
+  const parts = [];
+  if (matched.size) parts.push(`ticked ${matched.size} lot${matched.size === 1 ? '' : 's'}`);
+  if (lockedSkipped) parts.push(`${lockedSkipped} locked (skipped)`);
+  if (missing.length) parts.push(`not found: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? '…' : ''}`);
+  toast(parts.length ? parts.join(' · ') : 'No lots matched');
+}
+function peClearTicks(){
+  if (_pe.ticked) _pe.ticked.clear();
+  document.querySelectorAll('.pe-select-cb').forEach(cb => { cb.checked = false; });
+  const pick = document.getElementById('pe-pick-lots'); if (pick) pick.value = '';
+  const code = document.getElementById('pe-buyer-code'); if (code) code.value = '';
+  const prev = document.getElementById('pe-buyer-preview'); if (prev) prev.innerHTML = '';
+  _peUpdateTickUI();
+}
+// Per-keystroke buyer-code preview (trade name + sale type, or WD/NA).
+function peBuyerPreview(){
+  const input = document.getElementById('pe-buyer-code');
+  const prev  = document.getElementById('pe-buyer-preview');
+  if (!input || !prev) return;
+  const code = String(input.value || '').trim().toUpperCase();
+  if (!code) { prev.innerHTML = ''; return; }
+  const SPECIAL = { WD:'Withdrawn', NA:'N/A' };
+  if (SPECIAL[code]) {
+    prev.innerHTML = `✓ <strong style="color:var(--spice-cardamom)">${esc(SPECIAL[code])}</strong><span style="color:var(--text3)"> · price will be zeroed</span>`;
+    return;
+  }
+  const b = (_pe.buyers || []).find(x => String(x.buyer || '').trim().toUpperCase() === code);
+  if (b) {
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'}[b.sale] || 'Local';
+    prev.innerHTML = `✓ <strong style="color:var(--spice-cardamom)">${esc(b.buyer1 || '(no trade name)')}</strong>`
+      + (b.code ? `<span style="color:var(--text3)"> · code ${esc(b.code)}</span>` : '')
+      + `<span style="color:var(--text3)"> · ${esc(saleLabel)}</span>`;
+  } else {
+    prev.innerHTML = `<span style="color:var(--spice-chili)">No buyer with code "${esc(code)}"</span>`;
+  }
+}
+// Stamp the typed buyer code onto every ticked lot, then recalculate.
+async function peAssignBuyer(){
+  const input = document.getElementById('pe-buyer-code');
+  const code = String((input && input.value) || '').trim();
+  const ids = _pe.ticked ? [..._pe.ticked] : [];
+  if (!ids.length) { toast('Tick one or more lots first'); return; }
+  if (!code)       { toast('Enter a buyer code'); return; }
+  try {
+    const r = await j('/api/lots/bulk-buyer', { method: 'POST', body: JSON.stringify({ ids, buyer: code }) });
+    const n = r.updated || 0;
+    const skipped = (r.skipped && r.skipped.length) || 0;
+    const skipNote = skipped ? ` · ${skipped} skipped (locked)` : '';
+    // Recalculate so amounts/tax refresh (buyer change can shift sale type).
+    if (_pe.aid) { try { await j(`/api/lots/calculate/${_pe.aid}`, { method: 'POST' }); } catch (_) {} }
+    const saleLabel = {L:'Local',I:'Inter-state',E:'Export',W:'Withdrawn',N:'N/A'}[r.sale] || 'Local';
+    const recalcNote = r.withdrawn ? ' · price zeroed & recalculated' : ' · recalculated';
+    toast(`Set buyer ${r.buyer} (${saleLabel}) on ${n} lot${n === 1 ? '' : 's'}${skipNote}${recalcNote}`);
+    if (input) input.value = '';
+    const prev = document.getElementById('pe-buyer-preview'); if (prev) prev.innerHTML = '';
+    await loadPriceEntryGrid();   // reload → shows new buyer + refreshed amounts; ticks reset
+    if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
   } catch (e) { showError(e); }
 }
 
