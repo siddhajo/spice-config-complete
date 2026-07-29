@@ -5068,8 +5068,8 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
     <!-- Price List Mapping — fill the CODE column of a Price List
          (Before) sheet from the Buyers master (TRADE NAME → CODE).
-         Gated by flag_price_list_mapping AND business_mode === 'e-Auction'
-         via the .feat-price-list-mapping hide rule. -->
+         Gated by flag_price_list_mapping alone (shows in both e-Trade
+         and e-Auction) via the .feat-price-list-mapping hide rule. -->
     <div class="tc" id="tc-plmap">
       <div class="card">
         <h2>Price List Mapping
@@ -10827,7 +10827,7 @@ const _MODE_HIDE_KEYS = {
                 'bank_tn_name','bank_tn_acct','bank_tn_ifsc'],
   // e-Auction-only fields hidden in e-Trade mode:
   'e-Trade':   ['commission','hpc','sb_refund',
-                'flag_crop_receipt','flag_reserved_price','flag_price_list_mapping', // (7) e-Auction feature flags
+                'flag_crop_receipt','flag_reserved_price', // (7) e-Auction feature flags (Price List Mapping now shows in both modes)
                 'tally_commission_auction']                           // (10) e-Auction Commission ledger
 };
 
@@ -10948,9 +10948,9 @@ function applyFeatureFlags(){
   setFlag('data-feat-crop-receipt',   isEAuc && lookupFlag('flag_crop_receipt'));
   setFlag('data-feat-reserved-price', isEAuc && lookupFlag('flag_reserved_price'));
   // Price List Mapping — sidebar entry + Lots toolbar button + the
-  // Price List Mapping tab. Gated by business_mode === 'e-Auction' on
-  // top of the flag, so it only shows in e-Auction mode.
-  setFlag('data-feat-price-list-mapping', isEAuc && lookupFlag('flag_price_list_mapping'));
+  // Price List Mapping tab. Available in BOTH e-Trade and e-Auction now,
+  // so it's gated on the flag alone (no business-mode restriction).
+  setFlag('data-feat-price-list-mapping', lookupFlag('flag_price_list_mapping'));
   // Sidebar module toggles. Bills of Supply is independent of business
   // mode; both Debit Notes streams are e-Auction-only (AND'ed with isEAuc
   // like Crop Receipt / Reserved Price above), so they vanish in e-Trade.
@@ -23179,8 +23179,8 @@ async function loadPriceCheckAuctions(){
 // PRICE LIST MAPPING — fill the CODE column of a Price List (Before)
 // sheet from the Buyers master. Upload → preview (TRADE NAME → CODE
 // match per row) → download the updated file for Lots → Price Import.
-// Surfaced only when flag_price_list_mapping is ON AND business_mode
-// is e-Auction (the .feat-price-list-mapping hide rule).
+// Surfaced whenever flag_price_list_mapping is ON, in both e-Trade and
+// e-Auction (the .feat-price-list-mapping hide rule).
 // ════════════════════════════════════════════════════════════════
 let _plLastSummary = null;
 function plOnFileChange(){

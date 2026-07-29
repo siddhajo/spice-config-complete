@@ -198,7 +198,7 @@ const DEFAULTS = [
   // top of the flag — flipping the mode away from e-Auction hides both
   // surfaces regardless of the flag value. Default ON because most
   // e-Auction operators use the mapping flow.
-  { key: 'flag_price_list_mapping', value: 'true',   category: 'flags',     label: 'Price List Mapping (e-Auction)', type: 'boolean' },
+  { key: 'flag_price_list_mapping', value: 'true',   category: 'flags',     label: 'Price List Mapping', type: 'boolean' },
   // Operational feature flags (default ON to preserve existing behaviour;
   // flag_price_check defaults OFF — matches the previous unset = gate-off state).
   { key: 'flag_whatsapp',       value: 'true',  category: 'flags',     label: 'WhatsApp Share Buttons',                 type: 'boolean' },
@@ -513,7 +513,7 @@ const MODE_HIDE_KEYS = {
                 'tally_company_name','tally_state_code','tally_home_state','tally_inv_prefix',
                 'bank_tn_name','bank_tn_acct','bank_tn_ifsc'],
   'e-Trade':   ['commission','hpc','sb_refund',
-                'flag_crop_receipt','flag_reserved_price','flag_price_list_mapping',
+                'flag_crop_receipt','flag_reserved_price',
                 'tally_commission_auction'],
 };
 
@@ -664,6 +664,9 @@ function initCompanySettings(db) {
     // bill-to. The old "override consignee with separate Ship-To party"
     // label no longer describes the behaviour.
     relabel.run('Ship To (buyer address = ship-to/consignee address)', 'tally_ship_to', 'Ship To (buyer address = ship-to/consignee address)');
+    // Price List Mapping is no longer e-Auction-only (now available in
+    // e-Trade too), so drop the "(e-Auction)" qualifier from its label.
+    relabel.run('Price List Mapping', 'flag_price_list_mapping', 'Price List Mapping');
   } catch (e) { /* non-fatal */ }
 
   // Migration: the Seller YouTube Link moved out of "Integrations" into its
