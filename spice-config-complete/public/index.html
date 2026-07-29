@@ -26485,6 +26485,40 @@ function peToggleAllTicks(checked){
   });
   _peUpdateTickUI();
 }
+// Float ticked rows to the top of the grid, then re-render. Editable prices
+// complicate this: the grid keys rows by array index, so re-ordering must
+// (1) fold any in-progress price edit from the DOM back into the lot object
+// so the re-render doesn't drop it, and (2) rebuild _pe.dirty against the new
+// row indices. Ticked rows keep their existing relative order (stable sort).
+function _peSortTickedFirst(){
+  if (!_pe.ticked || !_pe.ticked.size || !_pe.lots.length) return;
+  const dirtyLotIds = new Set();
+  document.querySelectorAll('[data-peprice]').forEach(inp => {
+    const i = Number(inp.getAttribute('data-peprice'));
+    const l = _pe.lots[i];
+    if (!l || !_pe.dirty[i]) return;
+    dirtyLotIds.add(l.id);
+    const raw = String(inp.value || '').trim();
+    const price = raw === '' ? 0 : parseFloat(raw);
+    if (Number.isFinite(price) && price >= 0) { l.price = price; l.amount = (Number(l.qty) || 0) * price; }
+  });
+  const ticked = _pe.ticked;
+  _pe.lots = _pe.lots
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => {
+      const d = (ticked.has(a.l.id) ? 0 : 1) - (ticked.has(b.l.id) ? 0 : 1);
+      return d !== 0 ? d : a.i - b.i;   // stable within each group
+    })
+    .map(x => x.l);
+  _pe.dirty = {};
+  _pe.lots.forEach((l, i) => { if (dirtyLotIds.has(l.id)) _pe.dirty[i] = true; });
+  renderPriceEntryGrid();   // re-paints checkboxes from _pe.ticked + refreshes count
+  // renderPriceEntryGrid doesn't paint the unsaved dot — restore it for dirty rows.
+  Object.keys(_pe.dirty).forEach(i => {
+    const st = document.querySelector(`[data-pestatus="${i}"]`);
+    if (st) { st.textContent = '•'; st.style.color = '#a16207'; }
+  });
+}
 // Type a lot list (supports ranges like 5-10) → tick the matching rows.
 function pePickLots(){
   const input = document.getElementById('pe-pick-lots');
@@ -26527,8 +26561,8 @@ function pePickLots(){
     matched.add(id);
   }
   for (const id of matched) _pe.ticked.add(id);
-  matched.forEach(id => { const cb = document.querySelector(`.pe-select-cb[data-pecheck="${id}"]`); if (cb && !cb.disabled) cb.checked = true; });
   if (matched.size) input.value = '';
+  _peSortTickedFirst();   // check the boxes + float ticked rows to the top (re-renders)
   _peUpdateTickUI();
   const parts = [];
   if (matched.size) parts.push(`ticked ${matched.size} lot${matched.size === 1 ? '' : 's'}`);
