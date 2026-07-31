@@ -3515,6 +3515,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           </div>
           <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap">
             <button class="btn btn-o" style="height:38px;padding:0 14px;font-weight:600" onclick="loadPriceEntryGrid()" title="Reload lots from the server">🔄 Refresh</button>
+            <button id="pe-import-btn" class="needs-lot-write btn btn-o" style="height:38px;padding:0 14px;font-weight:600" onclick="openPeImport()" title="Import prices (and optionally buyer codes) from an Excel file — you choose which columns map to what">📥 Import Prices from Excel</button>
             <button id="pe-save-calc" class="btn btn-a" style="height:38px;padding:0 16px;font-weight:600" onclick="peSaveAndCalculate()">💾 Save &amp; Calculate All</button>
           </div>
         </div>
@@ -6318,6 +6319,54 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
     <span id="pl-rb-foot" style="flex:1;font-size:12.5px;color:var(--text2)"></span>
     <button class="btn btn-o" onclick="hideModal('resolve-buyers-modal')">Close</button>
     <button class="btn btn-g needs-lot-write" id="pl-rb-apply-btn" onclick="rbApply()">Assign Buyers</button>
+  </div>
+</div></div>
+
+<!-- ═══ PRICE ENTRY → IMPORT PRICES FROM EXCEL ══════════════ -->
+<!-- Two-step flow: (1) pick a file, parsed server-side into headers + rows;
+     (2) map the sheet's columns onto the fields we need (Lot No + Price,
+     optionally Buyer Code) and apply to the lots of the trade currently
+     selected in Price Entry. Lots are matched by lot number; nothing is
+     written until Import. -->
+<div class="modal-bg" id="pe-import-modal"><div class="modal" style="max-width:640px">
+  <h2>Import Prices from Excel</h2>
+
+  <!-- STEP 1 — file picker -->
+  <div id="pei-step-file">
+    <p style="font-size:12.5px;color:var(--text2);margin:0 0 12px;line-height:1.5">
+      Pick an <b>.xls</b> or <b>.xlsx</b> file. On the next step you'll choose which of its columns hold the <b>Lot No</b> and <b>Price</b> (and, optionally, the <b>Buyer Code</b>). Prices are matched to the lots of the trade selected in Price Entry — by lot number.
+    </p>
+    <div class="fg"><label>Select File (.xls or .xlsx)</label>
+      <input type="file" id="pei-file" accept=".xls,.xlsx" style="padding:6px" onchange="peiFilePicked()">
+    </div>
+    <div id="pei-file-status" style="font-size:12px;color:var(--text3);margin-top:6px"></div>
+  </div>
+
+  <!-- STEP 2 — column mapping -->
+  <div id="pei-step-map" style="display:none">
+    <div style="font-size:12.5px;color:var(--text2);margin:0 0 12px;line-height:1.5">
+      Found <b id="pei-rowcount">0</b> row(s). Match each field to a column from your file. <b style="color:#b45309">Lot No</b> and <b style="color:#b45309">Price</b> are required.
+    </div>
+    <div class="sgrid">
+      <div class="fg"><label>Lot No column <span style="color:#b45309">*</span></label>
+        <select id="pei-map-lot" onchange="peiRenderPreview()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+      </div>
+      <div class="fg"><label>Price column <span style="color:#b45309">*</span></label>
+        <select id="pei-map-price" onchange="peiRenderPreview()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+      </div>
+      <div class="fg"><label>Buyer Code column <span style="color:var(--text3);font-weight:400">— optional</span></label>
+        <select id="pei-map-code" onchange="peiRenderPreview()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px"></select>
+      </div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--text2);margin:12px 0 4px">Preview <span style="font-weight:400;color:var(--text3)">— first few mapped rows</span></div>
+    <div id="pei-preview" style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto"></div>
+    <div id="pei-map-note" style="font-size:12px;margin-top:8px;color:var(--text3)"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-o" onclick="hideModal('pe-import-modal')">Cancel</button>
+    <button class="btn btn-o" id="pei-back" onclick="peiBackToFile()" style="display:none">← Back</button>
+    <button class="btn btn-g" id="pei-apply" onclick="peiApply()" style="display:none" disabled>Import Prices</button>
   </div>
 </div></div>
 
@@ -27077,6 +27126,231 @@ async function peSaveAndCalculate(){
       if (_peFlagPriceCheck()) toast('Prices changed — re-verify in Price Check before generating invoices.');
     });
   } catch (e) { showError(e); }
+}
+
+// ── Price Entry — Import Prices from Excel ─────────────────────────
+// Server parses the file into { headers, rows }; the operator maps columns
+// (Lot No + Price required, Buyer Code optional); we then match rows to the
+// selected trade's already-loaded lots by lot number and save each via the
+// same PUT the on-screen grid uses. Nothing is written until Import.
+let _pei = { headers: [], rows: [] };
+function openPeImport(){
+  if (!_pe.aid) { toast('Select a trade first'); return; }
+  _pei = { headers: [], rows: [] };
+  const f = document.getElementById('pei-file'); if (f) f.value = '';
+  document.getElementById('pei-file-status').textContent = '';
+  document.getElementById('pei-step-file').style.display = '';
+  document.getElementById('pei-step-map').style.display = 'none';
+  document.getElementById('pei-back').style.display = 'none';
+  const applyBtn = document.getElementById('pei-apply');
+  applyBtn.style.display = 'none'; applyBtn.disabled = true;
+  showModal('pe-import-modal');
+}
+async function peiFilePicked(){
+  const input = document.getElementById('pei-file');
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const status = document.getElementById('pei-file-status');
+  status.style.color = 'var(--text3)';
+  status.textContent = 'Reading file…';
+  try {
+    const fd = new FormData(); fd.append('file', file);
+    const r = await fetch(B + '/api/lots/price-import/parse', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + T }, body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Could not read the file');
+    if (!d.rowCount) throw new Error('No data rows found in the file');
+    _pei.headers = d.headers || [];
+    _pei.rows = d.rows || [];
+    _peiBuildMapping();
+    document.getElementById('pei-rowcount').textContent = d.rowCount;
+    document.getElementById('pei-step-file').style.display = 'none';
+    document.getElementById('pei-step-map').style.display = '';
+    document.getElementById('pei-back').style.display = '';
+    document.getElementById('pei-apply').style.display = '';
+    status.textContent = '';
+  } catch (e) {
+    status.style.color = '#b91c1c';
+    status.textContent = (e && e.message) || 'Failed to read the file';
+  }
+}
+function peiBackToFile(){
+  document.getElementById('pei-step-map').style.display = 'none';
+  document.getElementById('pei-step-file').style.display = '';
+  document.getElementById('pei-back').style.display = 'none';
+  document.getElementById('pei-apply').style.display = 'none';
+}
+// Populate the three column dropdowns and auto-guess sensible defaults from
+// the header names.
+function _peiBuildMapping(){
+  const guess = (...keywords) => {
+    for (const kw of keywords) {
+      const hit = _pei.headers.find(h => h.toUpperCase() === kw);
+      if (hit) return hit;
+    }
+    for (const kw of keywords) {
+      const hit = _pei.headers.find(h => h.toUpperCase().includes(kw));
+      if (hit) return hit;
+    }
+    return '';
+  };
+  const opt = (includeBlank) => {
+    const blank = includeBlank ? '<option value="">— none —</option>' : '';
+    return blank + _pei.headers.map(h => `<option value="${escAttr(h)}">${esc(h)}</option>`).join('');
+  };
+  const lotSel = document.getElementById('pei-map-lot');
+  const priceSel = document.getElementById('pei-map-price');
+  const codeSel = document.getElementById('pei-map-code');
+  lotSel.innerHTML = opt(false);
+  priceSel.innerHTML = opt(false);
+  codeSel.innerHTML = opt(true);
+  lotSel.value = guess('LOT NO', 'LOTNO', 'LOT_NO', 'LOT', 'LOTNUMBER') || _pei.headers[0] || '';
+  priceSel.value = guess('PRICE', 'RATE', 'AMOUNT PER', 'PRICE/KG') || '';
+  codeSel.value = guess('CODE', 'BUYER CODE', 'BUYERCODE', 'BUYER') || '';
+  peiRenderPreview();
+}
+function peiRenderPreview(){
+  const lotCol = document.getElementById('pei-map-lot').value;
+  const priceCol = document.getElementById('pei-map-price').value;
+  const codeCol = document.getElementById('pei-map-code').value;
+  const host = document.getElementById('pei-preview');
+  const note = document.getElementById('pei-map-note');
+  const applyBtn = document.getElementById('pei-apply');
+  const ready = lotCol && priceCol && lotCol !== priceCol;
+  applyBtn.disabled = !ready;
+  if (!ready) {
+    note.style.color = '#b45309';
+    note.textContent = !lotCol || !priceCol
+      ? 'Pick both a Lot No and a Price column to continue.'
+      : 'Lot No and Price must be different columns.';
+  } else {
+    note.style.color = 'var(--text3)';
+    note.textContent = codeCol ? 'Buyer codes from "' + codeCol + '" will also be written.' : 'Buyer codes will not be changed.';
+  }
+  const cols = [['Lot No', lotCol], ['Price', priceCol]];
+  if (codeCol) cols.push(['Buyer Code', codeCol]);
+  const head = cols.map(c => `<th style="padding:6px 10px;text-align:left;position:sticky;top:0;background:var(--bg,#f8f8f8);border-bottom:1px solid var(--border)">${esc(c[0])}</th>`).join('');
+  const body = _pei.rows.slice(0, 6).map(row => {
+    const tds = cols.map(c => `<td style="padding:5px 10px;border-bottom:1px solid var(--border)">${esc(String(row[c[1]] == null ? '' : row[c[1]]))}</td>`).join('');
+    return `<tr>${tds}</tr>`;
+  }).join('');
+  host.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+// Build a lot_no → lot index with the same tolerance as pePickLots (canonical
+// uppercase / numeric / digits-only keys), so a file's "1" matches a stored
+// "001" and "1A" matches "1a".
+function _peiBuildLotIndex(){
+  const byLot = new Map();
+  for (const l of _pe.lots) {
+    const s = String(l.lot_no == null ? '' : l.lot_no).trim();
+    if (!s) continue;
+    const canonical = s.toUpperCase();
+    if (!byLot.has(canonical)) byLot.set(canonical, l);
+    const num = Number(s);
+    if (Number.isFinite(num) && String(num) !== canonical && !byLot.has(String(num))) byLot.set(String(num), l);
+    const digits = s.replace(/\D+/g, '');
+    if (digits) { const dn = Number(digits); if (Number.isFinite(dn)) { const ds = String(dn); if (!byLot.has(ds)) byLot.set(ds, l); } }
+  }
+  return byLot;
+}
+function _peiMatchLot(byLot, token){
+  const k = String(token == null ? '' : token).trim().toUpperCase();
+  if (!k) return null;
+  if (byLot.has(k)) return byLot.get(k);
+  const num = Number(k);
+  if (Number.isFinite(num) && byLot.has(String(num))) return byLot.get(String(num));
+  const digits = k.replace(/\D+/g, '');
+  if (digits) { const dn = Number(digits); if (Number.isFinite(dn) && byLot.has(String(dn))) return byLot.get(String(dn)); }
+  return null;
+}
+// Match the mapped rows to the trade's loaded lots (by lot number), then save
+// prices through the same per-lot PUT the grid uses and — when a Buyer Code
+// column is mapped — assign codes through /api/lots/bulk-buyer (which resolves
+// the code to buyer/buyer1/sale, exactly like the on-screen Set Buyer flow).
+// Prices are applied BEFORE codes so a WD/NA code correctly zeroes the price
+// last. Nothing is written until this runs.
+async function peiApply(){
+  const lotCol = document.getElementById('pei-map-lot').value;
+  const priceCol = document.getElementById('pei-map-price').value;
+  const codeCol = document.getElementById('pei-map-code').value;
+  if (!lotCol || !priceCol) { toast('Map Lot No and Price first'); return; }
+  const byLot = _peiBuildLotIndex();
+  const norm = (v) => String(v == null ? '' : v).trim();
+  const parsePrice = (v) => {
+    // Strip currency symbols / commas / spaces that Excel text cells may carry.
+    const s = norm(v).replace(/[₹,\s]/g, '');
+    if (s === '') return NaN;
+    return Number(s);
+  };
+  const priceUpdates = [];   // { lot, price }
+  const codeByLot = new Map(); // lotId -> raw code string
+  const unmatched = [];    // lot numbers with no matching lot
+  const skipped = [];      // rows with no usable price / code
+  const lockedHit = [];
+  for (const row of _pei.rows) {
+    const lotNo = norm(row[lotCol]);
+    if (!lotNo) { continue; }   // blank lot cell — ignore silently
+    const lot = _peiMatchLot(byLot, lotNo);
+    if (!lot) { unmatched.push(lotNo); continue; }
+    if (lot.locked_at) { lockedHit.push(lotNo); continue; }
+    const price = parsePrice(row[priceCol]);
+    const codeVal = codeCol ? norm(row[codeCol]) : '';
+    // A row must carry a valid price or a buyer code to be worth saving.
+    const hasPrice = Number.isFinite(price) && price >= 0;
+    if (!hasPrice && !codeVal) { skipped.push(lotNo); continue; }
+    if (hasPrice) priceUpdates.push({ lot, price });
+    if (codeVal) codeByLot.set(lot.id, codeVal);
+  }
+  if (!priceUpdates.length && !codeByLot.size) {
+    toast(unmatched.length ? 'No lot numbers matched this trade' : 'Nothing to import');
+    return;
+  }
+  const btn = document.getElementById('pei-apply');
+  let ok = 0, failed = 0, codeOk = 0, codeFail = 0;
+  await withBusy(btn, async () => {
+    // 1) Prices — per-lot PUT (same as the inline grid save).
+    for (const u of priceUpdates) {
+      const amount = (Number(u.lot.qty) || 0) * u.price;
+      try {
+        await j(`/api/lots/${u.lot.id}`, { method: 'PUT', body: JSON.stringify({ price: u.price, amount }) });
+        u.lot.price = u.price; u.lot.amount = amount; ok++;
+      } catch (_) { failed++; }
+    }
+    // 2) Buyer codes — grouped by code, one bulk-buyer call each so each code
+    // resolves to a registered buyer (unknown codes 404 → counted as failed).
+    const byCode = new Map();
+    for (const [lotId, code] of codeByLot) {
+      const k = code.toUpperCase();
+      if (!byCode.has(k)) byCode.set(k, []);
+      byCode.get(k).push(lotId);
+    }
+    for (const [code, ids] of byCode) {
+      try {
+        const r = await j('/api/lots/bulk-buyer', { method: 'POST', body: JSON.stringify({ ids, buyer: code }) });
+        codeOk += (r && r.updated) || 0;
+      } catch (_) { codeFail += ids.length; }
+    }
+  });
+  hideModal('pe-import-modal');
+  _pe.ticked = new Set();
+  await loadPriceEntryGrid();
+  if (typeof refreshTradeStage === 'function') { try { refreshTradeStage(true); } catch (_) {} }
+  // Summarise the outcome, including anything that didn't apply.
+  const parts = [`Imported ${ok} price(s)`];
+  if (codeByLot.size) parts.push(`${codeOk} buyer code(s)`);
+  if (failed) parts.push(`${failed} price failed`);
+  if (codeFail) parts.push(`${codeFail} code failed`);
+  if (unmatched.length) parts.push(`${unmatched.length} unmatched`);
+  if (skipped.length) parts.push(`${skipped.length} skipped`);
+  if (lockedHit.length) parts.push(`${lockedHit.length} locked`);
+  toast(parts.join(' · '));
+  if (unmatched.length) {
+    const preview = unmatched.slice(0, 12).join(', ');
+    console.warn('Price import — unmatched lot numbers:', unmatched);
+    alert(`${unmatched.length} lot number(s) in the file didn't match this trade and were skipped:\n\n${preview}${unmatched.length > 12 ? ', …' : ''}`);
+  }
+  if (_peFlagPriceCheck()) toast('Prices changed — re-verify in Price Check before generating invoices.');
 }
 
 // ── Price Entry: bulk buyer assignment ─────────────────────────

@@ -5324,6 +5324,61 @@ function getLotLock(db, lotId) {
   return r || null;
 }
 
+// ── Price Entry — parse an uploaded price sheet (parse-only) ──
+// Reads the first worksheet of an .xls/.xlsx into { headers, rows } so the
+// Price Entry "Import Prices from Excel" flow can let the operator map its
+// columns (Lot No + Price, optionally Buyer Code) client-side. Writes NOTHING
+// to the DB — the client applies matched rows via PUT /api/lots/:id, so this
+// stays a read-only helper. Same !ref-repair + banner-row tolerance as the
+// bulk lot import so trade-fair-style price lists parse cleanly.
+app.post('/api/lots/price-import/parse', requireLotWrite, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const workbook = XLSX.readFile(req.file.path);
+    const ws = workbook.Sheets[workbook.SheetNames[0]];
+    if (!ws) throw new Error('No worksheet found in the file.');
+
+    // Repair a too-narrow declared !ref (some exports under-report their
+    // width) by recomputing the true bounding box from the actual cells.
+    { let maxC = -1, maxR = -1;
+      for (const k of Object.keys(ws)) {
+        if (k[0] === '!') continue;
+        const a = XLSX.utils.decode_cell(k);
+        if (a.c > maxC) maxC = a.c;
+        if (a.r > maxR) maxR = a.r;
+      }
+      if (maxC >= 0 && maxR >= 0) ws['!ref'] = XLSX.utils.encode_range({ s: { c: 0, r: 0 }, e: { c: maxC, r: maxR } });
+    }
+
+    // Some sheets prepend a title/banner row above the real header. Scan the
+    // first 20 rows for one carrying a LOT-like column and parse from there;
+    // fall back to row 1 for ordinary files.
+    const normKey = (s) => String(s == null ? '' : s).trim().toUpperCase().replace(/[\s_\-]+/g, ' ');
+    const LOT_HEADERS = new Set(['LOT', 'LOT NO', 'LOTNO', 'LOT NUMBER']);
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    let headerRowIdx = 0;
+    for (let i = 0; i < Math.min(aoa.length, 20); i++) {
+      if ((aoa[i] || []).some(c => LOT_HEADERS.has(normKey(c)))) { headerRowIdx = i; break; }
+    }
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', range: headerRowIdx });
+    // Header order as it appears in the sheet (sheet_to_json keys aren't
+    // guaranteed ordered), so the column dropdowns list columns left-to-right.
+    const headerRow = (aoa[headerRowIdx] || []).map(h => String(h == null ? '' : h).trim()).filter(h => h !== '');
+    const seen = new Set();
+    const headers = [];
+    for (const h of headerRow) { if (!seen.has(h)) { seen.add(h); headers.push(h); } }
+    // Include any keys sheet_to_json produced that weren't in the header scan
+    // (defensive — e.g. duplicate-name disambiguation like "Price_1").
+    for (const r of rows) for (const k of Object.keys(r)) { if (!seen.has(k)) { seen.add(k); headers.push(k); } }
+
+    res.json({ headers, rows, rowCount: rows.length });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  } finally {
+    if (req.file) fs.unlink(req.file.path, () => {});
+  }
+});
+
 app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   const db = getDb();
   // Lock gate: a locked lot is editable only by admins. Server returns
