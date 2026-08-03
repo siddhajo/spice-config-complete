@@ -5554,10 +5554,25 @@ function partitionLotsByLock(db, ids, req) {
 // Body: { ids:[...], buyer:'B042' }
 app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
-  const buyerCode = String(req.body.buyer || '').trim();
   if (!ids.length) return res.status(400).json({ error: 'ids array required' });
-  if (!buyerCode) return res.status(400).json({ error: 'buyer code required' });
   const db = getDb();
+  // Clear mode — wipe the buyer assignment (code, buyer, buyer1, sale) on the
+  // selected lots and mark them un-invoiced again. Prices/amounts are KEPT:
+  // clearing a buyer removes who bought the lot, not what it's worth. Used by
+  // the Price Entry action bar's "Clear Buyer Code".
+  if (req.body.clear === true) {
+    const partC = partitionLotsByLock(db, ids, req);
+    if (!partC.allowedIds.length) {
+      return res.status(423).json({ error: 'Every selected lot is locked. Ask an admin to unlock first.', locked: true, skipped: partC.skipped });
+    }
+    const phC = partC.allowedIds.map(() => '?').join(',');
+    db.run(`UPDATE lots SET buyer='', buyer1='', code='', sale='', invo='' WHERE id IN (${phC})`, partC.allowedIds);
+    const _aidsC = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${phC})`, partC.allowedIds);
+    for (const r of _aidsC) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+    return res.json({ success: true, updated: partC.allowedIds.length, cleared: true, skipped: partC.skipped });
+  }
+  const buyerCode = String(req.body.buyer || '').trim();
+  if (!buyerCode) return res.status(400).json({ error: 'buyer code required' });
   // WD (Withdrawn) / NA (N/A) are pseudo-buyers, not rows in the buyers
   // master — they mark a lot as pulled from sale. Mirror the single-lot edit
   // modal's SPECIAL handling: skip the master lookup, stamp the marker, and
