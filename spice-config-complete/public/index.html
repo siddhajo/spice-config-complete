@@ -7134,6 +7134,10 @@ function injectModalCloses(){
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectModalCloses);
 else injectModalCloses();
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
+// Attribute-safe escape (also escapes single quotes). Referenced by several
+// features (Price Entry import mapping, buyer-code picker, Resolve Buyers);
+// defined here as a global so those code paths don't throw "escAttr is not defined".
+function escAttr(s){return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 // ── Indian number formatter (lakhs grouping) ──────────────────
 // fmtI(1234567.89)    → "12,34,567.89"
 // fmtI(1234567)       → "12,34,567"
