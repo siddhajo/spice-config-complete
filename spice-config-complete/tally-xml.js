@@ -2916,13 +2916,14 @@ function generLedgerXML(rows, cfg, opts = {}) {
 <CURRENCYNAME>₹</CURRENCYNAME>`;
 
     if (isParty) {
-      // For sales/RD parties we have state + PAN; for URD we still emit the
-      // tags but leave them empty (the target URD XML uses empty tags here,
-      // which is what Tally expects for unregistered parties).
+      // For sales/RD parties we have state + PAN. URD (agriculturist) parties
+      // are unregistered so they carry no GSTIN/state — PRIORSTATENAME stays
+      // empty — but their PAN (from the seller master) IS emitted in
+      // INCOMETAXNUMBER when available.
       if (isUrdParty) {
         block += `
 <PRIORSTATENAME></PRIORSTATENAME>
-<INCOMETAXNUMBER></INCOMETAXNUMBER>`;
+<INCOMETAXNUMBER>${pan}</INCOMETAXNUMBER>`;
       } else {
         block += `
 <PRIORSTATENAME>${state}</PRIORSTATENAME>
