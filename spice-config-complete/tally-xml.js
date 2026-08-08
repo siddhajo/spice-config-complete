@@ -1491,7 +1491,10 @@ function generRDPurchaseXML(rows, cfg, opts = {}) {
   // default for Kerala), not the ISP one. Falls back to ISP if ASP not set.
   const intra      = cfgGet(cfg, 'tally_state_code_amazing', '') || cfgGet(cfg, 'tally_state_code', '32');
   const ainvPrefix = cfgGet(cfg, 'tally_ainv_prefix', 'ASP/');
-  const sStateName = cfgGet(cfg, 'tally_home_state_amazing', cfgGet(cfg, 'tally_home_state', 'Kerala'));
+  // Place of supply for ASP RD purchase vouchers uses the "URD Purchase State
+  // (agriculturist)" config (tally_urd_state, default Kerala) — i.e. the ASP
+  // (Kerala) leg's state, not the ISP home state.
+  const sStateName = cfgGet(cfg, 'tally_urd_state', 'Kerala');
 
   const Purchase_LDR    = cfgGet(cfg, 'tally_purchase_dealer', 'Trade Purchase From Dealer');
   const Tax_CGST_IN     = cfgGet(cfg, 'tally_cgst_input', 'INPUT CGST 2.5%');
