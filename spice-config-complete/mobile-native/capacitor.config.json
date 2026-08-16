@@ -3,7 +3,7 @@
   "appName": "Spice Auction",
   "webDir": "www",
   "server": {
-    "url": "https://your-app.up.railway.app/mobile",
+    "url": "https://spice-config-complete-production.up.railway.app/mobile",
     "androidScheme": "https",
     "cleartext": false
   },
