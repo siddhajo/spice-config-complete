@@ -1,0 +1,12 @@
+# Generated / machine-local — never commit these.
+node_modules/
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+
+# Signing material. The keystore and its passwords must NEVER reach the repo;
+# CI reconstructs them from repository secrets (see .github/workflows/android-apk.yml).
+android/keystore.properties
+*.keystore
+*.jks

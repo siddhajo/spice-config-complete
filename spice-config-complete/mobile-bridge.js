@@ -371,6 +371,184 @@ function renderSellerReceiptCompact(doc, sellerLots, cfg) {
      .text('** THANK YOU **', m, doc.y, { width: w, align: 'center' });
 }
 
+// ── RENDERER (ESC/POS raw bytes, for Bluetooth thermal printers) ──
+// Produces a 58mm ESC/POS receipt from the SAME lot data + config as the PDF
+// renderers, so a Bluetooth print matches the compact PDF slip field for
+// field. The client writes these bytes straight to the printer (native SPP in
+// the Android wrapper, Web Bluetooth in Chrome) or hands them to RawBT.
+// `charWidth` = characters per line (32 for a 58mm Font-A roll; 42/48 for
+// wider rolls).
+//
+// Header is TEXT ONLY — deliberately, and for two reasons: the compact PDF
+// slip this mirrors prints no logo either (per spec, lot entry is done from
+// ASP and the slip is text-only), and the configured logo is a PNG, which
+// would need a decoder dependency to raster. Nothing here needs a new package.
+function buildEscposReceipt(lots, cfg, opts) {
+  const ESC = 0x1B, GS = 0x1D;
+  const WIDTH = (opts && opts.charWidth) || 32;
+  const chunks = [];
+  const raw   = (...b) => chunks.push(Buffer.from(b));
+  // latin1 so one JS char === one byte: the printer's code page is single-byte,
+  // and a UTF-8 encode would desynchronise every column that follows.
+  const put   = (s) => chunks.push(Buffer.from(String(s), 'latin1'));
+  const nl    = () => raw(0x0A);
+  const line  = (s) => { put(s == null ? '' : s); nl(); };
+  const left  = () => raw(ESC, 0x61, 0x00);
+  const center= () => raw(ESC, 0x61, 0x01);
+  const boldOn  = () => raw(ESC, 0x45, 0x01);
+  const boldOff = () => raw(ESC, 0x45, 0x00);
+  const big   = (on) => raw(GS, 0x21, on ? 0x11 : 0x00); // double W+H / normal
+  const rule  = (ch) => line((ch || '-').repeat(WIDTH));
+  // Left/right justified on one WIDTH-wide line. Truncates the LEFT label if
+  // the pair would overflow, so the right-hand value always shows in full.
+  const lr = (l, r) => {
+    l = String(l == null ? '' : l); r = String(r == null ? '' : r);
+    let gap = WIDTH - l.length - r.length;
+    if (gap < 1) { l = l.slice(0, Math.max(0, WIDTH - r.length - 1)); gap = WIDTH - l.length - r.length; }
+    return l + ' '.repeat(Math.max(1, gap)) + r;
+  };
+  // Wrap a long value under a short label without breaking mid-word where it
+  // can be helped — seller names and places routinely exceed 32 chars.
+  const wrapped = (label, value) => {
+    const text = label + ': ' + String(value == null ? '' : value);
+    let rest = text;
+    while (rest.length > WIDTH) {
+      let cut = rest.lastIndexOf(' ', WIDTH);
+      if (cut <= label.length + 1) cut = WIDTH;      // no usable space → hard break
+      line(rest.slice(0, cut));
+      rest = '  ' + rest.slice(cut).replace(/^\s+/, '');
+    }
+    if (rest.trim()) line(rest);
+  };
+
+  const lot0 = lots[0] || {};
+  const dateFmt = lot0.date ? String(lot0.date).split('-').reverse().join('/') : '';
+  const branch = cfg.branch || lot0.branch || '';
+  const L = cfg.labels || {};
+  const lb = (k, d) => L[k] || d;
+
+  raw(ESC, 0x40);                      // initialize
+  center();
+  boldOn(); big(true); line(cfg.appTitle || 'RECEIPT'); big(false);
+  if (branch) line(branch + ' BRANCH');
+  boldOff();
+  left();
+  rule();
+  line(lr('Date: ' + dateFmt, (cfg.tradeNoLabel || 'Trade #') + (lot0.ano || '')));
+  rule();
+
+  // Seller block — same four fields as the compact PDF slip, same masking
+  // policy (mask_acct / mask_ifsc from company_settings).
+  const { maskAcct, maskIfsc } = makeMaskers({ mask_acct: cfg.acctMask, mask_ifsc: cfg.ifscMask });
+  const maskedAcct = lot0.acctnum ? maskAcct(lot0.acctnum) : '';
+  const maskedIfsc = lot0.ifsc ? maskIfsc(lot0.ifsc) : '';
+  const place = [lot0.ppla, lot0.pin].filter(Boolean).join(', ');
+  boldOn(); wrapped(lb('seller', 'Seller'), lot0.trader_name || ''); boldOff();
+  if (place) wrapped(lb('place', 'Place'), place);
+  wrapped(lb('acct_no', 'A/C'), maskedAcct || '--NIL--');
+  wrapped(lb('ifsc', 'IFSC'), maskedIfsc || '--NIL--');
+  rule();
+
+  // ── Lots as an ALIGNED COLUMN TABLE (mirrors the compact PDF slip) ──
+  // Same five columns in the same order: Lot#, Bags, Net, Smp, Gross. Column
+  // widths are sized to actual content within the roll's character width;
+  // numbers right-aligned, text left-aligned.
+  const fields = [
+    { key: 'lot_no', hdr: lb('lot_no', 'Lot#'),     numeric: false, val: (l) => String(l.lot_no == null ? '' : l.lot_no) },
+    { key: 'bags',   hdr: lb('bags', 'Bags'),       numeric: true,  val: (l) => String(l.bags == null ? '' : l.bags) },
+    { key: 'net',    hdr: lb('net_wt', 'Net'),      numeric: true,  val: (l) => (Number(l.qty) || 0).toFixed(3) },
+    { key: 'sample', hdr: lb('sample_wt', 'Smp'),   numeric: true,  val: (l) => { const s = Number(l.sample_weight) || cfg.sampleWeight || 0; return s ? s.toFixed(3) : ''; } },
+    { key: 'gross',  hdr: lb('gross_wt', 'Gross'),  numeric: true,  val: (l) => { const s = Number(l.sample_weight) || cfg.sampleWeight || 0; const g = grossWeightFor(l, Number(l.qty) || 0, s); return g ? g.toFixed(3) : ''; } },
+  ];
+  const rowsData = lots.map(l => fields.map(f => f.val(l)));
+  const colW = fields.map((f, ci) => {
+    let w = String(f.hdr).length;
+    for (const rd of rowsData) w = Math.max(w, rd[ci].length);
+    return w;
+  });
+  const GAP = 1;
+  const gapTotal = GAP * Math.max(0, fields.length - 1);
+  // Too wide for the roll → shrink the widest column first, but never below a
+  // floor (4 for numbers so a "240.800" weight keeps its digits, 3 for text).
+  let sumW = colW.reduce((a, b) => a + b, 0) + gapTotal, guard = 300;
+  while (sumW > WIDTH && guard-- > 0) {
+    let idx = -1, best = -1;
+    for (let i = 0; i < fields.length; i++) {
+      const floor = fields[i].numeric ? 4 : 3;
+      if (colW[i] > floor && colW[i] > best) { best = colW[i]; idx = i; }
+    }
+    if (idx < 0) break;
+    colW[idx]--; sumW--;
+  }
+  // Spare room → widen a text column so the table fills the roll edge to edge.
+  const spare = WIDTH - (colW.reduce((a, b) => a + b, 0) + gapTotal);
+  if (spare > 0) {
+    let ti = fields.findIndex(f => !f.numeric);
+    if (ti < 0) ti = fields.length - 1;
+    colW[ti] += spare;
+  }
+  const cell = (text, w, right) => {
+    text = String(text == null ? '' : text);
+    if (text.length > w) text = right ? text.slice(text.length - w) : text.slice(0, w);
+    return right ? text.padStart(w) : text.padEnd(w);
+  };
+  const tableRow = (vals) => vals.map((v, i) => cell(v, colW[i], fields[i].numeric)).join(' ');
+  boldOn(); line(tableRow(fields.map(f => f.hdr))); boldOff();
+  rule();
+  rowsData.forEach(rd => line(tableRow(rd)));
+
+  let totalQty = 0, totalGross = 0, totalBags = 0, totalSample = 0;
+  lots.forEach(l => {
+    const sw = Number(l.sample_weight) || cfg.sampleWeight || 0;
+    const netW = Number(l.qty) || 0;
+    totalQty    += netW;
+    totalGross  += grossWeightFor(l, netW, sw);
+    totalBags   += Number(l.bags) || 0;
+    totalSample += sw;
+  });
+  rule();
+  boldOn();
+  // Compact totals — the same segments + labels the PDF summary row carries,
+  // packed into centered lines no wider than the roll. Breaks only at " | " so
+  // "Net: 240.800 kg" can never split across a wrap.
+  const seg = [lots.length + ' lot(s)', totalBags + ' ' + lb('bags', 'bags').toLowerCase()];
+  seg.push(lb('net_wt', 'Net') + ': ' + totalQty.toFixed(3) + ' kg');
+  if (totalSample) seg.push(lb('sample_wt', 'Smp') + ': ' + totalSample.toFixed(3) + ' kg');
+  if (totalGross)  seg.push(lb('gross_wt', 'Gross') + ': ' + totalGross.toFixed(3) + ' kg');
+  center();
+  let tline = '';
+  for (const s of seg) {
+    const cand = tline ? tline + ' | ' + s : s;
+    if (cand.length > WIDTH && tline) { line(tline); tline = s; }
+    else tline = cand;
+  }
+  if (tline) line(tline);
+  left();
+  boldOff();
+  rule();
+  if (cfg.showUser) { line('Entered by: ' + (lot0.user_id || '')); }
+  center(); boldOn(); line('** THANK YOU **'); boldOff(); left();
+  raw(0x0A, 0x0A, 0x0A, 0x0A);         // feed clear of the tear bar
+  raw(GS, 0x56, 0x00);                 // full cut (ignored by cutter-less printers)
+  return Buffer.concat(chunks);
+}
+
+// Group arbitrary lot rows by seller and emit ONE ESC/POS receipt per seller.
+// Each buildEscposReceipt buffer already ends in a feed + cut, so concatenating
+// them yields one slip per seller. Thermal counterpart of the PDF
+// streamGroupedReceipts, used by the batch / all-by-seller print routes so
+// Bluetooth and RawBT get the same grouping the PDF path produces.
+function buildGroupedEscpos(lots, cfg, opts) {
+  const groups = {};
+  const order = [];
+  for (const l of lots) {
+    const key = l.trader_id || ('u_' + (l.trader_name || 'unknown'));
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(l);
+  }
+  return Buffer.concat(order.map(k => buildEscposReceipt(groups[k], cfg, opts)));
+}
+
 // Receipt page WIDTH in points. Mirrors the desktop `lot_receipt_width_mm`
 // setting (Settings → Lot Entry Defaults) so the mobile PDF prints to the
 // same thermal roll as the desktop slip. Blank/0 keeps the legacy widths
@@ -1390,6 +1568,95 @@ function mountMobile(app, deps) {
     doc.pipe(res);
     r.render(doc, [lot], cfg);
     doc.end();
+  });
+
+  // ── ESC/POS SIBLINGS ────────────────────────────────────────────
+  // Every PDF print route above has a raw-bytes twin below, selecting the
+  // exact same lots with the same branch scoping and the same config. The
+  // mobile UI picks between them via its "Print method" menu: PDF opens the
+  // browser dialog, the .escpos sibling feeds a Bluetooth thermal printer
+  // (native SPP inside the Android wrapper, Web Bluetooth in Chrome, or RawBT).
+  // ?width=32|42|48 sets characters per line (default 32 = 58mm roll).
+  const escposWidth = (req) => parseInt(req.query.width, 10) || 32;
+  const sendEscpos = (res, buf, filename) => {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.send(buf);
+  };
+
+  // (1b) Single-lot receipt as raw ESC/POS bytes.
+  app.get('/api/lots/:id/receipt.escpos', requireAuthFlex, (req, res) => {
+    const db = getDb();
+    const lot = db.get(LOT_SELECT_SQL + ' WHERE l.id = ?', [parseInt(req.params.id, 10)]);
+    if (!lot) return res.status(404).json({ error: 'Lot not found' });
+    const branch = req.query && req.query.branch;
+    if (branch && lot.branch !== branch) {
+      return res.status(404).json({ error: `Lot ${lot.lot_no} is not in ${branch}` });
+    }
+    const cfg = getReceiptConfig(db);
+    if (branch) cfg.branch = branch;
+    sendEscpos(res, buildEscposReceipt([lot], cfg, { charWidth: escposWidth(req) }),
+      `Lot_${lot.lot_no}_Receipt.bin`);
+  });
+
+  // (2b) Selected lot ids as raw ESC/POS — one receipt per seller.
+  app.get('/api/lots/print-batch.escpos', requireAuthFlex, (req, res) => {
+    const db = getDb();
+    const ids = String(req.query.ids || '').split(',').map(Number).filter(n => n > 0);
+    if (!ids.length) return res.status(400).json({ error: 'No lot IDs provided' });
+    const branch = (req.query && req.query.branch) || '';
+    let lots = ids.map(id => db.get(LOT_SELECT_SQL + ' WHERE l.id = ?', [id])).filter(Boolean);
+    if (branch) lots = lots.filter(l => l.branch === branch);
+    if (!lots.length) {
+      return res.status(404).json({ error: branch ? `No lots in ${branch}` : 'No lots found' });
+    }
+    const cfg = getReceiptConfig(db);
+    if (branch) cfg.branch = branch;
+    sendEscpos(res, buildGroupedEscpos(lots, cfg, { charWidth: escposWidth(req) }),
+      `Lots_${lots.length}.bin`);
+  });
+
+  // (3b) All lots for one seller in one auction, as raw ESC/POS.
+  app.get('/api/lots/print-seller.escpos', requireAuthFlex, (req, res) => {
+    const db = getDb();
+    const traderId = parseInt(req.query.trader_id, 10);
+    const auctionId = parseInt(req.query.auction_id, 10);
+    if (!traderId || !auctionId) {
+      return res.status(400).json({ error: 'trader_id and auction_id required' });
+    }
+    const branch = (req.query && req.query.branch) || '';
+    const params = [auctionId, traderId];
+    let where = 'l.auction_id = ? AND l.trader_id = ?';
+    if (branch) { where += ' AND l.branch = ?'; params.push(branch); }
+    const lots = db.all(LOT_SELECT_SQL + ' WHERE ' + where + ' ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no', params);
+    if (!lots.length) {
+      return res.status(404).json({ error: branch ? `No lots for this seller in ${branch}` : 'No lots found' });
+    }
+    const cfg = getReceiptConfig(db);
+    if (branch) cfg.branch = branch;
+    sendEscpos(res, buildEscposReceipt(lots, cfg, { charWidth: escposWidth(req) }),
+      `Seller_${(lots[0].trader_name || 'Receipt').replace(/[^A-Za-z0-9]+/g, '_')}.bin`);
+  });
+
+  // (4b) Every seller in an auction as raw ESC/POS — one receipt per seller.
+  // A dedicated path (…-escpos/:id) rather than a ".escpos" suffix, so the
+  // trailing numeric auction id stays a clean route param.
+  app.get('/api/lots/print-all-sellers-escpos/:auctionId', requireAuthFlex, (req, res) => {
+    const db = getDb();
+    const auctionId = parseInt(req.params.auctionId, 10);
+    const branch = req.query.branch || '';
+    const params = [auctionId];
+    let where = 'l.auction_id = ?';
+    if (branch) { where += ' AND l.branch = ?'; params.push(branch); }
+    const lots = db.all(
+      LOT_SELECT_SQL + ' WHERE ' + where +
+      ' ORDER BY COALESCE(t.name, l.name), CAST(l.lot_no AS INTEGER), l.lot_no',
+      params
+    );
+    if (!lots.length) return res.status(404).json({ error: 'No lots found' });
+    const cfg = getReceiptConfig(db);
+    if (branch) cfg.branch = branch;
+    sendEscpos(res, buildGroupedEscpos(lots, cfg, { charWidth: escposWidth(req) }), 'AllSellers.bin');
   });
 
   // Shared helper — groups arbitrary lot rows by seller, then renders

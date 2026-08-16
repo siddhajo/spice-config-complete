@@ -1,0 +1,32 @@
+// Release signing for the Spice Auction wrapper.
+//
+// One-time setup (see README "Distributable signed APK"):
+//   1. Generate a keystore and put it at  android/spice-release.keystore
+//   2. Copy keystore.properties.example -> android/keystore.properties and fill it in.
+//   3. In android/app/build.gradle, add this line at the very BOTTOM:
+//        apply from: "../../signing/signing.gradle"
+//
+// With those in place, `./gradlew assembleRelease` produces a signed APK.
+def kpFile = rootProject.file("keystore.properties")
+if (kpFile.exists()) {
+    def kp = new Properties()
+    kp.load(new FileInputStream(kpFile))
+    android {
+        signingConfigs {
+            release {
+                storeFile file(kp['storeFile'])
+                storePassword kp['storePassword']
+                keyAlias kp['keyAlias']
+                keyPassword kp['keyPassword']
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.release
+                minifyEnabled false
+            }
+        }
+    }
+} else {
+    println "signing.gradle: android/keystore.properties not found — release build will be UNSIGNED."
+}

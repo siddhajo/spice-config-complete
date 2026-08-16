@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Install Spice Auction (printing app)</title>
+  <style>
+    :root{color-scheme:light dark}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+         background:#0f6e56;color:#fff;-webkit-text-size-adjust:100%}
+    .wrap{max-width:460px;margin:0 auto;padding:24px 18px 48px}
+    .card{background:#fff;color:#1f2937;border-radius:16px;padding:22px 20px;margin-top:16px;
+          box-shadow:0 8px 30px rgba(0,0,0,.18)}
+    h1{font-size:22px;margin:8px 0 2px;text-align:center}
+    .sub{text-align:center;opacity:.9;font-size:13px;margin-bottom:6px}
+    .dl{display:block;text-align:center;background:#0f6e56;color:#fff;text-decoration:none;
+        font-weight:700;font-size:17px;padding:15px;border-radius:12px;margin:6px 0 4px}
+    .dl:active{opacity:.85}
+    ol{padding-left:20px;line-height:1.7;font-size:14px}
+    li{margin-bottom:4px}
+    .note{font-size:12px;color:#6b7280;margin-top:10px;line-height:1.5}
+    .step-h{font-weight:700;margin:16px 0 4px;font-size:14px}
+    code{background:#eef2f0;padding:1px 6px;border-radius:5px;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Spice Auction — printing app</h1>
+    <div class="sub">Install this on the phone that prints to the Bluetooth printer.</div>
+
+    <div class="card">
+      <div class="step-h">1. Download &amp; install</div>
+      <a id="dl-btn" class="dl" href="downloads/spice-auction.apk">⬇ Download app</a>
+      <div id="dl-status" class="note"></div>
+      <ol>
+        <li>Tap <b>Download app</b> above.</li>
+        <li>Open the downloaded <code>spice-auction.apk</code>.</li>
+        <li>If asked, allow <b>“install from unknown sources”</b> for your browser — then tap <b>Install</b>.</li>
+      </ol>
+      <div class="note">This is your own company app — the “unknown sources” warning is normal for apps not from the Play Store.</div>
+      <script>
+        // Don't fail silently: if the APK hasn't been published yet (404), grey
+        // out the button and say so, instead of a dead tap.
+        (function(){
+          var btn=document.getElementById('dl-btn'), st=document.getElementById('dl-status');
+          fetch('downloads/spice-auction.apk',{method:'HEAD',cache:'no-store'})
+            .then(function(r){ if(!r.ok) throw 0; })
+            .catch(function(){
+              btn.removeAttribute('href');
+              btn.style.opacity='.45'; btn.style.pointerEvents='none';
+              st.innerHTML='⚠️ The app isn’t published yet. Admin: build it once via '+
+                'GitHub → <b>Actions → Build Android APK → Run workflow</b>, then reload this page.';
+            });
+        })();
+      </script>
+
+      <div class="step-h">2. Pair the printer (once)</div>
+      <ol>
+        <li>Android <b>Settings → Bluetooth</b> → pair your thermal printer (e.g. MPT-II).</li>
+      </ol>
+
+      <div class="step-h">3. Set it up in the app (once)</div>
+      <ol>
+        <li>Open <b>Spice Auction</b>, log in.</li>
+        <li>Menu (⋮) → <b>Print method</b> → cycle to <b>Bluetooth (app)</b>.</li>
+        <li>Menu → <b>Connect Bluetooth printer</b> → pick your printer.</li>
+        <li>Menu → <b>🧪 Test print</b> → a small “PRINTER OK” slip should print.</li>
+      </ol>
+      <div class="note">Done — receipts now print straight to the printer. No RawBT, no watermark. If the app updates, you don’t need to reinstall; just reopen it.</div>
+    </div>
+  </div>
+</body>
+</html>

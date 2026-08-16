@@ -1,0 +1,13 @@
+{
+  "appId": "com.vinoth.spiceauction",
+  "appName": "Spice Auction",
+  "webDir": "www",
+  "server": {
+    "url": "https://your-app.up.railway.app/mobile",
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
