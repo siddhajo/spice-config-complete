@@ -1,26 +1,34 @@
 name: Build Android APK
 
 # Builds + signs the native wrapper APK in the cloud so nobody has to open
-# Android Studio. Run it from the repo's "Actions" tab → "Build Android APK" →
-# "Run workflow". It signs with your keystore (stored as repo secrets) and
-# publishes the APK into public-mobile/downloads/ so the app serves it at
-# /mobile/install.html for operators to install.
+# Android Studio. Trigger from Actions tab → "Build Android APK" → "Run
+# workflow", or push a tag like v1.2.3. Signs with the release keystore
+# (repo secrets) and publishes the APK into the app so operators can install
+# it from /mobile/install.html.
+
 on:
-  workflow_dispatch:        # manual "Run workflow" button
+  workflow_dispatch:
   push:
-    tags: ['v*']            # ...or automatically when you push a version tag
+    tags: ['v*']
 
 permissions:
-  contents: write           # needed to commit the built APK back into the repo
+  contents: write
+
+# Only these paths should ever need editing.
+env:
+  APP_ROOT:         spice-config-complete
+  PWA_SOURCE:       spice-config-complete/public-mobile
+  APK_PUBLISH_DIR:  spice-config-complete/public-mobile/downloads
+  APK_PUBLISH_NAME: spice-auction.apk
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -29,57 +37,95 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
-      - name: Install dependencies
-        working-directory: ./mobile-native
+      # ── Capacitor deps ────────────────────────────────────────────────
+      - name: Install Capacitor deps
+        working-directory: ${{ env.APP_ROOT }}/mobile-native
         run: npm install
 
-      - name: Add Android platform (only if missing) + sync plugins
-        working-directory: ./mobile-native
+      # ── Copy the PWA into the Capacitor webDir ────────────────────────
+      # capacitor.config.json has webDir: "www"; workflow populates it.
+      # Adds index.html shim if the PWA entry file is app.html — Capacitor
+      # requires index.html at webDir root or the wrapper shows a blank page.
+      - name: Copy PWA into www/
+        run: |
+          rm -rf ${{ env.APP_ROOT }}/mobile-native/www
+          mkdir -p ${{ env.APP_ROOT }}/mobile-native/www
+          cp -R ${{ env.PWA_SOURCE }}/. ${{ env.APP_ROOT }}/mobile-native/www/
+          if [ ! -f ${{ env.APP_ROOT }}/mobile-native/www/index.html ] \
+             && [ -f ${{ env.APP_ROOT }}/mobile-native/www/app.html ]; then
+            cp ${{ env.APP_ROOT }}/mobile-native/www/app.html \
+               ${{ env.APP_ROOT }}/mobile-native/www/index.html
+            echo "Created index.html shim from app.html"
+          fi
+          echo "PWA files in www/:"
+          ls ${{ env.APP_ROOT }}/mobile-native/www | head -20
+
+      # ── Generate native Android project (idempotent) ──────────────────
+      - name: Add Android platform + sync web assets
+        working-directory: ${{ env.APP_ROOT }}/mobile-native
         run: |
           [ -d android ] || npx cap add android
-          rm -f android/local.properties   # drop any committed Mac SDK path; CI sets its own
+          rm -f android/local.properties        # drop any local Mac SDK path
           npx cap sync android
 
-      - name: Add Bluetooth permissions (Android 12+)
-        working-directory: ./mobile-native/android/app/src/main
+      # ── Bluetooth permissions for thermal printers (Android 12+) ─────
+      - name: Add Bluetooth permissions
+        working-directory: ${{ env.APP_ROOT }}/mobile-native/android/app/src/main
         run: |
           if ! grep -q BLUETOOTH_CONNECT AndroidManifest.xml; then
             sed -i 's#<application#<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <application#' AndroidManifest.xml
           fi
 
+      # ── Signing (writes keystore + config from repo secrets) ─────────
       - name: Configure signing
-        working-directory: .e/mobile-native/android
+        working-directory: ${{ env.APP_ROOT }}/mobile-native/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PW:  ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS:    ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PW:       ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > spice-release.keystore
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > spice-release.keystore
           cat > keystore.properties <<EOF
           storeFile=../spice-release.keystore
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          storePassword=$KEYSTORE_PW
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PW
           EOF
-          grep -q 'signing.gradle' app/build.gradle || printf '\napply from: "../../signing/signing.gradle"\n' >> app/build.gradle
+          grep -q 'signing.gradle' app/build.gradle || \
+            printf '\napply from: "../../signing/signing.gradle"\n' >> app/build.gradle
 
+      # ── Build ─────────────────────────────────────────────────────────
       - name: Build signed release APK
-        working-directory: ./mobile-native/android
-        run: ./gradlew assembleRelease
+        working-directory: ${{ env.APP_ROOT }}/mobile-native/android
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload APK as a downloadable artifact
+      # Always upload so we can grab the APK even if the git-commit step
+      # at the end fails (protected branch, no write permission, etc.).
+      - name: Upload APK as workflow artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: spice-auction-apk
-          path: ./mobile-native/android/app/build/outputs/apk/release/app-release.apk
+          path: ${{ env.APP_ROOT }}/mobile-native/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
 
-      - name: Publish APK into the app (served at /mobile/install.html)
-        working-directory: ./
+      # ── Publish APK into repo (served at /mobile/install.html) ───────
+      - name: Publish APK into repo
         run: |
-          mkdir -p public-mobile/downloads
-          cp mobile-native/android/app/build/outputs/apk/release/app-release.apk public-mobile/downloads/spice-auction.apk
-          git config user.name "github-actions[bot]"
+          mkdir -p "${{ env.APK_PUBLISH_DIR }}"
+          cp ${{ env.APP_ROOT }}/mobile-native/android/app/build/outputs/apk/release/app-release.apk \
+             "${{ env.APK_PUBLISH_DIR }}/${{ env.APK_PUBLISH_NAME }}"
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public-mobile/downloads/spice-auction.apk
+          git add "${{ env.APK_PUBLISH_DIR }}/${{ env.APK_PUBLISH_NAME }}"
           git commit -m "chore: publish Android APK [skip ci]" || echo "No change to commit"
           git push
