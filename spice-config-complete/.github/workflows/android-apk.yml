@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write           # needed to commit the built APK back into the repo
 
+defaults:
+      run:
+        working-directory: ./spice-config-complete/spice-config-complete
+
 jobs:
   build:
     runs-on: ubuntu-latest
