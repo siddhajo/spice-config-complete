@@ -1,0 +1,84 @@
+name: Build Android APK
+
+# Builds + signs the native wrapper APK in the cloud so nobody has to open
+# Android Studio. Run it from the repo's "Actions" tab → "Build Android APK" →
+# "Run workflow". It signs with your keystore (stored as repo secrets) and
+# publishes the APK into public-mobile/downloads/ so the app serves it at
+# /mobile/install.html for operators to install.
+on:
+  workflow_dispatch:        # manual "Run workflow" button
+  push:
+    tags: ['v*']            # ...or automatically when you push a version tag
+
+permissions:
+  contents: write           # needed to commit the built APK back into the repo
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: mobile-native
+        run: npm install
+
+      - name: Add Android platform (only if missing) + sync plugins
+        working-directory: mobile-native
+        run: |
+          [ -d android ] || npx cap add android
+          rm -f android/local.properties   # drop any committed Mac SDK path; CI sets its own
+          npx cap sync android
+
+      - name: Add Bluetooth permissions (Android 12+)
+        working-directory: mobile-native/android/app/src/main
+        run: |
+          if ! grep -q BLUETOOTH_CONNECT AndroidManifest.xml; then
+            sed -i 's#<application#<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <application#' AndroidManifest.xml
+          fi
+
+      - name: Configure signing
+        working-directory: mobile-native/android
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > spice-release.keystore
+          cat > keystore.properties <<EOF
+          storeFile=../spice-release.keystore
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+          grep -q 'signing.gradle' app/build.gradle || printf '\napply from: "../../signing/signing.gradle"\n' >> app/build.gradle
+
+      - name: Build signed release APK
+        working-directory: mobile-native/android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK as a downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spice-auction-apk
+          path: mobile-native/android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Publish APK into the app (served at /mobile/install.html)
+        run: |
+          mkdir -p public-mobile/downloads
+          cp mobile-native/android/app/build/outputs/apk/release/app-release.apk public-mobile/downloads/spice-auction.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public-mobile/downloads/spice-auction.apk
+          git commit -m "chore: publish Android APK [skip ci]" || echo "No change to commit"
+          git push
