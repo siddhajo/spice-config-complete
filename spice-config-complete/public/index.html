@@ -15692,7 +15692,7 @@ async function fillAucSelect(selId){const d=await j('/api/auctions');const sel=d
 // (#lot-auction, #inv-auction, #pur-auction, #bill-auction,
 // #pay-auction, #tally-auction, #exp-auction, #lorry-auction,
 // #dn-auction, #le-auction, #pc-auction, #dbf-auction, #sb-auction,
-// #rep-auction). Persisted in localStorage('global_aid') so the
+// #rep-auction, #pe-auction). Persisted in localStorage('global_aid') so the
 // choice survives reloads.
 //
 // Label text ("Trade" vs "Auction") flips via data-term-auction so
@@ -15708,7 +15708,7 @@ const _GLOBAL_AID_TARGETS = [
   'lot-auction', 'inv-auction', 'pur-auction', 'bill-auction',
   'pay-auction', 'tally-auction', 'exp-auction', 'lorry-auction',
   'dn-auction',  'le-auction',   'pc-auction',  'dbf-auction',
-  'sb-auction',  'rep-auction',
+  'sb-auction',  'rep-auction',  'pe-auction',
 ];
 
 let _globalAidList = [];   // [{id, ano, date, lot_count, mode}]
