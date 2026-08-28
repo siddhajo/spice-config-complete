@@ -1085,6 +1085,18 @@ tr:hover td{background:var(--spice-cream)}
   background:var(--spice-cardamom);color:#fff;
   padding:8px;font-size:11px;letter-spacing:.4px;border-bottom:none
 }
+/* Price Entry list scrolls within a fixed viewport so the toolbar/filters
+   stay put and only the rows scroll; the coloured header sticks on top and
+   the totals row sticks to the bottom, so both stay readable mid-scroll.
+   border-collapse:collapse drops borders on sticky cells, so the totals row
+   draws its top rule with a box-shadow instead. */
+#pe-grid{max-height:calc(100vh - 320px);overflow:auto}
+#pe-grid .pe-grid-table thead th{position:sticky;top:0;z-index:2}
+#pe-grid .pe-grid-table tfoot tr{position:sticky;bottom:0;z-index:2}
+#pe-grid .pe-grid-table tfoot td{
+  background:var(--bg);font-weight:700;border-bottom:none;
+  box-shadow:inset 0 2px 0 var(--border)
+}
 
 /* ── Per-screen guide banner (plain-English help for every tab) ─
    ONE shared banner lives at the top of .content, OUTSIDE the
@@ -3521,7 +3533,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </div>
 
         <div style="font-size:12.5px;color:var(--text2);margin-top:8px;line-height:1.5">
-          Type a price and press <b>Enter</b> (or Tab) to save it and jump to the next lot. Only the <b>Price</b> column is editable — every other field is read-only, so there's no risk of changing the wrong thing. When you're done, click <b>Save &amp; Calculate All</b> to compute commission, tax and payable for the whole trade.
+          Type a price and press <b>Enter</b> (or Tab) to save it and jump to the next lot. Only the <b>Price</b> column is editable — every other field is read-only, so there's no risk of changing the wrong thing. Only lots that still need work are listed — tick <b>Show all rows</b> to see completed ones too. When you're done, click <b>Save &amp; Calculate All</b> to compute commission, tax and payable for the whole trade.
           <span id="pe-pc-note" style="display:none;color:#a16207"> Price Check is ON for this install — you'll need to re-verify prices before generating invoices.</span>
         </div>
         <div id="pe-summary" style="font-size:12px;color:var(--text3);margin-top:6px"></div>
@@ -3545,6 +3557,12 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <select id="pe-filter-branch" onchange="peSetFilter('branch',this.value)" style="min-width:130px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px"><option value="">All branches</option></select>
           <input id="pe-filter-seller" placeholder="Seller" oninput="peSetFilter('seller',this.value)" style="width:180px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px">
           <button class="btn btn-o" style="height:32px;padding:0 10px;font-weight:600" onclick="peClearFilters()">Clear filters</button>
+          <!-- Completed rows (priced + buyer set, or WD/NA) are hidden by
+               default so the operator only sees what still needs work. Tick to
+               show every lot in the trade. -->
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;margin-left:6px;cursor:pointer" title="Show completed lots too (priced with a buyer code, plus WD/NA lots)">
+            <input type="checkbox" id="pe-show-all" onchange="peToggleShowAll(this.checked)" style="width:15px;height:15px;cursor:pointer"> Show all rows
+          </label>
         </div>
         <!-- Bulk buyer-code bar — appears only when one or more lots are
              ticked in the grid below. Set applies a buyer code (via the
@@ -3557,7 +3575,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <button class="btn btn-o" style="height:34px;padding:0 12px;font-weight:600;margin-left:auto" onclick="peClearSelection()" title="Untick all lots">Clear selection</button>
         </div>
       </div>
-      <div class="card"><div id="pe-grid" style="overflow-x:auto"></div></div>
+      <!-- #pe-grid scrolls (both axes) via CSS — no inline overflow here, or it
+           would override the max-height/sticky-header rules. -->
+      <div class="card"><div id="pe-grid"></div></div>
     </div>
 
     <!-- LOTS -->
@@ -8906,6 +8926,7 @@ const SCREEN_GUIDE = {
             'Review the flagged differences before applying.'] },
   priceentry: { title: 'Price Entry — type prices fast, one lot at a time',
     steps: ['Pick the trade. Only the Price column is editable — every other field is read-only.',
+            'Only lots that still need work are listed — tick “Show all rows” to see completed ones too.',
             'Type a price and press Enter (or Tab) to save it and jump to the next lot.',
             'When done, click “Save & Calculate All” to compute commission, tax and payable.'] },
   lotentry: { title: 'Lot Entry — enter lots from the trade floor',
@@ -27030,7 +27051,16 @@ async function previewInvoice(type){
 // bring-to-front), so clearing the selection restores every lot's place.
 // dirty/sel/front are keyed by lot id (stable across re-render/reorder).
 let _pe = { aid: null, lots: [], byId: new Map(), view: [], dirty: new Set(), sel: new Set(),
-            front: [], sort: { col: null, dir: 1 }, filter: { lot: '', branch: '', seller: '' }, buyers: [] };
+            front: [], sort: { col: null, dir: 1 }, filter: { lot: '', branch: '', seller: '' }, buyers: [],
+            showAll: false };
+// A row is "complete" (needs no more work here) when it's priced AND has a
+// buyer code, OR it's a WD/NA lot (withdrawn / not-auctioned → nothing to
+// price). Completed rows are hidden unless "Show all rows" is ticked.
+function _peIsComplete(l){
+  const code = String(l && l.code || '').trim().toUpperCase();
+  if (code === 'WD' || code === 'NA') return true;
+  return Number(l && l.price) > 0 && !!String(l && l.buyer || '').trim();
+}
 // Price Check on/off — read from _sdata.flags the same way the rest of the
 // client does (see applyFeatureFlags / flag_pay_calc_discount lookups).
 function _peFlagPriceCheck(){
@@ -27102,8 +27132,13 @@ function _pePasses(l){
   if (f.lot    && !String(l.lot_no || '').toLowerCase().includes(f.lot.toLowerCase()))    return false;
   if (f.branch && String(l.branch || '') !== f.branch)                                    return false;
   if (f.seller && !String(l.name   || '').toLowerCase().includes(f.seller.toLowerCase())) return false;
+  // Hide completed rows unless "Show all rows" is ticked — but always keep a lot
+  // that was explicitly brought to front (a deliberate revisit of a done lot).
+  if (!_pe.showAll && _peIsComplete(l) && !_pe.front.includes(l.id)) return false;
   return true;
 }
+// Toggle showing completed rows (from the "Show all rows" checkbox).
+function peToggleShowAll(on){ _pe.showAll = !!on; renderPriceEntryGrid(); }
 // Derive the display order from the canonical list: filter, then sort, with
 // any bring-to-front lots pinned on top (in the order they were entered).
 function _peViewLots(){
@@ -27166,9 +27201,34 @@ function renderPriceEntryGrid(){
     </tr>`;
   }).join('');
   const thStyle = 'cursor:pointer;user-select:none';
+  const anyHiddenComplete = !_pe.showAll && _pe.lots.some(l => _peIsComplete(l) && !_pe.front.includes(l.id));
   const bodyHtml = view.length
     ? rows
-    : `<tr><td colspan="12" style="padding:20px;text-align:center;color:var(--text3);font-size:13px">No lots match the current filter. <a href="#" onclick="peClearFilters();return false" style="color:var(--green)">Clear filters</a></td></tr>`;
+    : `<tr><td colspan="12" style="padding:20px;text-align:center;color:var(--text3);font-size:13px">${anyHiddenComplete
+        ? 'Nothing left to price — every lot matching the filter is complete. <a href="#" onclick="document.getElementById(\'pe-show-all\').checked=true;peToggleShowAll(true);return false" style="color:var(--green)">Show all rows</a>.'
+        : 'No lots match the current filter.'} <a href="#" onclick="peClearFilters();return false" style="color:var(--green)">Clear filters</a></td></tr>`;
+  // Totals row — computed over the CURRENTLY VISIBLE rows, so with a filter on
+  // (or completed rows hidden) it reads as a subtotal for what's on screen.
+  // WD/NA lots carry no sale value, so they add to Bags/Qty but not to Amount,
+  // matching the per-row cells above.
+  let totBags = 0, totQty = 0, totAmt = 0;
+  for (const l of view) {
+    const noSaleRow = ['WD','NA'].includes(String(l.code||'').trim().toUpperCase());
+    totBags += Number(l.bags) || 0;
+    totQty  += Number(l.qty)  || 0;
+    totAmt  += noSaleRow ? 0 : (Number(l.qty)||0) * (Number(l.price)||0);
+  }
+  const totLabel = (view.length < _pe.lots.length ? 'Shown subtotal' : 'Total') +
+    ` · ${view.length} lot${view.length === 1 ? '' : 's'}`;
+  const footHtml = view.length ? `<tfoot><tr>
+      <td></td>
+      <td colspan="3" style="padding:8px;text-align:left">${totLabel}</td>
+      <td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">${_peBags(totBags)}</td>
+      <td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">${_peFmt(totQty)}</td>
+      <td></td>
+      <td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">${_peFmt(totAmt)}</td>
+      <td colspan="4"></td>
+    </tr></tfoot>` : '';
   grid.innerHTML = `<table class="pe-grid-table" style="width:100%;border-collapse:collapse;font-size:13px">
     <thead><tr>
       <th style="border-top-left-radius:6px;width:28px;text-align:center"><input type="checkbox" id="pe-selall" onchange="peToggleSelectAll(this.checked)" title="Select all priceable lots" style="width:15px;height:15px;cursor:pointer"></th>
@@ -27180,7 +27240,7 @@ function renderPriceEntryGrid(){
       <th style="text-align:left">Code</th>
       <th style="text-align:left">Buyer Code</th>
       <th style="text-align:left">Buyer Name</th><th style="border-top-right-radius:6px"></th>
-    </tr></thead><tbody>${bodyHtml}</tbody></table>`;
+    </tr></thead><tbody>${bodyHtml}</tbody>${footHtml}</table>`;
   _peSyncSelectionUI();
   _peRenderSummary();
 }
@@ -27195,7 +27255,13 @@ function _peRenderSummary(){
   // Note when a filter is hiding some rows so the on-screen count is clear.
   const shown = (_pe.view || []).length;
   const filtered = shown < _pe.lots.length ? ` · showing ${shown} of ${_pe.lots.length}` : '';
-  sumEl.innerHTML = `${priced}/${total} lots priced` + (dirty ? ` · <b style="color:#a16207">${dirty} unsaved</b>` : (total ? ' · all saved' : '')) + filtered;
+  // Count completed rows currently hidden (only when "Show all rows" is off).
+  const hiddenComplete = _pe.showAll ? 0
+    : _pe.lots.filter(l => _peIsComplete(l) && !_pe.front.includes(l.id)).length;
+  const hiddenNote = hiddenComplete
+    ? ` · <b style="color:#166534">${hiddenComplete} complete hidden</b> <span style="color:var(--text3)">(tick “Show all rows”)</span>`
+    : '';
+  sumEl.innerHTML = `${priced}/${total} lots priced` + (dirty ? ` · <b style="color:#a16207">${dirty} unsaved</b>` : (total ? ' · all saved' : '')) + filtered + hiddenNote;
 }
 function pePriceInput(id){
   const inp = document.querySelector(`[data-peprice="${id}"]`); if (!inp) return;
