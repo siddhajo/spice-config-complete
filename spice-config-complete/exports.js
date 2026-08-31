@@ -1380,6 +1380,24 @@ async function exportPramanCSV(db, auctionId, cfg, state) {
     return s;
   };
 
+  // Lot numbers are stored zero-padded ("001", "056") but the Trade Fair
+  // upload rejects them — "Invalid Lot number for the Lot: 001". The workaround
+  // operators found was to open the CSV in Excel and re-save it as comma-
+  // delimited: Excel reads a digits-only cell as a NUMBER, so "001" is written
+  // back as "1" and the upload passes. We emit that form directly so nobody has
+  // to round-trip the file through Excel.
+  //
+  // Mirrors Excel exactly — only an all-digits value is treated as numeric, so
+  // an alpha-prefixed lot ("A001") stays text and keeps its padding, and "000"
+  // collapses to "0" rather than to blank. The reverse direction is safe: the
+  // Trade Fair price-sync matches lots through parseLotNo/normLotKey (see
+  // server.js runLotImport), which already equates "1" with "001".
+  const excelNumericLotNo = (v) => {
+    const s = String(v == null ? '' : v).trim();
+    if (!/^\d+$/.test(s)) return s;
+    return String(parseInt(s, 10));
+  };
+
   // Per business rule: every Praman row reports ASP as the planter,
   // regardless of which trader actually supplied the lot. This is for the
   // Praman platform's expected upload format — internal records still keep
@@ -1400,7 +1418,7 @@ async function exportPramanCSV(db, auctionId, cfg, state) {
     const lotCompany = 'ISPL';
 
     lines.push([
-      r.lot_no || '',
+      excelNumericLotNo(r.lot_no),
       lotCompany,
       r.branch || '',
       planterDealer,
@@ -1420,9 +1438,12 @@ async function exportPramanCSV(db, auctionId, cfg, state) {
     ].map(csvEscape).join(','));
   }
 
-  // CSV text → Buffer. Prefix with BOM so Excel on Windows opens with
-  // UTF-8 correctly (otherwise accented characters break).
-  return Buffer.from('\uFEFF' + lines.join('\r\n'), 'utf8');
+  // CSV text → Buffer. NO BOM: the Praman / Trade Fair upload does an exact
+  // header-string match, and a leading UTF-8 BOM glues an invisible char onto
+  // the first header ("Lot Number"), which the site rejects with
+  // "File headers are not matched with required format". This is a machine
+  // upload, not an Excel-viewed sheet, so the BOM is unnecessary here.
+  return Buffer.from(lines.join('\r\n'), 'utf8');
 }
 
 // ── Export Type 12: Trade Report (BUYERS LIST FOR VERIFICATION) ──
