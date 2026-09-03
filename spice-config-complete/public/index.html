@@ -6681,7 +6681,28 @@ function noteServerContext(path, method, resp, ok){
     adoptContext({ rev: n, state, mode });
     return;
   }
-  if (n !== window._ctx.rev) showContextBanner({ state, mode });
+  // STRICTLY GREATER, not "different". The rev in a response header is
+  // stamped when the request arrives, so a GET issued before a bump but
+  // resolving after it carries the OLD rev — and a state flip fires
+  // several of those in parallel (brand, presets, settings reload). On
+  // "different" they read as somebody else's change and the window that
+  // made the flip alarms at its own in-flight replies, while the window
+  // that actually needs the warning is idle and sees nothing. Only a rev
+  // ahead of ours means the ground moved.
+  if (n > window._ctx.rev) showContextBanner({ state, mode });
+}
+
+// Ask the server outright. Used by the idle poll and whenever this window
+// comes back to the foreground — a tab that was hidden ran no poll at all,
+// so it must check on the way in rather than wait out the next interval.
+let _ctxLastCheck = 0;
+function checkContextNow(){
+  if (!T) return;
+  if (window._ctx.stale) return;          // already flagged — don't nag
+  const now = Date.now();
+  if (now - _ctxLastCheck < 3000) return; // focus/visibility can fire together
+  _ctxLastCheck = now;
+  j('/api/business-context').catch(()=>{});
 }
 
 // A full-width bar, not a toast: this must not scroll away or auto-dismiss
@@ -6713,15 +6734,19 @@ function hideContextBanner(){
   if (el){ el.style.display = 'none'; document.body.style.paddingTop = ''; }
 }
 
-// Idle tabs issue no requests, so nothing would teach them the context
-// moved. Poll while visible and logged in; the response header does the
-// rest through noteServerContext().
+// An idle screen issues no requests, so nothing would otherwise teach it
+// that the context moved — which is exactly the screen that needs telling.
+// Three triggers: a slow poll while in the foreground, and an immediate
+// check whenever this window is brought back (tab revealed, or window
+// refocused after the operator was in the other one).
 setInterval(() => {
-  if (!T) return;
   if (document.visibilityState !== 'visible') return;
-  if (window._ctx.stale) return;   // already flagged — stop nagging the server
-  j('/api/business-context').catch(()=>{});
+  checkContextNow();
 }, 25000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') checkContextNow();
+});
+window.addEventListener('focus', checkContextNow);
 
 const h=(t,o={})=>fetch(B+t,{...o,headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders(),...(o.headers||{})}});
 // j() throws on non-2xx so callers can't silently mis-parse an error body.
