@@ -3589,6 +3589,15 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <input type="checkbox" id="pe-show-all" onchange="peToggleShowAll(this.checked)" style="width:15px;height:15px;cursor:pointer"> Show all rows
           </label>
         </div>
+        <!-- Already-priced warning — appears while typing in "Select lots" or
+             the "Lot no" filter above, when a matched lot already carries a
+             price and/or a buyer code. Advisory only: nothing is blocked, it
+             just makes overwriting finished work a deliberate act. -->
+        <div id="pe-priced-warn" style="display:none;align-items:flex-start;gap:9px;margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:12.5px;color:#78350f;line-height:1.55">
+          <span style="font-size:14px;line-height:1.3">⚠️</span>
+          <div id="pe-priced-warn-text" style="flex:1;min-width:0"></div>
+          <button type="button" onclick="peDismissPricedWarn()" title="Dismiss" aria-label="Dismiss this warning" style="border:none;background:transparent;cursor:pointer;color:#92400e;font-size:13px;line-height:1;padding:2px 4px">✕</button>
+        </div>
         <!-- Bulk buyer-code bar — appears only when one or more lots are
              ticked in the grid below. Set applies a buyer code (via the
              Set-Buyer modal) to every ticked lot; Clear wipes the buyer code
@@ -6667,12 +6676,19 @@ function adoptContext(ctx){
 // Called with every API response. First sighting seeds the context
 // silently; any later change that we did not cause raises the banner.
 function noteServerContext(path, method, resp, ok){
+  // Sign-in watch rides on the same headers. Handled first and independently
+  // of the settings rev, so a sign-in is noticed even when settings are
+  // untouched (which is the usual case).
+  try { noteLoginRev(resp); } catch(_) {}
   let rev;
   try { rev = resp.headers.get('X-Settings-Rev'); } catch(_) { return; }
   if (rev === null || rev === undefined || rev === '') return;
   const n = Number(rev);
   const state = (()=>{ try{ return resp.headers.get('X-Business-State')||''; }catch(_){ return ''; } })();
   const mode  = (()=>{ try{ return resp.headers.get('X-Business-Mode') ||''; }catch(_){ return ''; } })();
+  // Who made the change, so the banner can name them rather than saying
+  // "another session". URI-encoded on the wire (headers are Latin-1 only).
+  const by = (()=>{ try{ return decodeURIComponent(resp.headers.get('X-Settings-By')||''); }catch(_){ return ''; } })();
   // Only a SUCCESSFUL own-write adopts. A settings save that itself got
   // refused (someone else saved first) must raise the banner, not quietly
   // swallow the newer rev.
@@ -6689,7 +6705,63 @@ function noteServerContext(path, method, resp, ok){
   // made the flip alarms at its own in-flight replies, while the window
   // that actually needs the warning is idle and sees nothing. Only a rev
   // ahead of ours means the ground moved.
-  if (n > window._ctx.rev) showContextBanner({ state, mode });
+  if (n > window._ctx.rev) showContextBanner({ state, mode, by });
+}
+
+// ── Sign-in watch ────────────────────────────────────────────
+// The server stamps a monotonic sign-in counter on every response. When it
+// moves ahead of what we last saw, someone signed in — ask the server who.
+// The details are served to admins/managers only, so a non-supervisor's
+// client finds nothing and stays quiet.
+window._loginRev = null;
+let _loginFetchInFlight = false;
+function noteLoginRev(resp){
+  let raw;
+  try { raw = resp.headers.get('X-Login-Rev'); } catch(_) { return; }
+  if (raw === null || raw === undefined || raw === '') return;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return;
+  // First sighting seeds silently — we must not announce sign-ins that
+  // happened before this screen was even open.
+  if (window._loginRev === null){ window._loginRev = n; return; }
+  if (n <= window._loginRev) return;
+  window._loginRev = n;
+  if (_loginFetchInFlight) return;
+  _loginFetchInFlight = true;
+  // Raw fetch, not j(): this must not recurse back through noteServerContext
+  // while we are inside it, and a failure here is not worth surfacing.
+  fetch(B + '/api/business-context', { headers: { 'Authorization': 'Bearer ' + T } })
+    .then(r => r.ok ? r.json() : null)
+    .then(d => { if (d && d.loginMeta) showLoginNotice(d.loginMeta); })
+    .catch(()=>{})
+    .finally(()=>{ _loginFetchInFlight = false; });
+}
+
+// A corner card rather than a toast: a sign-in is worth noticing but must
+// never interrupt what the supervisor is doing, and it should still be
+// there if they were looking away. Auto-dismisses after 30s; stacks are
+// avoided by reusing the one element.
+function showLoginNotice(m){
+  let el = document.getElementById('login-notice');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'login-notice';
+    el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99998;max-width:320px;'
+      + 'background:#065F46;color:#fff;border-radius:10px;padding:12px 14px;font-size:12.5px;'
+      + 'line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:pointer';
+    el.title = 'Click to dismiss · full history in the App Activity Log';
+    el.onclick = () => { el.style.display = 'none'; };
+    document.body.appendChild(el);
+  }
+  const where = [m.app, m.ip].filter(Boolean).join(' · ');
+  el.innerHTML = '<div style="font-weight:700;margin-bottom:3px">Someone signed in</div>'
+    + '<div><strong>' + esc(m.by || '—') + '</strong>'
+    + (m.role ? ' <span style="opacity:.85">(' + esc(m.role) + ')</span>' : '') + '</div>'
+    + (where ? '<div style="opacity:.85">' + esc(where) + '</div>' : '')
+    + (m.at ? '<div style="opacity:.7;font-size:11.5px;margin-top:3px">' + esc(m.at) + '</div>' : '');
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 30000);
 }
 
 // Ask the server outright. Used by the idle poll and whenever this window
@@ -6807,6 +6879,16 @@ async function _jOnce(t, o){
       // Stale token: silently log out — no toast / pill error, so the
       // user just lands on the login form without a confusing "Session
       // expired" message blinking up.
+      //
+      // ONE exception: a session displaced by the single-session policy.
+      // Landing on a blank login form after being kicked mid-work reads as
+      // a bug, so that case gets an explicit reason on the login screen.
+      if (body && body.code === 'SESSION_REVOKED'){
+        try {
+          const le = document.getElementById('login-err');
+          if (le) le.textContent = body.error || 'You were signed out because this account signed in elsewhere.';
+        } catch(_) {}
+      }
       console.warn('Got 401 — clearing stale token');
       localStorage.removeItem('t'); T = '';
       try {
@@ -27386,6 +27468,13 @@ async function loadPriceEntryGrid(){
   const grid = document.getElementById('pe-grid');
   const sumEl = document.getElementById('pe-summary');
   const fbar = document.getElementById('pe-filter-bar');
+  // Any already-priced warning on screen described the previous load, so drop
+  // it (and its dismissal memory). It comes back on the next keystroke in
+  // either lot box — including right after a bulk buyer-set, where re-showing
+  // it immediately would only nag about work the operator just did.
+  const warn = document.getElementById('pe-priced-warn');
+  if (warn) warn.style.display = 'none';
+  _peWarnDismissed = '';
   if (!aid) {
     grid.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Select a trade to price its lots.</div>';
     if (sumEl) sumEl.textContent = ''; if (fbar) fbar.style.display = 'none'; return;
@@ -27880,6 +27969,7 @@ function peSort(col){
 function peSetFilter(key, val){
   _pe.filter[key] = val;
   renderPriceEntryGrid();
+  peUpdatePricedWarn();
 }
 function peClearFilters(){
   _pe.filter = { lot: '', branch: '', seller: '' };
@@ -27887,6 +27977,83 @@ function peClearFilters(){
   const bf = document.getElementById('pe-filter-branch'); if (bf) bf.value = '';
   const sf = document.getElementById('pe-filter-seller'); if (sf) sf.value = '';
   renderPriceEntryGrid();
+  peUpdatePricedWarn();
+}
+// ── Already-priced warning ────────────────────────────────────────
+// The two lot-picking boxes above the grid ("Select lots" and the "Lot no"
+// filter) are how an operator homes in on a lot to re-price. If a lot they
+// name is already done — a price entered, a buyer code set, or both — say so
+// before they type over it. Advisory only: nothing is blocked or confirmed
+// away, the banner just makes the overwrite deliberate.
+// _peWarnDismissed remembers WHICH lots were dismissed, so the banner stays
+// hidden while the typed text keeps naming the same lots but comes back as
+// soon as a different lot enters the match.
+let _peWarnDismissed = '';
+// Lots already carrying work. WD/NA lots are excluded — they can't be
+// priced here, so there is nothing to warn about.
+function _peHasWork(l){
+  const code = String(l && l.code || '').trim().toUpperCase();
+  if (code === 'WD' || code === 'NA') return false;
+  return Number(l && l.price) > 0 || !!String(l && l.buyer || '').trim();
+}
+// Lots named by the current contents of the two boxes, in grid order.
+// "Select lots" matches whole lot numbers (ranges expanded, leading zeros
+// ignored); the filter box matches the same substring the grid filters on.
+function _peWarnMatches(){
+  const sel  = (document.getElementById('pe-lotno-input')?.value || '').trim();
+  const filt = (document.getElementById('pe-filter-lot')?.value  || '').trim();
+  if (!sel && !filt) return [];
+  const keys = new Set(_peParseLotTokens(sel).map(w => w.key).filter(Boolean));
+  const needle = filt.toLowerCase();
+  return _pe.lots.filter(l =>
+    (keys.size  && keys.has(_peNormLot(l.lot_no))) ||
+    (needle     && String(l.lot_no || '').toLowerCase().includes(needle)));
+}
+// "priced at ₹2,942.00 and has buyer code ABC" — whichever parts apply.
+function _peWorkPhrase(l){
+  const bits = [];
+  if (Number(l.price) > 0) bits.push(`priced at ₹${_peFmt(l.price)}`);
+  const buyer = String(l.buyer || '').trim();
+  if (buyer) bits.push(`has buyer code <b>${esc(buyer)}</b>`);
+  return bits.join(' and ');
+}
+// Recompute and show/hide the banner. Called from both input handlers.
+function peUpdatePricedWarn(){
+  const box = document.getElementById('pe-priced-warn');
+  const txt = document.getElementById('pe-priced-warn-text');
+  if (!box || !txt) return;
+  const hit = _peWarnMatches().filter(_peHasWork);
+  if (!hit.length) { box.style.display = 'none'; _peWarnDismissed = ''; return; }
+  const key = hit.map(l => l.id).sort((a, b) => a - b).join(',');
+  if (key === _peWarnDismissed) { box.style.display = 'none'; return; }
+  _peWarnDismissed = '';
+  if (hit.length === 1) {
+    const l = hit[0];
+    txt.innerHTML = `Lot <b>${esc(l.lot_no)}</b> is already ${_peWorkPhrase(l)}. ` +
+      `<b>Do you still want to change it?</b>`;
+  } else {
+    // Cap the per-lot detail so a broad filter ("1") can't flood the banner.
+    const SHOWN = 6;
+    const list = hit.slice(0, SHOWN).map(l => {
+      const parts = [];
+      if (Number(l.price) > 0) parts.push('₹' + _peFmt(l.price));
+      const buyer = String(l.buyer || '').trim();
+      if (buyer) parts.push(esc(buyer));
+      return `<b>${esc(l.lot_no)}</b> (${parts.join(' · ')})`;
+    }).join(', ');
+    const more = hit.length > SHOWN ? ` and ${hit.length - SHOWN} more` : '';
+    txt.innerHTML = `<b>${hit.length} lots</b> you're picking are already priced or have a buyer code — ` +
+      `${list}${more}. <b>Do you still want to change them?</b>`;
+  }
+  box.style.display = 'flex';
+}
+// Dismiss the banner for the lots it is currently naming. It reappears as
+// soon as the typed text matches a different set of lots.
+function peDismissPricedWarn(){
+  const hit = _peWarnMatches().filter(_peHasWork);
+  _peWarnDismissed = hit.map(l => l.id).sort((a, b) => a - b).join(',');
+  const box = document.getElementById('pe-priced-warn');
+  if (box) box.style.display = 'none';
 }
 // Refresh the filter bar for the loaded trade: show it, and rebuild the
 // branch dropdown from the distinct branches present.
@@ -27912,6 +28079,7 @@ function peToggleLotNoClear(){
   const inp = document.getElementById('pe-lotno-input');
   const btn = document.getElementById('pe-lotno-clear');
   if (inp && btn) btn.style.display = inp.value ? 'flex' : 'none';
+  peUpdatePricedWarn();
 }
 // Clear the "Select lots" box and refocus it.
 function peClearLotNoInput(){
@@ -27924,14 +28092,12 @@ function peClearLotNoInput(){
 // Tick the lots whose numbers are typed in the quick-select box and pin them
 // to the top of the grid. Accepts a comma/space separated list, with numeric
 // ranges like "12-18". Leading zeros are ignored when matching.
-async function peSelectByLotNos(){
-  if (!_pe.aid) { toast('Select a trade first'); return; }
-  const inp = document.getElementById('pe-lotno-input');
-  const raw = inp ? inp.value : '';
-  if (!raw.trim()) { toast('Enter one or more lot numbers'); return; }
-  // Parse tokens: split on commas/whitespace, expand numeric a-b ranges.
-  const tokens = raw.split(/[\s,]+/).filter(Boolean);
-  const wanted = [];   // { key, label } in entry order
+// Parse a "Select lots" entry into the lot keys it asks for: split on
+// commas/whitespace and expand numeric a-b ranges. Returns { key, label }
+// in entry order (key is the normalised lot no, label is what was typed).
+function _peParseLotTokens(raw){
+  const tokens = String(raw || '').split(/[\s,]+/).filter(Boolean);
+  const wanted = [];
   for (const tok of tokens) {
     const m = tok.match(/^(\d+)\s*-\s*(\d+)$/);
     if (m) {
@@ -27943,6 +28109,14 @@ async function peSelectByLotNos(){
       wanted.push({ key: _peNormLot(tok), label: tok });
     }
   }
+  return wanted;
+}
+async function peSelectByLotNos(){
+  if (!_pe.aid) { toast('Select a trade first'); return; }
+  const inp = document.getElementById('pe-lotno-input');
+  const raw = inp ? inp.value : '';
+  if (!raw.trim()) { toast('Enter one or more lot numbers'); return; }
+  const wanted = _peParseLotTokens(raw);
   const byLot = new Map();
   for (const l of _pe.lots) byLot.set(_peNormLot(l.lot_no), l);
   const matchedIds = [];

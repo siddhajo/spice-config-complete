@@ -216,8 +216,20 @@ trail can never go silently empty.
 ## 6. Users, Roles & Permissions
 
 Authentication is **token-based**: log in with username + password (bcrypt-hashed), receive a session
-token, and send it as `Authorization: Bearer <token>`. Multiple devices can be logged in at once; each
-gets its own token, listed and revocable under "My Sessions".
+token, and send it as `Authorization: Bearer <token>`.
+
+**One account = one live session.** Signing in anywhere — office desktop, packaged app or the mobile
+PWA — revokes every other session that account holds. The displaced screen is signed out on its next
+request and told why (`401` with `code: SESSION_REVOKED`, shown on the login form) rather than getting a
+bare "session expired". Both the sign-in and the eviction are written to the activity log. Staff who
+need the phone and a desktop open simultaneously need **two accounts** — which is also what keeps the
+audit trail attributable to a person. Boot collapses any pre-existing duplicate sessions down to the
+most recently used one per user.
+
+**Sign-in notifications.** Every response carries an `X-Login-Rev` counter; when it advances, the client
+asks `/api/business-context` who signed in and shows a corner card naming the user, their role, the app
+and the IP. The details are served to **admins and managers only** — an auction-floor operator is not
+notified about colleagues. The full history is in the Activity Log for everyone with `view`.
 
 There are **5 fixed roles**, each granting a set of named capabilities. The role hierarchy is additive
 (each tier includes the ones below it):

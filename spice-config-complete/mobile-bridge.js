@@ -615,6 +615,11 @@ function mountMobile(app, deps) {
   // field user clearing their own lots) land in the same activity feed
   // the admin console reads. No-op shim if an older host didn't pass it.
   const auditLog = deps.auditLog || function () {};
+  // Single-session enforcement + the sign-in notification counter live in
+  // server.js so desktop and mobile share one policy and one counter.
+  // No-op shims keep an older host from breaking the mount.
+  const revokeOtherSessions = deps.revokeOtherSessions || function () { return 0; };
+  const bumpLoginRev = deps.bumpLoginRev || function () {};
 
   // ── 0. LAZY SELF-HEAL SCHEMA (defence in depth) ───────────────────
   // db.js is now the canonical source for every column/table the bridge
@@ -719,12 +724,19 @@ function mountMobile(app, deps) {
       } catch (_) { /* non-fatal */ }
     }
     const token = crypto.randomBytes(32).toString('hex');
-    // Multi-device sessions — DON'T delete existing sessions. Field staff
-    // can keep the desktop admin UI logged in while using the phone too.
+    // One account = one live session, phone included. Signing in here signs
+    // the same account out of the office desktop (and vice versa) — see
+    // revokeOtherSessions() in server.js. Field staff who need the phone and
+    // a desktop open at the same time need two accounts, which is also what
+    // makes the audit trail attributable to a person.
     db.run(
       'INSERT INTO sessions (token, user_id, device_label) VALUES (?, ?, ?)',
       [token, user.id, (req.headers['user-agent'] || '').slice(0, 80)]
     );
+    // Set the actor BEFORE the eviction so its audit row is attributed to the
+    // person whose sign-in caused it, not to 'system'.
+    req.user = user;
+    const evicted = revokeOtherSessions(db, user.id, token, req, user);
     db.run(
       'INSERT INTO login_history (user_id, username, ip, user_agent) VALUES (?, ?, ?, ?)',
       [
@@ -734,9 +746,11 @@ function mountMobile(app, deps) {
         /Mobile|Android|iPhone/i.test(req.headers['user-agent'] || '') ? 'Mobile' : 'Desktop',
       ]
     );
-    req.user = user;   // auditLog reads the actor off req
-    auditLog(req, 'login', 'session', null, { role: user.role, branch: user.branch || '' },
-      { status: 200, summary: `Signed in — ${user.username} (${user.role})` });
+    auditLog(req, 'login', 'session', null,
+      { role: user.role, branch: user.branch || '', evicted_sessions: evicted || undefined },
+      { status: 200, summary: `Signed in — ${user.username} (${user.role})`
+          + (evicted ? ` · signed out ${evicted} other session(s)` : '') });
+    bumpLoginRev(db, req, user);
     res.json({
       user: {
         id: user.id,

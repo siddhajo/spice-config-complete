@@ -143,7 +143,13 @@ function businessContext(db) {
       else if (r.key === 'business_mode') mode = String(r.value || '');
     }
   } catch (_) { /* pre-init / mid-migration — report an empty context */ }
-  return { rev: getSettingsRev(db), state, mode };
+  // `by` and `loginRev` ride along so the response headers can name who
+  // changed the settings and signal a new sign-in. Both are single-row
+  // app_state PK lookups, keeping this cheap enough for every response.
+  let by = '', loginRev = 0;
+  try { by = getSettingsRevMeta(db).by || ''; } catch (_) {}
+  try { loginRev = getLoginRev(db); } catch (_) {}
+  return { rev: getSettingsRev(db), state, mode, by, loginRev };
 }
 
 // Bump after ANY settings mutation, not just a state/mode flip. A changed
@@ -175,7 +181,77 @@ function applyContextHeaders(res, ctx) {
     res.set('X-Settings-Rev',   String(ctx.rev));
     res.set('X-Business-State', ctx.state);
     res.set('X-Business-Mode',  ctx.mode);
+    // Who moved the settings. The banner in the other sessions names them
+    // instead of saying "another session" — with several people on the same
+    // installation, "who changed it" is the first thing anyone asks.
+    // URI-encoded because a header must be Latin-1 and a username need not be.
+    if (ctx.by) res.set('X-Settings-By', encodeURIComponent(String(ctx.by)));
+    // Monotonic sign-in counter. A client that sees this go up knows someone
+    // signed in and asks /api/business-context for the details — so the
+    // notification lands within one request instead of waiting out the poll.
+    res.set('X-Login-Rev', String(ctx.loginRev || 0));
   } catch (_) { /* advisory only — never block a response over it */ }
+}
+
+// ── SIGN-IN ACTIVITY ─────────────────────────────────────────
+// A second monotonic counter, alongside settings_rev and read the same way.
+// Bumped on every successful sign-in; the meta row carries who it was, from
+// which app and IP, so an admin's screen can name them.
+function getLoginRev(db) {
+  try {
+    ensureAppState(db);
+    const row = db.get(`SELECT value FROM app_state WHERE key = 'logins_rev'`);
+    return (row && row.value) ? (parseInt(row.value, 10) || 0) : 0;
+  } catch (_) { return 0; }
+}
+function getLoginRevMeta(db) {
+  try {
+    const row = db.get(`SELECT value FROM app_state WHERE key = 'logins_rev_meta'`);
+    return (row && row.value) ? JSON.parse(row.value) : {};
+  } catch (_) { return {}; }
+}
+function bumpLoginRev(db, req, user) {
+  try {
+    ensureAppState(db);
+    const next = getLoginRev(db) + 1;
+    const nowRow = db.get(`SELECT datetime('now','localtime') AS t`);
+    const meta = {
+      rev: next,
+      by: user.username,
+      role: user.role || '',
+      app: auditApp(req),
+      ip: auditClientIp(req),
+      at: (nowRow && nowRow.t) || '',
+    };
+    db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('logins_rev', ?)`, [String(next)]);
+    db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('logins_rev_meta', ?)`, [JSON.stringify(meta)]);
+  } catch (_) { /* a sign-in must never fail over the notification counter */ }
+}
+
+// ── SINGLE SESSION PER USER ──────────────────────────────────
+// One account = one live session, on any device. Signing in anywhere
+// revokes every other session that account holds — the displaced screen is
+// signed out on its next request and told why. Revoking rather than
+// deleting is what makes that message possible; requireAuth() drops the row
+// once it has delivered it.
+function revokeOtherSessions(db, userId, keepToken, req, user) {
+  try {
+    const reason = `Signed in on another device (${auditApp(req)}${auditClientIp(req) ? ' · ' + auditClientIp(req) : ''})`;
+    const info = db.run(
+      `UPDATE sessions SET revoked_at = datetime('now','localtime'), revoked_reason = ?
+        WHERE user_id = ? AND token != ? AND revoked_at IS NULL`,
+      [reason, userId, keepToken]
+    );
+    const n = (info && info.changes) || 0;
+    // Worth an audit row: a displaced session is indistinguishable from a
+    // shared password unless the trail records that it happened.
+    if (n > 0) {
+      auditLog(req, 'logout', 'session', null,
+        { evicted_sessions: n, reason: 'single-session policy — signed in elsewhere' },
+        { status: 200, summary: `Signed out ${n} other session(s) of ${user.username} — one account, one session` });
+    }
+    return n;
+  } catch (_) { return 0; }
 }
 
 // Echo the current context on every /api response. The client compares it
@@ -525,6 +601,19 @@ function requireAuth(req, res, next) {
   // 401 (not 403) so the client's auto-logout flow triggers silently
   // instead of surfacing a "Session expired" toast to the user.
   if (!session) return res.status(401).json({ error: 'Session expired — please sign in again' });
+  // Single-session policy: this session was displaced by a later sign-in on
+  // the same account. Deliver the explanation once, then drop the row — the
+  // screen shows "you were signed out because…" rather than a bare expiry,
+  // which is the difference between an understood policy and a bug report.
+  if (session.revoked_at) {
+    db.run('DELETE FROM sessions WHERE token = ?', [token]);
+    return res.status(401).json({
+      code: 'SESSION_REVOKED',
+      error: (session.revoked_reason || 'This account signed in elsewhere')
+           + `. Only one session per user is allowed, so this screen was signed out at ${session.revoked_at}.`,
+      revokedAt: session.revoked_at,
+    });
+  }
   const user = db.get('SELECT * FROM users WHERE id = ?', [session.user_id]);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
   // Touch last_used_at for cleanup / activity display
@@ -759,9 +848,16 @@ app.post('/api/login', async (req, res) => {
     } catch (_) { /* non-fatal */ }
   }
   const token = crypto.randomBytes(32).toString('hex');
-  // Create a new session row WITHOUT deleting any existing sessions —
-  // this lets the same user stay logged in on multiple devices simultaneously.
+  // One account = one live session. The new session is created first, then
+  // every OTHER session this account holds — desktop, packaged app or phone
+  // — is revoked. Two people working under one login is what makes an audit
+  // trail unattributable, so the policy is deliberately strict: signing in
+  // here signs that account out everywhere else.
   db.run('INSERT INTO sessions (token, user_id, device_label) VALUES (?, ?, ?)', [token, user.id, device_label || '']);
+  // Set the actor BEFORE the eviction so its audit row is attributed to the
+  // person whose sign-in caused it, not to 'system'.
+  req.user = user;
+  const evicted = revokeOtherSessions(db, user.id, token, req, user);
   // Clean up very old sessions (> 30 days) so the table doesn't grow forever
   // Compare in the SAME frame as last_used_at, which is written with
   // datetime('now','localtime') — so the threshold must also be localtime,
@@ -773,11 +869,15 @@ app.post('/api/login', async (req, res) => {
   // Successful sign-in. Recorded in the same feed as everything else so a
   // session can be tied to the actions that followed it — same user, same
   // app, same IP, adjacent timestamps.
-  req.user = user;   // auditLog reads the actor off req
   auditLog(req, 'login', 'session', null, {
     role: user.role, branch: user.branch || '', device_label: device_label || '',
-  }, { status: 200, summary: `Signed in — ${user.username} (${user.role})` });
-  res.json({ token, role: user.role, username: user.username, permissions });
+    evicted_sessions: evicted || undefined,
+  }, { status: 200, summary: `Signed in — ${user.username} (${user.role})`
+       + (evicted ? ` · signed out ${evicted} other session(s)` : '') });
+  // Tell every other open screen that someone signed in (admins/managers
+  // act on it; see /api/business-context).
+  bumpLoginRev(db, req, user);
+  res.json({ token, role: user.role, username: user.username, permissions, evictedSessions: evicted || 0 });
 });
 app.post('/api/logout', (req, res) => {
   const t = (req.headers.authorization||'').replace('Bearer ','');
@@ -1097,7 +1197,8 @@ app.get('/api/traders/template', requireExport, async (req, res) => {
 });
 
 const { mountMobile } = require('./mobile-bridge');
-mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS, auditLog });
+mountMobile(app, { getDb, requireAuth, verifyPassword, hashPassword, isLegacyHash, ROLE_PERMISSIONS,
+  auditLog, revokeOtherSessions, bumpLoginRev });
 
 // ══════════════════════════════════════════════════════════════
 // COMPANY SETTINGS
@@ -1167,7 +1268,22 @@ app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSet
 // other request still needs to notice that someone flipped the state.
 app.get('/api/business-context', requireView, (req, res) => {
   const db = getDb();
-  res.json({ ...businessContext(db), meta: getSettingsRevMeta(db) });
+  // Sign-in notifications are for the people who supervise the installation.
+  // An auction-floor operator does not need a toast every time a colleague
+  // signs in, and the full sign-in history is in the Activity Log anyway.
+  // Everyone still receives the X-Login-Rev header — only the details are
+  // gated, so a non-supervisor's client simply finds nothing to show.
+  const supervises = req.user && (req.user.role === 'admin' || req.user.role === 'manager');
+  const out = { ...businessContext(db), meta: getSettingsRevMeta(db) };
+  if (supervises) {
+    const lm = getLoginRevMeta(db);
+    // Don't report the viewer's own sign-in back to them — they know.
+    // Nothing else is added here: this endpoint is polled every 25 seconds
+    // by every open screen, so it stays small. The full sign-in history
+    // (with app, IP and role) lives in the Activity Log.
+    if (lm && lm.by && lm.by !== req.user.username) out.loginMeta = lm;
+  }
+  res.json(out);
 });
 
 // Change history for the tracked Rates & Charges settings, scoped to the

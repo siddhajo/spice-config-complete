@@ -885,6 +885,10 @@ async function initDb() {
     'CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, id)',
     'CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, id)',
     'CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, id)',
+    // Single-session enforcement revokes a user's other sessions on every
+    // sign-in, and the admin session list groups by user — both filter on
+    // user_id, which is otherwise unindexed (only `token` is the PK).
+    'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
   ];
   for (const idx of indexes) { try { wrapped.exec(idx); } catch (e) {} }
 
@@ -1063,11 +1067,44 @@ async function initDb() {
     "ALTER TABLE audit_log ADD COLUMN status INTEGER",                // HTTP status — 4xx rows are blocked attempts
     "ALTER TABLE audit_log ADD COLUMN duration_ms INTEGER",           // server time spent (slow-op forensics)
     "ALTER TABLE audit_log ADD COLUMN summary TEXT DEFAULT ''",       // one-line plain-English sentence
+    // ── SINGLE-SESSION ENFORCEMENT ───────────────────────────────
+    // One account = one live session. When a user signs in, their other
+    // sessions are marked revoked here rather than deleted outright, so the
+    // displaced screen can be told WHY it was signed out instead of just
+    // getting a bare "session expired". The row is dropped once it has
+    // delivered that message.
+    "ALTER TABLE sessions ADD COLUMN revoked_at TEXT",
+    "ALTER TABLE sessions ADD COLUMN revoked_reason TEXT DEFAULT ''",
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
     catch (e) { /* column already exists — ignore */ }
   }
+
+  // ── SINGLE-SESSION CLEANUP ─────────────────────────────────────
+  // The old policy allowed a user to be signed in on several devices at
+  // once, so existing databases carry a pile of live tokens per account —
+  // and the 30-day idle sweep only ran on login, so abandoned ones linger
+  // for weeks. Collapse each user down to their most recently used session
+  // and drop anything idle beyond the 30-day cap.
+  //
+  // Runs on every boot and is self-limiting: with the policy enforced at
+  // login there is normally nothing to remove, so this is a no-op after the
+  // first start. The newest session per user is kept, so a restart does not
+  // sign out whoever is currently working.
+  try {
+    const stale = wrapped.run(
+      `DELETE FROM sessions WHERE last_used_at < datetime('now','localtime','-30 days')`);
+    const dupes = wrapped.run(
+      `DELETE FROM sessions
+        WHERE token NOT IN (
+          SELECT token FROM sessions s
+           WHERE s.last_used_at = (SELECT MAX(s2.last_used_at) FROM sessions s2 WHERE s2.user_id = s.user_id)
+           GROUP BY s.user_id
+        )`);
+    const n = ((stale && stale.changes) || 0) + ((dupes && dupes.changes) || 0);
+    if (n > 0) console.log(`Migration: removed ${n} stale/duplicate session(s) — one live session per user`);
+  } catch (e) { /* sessions table may not exist yet on a partial schema */ }
 
   // ── modified_at / modified_by stamping triggers ────────────────
   // Every write to an audited table records WHEN it changed and WHO
