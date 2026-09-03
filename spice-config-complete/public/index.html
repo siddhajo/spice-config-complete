@@ -3318,7 +3318,18 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="create">Created</option>
             <option value="edit">Edited</option>
             <option value="delete">Deleted</option>
+            <option value="bulk-edit">Bulk edited</option>
             <option value="bulk-delete">Bulk deleted</option>
+            <option value="import">Imported</option>
+            <option value="export">Exported</option>
+            <option value="print">Printed</option>
+            <option value="generate">Generated</option>
+            <option value="revert">Reverted</option>
+            <option value="lock">Locked</option>
+            <option value="unlock">Unlocked</option>
+            <option value="clear">Cleared</option>
+            <option value="blocked">Blocked attempts</option>
+            <option value="failed">Failed</option>
           </select>
           <button class="btn btn-o" onclick="appAuditPage=1;loadAppAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
           <button class="btn btn-o" onclick="downloadAuditLog('app')" style="height:32px;padding:0 14px;font-size:12px;font-weight:600" title="Download the whole-app activity log as a CSV file (Excel)">⬇ Download</button>
@@ -3326,6 +3337,20 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         </h2>
         <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin:0 0 12px">
           Every create / edit / delete across the whole app — the office desktop and the field-staff mobile app — including invoices, sellers, buyers, users and settings.
+          Exports, prints and <strong>blocked attempts</strong> (a refused permission, a locked record, a duplicate) are recorded too, each with the user, role, app,
+          IP address, the values submitted and the outcome. <strong>Click any row to expand its full record.</strong>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <input id="app-audit-q" type="search" placeholder="Search user, record, IP, value…" onkeydown="if(event.key==='Enter'){appAuditPage=1;loadAppAuditLog()}" onsearch="appAuditPage=1;loadAppAuditLog()"
+                 style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 10px;font-size:12.5px;font-family:inherit;min-width:220px;flex:1">
+          <select id="app-audit-entity" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"><option value="">All areas</option></select>
+          <select id="app-audit-user" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"><option value="">All users</option></select>
+          <select id="app-audit-app" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"><option value="">All apps</option></select>
+          <label style="font-size:12px;color:var(--spice-text-mute)">From
+            <input id="app-audit-from" type="date" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"></label>
+          <label style="font-size:12px;color:var(--spice-text-mute)">To
+            <input id="app-audit-to" type="date" onchange="appAuditPage=1;loadAppAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"></label>
+          <button class="btn btn-o" onclick="auditResetFilters('app')" style="height:32px;padding:0 12px;font-size:12px">Reset</button>
         </div>
         <div id="app-audit-host" style="overflow:auto;max-height:460px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
           <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load app activity.</div>
@@ -5452,7 +5477,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
             <option value="create">Created</option>
             <option value="edit">Edited</option>
             <option value="delete">Deleted</option>
+            <option value="bulk-edit">Bulk edited</option>
             <option value="bulk-delete">Bulk deleted</option>
+            <option value="import">Imported</option>
+            <option value="lock">Locked</option>
+            <option value="unlock">Unlocked</option>
+            <option value="blocked">Blocked attempts</option>
+            <option value="failed">Failed</option>
           </select>
           <button class="btn btn-o" onclick="event.stopPropagation();auditPage=1;loadAuditLog()" style="height:32px;padding:0 14px;font-size:12px;font-weight:600">Refresh</button>
           <button class="btn btn-o" onclick="event.stopPropagation();downloadAuditLog('lot')" style="height:32px;padding:0 14px;font-size:12px;font-weight:600" title="Download this lot activity log as a CSV file (Excel)">⬇ Download</button>
@@ -5461,6 +5492,23 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
         <div class="le-collapse-body" style="padding:0 20px 16px">
           <div style="font-size:12.5px;color:var(--spice-text-mute);line-height:1.55;margin:4px 0 12px">
             Who entered, edited or deleted each lot — across the office desktop and the field-staff mobile app.
+            Every entry records the user, their role, the app and IP it came from, and the exact
+            before → after values. <strong>Click any row to expand its full record.</strong>
+          </div>
+          <!-- Filter bar. Every control narrows the same feed and the CSV
+               download honours them, so an operator can isolate one user,
+               one day, or one lot number and export precisely that. The
+               user/app dropdowns are populated from the log itself. -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+            <input id="audit-q" type="search" placeholder="Search lot no, seller, value…" onkeydown="if(event.key==='Enter'){auditPage=1;loadAuditLog()}" onsearch="auditPage=1;loadAuditLog()"
+                   style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 10px;font-size:12.5px;font-family:inherit;min-width:210px;flex:1">
+            <select id="audit-user" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"><option value="">All users</option></select>
+            <select id="audit-app" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"><option value="">All apps</option></select>
+            <label style="font-size:12px;color:var(--spice-text-mute)">From
+              <input id="audit-from" type="date" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"></label>
+            <label style="font-size:12px;color:var(--spice-text-mute)">To
+              <input id="audit-to" type="date" onchange="auditPage=1;loadAuditLog()" style="height:32px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font-size:12.5px;font-family:inherit"></label>
+            <button class="btn btn-o" onclick="auditResetFilters('lot')" style="height:32px;padding:0 12px;font-size:12px">Reset</button>
           </div>
           <div id="audit-log-host" style="overflow:auto;max-height:420px;border:1px solid var(--border);border-radius:8px;background:var(--bg2,#fff);font-size:12px">
             <div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Click Refresh to load lot activity.</div>
@@ -6577,7 +6625,105 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
 
 <script>
 const B=location.origin;let T='';
-const h=(t,o={})=>fetch(B+t,{...o,headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...(o.headers||{})}});
+
+// ── Business context guard (concurrent sessions) ─────────────────
+// business_mode / business_state are installation-wide, so another
+// operator flipping the state re-points every figure this tab computes —
+// while this tab keeps rendering the settings it cached at load. The
+// server stamps its current context on every /api response; we hold the
+// last one we saw and echo it back on writes. A mismatch means someone
+// moved the ground under us, and the server refuses the write (409)
+// rather than letting it land on stale assumptions.
+//
+// `rev` is null until the first response teaches us the server's value —
+// before that we echo nothing, and the server leaves us unguarded.
+window._ctx = { rev: null, state: '', mode: '', stale: false };
+
+// Spread into any raw fetch() that bypasses h(). Omits the rev before we
+// know it, so a pre-login request is never refused for guessing.
+function ctxHeaders(){
+  const c = window._ctx;
+  const out = {};
+  if (c.rev !== null) out['X-Settings-Rev'] = String(c.rev);
+  if (c.state) out['X-Business-State'] = c.state;
+  if (c.mode)  out['X-Business-Mode']  = c.mode;
+  return out;
+}
+
+// Responses to OUR OWN settings/preset writes carry the rev we just
+// caused — adopt it instead of alarming at our own change. Other sessions
+// never issue a write to these paths, so they still get the banner.
+const _CTX_ADOPT_RE = /^\/api\/(company-settings|company-presets)/;
+
+function adoptContext(ctx){
+  if (!ctx) return;
+  if (ctx.rev !== undefined && ctx.rev !== null) window._ctx.rev = Number(ctx.rev);
+  if (ctx.state !== undefined) window._ctx.state = String(ctx.state || '');
+  if (ctx.mode  !== undefined) window._ctx.mode  = String(ctx.mode  || '');
+  window._ctx.stale = false;
+  hideContextBanner();
+}
+
+// Called with every API response. First sighting seeds the context
+// silently; any later change that we did not cause raises the banner.
+function noteServerContext(path, method, resp, ok){
+  let rev;
+  try { rev = resp.headers.get('X-Settings-Rev'); } catch(_) { return; }
+  if (rev === null || rev === undefined || rev === '') return;
+  const n = Number(rev);
+  const state = (()=>{ try{ return resp.headers.get('X-Business-State')||''; }catch(_){ return ''; } })();
+  const mode  = (()=>{ try{ return resp.headers.get('X-Business-Mode') ||''; }catch(_){ return ''; } })();
+  // Only a SUCCESSFUL own-write adopts. A settings save that itself got
+  // refused (someone else saved first) must raise the banner, not quietly
+  // swallow the newer rev.
+  const isOwnSettingsWrite = ok && method !== 'GET' && _CTX_ADOPT_RE.test(path);
+  if (window._ctx.rev === null || isOwnSettingsWrite){
+    adoptContext({ rev: n, state, mode });
+    return;
+  }
+  if (n !== window._ctx.rev) showContextBanner({ state, mode });
+}
+
+// A full-width bar, not a toast: this must not scroll away or auto-dismiss
+// while the operator keeps working against numbers that have moved.
+function showContextBanner(info){
+  window._ctx.stale = true;
+  let el = document.getElementById('ctx-stale-bar');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'ctx-stale-bar';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#C62828;color:#fff;'
+      + 'padding:10px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:12px;'
+      + 'box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    document.body.appendChild(el);
+  }
+  const who = (info && info.by) ? ` by ${esc(info.by)}` : '';
+  const ctxTxt = (info && (info.state || info.mode))
+    ? ` Now: ${esc(info.state || '—')} / ${esc(info.mode || '—')}.` : '';
+  el.innerHTML = '<span style="flex:1">⚠ Company settings were changed in another session'
+    + who + '.' + ctxTxt + ' This screen is out of date — reload before saving or generating.</span>'
+    + '<button type="button" onclick="location.reload()" style="background:#fff;color:#C62828;border:0;'
+    + 'border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer">Reload now</button>';
+  el.style.display = 'flex';
+  document.body.style.paddingTop = el.offsetHeight + 'px';
+}
+
+function hideContextBanner(){
+  const el = document.getElementById('ctx-stale-bar');
+  if (el){ el.style.display = 'none'; document.body.style.paddingTop = ''; }
+}
+
+// Idle tabs issue no requests, so nothing would teach them the context
+// moved. Poll while visible and logged in; the response header does the
+// rest through noteServerContext().
+setInterval(() => {
+  if (!T) return;
+  if (document.visibilityState !== 'visible') return;
+  if (window._ctx.stale) return;   // already flagged — stop nagging the server
+  j('/api/business-context').catch(()=>{});
+}, 25000);
+
+const h=(t,o={})=>fetch(B+t,{...o,headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders(),...(o.headers||{})}});
 // j() throws on non-2xx so callers can't silently mis-parse an error body.
 // On 401 it auto-logs-out (stale token after server restart).
 // Network state for multi-user sync indicator.
@@ -6593,6 +6739,11 @@ function friendlyErr(err) {
   if (err.status === 401) return 'Your session expired. Please log in again.';
   if (err.status === 403) return 'You do not have permission for this action.';
   if (err.status === 404) return 'We couldn\'t find what you were looking for.';
+  // The context guard's own 409s explain exactly what moved and who moved
+  // it — pass the server's wording through instead of the generic line.
+  if (err.status === 409 && (err.body?.code === 'SETTINGS_STALE' || err.body?.code === 'CONTEXT_MISMATCH')) {
+    return err.body.error;
+  }
   if (err.status === 409) return 'Conflict — this item was changed elsewhere. Refresh and try again.';
   if (err.status === 413) return 'File or data is too large to upload.';
   if (err.status === 422) return err.body?.error || 'Some fields are invalid. Please review and retry.';
@@ -6618,7 +6769,15 @@ async function _jOnce(t, o){
   }
   const text = await r.text();
   let body; try{ body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
+  // Every response teaches us the server's current business context.
+  try { noteServerContext(t, (o?.method || 'GET').toUpperCase(), r, r.ok); } catch(_) {}
   if(!r.ok){
+    // The write was refused because the settings moved under this tab.
+    // Raise the bar with the server's own wording — friendlyErr()'s
+    // generic "Conflict" tells the operator nothing actionable here.
+    if(r.status === 409 && (body.code === 'SETTINGS_STALE' || body.code === 'CONTEXT_MISMATCH')){
+      showContextBanner({ by: body.changedBy, state: body.context?.state, mode: body.context?.mode });
+    }
     if(r.status === 401){
       // Stale token: silently log out — no toast / pill error, so the
       // user just lands on the login form without a confusing "Session
@@ -11235,34 +11394,38 @@ async function applyStateToCompanyProfile(state){
   };
   for (const [k, v] of Object.entries(settingsPatch)) updateSdataField(k, v);
 
+  // SEQUENTIAL, not concurrent. These used to be fired together because
+  // they touch different keys and the latency is then ≈ the slower one —
+  // but both now bump settings_rev, and each echoes the rev this tab held
+  // when it was sent. Fired in parallel, whichever lands second is
+  // carrying a rev the first one already superseded, and the context
+  // guard refuses our own state flip halfway through. Serialising costs
+  // one extra round-trip and keeps the two writes in a defined order:
+  // persist the state, adopt the new rev, then move the preset.
+  const settingsSave = await j('/api/company-settings', {
+    method: 'PUT',
+    body: JSON.stringify({ settings: settingsPatch })
+  }).catch(e => { console.error('Failed to persist state/flags:', e); return null; });
+  if (settingsSave && settingsSave.context) adoptContext(settingsSave.context);
+
   // Align the server's active preset to the state. DETERMINISTIC — we always
   // set it to the target instead of guarding on a possibly-stale
   // _presets.active. That stale guard was the core bug: when the cached
   // active code already (incorrectly) matched the target, the server kept
   // the old preset and /api/brand kept returning the old company name, even
   // though the client badge/theme had already flipped.
-  const presetSwitch = (async () => {
-    try {
-      await j('/api/company-presets/active', {
-        method: 'PUT',
-        body: JSON.stringify({ code: targetPreset })
-      });
-      await loadPresets();
-      const freshValues = _presets[targetPreset] || {};
-      for (const [k, v] of Object.entries(freshValues)) updateSdataField(k, v);
-    } catch (e) {
-      console.error('Failed to auto-switch preset on state change:', e);
-    }
-  })();
-
-  // The settings write and the preset switch touch different keys, so run
-  // them CONCURRENTLY rather than serially — total latency ≈ the slower one.
-  const settingsSave = j('/api/company-settings', {
-    method: 'PUT',
-    body: JSON.stringify({ settings: settingsPatch })
-  }).catch(e => console.error('Failed to persist state/flags:', e));
-
-  await Promise.all([presetSwitch, settingsSave]);
+  try {
+    const presetRes = await j('/api/company-presets/active', {
+      method: 'PUT',
+      body: JSON.stringify({ code: targetPreset })
+    });
+    if (presetRes && presetRes.context) adoptContext(presetRes.context);
+    await loadPresets();
+    const freshValues = _presets[targetPreset] || {};
+    for (const [k, v] of Object.entries(freshValues)) updateSdataField(k, v);
+  } catch (e) {
+    console.error('Failed to auto-switch preset on state change:', e);
+  }
 
   toast(isKerala
     ? 'Switched to Kerala — Dispatch/Ship-to addresses hidden in PDFs'
@@ -13942,97 +14105,283 @@ async function loadDeleteLog(){
   }
 }
 
-// ── Lot Activity Log (audit feed) ────────────────────────────
-// Renders /api/admin/audit-log — every lot created / edited / deleted
-// from the desktop admin OR the field-staff mobile app. Paginated,
-// newest first, with a coarse device tag and a per-edit field diff.
+// ══════════════════════════════════════════════════════════════
+// ACTIVITY LOG (audit feed) — shared renderer for both cards
+// ══════════════════════════════════════════════════════════════
+// One implementation drives two views of /api/admin/audit-log:
+//   scope 'lot' → the Lot Entry tab's Activity Log (entity=lot)
+//   scope 'app' → the Backup tab's App Activity Log (every area)
+// Each row is a plain-English sentence built server-side; clicking it
+// expands the full forensic record — the field-by-field before→after
+// diff, the values submitted, and the request context (app, IP, route,
+// outcome, duration) — so an admin can reconstruct exactly what happened.
 let auditPage = 1;
+let appAuditPage = 1;
 function _auditEsc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// Column → human label, mirroring LOT_FIELD_LABELS on the server so a diff
+// reads "Price 0 → 585" instead of "prate 0 → 585".
+const AUDIT_FIELD_LABELS = {
+  lot_no:'Lot No', trader_id:'Seller ID', name:'Seller', branch:'Branch', state:'State',
+  crop:'Crop', grade:'Grade', crpt:'Crop Type', bags:'Bags', litre:'Litre', qty:'Qty',
+  gross_wt:'Gross Wt', sample_wt:'Sample Wt', wt_with_gunny:'Wt with Gunny', gunny_wt:'Gunny Wt',
+  moisture:'Moisture', reserved_price:'Reserved Price', code:'Buyer Code', buyer:'Buyer',
+  buyer1:'Buyer Trade Name', sale:'Sale Type', price:'Price', amount:'Amount',
+  prate:'Purchase Rate', pqty:'Purchase Qty', puramt:'Purchase Amount', com:'Commission',
+  sertax:'Service Tax', cgst:'CGST', sgst:'SGST', igst:'IGST', advance:'Advance',
+  balance:'Balance', bilamt:'Bill Amount', refund:'Refund', refud:'Refund Amt',
+  invo:'Invoice No', asp_invo:'ASP Invoice No', purno:'Purchase No', bilno:'Bill No',
+  cr:'GSTIN', pan:'PAN', tel:'Phone', aadhar:'Aadhaar', padd:'Address', ppla:'Place',
+  ppin:'PIN', pstate:'Seller State', pst_code:'State Code', locked_at:'Locked At',
+  locked_by:'Locked By', user_id:'Entered By',
+};
+function _auditLabel(k){ return AUDIT_FIELD_LABELS[k] || String(k).replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()); }
+
 function _auditActionBadge(action){
   const map = { create:['#065F46','#D1FAE5','Created'], edit:['#92400E','#FEF3C7','Edited'],
     'delete':['#991B1B','#FEE2E2','Deleted'], 'bulk-delete':['#991B1B','#FEE2E2','Bulk deleted'],
-    clear:['#3730A3','#E0E7FF','Cleared'] };
+    'bulk-edit':['#92400E','#FEF3C7','Bulk edited'], clear:['#3730A3','#E0E7FF','Cleared'],
+    'import':['#1E40AF','#DBEAFE','Imported'], 'export':['#1E40AF','#DBEAFE','Exported'],
+    print:['#374151','#E5E7EB','Printed'], backup:['#374151','#E5E7EB','Backup'],
+    generate:['#065F46','#D1FAE5','Generated'], revert:['#92400E','#FEF3C7','Reverted'],
+    lock:['#3730A3','#E0E7FF','Locked'], unlock:['#3730A3','#E0E7FF','Unlocked'],
+    alert:['#92400E','#FEF3C7','Alert'], login:['#065F46','#D1FAE5','Signed in'],
+    logout:['#374151','#E5E7EB','Signed out'], restore:['#991B1B','#FEE2E2','DB restored'],
+    // The two that matter most in an investigation: an action that was
+    // refused, and one that errored. Both are red-flagged.
+    blocked:['#991B1B','#FEE2E2','Blocked'], failed:['#991B1B','#FEE2E2','Failed'] };
   const m = map[action] || ['#374151','#E5E7EB', action || '—'];
   return '<span style="background:'+m[1]+';color:'+m[0]+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap">'+_auditEsc(m[2])+'</span>';
 }
+
+// Compact one-line detail used in the row itself. Prefers the server's
+// summary sentence; falls back to the legacy client-side rendering for rows
+// written before summaries existed.
 function _auditDetails(d, action){
   if (!d || typeof d !== 'object') return '—';
   const parts = [];
   if (d.trader) parts.push('Seller: <strong>'+_auditEsc(d.trader)+'</strong>');
   if (d.branch && action !== 'edit') parts.push(_auditEsc(d.branch));
   if (d.qty != null && Number(d.qty)) parts.push(Number(d.qty).toFixed(3)+' kg');
-  if (action === 'bulk-delete') {
-    if (d.count != null) parts.push('<strong>'+_auditEsc(d.count)+'</strong> lot(s)');
-    if (Array.isArray(d.lot_nos) && d.lot_nos.length) parts.push('#'+d.lot_nos.map(_auditEsc).join(', #'));
-    if (d.scope) parts.push(_auditEsc(d.scope));
+  if (d.count != null) parts.push('<strong>'+_auditEsc(d.count)+'</strong> record(s)');
+  if (Array.isArray(d.lot_nos) && d.lot_nos.length) parts.push('#'+d.lot_nos.map(_auditEsc).join(', #'));
+  if (d.changes && Object.keys(d.changes).length) {
+    parts.push(Object.entries(d.changes).map(([k,v]) => {
+      const from = v && typeof v === 'object' ? v.from : '';
+      const to   = v && typeof v === 'object' ? v.to   : v;
+      return '<code>'+_auditEsc(_auditLabel(k))+'</code>: '+_auditEsc(from==null||from===''?'∅':from)+' → '+_auditEsc(to==null||to===''?'∅':to);
+    }).join(' · '));
+  } else if (action === 'edit') {
+    parts.push('<span style="color:var(--spice-text-mute)">no field changes</span>');
   }
-  if (action === 'edit') {
-    if (d.changes && Object.keys(d.changes).length) {
-      parts.push(Object.entries(d.changes).map(([k,v]) => {
-        const from = v && typeof v === 'object' ? v.from : '';
-        const to   = v && typeof v === 'object' ? v.to   : v;
-        return '<code>'+_auditEsc(k)+'</code>: '+_auditEsc(from==null||from===''?'∅':from)+' → '+_auditEsc(to==null||to===''?'∅':to);
-      }).join(' · '));
-    } else {
-      parts.push('<span style="color:var(--spice-text-mute)">no field changes</span>');
-    }
-  }
+  if (d.method || d.path) parts.push('<code style="word-break:break-all">'+_auditEsc(d.method||'')+' '+_auditEsc(d.path||'')+'</code>');
   return parts.length ? parts.join(' · ') : '—';
 }
-async function loadAuditLog(){
-  const host = document.getElementById('audit-log-host');
+
+// Value formatter for the expanded panel — objects/arrays are pretty-printed
+// rather than dumped as [object Object].
+function _auditValue(v){
+  if (v == null || v === '') return '<span style="color:var(--spice-text-mute)">∅</span>';
+  if (Array.isArray(v)) {
+    if (!v.length) return '<span style="color:var(--spice-text-mute)">none</span>';
+    return '<ul style="margin:2px 0 0;padding-left:16px">' +
+      v.map(x => '<li>' + (typeof x === 'object' ? _auditEsc(JSON.stringify(x)) : _auditEsc(x)) + '</li>').join('') + '</ul>';
+  }
+  if (typeof v === 'object') {
+    return '<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin-top:2px">' +
+      Object.entries(v).map(([k, val]) =>
+        '<span style="color:var(--spice-text-mute)">'+_auditEsc(_auditLabel(k))+'</span><span>'+
+        (typeof val === 'object' ? _auditEsc(JSON.stringify(val)) : _auditEsc(val))+'</span>').join('') + '</div>';
+  }
+  return _auditEsc(v);
+}
+
+// The expanded panel: everything the log knows about one action.
+function _auditExpanded(lg){
+  const d = lg.details || {};
+  const rows = [];
+  const add = (k, v) => rows.push(
+    '<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px dashed var(--border)">' +
+    '<div style="min-width:150px;color:var(--spice-text-mute);font-weight:600">'+_auditEsc(k)+'</div>' +
+    '<div style="flex:1;word-break:break-word">'+v+'</div></div>');
+
+  // The change table comes first — it is what an investigation is looking for.
+  if (d.changes && Object.keys(d.changes).length) {
+    const diff = '<table style="border-collapse:collapse;width:100%;margin-top:2px">' +
+      '<thead><tr style="color:var(--spice-text-mute)"><th style="text-align:left;padding:2px 8px 2px 0">Field</th>' +
+      '<th style="text-align:left;padding:2px 8px 2px 0">Before</th><th style="text-align:left;padding:2px 0">After</th></tr></thead><tbody>' +
+      Object.entries(d.changes).map(([k, v]) => {
+        const from = (v && typeof v === 'object') ? v.from : '';
+        const to   = (v && typeof v === 'object') ? v.to   : v;
+        return '<tr><td style="padding:2px 8px 2px 0;font-weight:600">'+_auditEsc(_auditLabel(k))+'</td>' +
+          '<td style="padding:2px 8px 2px 0;color:#991B1B">'+_auditEsc(from==null||from===''?'∅':from)+'</td>' +
+          '<td style="padding:2px 0;color:#065F46;font-weight:600">'+_auditEsc(to==null||to===''?'∅':to)+'</td></tr>';
+      }).join('') + '</tbody></table>';
+    add('What changed', diff);
+  }
+  // Remaining payload keys, minus the ones already rendered above / shown in
+  // the row header.
+  const SKIP = new Set(['changes','device','method','path','status']);
+  for (const [k, v] of Object.entries(d)) {
+    if (SKIP.has(k)) continue;
+    add(_auditLabel(k), _auditValue(v));
+  }
+  // Request context — who/where/how, straight off the audit columns.
+  const ctx = [];
+  if (lg.role)   ctx.push('role <strong>'+_auditEsc(lg.role)+'</strong>');
+  if (lg.app || d.device) ctx.push('from <strong>'+_auditEsc(lg.app || d.device)+'</strong>');
+  if (lg.ip)     ctx.push('IP <code>'+_auditEsc(lg.ip)+'</code>');
+  if (lg.business_mode) ctx.push('mode <strong>'+_auditEsc(lg.business_mode)+'</strong>');
+  if (ctx.length) add('Who / where', ctx.join(' · '));
+  const req = [];
+  if (lg.method || lg.path) req.push('<code style="word-break:break-all">'+_auditEsc(lg.method||'')+' '+_auditEsc(lg.path||'')+'</code>');
+  if (lg.status != null) req.push('→ <strong style="color:'+(lg.status >= 400 ? '#991B1B' : '#065F46')+'">HTTP '+_auditEsc(lg.status)+'</strong>');
+  if (lg.duration_ms != null) req.push(_auditEsc(lg.duration_ms)+' ms');
+  if (req.length) add('Request', req.join(' '));
+  add('Log entry', '#'+_auditEsc(lg.id)+' · '+_auditEsc(lg.created_at));
+  return '<div style="padding:10px 14px;background:var(--bg,#F9FAFB);font-size:11.5px;line-height:1.6">'+rows.join('')+'</div>';
+}
+
+// Read the filter controls for a scope. Ids are prefixed per card so the two
+// can be filtered independently.
+function _auditFilterQS(scope, page, limit){
+  const p = scope === 'lot' ? 'audit' : 'app-audit';
+  const val = id => { const el = document.getElementById(id); return el && el.value ? el.value.trim() : ''; };
+  const qs = ['limit='+limit, 'page='+page];
+  if (scope === 'lot') qs.push('entity=lot');
+  else if (val('app-audit-entity')) qs.push('entity=' + encodeURIComponent(val('app-audit-entity')));
+  const map = { action: p+'-action', user: p+'-user', app: p+'-app', from: p+'-from', to: p+'-to', q: p+'-q' };
+  // The lot card's action select predates the prefix convention.
+  if (scope === 'lot') map.action = 'audit-action-filter';
+  for (const [key, id] of Object.entries(map)) {
+    const v = val(id);
+    if (v) qs.push(key + '=' + encodeURIComponent(v));
+  }
+  return qs.join('&');
+}
+
+// Fill the user / app / area dropdowns from the facets the server returns,
+// preserving the current selection. Only values that actually appear in the
+// log are offered, so the filters can never produce an empty result by
+// accident.
+function _auditSyncFacets(scope, facets){
+  if (!facets) return;
+  const p = scope === 'lot' ? 'audit' : 'app-audit';
+  const fill = (id, values, allLabel) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = '<option value="">'+allLabel+'</option>' +
+      values.map(v => '<option value="'+_auditEsc(v)+'"'+(v === cur ? ' selected' : '')+'>'+_auditEsc(v)+'</option>').join('');
+    el.value = cur;
+  };
+  fill(p+'-user', facets.users || [], 'All users');
+  fill(p+'-app',  facets.apps  || [], 'All apps');
+  if (scope === 'app') fill('app-audit-entity', facets.entities || [], 'All areas');
+}
+
+// Shared loader/renderer.
+async function _auditLoad(scope){
+  const hostId = scope === 'lot' ? 'audit-log-host' : 'app-audit-host';
+  const pagerId = scope === 'lot' ? 'audit-log-pager' : 'app-audit-pager';
+  const host = document.getElementById(hostId);
   if (!host) return;
-  const action = (document.getElementById('audit-action-filter') || {}).value || '';
+  const page = scope === 'lot' ? auditPage : appAuditPage;
   host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Loading…</div>';
   try {
-    const qs = 'entity=lot&limit=40&page='+auditPage+(action ? '&action='+encodeURIComponent(action) : '');
-    const r = await fetch(B + '/api/admin/audit-log?'+qs, { headers: { 'Authorization': 'Bearer ' + T } });
+    const qs = _auditFilterQS(scope, page, scope === 'lot' ? 40 : 50);
+    const r = await fetch(B + '/api/admin/audit-log?' + qs, { headers: { 'Authorization': 'Bearer ' + T } });
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed to load activity log'); }
     const data = await r.json();
+    _auditSyncFacets(scope, data.facets);
     const logs = data.logs || [];
-    const pager = document.getElementById('audit-log-pager');
+    const pager = document.getElementById(pagerId);
     if (!logs.length) {
-      host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">No lot activity recorded yet.</div>';
+      host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">No activity matches these filters.</div>';
       if (pager) pager.style.display = 'none';
       return;
     }
+    const thirdCol = scope === 'lot' ? 'Lot' : 'Area';
     let html = '<table style="width:100%;border-collapse:collapse">' +
       '<thead><tr style="background:var(--bg,#F3F4F6)">' +
       '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap">When</th>' +
       '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">User</th>' +
       '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">From</th>' +
       '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Action</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Lot</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Details</th></tr></thead><tbody>';
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">'+thirdCol+'</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">What happened</th>' +
+      '<th style="width:28px;border-bottom:1px solid var(--border)"></th></tr></thead><tbody>';
     for (const lg of logs) {
       const d = lg.details || {};
-      const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
-      const lotNo = (d.lot_no != null && d.lot_no !== '') ? '#'+_auditEsc(d.lot_no) : '—';
-      html += '<tr>' +
+      const appName = lg.app || (d.device === 'Mobile' ? 'Mobile' : 'Desktop');
+      const icon = /Mobile/i.test(appName) ? '📱' : (appName === 'API' ? '⌁' : '🖥');
+      const from = icon + ' ' + _auditEsc(appName) + (lg.ip ? '<div style="color:var(--spice-text-mute);font-size:10.5px">'+_auditEsc(lg.ip)+'</div>' : '');
+      const who = _auditEsc(lg.user_id || '—') +
+        (lg.role ? '<div style="color:var(--spice-text-mute);font-weight:400;font-size:10.5px">'+_auditEsc(lg.role)+'</div>' : '');
+      const third = scope === 'lot'
+        ? ((d.lot_no != null && d.lot_no !== '') ? '#'+_auditEsc(d.lot_no) : (d.count != null ? _auditEsc(d.count)+' lots' : '—'))
+        : (_auditEsc(lg.entity || '—') + (lg.entity_id != null ? ' <span style="color:var(--spice-text-mute)">#'+_auditEsc(lg.entity_id)+'</span>' : ''));
+      // Summary sentence from the server; legacy rows fall back to the
+      // client-side renderer.
+      const what = lg.summary ? _auditEsc(lg.summary) : _auditDetails(d, lg.action);
+      const failed = lg.status != null && lg.status >= 400;
+      html += '<tr class="audit-row" data-id="'+_auditEsc(lg.id)+'" onclick="auditToggleRow(this)" style="cursor:pointer'+(failed ? ';background:#FEF2F2' : '')+'">' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(fmtDT(lg.created_at))+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+who+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+from+'</td>' +
         '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:700;font-family:monospace">'+lotNo+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-size:11.5px">'+_auditDetails(d, lg.action)+'</td>' +
-        '</tr>';
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:700;font-family:monospace">'+third+'</td>' +
+        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-size:11.5px">'+what+'</td>' +
+        '<td style="padding:5px 6px;border-bottom:1px solid var(--border);color:var(--spice-text-mute)">▾</td>' +
+        '</tr>' +
+        '<tr class="audit-detail" style="display:none"><td colspan="7" style="padding:0;border-bottom:1px solid var(--border)">' +
+        _auditExpanded(lg) + '</td></tr>';
     }
     html += '</tbody></table>';
     host.innerHTML = html;
     const tp = data.totalPages || 1;
+    const fn = scope === 'lot' ? 'auditPage' : 'appAuditPage';
+    const reload = scope === 'lot' ? 'loadAuditLog()' : 'loadAppAuditLog()';
     if (pager && tp > 1) {
       pager.style.display = 'flex';
       pager.innerHTML =
-        '<button class="btn btn-o" '+(auditPage<=1?'disabled':'')+' onclick="auditPage=Math.max(1,auditPage-1);loadAuditLog()" style="height:30px;padding:0 12px;font-size:12px">‹ Prev</button>' +
+        '<button class="btn btn-o" '+(page<=1?'disabled':'')+' onclick="'+fn+'=Math.max(1,'+fn+'-1);'+reload+'" style="height:30px;padding:0 12px;font-size:12px">‹ Prev</button>' +
         '<span style="font-size:12px;color:var(--spice-text-mute)">Page '+data.page+' of '+tp+' · '+data.total+' entries</span>' +
-        '<button class="btn btn-o" '+(auditPage>=tp?'disabled':'')+' onclick="auditPage=Math.min('+tp+',auditPage+1);loadAuditLog()" style="height:30px;padding:0 12px;font-size:12px">Next ›</button>';
-    } else if (pager) { pager.style.display = 'none'; }
+        '<button class="btn btn-o" '+(page>=tp?'disabled':'')+' onclick="'+fn+'=Math.min('+tp+','+fn+'+1);'+reload+'" style="height:30px;padding:0 12px;font-size:12px">Next ›</button>';
+    } else if (pager) {
+      pager.style.display = 'flex';
+      pager.innerHTML = '<span style="font-size:12px;color:var(--spice-text-mute)">'+data.total+' entr'+(data.total === 1 ? 'y' : 'ies')+'</span>';
+    }
   } catch (e) {
     host.innerHTML = '<div style="padding:12px;color:#7F1D1D">'+_auditEsc(e.message || String(e))+'</div>';
   }
 }
+
+// Expand / collapse one row's full forensic record.
+function auditToggleRow(tr){
+  const next = tr.nextElementSibling;
+  if (!next || !next.classList.contains('audit-detail')) return;
+  const open = next.style.display !== 'none';
+  next.style.display = open ? 'none' : '';
+  const chev = tr.lastElementChild;
+  if (chev) chev.textContent = open ? '▾' : '▴';
+}
+
+// Reset every filter on a card back to "all" and reload.
+function auditResetFilters(scope){
+  const p = scope === 'lot' ? 'audit' : 'app-audit';
+  const ids = [p+'-user', p+'-app', p+'-from', p+'-to', p+'-q',
+               scope === 'lot' ? 'audit-action-filter' : 'app-audit-action'];
+  if (scope === 'app') ids.push('app-audit-entity');
+  for (const id of ids) { const el = document.getElementById(id); if (el) el.value = ''; }
+  if (scope === 'lot') { auditPage = 1; loadAuditLog(); } else { appAuditPage = 1; loadAppAuditLog(); }
+}
+
+async function loadAuditLog(){ return _auditLoad('lot'); }
+async function loadAppAuditLog(){ return _auditLoad('app'); }
+
 async function clearAuditLog(){
-  if (!await appConfirm('Clear the entire lot activity log?\n\nThe lots themselves are NOT affected — only the audit history is removed. This cannot be undone.')) return;
+  if (!await appConfirm('Clear the entire lot activity log?\n\nThe lots themselves are NOT affected — only the audit history is removed. This cannot be undone (download it first if you need to keep it).')) return;
   try {
     const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
@@ -14040,25 +14389,24 @@ async function clearAuditLog(){
     if (typeof toast === 'function') toast('Lot activity log cleared.');
   } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
 }
+async function clearAppAuditLog(){
+  if (!await appConfirm('Clear the ENTIRE activity log?\n\nThis removes all recorded activity across the whole app — every area, desktop and mobile, including the lot-entry Activity Log (they share one log). Your actual records (lots, invoices, sellers…) are NOT affected. This cannot be undone (download it first if you need to keep it).')) return;
+  try {
+    const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
+    appAuditPage = 1; loadAppAuditLog();
+    if (typeof toast === 'function') toast('Activity log cleared.');
+  } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
+}
 
 // ── Download activity log as CSV ─────────────────────────────
-// Shared by both cards. scope 'lot' → the lot-entry Activity Log
-// (entity=lot + its action filter); scope 'app' → the whole-app
-// App Activity Log (all entities + its action filter). Streams the
-// CSV via fetch (so the Bearer token is sent) and saves it through a
-// temporary object URL, mirroring downloadDbBackup().
+// Downloads exactly what the card is showing — same scope AND same
+// filters — so the file matches the screen. Streams via fetch (so the
+// Bearer token is sent) and saves through a temporary object URL,
+// mirroring downloadDbBackup().
 async function downloadAuditLog(scope){
   try {
-    const qs = [];
-    if (scope === 'lot') {
-      qs.push('entity=lot');
-      const a = (document.getElementById('audit-action-filter') || {}).value || '';
-      if (a) qs.push('action=' + encodeURIComponent(a));
-    } else {
-      const a = (document.getElementById('app-audit-action') || {}).value || '';
-      if (a) qs.push('action=' + encodeURIComponent(a));
-    }
-    const url = B + '/api/admin/audit-log/export' + (qs.length ? ('?' + qs.join('&')) : '');
+    const url = B + '/api/admin/audit-log/export?' + _auditFilterQS(scope, 1, 1);
     const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + T } });
     if (!r.ok) {
       let err = 'Download failed';
@@ -14079,87 +14427,6 @@ async function downloadAuditLog(scope){
   } catch (e) {
     if (typeof toast === 'function') toast('Download failed: ' + e.message); else alert('Download failed: ' + e.message);
   }
-}
-
-// ── App Activity Log (whole-app audit feed) ──────────────────
-// Admin-only viewer (Backup tab) over /api/admin/audit-log with NO
-// entity filter — so it shows every area (lots, invoices, sellers,
-// buyers, users, settings…) captured from the desktop UI and the
-// mobile PWA. The lot-entry card above is the lot-scoped view; this
-// is the cross-entity superset. Reuses the _audit* render helpers.
-let appAuditPage = 1;
-function _appAuditDetails(d, action){
-  if (!d || typeof d !== 'object') return '—';
-  // Rich rows (explicit auditLog calls) carry domain fields → reuse the
-  // lot-style renderer. Generic rows (from the capture middleware) carry
-  // {method, path} → show the request that changed state.
-  const hasRich = d.trader || d.qty != null || d.changes || d.lot_nos || d.count != null;
-  if (hasRich) return _auditDetails(d, action);
-  if (d.method || d.path) {
-    return '<code>'+_auditEsc(d.method||'')+'</code> <code style="word-break:break-all">'+_auditEsc(d.path||'')+'</code>';
-  }
-  return _auditDetails(d, action);
-}
-async function loadAppAuditLog(){
-  const host = document.getElementById('app-audit-host');
-  if (!host) return;
-  const action = (document.getElementById('app-audit-action') || {}).value || '';
-  host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">Loading…</div>';
-  try {
-    const qs = 'limit=50&page='+appAuditPage+(action ? '&action='+encodeURIComponent(action) : '');
-    const r = await fetch(B + '/api/admin/audit-log?'+qs, { headers: { 'Authorization': 'Bearer ' + T } });
-    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed to load app activity'); }
-    const data = await r.json();
-    const logs = data.logs || [];
-    const pager = document.getElementById('app-audit-pager');
-    if (!logs.length) {
-      host.innerHTML = '<div style="padding:12px;color:var(--spice-text-mute);font-style:italic">No app activity recorded yet.</div>';
-      if (pager) pager.style.display = 'none';
-      return;
-    }
-    let html = '<table style="width:100%;border-collapse:collapse">' +
-      '<thead><tr style="background:var(--bg,#F3F4F6)">' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);white-space:nowrap">When</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">User</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">From</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Action</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Area</th>' +
-      '<th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border)">Details</th></tr></thead><tbody>';
-    for (const lg of logs) {
-      const d = lg.details || {};
-      const device = d.device === 'Mobile' ? '📱 Mobile' : '🖥 Desktop';
-      const area = _auditEsc(lg.entity || '—') + (lg.entity_id != null ? ' <span style="color:var(--spice-text-mute)">#'+_auditEsc(lg.entity_id)+'</span>' : '');
-      html += '<tr>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+_auditEsc(fmtDT(lg.created_at))+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600">'+_auditEsc(lg.user_id||'—')+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);white-space:nowrap">'+device+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">'+_auditActionBadge(lg.action)+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-weight:600;white-space:nowrap">'+area+'</td>' +
-        '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-size:11.5px">'+_appAuditDetails(d, lg.action)+'</td>' +
-        '</tr>';
-    }
-    html += '</tbody></table>';
-    host.innerHTML = html;
-    const tp = data.totalPages || 1;
-    if (pager && tp > 1) {
-      pager.style.display = 'flex';
-      pager.innerHTML =
-        '<button class="btn btn-o" '+(appAuditPage<=1?'disabled':'')+' onclick="appAuditPage=Math.max(1,appAuditPage-1);loadAppAuditLog()" style="height:30px;padding:0 12px;font-size:12px">‹ Prev</button>' +
-        '<span style="font-size:12px;color:var(--spice-text-mute)">Page '+data.page+' of '+tp+' · '+data.total+' entries</span>' +
-        '<button class="btn btn-o" '+(appAuditPage>=tp?'disabled':'')+' onclick="appAuditPage=Math.min('+tp+',appAuditPage+1);loadAppAuditLog()" style="height:30px;padding:0 12px;font-size:12px">Next ›</button>';
-    } else if (pager) { pager.style.display = 'none'; }
-  } catch (e) {
-    host.innerHTML = '<div style="padding:12px;color:#7F1D1D">'+_auditEsc(e.message || String(e))+'</div>';
-  }
-}
-async function clearAppAuditLog(){
-  if (!await appConfirm('Clear the ENTIRE activity log?\n\nThis removes all recorded activity across the whole app — every area, desktop and mobile, including the lot-entry Activity Log (they share one log). Your actual records (lots, invoices, sellers…) are NOT affected. This cannot be undone.')) return;
-  try {
-    const r = await fetch(B + '/api/admin/audit-log', { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + T } });
-    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Failed'); }
-    appAuditPage = 1; loadAppAuditLog();
-    if (typeof toast === 'function') toast('Activity log cleared.');
-  } catch (e) { if (typeof toast === 'function') toast(e.message || 'Failed'); else alert(e.message || 'Failed'); }
 }
 
 // ── GST Portal Lookup (Item 4) ───────────────────────────
@@ -16171,7 +16438,7 @@ async function doGenerateAll(){
   submitBtn.disabled=true;submitBtn.textContent='Generating…';
   try{
     const r=await fetch(B+`/api/${routeMap[kind]}/${aid}`,{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(body)});
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},body:JSON.stringify(body)});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Batch failed');
     let msg=`Generated ${d.generated} record(s)`;
@@ -17843,7 +18110,7 @@ async function generateInvoice(){
       await withOverlay('Generating invoice…', async () => {
         const r=await fetch(B+`/api/invoices/generate/${aid}`,{
           method:'POST',
-          headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+          headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
           body:JSON.stringify({saleType,buyerCode,invoiceNo:String(startInvNo),includeTransportInsurance:includeTI})});
         const d=await r.json();
         if(!r.ok)throw new Error(d.error||'Failed to generate invoice');
@@ -17866,7 +18133,7 @@ async function generateInvoice(){
         try{
           const r=await fetch(B+`/api/invoices/generate/${aid}`,{
             method:'POST',
-            headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
             body:JSON.stringify({saleType,buyerCode,invoiceNo:invNo,includeTransportInsurance:includeTI})});
           const d=await r.json();
           if(!r.ok)throw new Error(d.error||'Generation failed');
@@ -18919,7 +19186,7 @@ async function generatePurchase(){
   try{
     const r=await fetch(B+`/api/purchases/generate/${aid}`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
       body:JSON.stringify({sellerName,invoiceNo})});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Failed to generate purchase invoice');
@@ -21404,7 +21671,7 @@ async function generateBill(){
   if(!sellerName||!billNo){alert('Enter seller name and bill no');return}
   try{
     const r=await fetch(B+`/api/bills/generate/${aid}`,{method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
       body:JSON.stringify({sellerName,billNo})});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Failed');

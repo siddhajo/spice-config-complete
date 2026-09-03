@@ -701,6 +701,12 @@ function mountMobile(app, deps) {
     // upgraded to bcrypt earlier can still log in here.
     const ok = user ? await verifyPassword(password, user.password_hash) : false;
     if (!user || !ok) {
+      // Mirror the desktop login's audit row so a failed field-staff
+      // sign-in shows up in the same activity feed, tagged Mobile PWA.
+      auditLog(req, 'blocked', 'session', null, {
+        attempted_username: String(username || '').slice(0, 60),
+        reason: user ? 'wrong password' : 'no such user',
+      }, { status: 401, summary: `FAILED sign-in as "${String(username || '').slice(0, 60)}" — ${user ? 'wrong password' : 'no such user'}` });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
     // Opportunistic rehash to bcrypt if the stored hash is legacy SHA-256.
@@ -728,6 +734,9 @@ function mountMobile(app, deps) {
         /Mobile|Android|iPhone/i.test(req.headers['user-agent'] || '') ? 'Mobile' : 'Desktop',
       ]
     );
+    req.user = user;   // auditLog reads the actor off req
+    auditLog(req, 'login', 'session', null, { role: user.role, branch: user.branch || '' },
+      { status: 200, summary: `Signed in — ${user.username} (${user.role})` });
     res.json({
       user: {
         id: user.id,
@@ -741,7 +750,20 @@ function mountMobile(app, deps) {
 
   app.post('/api/auth/logout', (req, res) => {
     const t = (req.headers.authorization || '').replace('Bearer ', '');
-    if (t) getDb().run('DELETE FROM sessions WHERE token = ?', [t]);
+    const db = getDb();
+    // Resolve the actor before the session row goes away, else the audit
+    // row would be attributed to 'system'.
+    let who = null;
+    if (t) {
+      const s = db.get('SELECT user_id FROM sessions WHERE token = ?', [t]);
+      if (s) who = db.get('SELECT username, role FROM users WHERE id = ?', [s.user_id]);
+    }
+    if (t) db.run('DELETE FROM sessions WHERE token = ?', [t]);
+    if (who) {
+      req.user = who;
+      auditLog(req, 'logout', 'session', null, { role: who.role || '' },
+        { status: 200, summary: `Signed out — ${who.username}` });
+    }
     res.json({ success: true });
   });
 

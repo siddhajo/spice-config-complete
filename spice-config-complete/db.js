@@ -676,6 +676,15 @@ async function initDb() {
   )`);
 
   // ── AUDIT LOG ──────────────────────────────────────────────
+  // One row per state-changing action (and per blocked attempt), from the
+  // desktop UI, the mobile PWA and the packaged desktop app alike. The
+  // first six columns are the classic "who / what / which record"; the
+  // rest are the forensic context — role, app, IP, business mode, the HTTP
+  // request itself, its outcome and duration — that lets an admin
+  // reconstruct exactly what happened. `details` holds the JSON payload
+  // (field-level before→after diffs, submitted values, bulk id lists).
+  // The forensic columns are also declared in the migrations list below so
+  // databases created before they existed pick them up on boot.
   wrapped.exec(`CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -683,7 +692,16 @@ async function initDb() {
     entity TEXT NOT NULL,
     entity_id INTEGER,
     details TEXT,
-    created_at TEXT DEFAULT (datetime('now','localtime'))
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    role TEXT DEFAULT '',
+    app TEXT DEFAULT '',
+    ip TEXT DEFAULT '',
+    business_mode TEXT DEFAULT '',
+    method TEXT DEFAULT '',
+    path TEXT DEFAULT '',
+    status INTEGER,
+    duration_ms INTEGER,
+    summary TEXT DEFAULT ''
   )`);
 
   // ── SETTINGS HISTORY ───────────────────────────────────────
@@ -859,6 +877,14 @@ async function initDb() {
     // a full scan of trader_banks per row to check for orphans. Without
     // this, bulk seller deletion is O(N·M) — quadratic.
     'CREATE INDEX IF NOT EXISTS idx_trader_banks_trader ON trader_banks(trader_id)',
+    // Activity log. The feed is always read newest-first with an entity /
+    // action / user filter, and it is the fastest-growing table in the DB
+    // (every state-changing request writes a row). Without these, each page
+    // of the Activity Log card scans the whole history.
+    'CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, id)',
+    'CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, id)',
+    'CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, id)',
   ];
   for (const idx of indexes) { try { wrapped.exec(idx); } catch (e) {} }
 
@@ -1021,6 +1047,22 @@ async function initDb() {
       `ALTER TABLE ${t} ADD COLUMN modified_at TEXT DEFAULT ''`,
       `ALTER TABLE ${t} ADD COLUMN modified_by TEXT DEFAULT ''`,
     ]),
+    // ── FORENSIC AUDIT COLUMNS ───────────────────────────────────
+    // The activity log used to answer only "who touched what". These
+    // columns answer the rest of the question an investigation actually
+    // asks: from which app/device and IP, under which role and business
+    // mode, via which HTTP request, with what outcome, and how long it
+    // took. Promoted to real columns (rather than left inside the details
+    // JSON) so the log can be filtered and indexed on them.
+    "ALTER TABLE audit_log ADD COLUMN role TEXT DEFAULT ''",          // actor's role at action time
+    "ALTER TABLE audit_log ADD COLUMN app TEXT DEFAULT ''",           // Desktop / Mobile PWA / Desktop App / API
+    "ALTER TABLE audit_log ADD COLUMN ip TEXT DEFAULT ''",            // client IP (which machine on the LAN)
+    "ALTER TABLE audit_log ADD COLUMN business_mode TEXT DEFAULT ''", // e-Trade vs e-Auction at action time
+    "ALTER TABLE audit_log ADD COLUMN method TEXT DEFAULT ''",        // POST / PUT / DELETE …
+    "ALTER TABLE audit_log ADD COLUMN path TEXT DEFAULT ''",          // the API route that was hit
+    "ALTER TABLE audit_log ADD COLUMN status INTEGER",                // HTTP status — 4xx rows are blocked attempts
+    "ALTER TABLE audit_log ADD COLUMN duration_ms INTEGER",           // server time spent (slow-op forensics)
+    "ALTER TABLE audit_log ADD COLUMN summary TEXT DEFAULT ''",       // one-line plain-English sentence
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
@@ -1457,6 +1499,31 @@ function replaceDbFromBuffer(buf) {
   // are per-instance, and the restored DB's stamping triggers reference it,
   // so any write would otherwise fail with "no such function".
   registerDbFunctions(rawDb);
+  // The restored file carries whatever schema it was backed up with, and the
+  // migrations in initDb() do not re-run on it (they are part of boot). The
+  // activity log is the one table that must keep working immediately: it
+  // records the restore itself and everything the operator does next, and a
+  // missing column would make every insert fail silently until a restart.
+  // So re-assert its shape here. Everything else still needs a restart to
+  // pick up a full migration pass after restoring an older backup.
+  try {
+    rawDb.run(`CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      entity_id INTEGER,
+      details TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+    for (const col of [
+      "role TEXT DEFAULT ''", "app TEXT DEFAULT ''", "ip TEXT DEFAULT ''",
+      "business_mode TEXT DEFAULT ''", "method TEXT DEFAULT ''", "path TEXT DEFAULT ''",
+      "status INTEGER", "duration_ms INTEGER", "summary TEXT DEFAULT ''",
+    ]) {
+      try { rawDb.run(`ALTER TABLE audit_log ADD COLUMN ${col}`); } catch (_) { /* already present */ }
+    }
+  } catch (_) { /* never block a restore on audit housekeeping */ }
   // Schedule a save so the new state is persisted to disk immediately
   // (and not just held in memory until the next write).
   scheduleSave();

@@ -187,8 +187,29 @@ Edit it in the UI under **Settings**, or via `PUT /api/company-settings`.
 ### Audit trail
 
 Every business row (`traders`, `buyers`, `lots`, `invoices`, …) carries `modified_at` and `modified_by`,
-stamped automatically by database triggers using the logged-in username. The `audit_log` table records
-create/edit/delete actions with the device type (mobile vs desktop).
+stamped automatically by database triggers using the logged-in username.
+
+The `audit_log` table is the forensic record. One row per action, written from three places:
+
+| Source | Covers |
+| --- | --- |
+| `auditLog()` calls in handlers | Lot create / edit / delete, every bulk lot op, lock / unlock, settings changes, sign-in / sign-out |
+| The app-wide capture middleware (top of `server.js`) | Every other state-changing request, plus exports, prints and backups (GET), plus **blocked** (4xx) and **failed** (5xx) attempts |
+| Mobile bridge | The same, via the shared `app` — mobile writes are tagged `Mobile PWA` |
+
+Each row carries the actor and their **role**, the **app** (Desktop / Desktop App / Mobile PWA / API),
+the client **IP**, the **business mode**, the HTTP method / route / status / duration, a plain-English
+`summary` sentence, and a `details` JSON payload. For a lot edit that payload is a before → after diff
+across the whole row; for a delete it is a full snapshot of what was removed; for a rejected request it
+is the values that were submitted. Secrets (password / token / hash fields) are redacted on the way in.
+
+Two views read it: the **Activity Log** card in Lot Entry (`entity=lot`, mode-scoped) and the admin-only
+**App Activity Log** in Backup (all areas). Both filter by user, app, action, date range and free text,
+expand any row to the full record, and export the filtered set as CSV.
+
+Retention: a year of history and 200,000 rows, whichever comes first — override with
+`SPICE_AUDIT_RETENTION_DAYS` / `SPICE_AUDIT_MAX_ROWS`. Clearing the log writes its own audit row, so the
+trail can never go silently empty.
 
 ---
 

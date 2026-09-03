@@ -79,6 +79,191 @@ app.use('/api', (req, res, next) => {
 });
 
 // ══════════════════════════════════════════════════════════════
+// BUSINESS CONTEXT GUARD (concurrent sessions)
+// ══════════════════════════════════════════════════════════════
+// business_mode / business_state are INSTALLATION-WIDE singletons in
+// company_settings — not per-user, not per-session. Every money figure
+// reads them ambiently through getSettingsFlat(): CGST/SGST vs IGST,
+// prate/puramt, and the ASP-vs-ISP identity stamped onto invoices. So one
+// operator flipping the state silently re-points what every OTHER
+// logged-in operator computes, and their browsers — which cache settings
+// at load and have no push channel — carry on showing the old context.
+// That is how concurrent sessions produce one set of wrong numbers, and
+// it happens whether or not they share a login.
+//
+// The durable fix is to derive state from the record instead of from
+// ambient config. This is the containment layer under it:
+//
+//   • every settings write bumps a monotonic `settings_rev`
+//   • every /api response echoes the current context back in headers
+//   • a mutating request that echoes a STALE rev is refused with 409
+//     SETTINGS_STALE rather than computed against an assumption the
+//     server no longer holds
+//   • the money endpoints (calculate-all, invoice/purchase/bill
+//     generation) must additionally declare the state they believe they
+//     are working in, and fail CLOSED when they don't
+//
+// The counter lives in app_state, not company_settings, so the settings
+// export/import round-trip can't clobber it.
+function ensureAppState(db) {
+  db.run(`CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)`);
+}
+
+// Read on every /api response, so it stays two tiny PK lookups with NO
+// cross-request cache: a process-level cache is exactly what goes stale
+// the moment this runs on more than one instance, which is the bug class
+// we're closing, not one to reintroduce.
+function getSettingsRev(db) {
+  try {
+    ensureAppState(db);
+    const row = db.get(`SELECT value FROM app_state WHERE key = 'settings_rev'`);
+    return (row && row.value) ? (parseInt(row.value, 10) || 0) : 0;
+  } catch (_) { return 0; }
+}
+
+function getSettingsRevMeta(db) {
+  try {
+    const row = db.get(`SELECT value FROM app_state WHERE key = 'settings_rev_meta'`);
+    return (row && row.value) ? JSON.parse(row.value) : {};
+  } catch (_) { return {}; }
+}
+
+// The installation-wide computation context, in the shape the client
+// echoes back on its next request. Reads the two GLOBAL_KEYS rows
+// directly rather than going through getSettingsFlat() — this runs on
+// every single API response, so it stays a 2-row read.
+function businessContext(db) {
+  let state = '', mode = '';
+  try {
+    const rows = db.all(
+      `SELECT key, value FROM company_settings
+        WHERE business_mode = '*' AND key IN ('business_mode','business_state')`);
+    for (const r of rows || []) {
+      if (r.key === 'business_state') state = String(r.value || '').toUpperCase();
+      else if (r.key === 'business_mode') mode = String(r.value || '');
+    }
+  } catch (_) { /* pre-init / mid-migration — report an empty context */ }
+  return { rev: getSettingsRev(db), state, mode };
+}
+
+// Bump after ANY settings mutation, not just a state/mode flip. A changed
+// commission rate or GST percentage moves the money just as surely, and a
+// session that saved a lot against the old rate wrote a wrong figure.
+// `keys` is recorded so the other sessions' banner can say what moved.
+// Re-stamps the response headers too, so the writer's own client adopts
+// the new rev instead of alarming at its own change.
+function bumpSettingsRev(db, req, res, keys) {
+  try {
+    ensureAppState(db);
+    const next = getSettingsRev(db) + 1;
+    const nowRow = db.get(`SELECT datetime('now','localtime') AS t`);
+    const meta = {
+      by:   (req && req.user && req.user.username) || 'system',
+      at:   (nowRow && nowRow.t) || '',
+      keys: Array.isArray(keys) ? keys.slice(0, 12) : [],
+    };
+    db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('settings_rev', ?)`, [String(next)]);
+    db.run(`INSERT OR REPLACE INTO app_state (key, value) VALUES ('settings_rev_meta', ?)`, [JSON.stringify(meta)]);
+  } catch (_) { /* never fail the write itself over the counter */ }
+  const ctx = businessContext(db);
+  if (res) applyContextHeaders(res, ctx);
+  return ctx;
+}
+
+function applyContextHeaders(res, ctx) {
+  try {
+    res.set('X-Settings-Rev',   String(ctx.rev));
+    res.set('X-Business-State', ctx.state);
+    res.set('X-Business-Mode',  ctx.mode);
+  } catch (_) { /* advisory only — never block a response over it */ }
+}
+
+// Echo the current context on every /api response. The client compares it
+// against what it last saw; a difference means another session moved the
+// ground under it.
+app.use('/api', (req, res, next) => {
+  try { applyContextHeaders(res, businessContext(getDb())); } catch (_) {}
+  next();
+});
+
+// Requests that legitimately carry no context echo: the auth handshake
+// (the client has no context until it is logged in) and the mobile PWA,
+// which never sends these headers. An ABSENT header means "unguarded", so
+// adding this cannot break a client that doesn't know about it — only
+// callers that opt in by echoing a rev can be refused for echoing a stale
+// one. The money endpoints below opt in unconditionally instead.
+const CTX_GUARD_SKIP_RE = /^\/api\/(auth\/|login\b|logout\b|refresh\b|me\b|mobile\/)/i;
+
+app.use('/api', (req, res, next) => {
+  const m = req.method;
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return next();
+  if (CTX_GUARD_SKIP_RE.test(req.originalUrl || '')) return next();
+  const sent = req.get('X-Settings-Rev');
+  if (sent == null || sent === '') return next();
+  let db;
+  try { db = getDb(); } catch (_) { return next(); }
+  const ctx = businessContext(db);
+  if ((parseInt(sent, 10) || 0) === ctx.rev) return next();
+  const meta = getSettingsRevMeta(db);
+  return res.status(409).json({
+    code: 'SETTINGS_STALE',
+    error: `Company settings were changed by ${meta.by || 'another user'} while this screen was open — `
+         + `the business context is now ${ctx.state || '—'} / ${ctx.mode || '—'}. `
+         + `Reload before saving, so you aren't computing against the old settings.`,
+    context: ctx,
+    changedBy: meta.by || null,
+    changedAt: meta.at || null,
+    changedKeys: meta.keys || [],
+  });
+});
+
+// Money endpoints: the caller must state the context it believes it is
+// computing in. Fails CLOSED — a caller that declares nothing is refused,
+// because "silently used whatever happened to be current" is precisely
+// the failure this exists to prevent. Only the desktop UI reaches these
+// routes (the mobile bridge does not), so closing them is safe.
+//
+// Returns the live context on success, or null after having already sent
+// the error response — callers do `if (!assertMoneyContext(req, res)) return;`.
+function assertMoneyContext(req, res) {
+  let db;
+  try { db = getDb(); } catch (_) { return { rev: 0, state: '', mode: '' }; }
+  const ctx = businessContext(db);
+  const b = req.body || {};
+  const wantState = String(b.expected_state != null ? b.expected_state : (req.get('X-Business-State') || '')).toUpperCase();
+  const wantMode  = String(b.expected_mode  != null ? b.expected_mode  : (req.get('X-Business-Mode')  || ''));
+  // If the installation itself has no business_state configured there is
+  // nothing for a caller to match, and demanding a declaration would only
+  // brick calculation on a half-set-up install. Nothing can drift out of
+  // sync with a value that doesn't exist, so let it through.
+  if (!ctx.state) return ctx;
+  if (!wantState) {
+    res.status(400).json({
+      code: 'CONTEXT_REQUIRED',
+      error: 'This request has to declare the business state it was prepared for '
+           + '(expected_state in the body, or the X-Business-State header). Reload the page and retry.',
+      context: ctx,
+    });
+    return null;
+  }
+  if (wantState !== ctx.state || (wantMode && wantMode !== ctx.mode)) {
+    const meta = getSettingsRevMeta(db);
+    res.status(409).json({
+      code: 'CONTEXT_MISMATCH',
+      error: `Refusing to write: this screen is working in ${wantState}${wantMode ? ' / ' + wantMode : ''}, `
+           + `but the installation is now set to ${ctx.state || '—'} / ${ctx.mode || '—'}`
+           + `${meta.by ? ' (changed by ' + meta.by + ')' : ''}. `
+           + `Reload and re-check the figures before generating.`,
+      context: ctx,
+      changedBy: meta.by || null,
+      changedAt: meta.at || null,
+    });
+    return null;
+  }
+  return ctx;
+}
+
+// ══════════════════════════════════════════════════════════════
 // APP-WIDE AUDIT CAPTURE (desktop + mobile)
 // ══════════════════════════════════════════════════════════════
 // Records every state-changing request (POST/PUT/PATCH/DELETE) from BOTH
@@ -99,7 +284,7 @@ app.use('/api', (req, res, next) => {
 // SKIP regex drops noise that is either non-mutating (print/export), or
 // already recorded elsewhere (auth → login_history), or self-referential
 // (the audit-log routes). Best-effort: it must never break the request.
-const AUDIT_SKIP_RE = /\/(login|logout|refresh|me)\b|\/auth\/|\/audit-log\b|\/print|\/export|\/status\b|\/logo\b/i;
+const AUDIT_SKIP_RE = /\/(login|logout|refresh|me)\b|\/auth\/|\/audit-log\b|\/print|\/status\b|\/logo\b/i;
 function auditEntityFromPath(p) {
   // /api/lots/123 → lot ; /api/debit-notes → debit-note ; /api/admin/users → user
   const m = String(p || '').match(/^\/api\/(?:admin\/|system\/)?([a-z][a-z0-9-]*)/i);
@@ -109,22 +294,82 @@ function auditEntityFromPath(p) {
   else if (seg.endsWith('s')) seg = seg.slice(0, -1);
   return seg;
 }
+// Map a request onto a verb the log can group by, so the feed distinguishes
+// a generate from an ordinary create and an import from a hand edit. Falls
+// back to the plain HTTP-method mapping.
+function auditActionFromRequest(method, p) {
+  const path = String(p || '').toLowerCase();
+  if (/\/bulk-delete|\/delete-all/.test(path)) return 'bulk-delete';
+  if (/\/bulk-|\/batch/.test(path))            return 'bulk-edit';
+  if (/\/import|\/upload/.test(path))          return 'import';
+  if (/\/backup/.test(path))                   return 'backup';
+  if (/\/print/.test(path))                    return 'print';
+  if (/\/export|\/download/.test(path))        return 'export';
+  if (/\/generate|\/create-invoice/.test(path))return 'generate';
+  if (/\/restore/.test(path))                  return 'restore';
+  if (/\/revert|\/undo/.test(path))            return 'revert';
+  if (/\/unlock/.test(path))                   return 'unlock';
+  if (/\/lock/.test(path))                     return 'lock';
+  if (method === 'DELETE')                     return 'delete';
+  if (method === 'PUT' || method === 'PATCH')  return 'edit';
+  return 'create';
+}
+// Reads are not logged — with one exception. Pulling data OUT of the system
+// (an export, a download, a print) is a real, attributable act that an
+// investigation cares about ("who took the buyer master off the machine?"),
+// and these are GET routes. So GETs matching this pattern are captured while
+// every other read stays unlogged.
+const AUDIT_READ_CAPTURE_RE = /\/(export|download|print|backup)\b/i;
 app.use((req, res, next) => {
   const method = req.method;
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  if (isRead && !(method === 'GET' && AUDIT_READ_CAPTURE_RE.test(req.path))) return next();
   if (AUDIT_SKIP_RE.test(req.path)) return next();
+  const started = Date.now();
+  // Snapshot the body NOW: a handler is free to mutate req.body while it
+  // works, and by res.on('finish') the original submission would be gone.
+  let bodySnapshot = null;
+  try {
+    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length) {
+      bodySnapshot = JSON.parse(JSON.stringify(req.body));
+    }
+  } catch (_) { bodySnapshot = null; }
   res.on('finish', () => {
     try {
-      if (req._audited) return;            // a richer explicit auditLog() already wrote a row
+      if (req._audited) {                  // a richer explicit auditLog() already wrote the row(s)
+        // Backfill the outcome its handler couldn't know yet.
+        if (req._auditRowIds && req._auditRowIds.length) {
+          const db = getDb();
+          const ph = req._auditRowIds.map(() => '?').join(',');
+          db.run(`UPDATE audit_log SET status = ?, duration_ms = ? WHERE id IN (${ph})`,
+            [res.statusCode, Date.now() - started, ...req._auditRowIds]);
+        }
+        return;
+      }
       if (!req.user) return;               // unauthenticated / failed auth — nothing to attribute
-      if (res.statusCode >= 400) return;   // request errored out → no state change to record
-      const action = method === 'DELETE' ? 'delete'
-                   : (method === 'PUT' || method === 'PATCH') ? 'edit'
-                   : 'create';
+      const status = res.statusCode;
+      // A refused request is often the MOST useful row in an investigation
+      // ("who tried to delete the locked lot?"), so we record it too —
+      // tagged 'blocked' (permission / lock / duplicate refusals) or
+      // 'failed' (server errors) rather than as a state change that never
+      // happened. 404s are noise and are dropped.
+      const ok = status < 400;
+      if (!ok && status === 404) return;
+      const action = ok ? auditActionFromRequest(method, req.path)
+                        : (status >= 500 ? 'failed' : 'blocked');
       const idMatch = req.path.match(/\/(\d+)(?:\/|$)/);
-      auditLog(req, action, auditEntityFromPath(req.path), idMatch ? idMatch[1] : null, {
-        method, path: req.path, status: res.statusCode
-      });
+      const details = { method, path: req.originalUrl || req.path, status };
+      // What was actually submitted — the difference between a log entry
+      // that says "someone edited settings" and one that says which key
+      // moved to which value. Secrets are redacted by auditSanitize().
+      if (bodySnapshot) details.submitted = bodySnapshot;
+      // Exports/prints carry their scope in the query string (which trade,
+      // which buyer, which date range) — that IS the payload for a read.
+      if (req.query && Object.keys(req.query).length) details.filters = req.query;
+      if (req.file) details.file = { name: req.file.originalname, size: req.file.size };
+      if (!ok) details.reason = 'request rejected with HTTP ' + status;
+      auditLog(req, action, auditEntityFromPath(req.path), idMatch ? idMatch[1] : null, details,
+        { status, durationMs: Date.now() - started });
     } catch (_) { /* audit capture must never break the response */ }
   });
   next();
@@ -494,7 +739,17 @@ app.post('/api/login', async (req, res) => {
   const db = getDb();
   const user = db.get('SELECT * FROM users WHERE username = ?', [username]);
   const ok = user ? await verifyPassword(password, user.password_hash) : false;
-  if (!user || !ok) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!user || !ok) {
+    // A failed sign-in is attributable to a typed username, an app and an
+    // IP even though no session exists — and repeated ones are exactly what
+    // an investigation looks for. req.user is unset here, so the actor is
+    // passed explicitly via the summary.
+    auditLog(req, 'blocked', 'session', null, {
+      attempted_username: String(username || '').slice(0, 60),
+      reason: user ? 'wrong password' : 'no such user',
+    }, { status: 401, summary: `FAILED sign-in as "${String(username || '').slice(0, 60)}" — ${user ? 'wrong password' : 'no such user'}` });
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
   // Opportunistic upgrade: legacy SHA-256 rows get re-hashed to bcrypt on
   // first successful desktop login so mobile + desktop stay in sync.
   if (isLegacyHash(user.password_hash)) {
@@ -515,11 +770,31 @@ app.post('/api/login', async (req, res) => {
   // Return the user's capabilities array so the client can hide buttons
   // they're not allowed to use. Server still validates every request.
   const permissions = Array.from(effectivePermissions(user));
+  // Successful sign-in. Recorded in the same feed as everything else so a
+  // session can be tied to the actions that followed it — same user, same
+  // app, same IP, adjacent timestamps.
+  req.user = user;   // auditLog reads the actor off req
+  auditLog(req, 'login', 'session', null, {
+    role: user.role, branch: user.branch || '', device_label: device_label || '',
+  }, { status: 200, summary: `Signed in — ${user.username} (${user.role})` });
   res.json({ token, role: user.role, username: user.username, permissions });
 });
 app.post('/api/logout', (req, res) => {
   const t = (req.headers.authorization||'').replace('Bearer ','');
-  if (t) getDb().run('DELETE FROM sessions WHERE token = ?', [t]);
+  const db = getDb();
+  // Resolve who is signing out BEFORE the session row is dropped, so the
+  // row isn't attributed to 'system'.
+  let who = null;
+  if (t) {
+    const s = db.get('SELECT user_id FROM sessions WHERE token = ?', [t]);
+    if (s) who = db.get('SELECT username, role FROM users WHERE id = ?', [s.user_id]);
+  }
+  if (t) db.run('DELETE FROM sessions WHERE token = ?', [t]);
+  if (who) {
+    req.user = who;
+    auditLog(req, 'logout', 'session', null, { role: who.role || '' },
+      { status: 200, summary: `Signed out — ${who.username}` });
+  }
   res.json({ success: true });
 });
 app.get('/api/me', requireView, (req, res) => {
@@ -831,7 +1106,48 @@ app.get('/api/company-settings', requireView, (req, res) => {
   res.json({ categories: CATEGORIES, settings: getAllSettings(getDb()) });
 });
 app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
-  const count = updateSettings(getDb(), req.body.settings || {});
+  const db = getDb();
+  const incoming = req.body.settings || {};
+  const keys = Object.keys(incoming);
+  // business_state / business_mode re-point every downstream calculation
+  // for the whole installation, so they need their own capability.
+  // settings_write alone isn't enough: it is grantable to an individual
+  // operator (GRANTABLE_EXTRA_PERMISSIONS), and "may edit the company
+  // address" must not silently carry "may switch the tax treatment for
+  // everyone currently logged in".
+  if (keys.some(k => k === 'business_state' || k === 'business_mode')
+      && !userCan(req.user, 'state_toggle')) {
+    return res.status(403).json({
+      error: `Your role (${req.user.role}) can edit settings but not switch the business state or mode`,
+      required: 'state_toggle',
+      role: req.user.role,
+    });
+  }
+  // Snapshot the affected keys before the write so the audit row carries a
+  // before → after diff. A settings change silently re-points every
+  // downstream calculation (commission, GST, gunny, transport), so "who
+  // moved this figure, from what, and when" is the question the log has to
+  // answer months later — settings_history only tracks a curated subset.
+  const _before = getSettingsFlat(db);
+  const count = updateSettings(db, incoming);
+  try {
+    const _after = getSettingsFlat(db);
+    const changes = {};
+    for (const k of keys) {
+      const a = _before[k] == null ? '' : String(_before[k]);
+      const b = _after[k]  == null ? '' : String(_after[k]);
+      if (a !== b) changes[k] = { from: _before[k], to: _after[k] };
+    }
+    if (Object.keys(changes).length) {
+      auditLog(req, 'edit', 'setting', null, {
+        changes,
+        keys_submitted: keys.length,
+        // These two re-point the whole installation's tax treatment, so
+        // flag them explicitly rather than leaving them among the rest.
+        critical: keys.filter(k => k === 'business_state' || k === 'business_mode'),
+      });
+    }
+  } catch (_) { /* auditing must not fail a settings save */ }
   // Propagate the active mode's Rates & Charges sample-refund source
   // (refund in e-Trade, sb_refund in e-Auction) into tally_sample_kgs and
   // sample_weight so the three stay in lockstep (points 11 & 12).
@@ -840,9 +1156,19 @@ app.put('/api/company-settings', requireSettingsWrite, (req, res) => {
   // the change takes effect immediately without a restart.
   invalidateDateFmtCache();
   try { require('./date-format').invalidateDateFormatCache(); } catch (_) {}
-  res.json({ success: true, updated: count });
+  // Every other open session is now working from stale settings — bump the
+  // rev so their next write is refused and their banner tells them why.
+  const context = bumpSettingsRev(db, req, res, keys);
+  res.json({ success: true, updated: count, context });
 });
 app.get('/api/company-settings/flat', requireView, (req, res) => res.json(getSettingsFlat(getDb())));
+
+// Cheap poll target for idle tabs: an open screen that isn't issuing any
+// other request still needs to notice that someone flipped the state.
+app.get('/api/business-context', requireView, (req, res) => {
+  const db = getDb();
+  res.json({ ...businessContext(db), meta: getSettingsRevMeta(db) });
+});
 
 // Change history for the tracked Rates & Charges settings, scoped to the
 // active business mode (matching what the Settings panel shows). Newest
@@ -1401,7 +1727,11 @@ app.put('/api/company-presets/active', requireStateToggle, (req, res) => {
       return res.status(400).json({ error: 'Invalid preset code — must be ISP or ASP' });
     }
     setActivePresetCode(getDb(), code);
-    res.json({ success: true, active: code });
+    // The active preset decides which company identity is stamped on
+    // PDFs — same blast radius as a settings write, so it bumps the rev
+    // too and stales out every other open session.
+    const context = bumpSettingsRev(getDb(), req, res, ['active_preset']);
+    res.json({ success: true, active: code, context });
   } catch (e) {
     console.error('[presets/active] Failed to switch preset:', e);
     res.status(500).json({ error: e.message });
@@ -1417,7 +1747,10 @@ app.put('/api/company-presets/:code', requireSettingsWrite, (req, res) => {
       return res.status(400).json({ error: 'Invalid preset code — must be ISP or ASP' });
     }
     savePreset(getDb(), code, req.body.values || {});
-    res.json({ success: true });
+    // Preset values are the company identity printed on every PDF, so an
+    // edit here stales other sessions the same way a settings write does.
+    const context = bumpSettingsRev(getDb(), req, res, ['preset:' + code]);
+    res.json({ success: true, context });
   } catch (e) {
     console.error('[presets/save] Failed to save preset:', e);
     res.status(500).json({ error: e.message });
@@ -1478,7 +1811,10 @@ app.post('/api/company-settings/import', requireSettingsWrite, (req, res) => {
   try { syncSampleRefund(getDb()); } catch (_) {}
   invalidateDateFmtCache();
   try { require('./date-format').invalidateDateFormatCache(); } catch (_) {}
-  res.json({ success: true, imported: count });
+  // A bundle import can rewrite the state/mode and every rate at once —
+  // the widest-blast-radius settings write there is.
+  const context = bumpSettingsRev(getDb(), req, res, ['settings_import']);
+  res.json({ success: true, imported: count, context });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -1887,7 +2223,149 @@ app.get('/api/admin/delete-log', requireDeleteAll, (req, res) => {
 // User-Agent) are captured automatically so the admin console can tell a
 // phone lot-entry from a desktop one. `details` is any JSON-able object
 // describing the change (lot_no, qty, trader, field diff, …).
-function auditLog(req, action, entity, entityId, details) {
+// Which app the request came from. The User-Agent distinguishes the three
+// clients that share this server: the packaged Electron desktop app (its UA
+// carries "Electron"), the field-staff mobile PWA (mobile UA), and the
+// office browser. Anything without a browser UA at all is a direct API/script
+// call — worth flagging distinctly, because it is the one channel a normal
+// operator never uses.
+function auditApp(req) {
+  const ua = (req && req.headers && req.headers['user-agent']) || '';
+  if (!ua) return 'API';
+  if (/Electron|SpiceConfig/i.test(ua)) return 'Desktop App';
+  if (/Mobile|Android|iPhone|iPad|iPod/i.test(ua)) return 'Mobile PWA';
+  if (/Mozilla|Chrome|Safari|Firefox|Edg/i.test(ua)) return 'Desktop';
+  return 'API';
+}
+
+// Client IP, honouring the proxy header Railway/nginx set. Trimmed of the
+// IPv6-mapped-IPv4 prefix so LAN addresses read as 192.168.x.x rather than
+// ::ffff:192.168.x.x.
+function auditClientIp(req) {
+  try {
+    const fwd = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const raw = fwd || req.ip || (req.connection && req.connection.remoteAddress) || '';
+    return String(raw).replace(/^::ffff:/, '').replace(/^::1$/, 'localhost');
+  } catch (_) { return ''; }
+}
+
+// Field names whose values must never reach the log. Password/token material
+// is redacted rather than dropped so the trail still shows that the field was
+// part of the request.
+const AUDIT_SECRET_RE = /pass|pwd|token|secret|hash|otp|cookie|auth|key$/i;
+// Bulky/derived fields that would drown a log row without telling the reader
+// anything they can't get from the record itself.
+const AUDIT_BULK_KEYS = new Set(['file', 'data', 'rows', 'base64', 'image', 'logo', 'pdf', 'html']);
+
+// Reduce an arbitrary request body / row to something a human can read in a
+// log line: secrets redacted, long strings clipped, big arrays summarised by
+// length, nested objects kept one level deep. Never throws.
+function auditSanitize(obj, depth = 0) {
+  if (obj == null) return obj;
+  if (Array.isArray(obj)) {
+    if (obj.length > 12) return { count: obj.length, first: auditSanitize(obj.slice(0, 12), depth + 1) };
+    return obj.slice(0, 12).map(v => auditSanitize(v, depth + 1));
+  }
+  if (typeof obj === 'object') {
+    if (depth > 2) return '…';
+    const out = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (AUDIT_SECRET_RE.test(k)) { out[k] = '••• redacted'; continue; }
+      if (AUDIT_BULK_KEYS.has(k.toLowerCase())) { out[k] = '[omitted]'; continue; }
+      if (v === '' || v === null || v === undefined) continue;   // blank fields add no signal
+      out[k] = auditSanitize(v, depth + 1);
+    }
+    return out;
+  }
+  // Numbers and booleans keep their type — a log reader (and the CSV) should
+  // see qty 25.75, not "25.75". Only strings are clipped.
+  if (typeof obj !== 'string') return obj;
+  return obj.length > 200 ? obj.slice(0, 200) + '…' : obj;
+}
+
+// Human-readable area name for an entity slug, so the log reads
+// "Sales Invoice" instead of "invoice". Falls back to the slug itself.
+const AUDIT_AREA_LABELS = {
+  lot: 'Lot', auction: 'Trade / Auction', trader: 'Seller', buyer: 'Buyer',
+  invoice: 'Sales Invoice', purchase: 'Purchase', bill: 'Bill',
+  'debit-note': 'Debit Note', user: 'User', setting: 'Settings',
+  'company-setting': 'Company Settings', 'audit-log': 'Activity Log',
+  restore: 'Database (whole-DB restore)', system: 'System',
+  session: 'Session', backup: 'Backup', payment: 'Payment',
+  'trade-fair': 'Trade Fair', allocation: 'Lot Allocation', booking: 'Booking Alert',
+  company: 'Company Config', licence: 'Licence', license: 'Licence',
+};
+function auditAreaLabel(entity) {
+  return AUDIT_AREA_LABELS[entity] || (entity ? entity.charAt(0).toUpperCase() + entity.slice(1) : 'Other');
+}
+
+// Compose the one-line plain-English sentence stored in audit_log.summary.
+// This is what the Activity Log shows at a glance ("Edited Lot #12 — price
+// 0 → 585, buyer ∅ → B042"); the full JSON stays in `details` for the
+// expandable view. Built server-side so the CSV export reads the same as
+// the screen.
+function auditSummarize(action, entity, entityId, details) {
+  const d = details || {};
+  const area = auditAreaLabel(entity);
+  const verb = {
+    create: 'Created', edit: 'Edited', delete: 'Deleted', 'bulk-delete': 'Bulk deleted',
+    'bulk-edit': 'Bulk edited', import: 'Imported', export: 'Exported', clear: 'Cleared',
+    print: 'Printed', backup: 'Backed up', alert: 'Alert raised', restore: 'RESTORED',
+    lock: 'Locked', unlock: 'Unlocked', generate: 'Generated', revert: 'Reverted',
+    blocked: 'BLOCKED', failed: 'FAILED', login: 'Signed in', logout: 'Signed out',
+  }[action] || (action ? action.charAt(0).toUpperCase() + action.slice(1) : 'Acted on');
+  const bits = [];
+  // Which record. A rejected request never got an id, so its identity has to
+  // come from what the client submitted — that is the whole point of the row.
+  const sub = (d.submitted && typeof d.submitted === 'object') ? d.submitted : {};
+  let what = area;
+  if (d.lot_no != null && d.lot_no !== '') what += ' #' + d.lot_no;
+  else if (d.invo) what += ' ' + d.invo;
+  else if (d.name) what += ' "' + d.name + '"';
+  else if (sub.lot_no) what += ' #' + sub.lot_no;
+  else if (sub.name || sub.buyer1) what += ' "' + (sub.name || sub.buyer1) + '"';
+  else if (entityId != null) what += ' #' + entityId;
+  if (d.count != null) what = d.count + ' × ' + area;
+  if (d.operation) bits.push(d.operation);
+  // Salient context
+  if (d.trader) bits.push('seller ' + d.trader);
+  if (d.branch) bits.push(d.branch);
+  if (d.qty != null && Number(d.qty)) bits.push(Number(d.qty).toFixed(3) + ' kg');
+  if (d.lot_nos && Array.isArray(d.lot_nos) && d.lot_nos.length) {
+    bits.push('#' + d.lot_nos.slice(0, 8).join(', #') + (d.lot_nos.length > 8 ? ` +${d.lot_nos.length - 8} more` : ''));
+  }
+  // Field-level diff — the part that pinpoints an unexplained figure
+  if (d.changes && typeof d.changes === 'object') {
+    const ch = Object.entries(d.changes).slice(0, 6).map(([k, v]) => {
+      const from = (v && typeof v === 'object') ? v.from : '';
+      const to   = (v && typeof v === 'object') ? v.to   : v;
+      const lbl  = LOT_FIELD_LABELS[k] || k;
+      return `${lbl} ${from === '' || from == null ? '∅' : from} → ${to === '' || to == null ? '∅' : to}`;
+    });
+    const extra = Object.keys(d.changes).length - ch.length;
+    if (ch.length) bits.push(ch.join(', ') + (extra > 0 ? ` +${extra} more field(s)` : ''));
+  }
+  // Generic rows (captured by the middleware rather than hand-instrumented)
+  // have no diff — their signal is the values that were submitted.
+  if (!d.changes && Object.keys(sub).length) {
+    const shown = Object.entries(sub).filter(([k]) => k !== 'ids').slice(0, 6)
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v).slice(0, 40) : v}`);
+    if (shown.length) bits.push(shown.join(', '));
+  }
+  if (d.reason) bits.push(d.reason);
+  if (d.method && d.path && (action === 'blocked' || action === 'failed')) bits.push(`via ${d.method} ${d.path}`);
+  return verb + ' ' + what + (bits.length ? ' — ' + bits.join(', ') : '');
+}
+
+// auditLog() records a single action against the audit_log table.
+//   action    — create / edit / delete / bulk-delete / import / blocked / …
+//   entity    — area slug ('lot', 'invoice', 'user', …)
+//   entityId  — the record's id when there is one
+//   details   — any JSON-able object describing the change
+//   opts      — { status, durationMs, summary } overrides from the caller
+// Actor, role, app, IP, business mode and the HTTP request are captured
+// automatically, so no call site has to remember them.
+function auditLog(req, action, entity, entityId, details, opts) {
   // Mark the request as explicitly audited so the global capture middleware
   // (registered near the top of this file) does NOT also write a coarse row
   // for it — the rich call here wins. Set outside the try so a failed insert
@@ -1895,72 +2373,218 @@ function auditLog(req, action, entity, entityId, details) {
   if (req) req._audited = true;
   try {
     const db = getDb();
+    const o = opts || {};
     const username = (req && req.user && req.user.username) || 'system';
-    const ua = (req && req.headers && req.headers['user-agent']) || '';
-    const device = /Mobile|Android|iPhone|iPad/i.test(ua) ? 'Mobile' : 'Desktop';
-    const payload = JSON.stringify(Object.assign({ device }, details || {}));
-    const eid = Number.isFinite(Number(entityId)) ? parseInt(entityId, 10) : null;
-    db.run(
-      'INSERT INTO audit_log (user_id, action, entity, entity_id, details) VALUES (?, ?, ?, ?, ?)',
-      [username, action, entity, eid, payload]
+    const role = (req && req.user && req.user.role) || '';
+    const app = req ? auditApp(req) : 'System';
+    // 'device' is kept inside details for backwards compatibility with rows
+    // written (and readers built) before the dedicated columns existed.
+    const device = app === 'Mobile PWA' ? 'Mobile' : 'Desktop';
+    let mode = '';
+    try { mode = currentBusinessMode(db) || ''; } catch (_) {}
+    const clean = auditSanitize(details || {});
+    const payload = JSON.stringify(Object.assign({ device }, clean));
+    // Guard the empty cases explicitly: Number(null) is 0 (finite), so a
+    // plain isFinite check would turn "no record id" into parseInt(null) = NaN
+    // and the row would render as "#NaN".
+    const eidRaw = (entityId === null || entityId === undefined || entityId === '')
+      ? NaN : parseInt(entityId, 10);
+    const eid = Number.isFinite(eidRaw) ? eidRaw : null;
+    const summary = o.summary || auditSummarize(action, entity, eid, clean);
+    const ins = db.run(
+      `INSERT INTO audit_log
+         (user_id, action, entity, entity_id, details,
+          role, app, ip, business_mode, method, path, status, duration_ms, summary)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [username, action, entity, eid, payload,
+       role, app, req ? auditClientIp(req) : '', mode,
+       (req && req.method) || '', (req && (req.originalUrl || req.path)) || '',
+       o.status != null ? o.status : null,
+       o.durationMs != null ? Math.round(o.durationMs) : null,
+       summary]
     );
+    // A handler calls auditLog() mid-request, before the response status and
+    // the total server time exist. Remember the row so the capture middleware
+    // can stamp both once the response finishes — otherwise the richest rows
+    // in the log would be the only ones missing their outcome.
+    if (req && ins && ins.lastInsertRowid) {
+      (req._auditRowIds || (req._auditRowIds = [])).push(ins.lastInsertRowid);
+    }
+    auditPruneTick(db);
   } catch (e) {
     console.error('[auditLog] insert failed:', e.message);
   }
 }
 
-// Build a compact before→after diff over a curated set of lot columns so
-// the audit row records WHAT changed on an edit without dumping the whole
-// row. Returns {} when nothing of interest changed.
+// ── Retention ────────────────────────────────────────────────
+// The log is now detailed enough to grow fast, and this DB is held in
+// memory and rewritten whole on save — so an unbounded audit table would
+// slow down every write in the app, not just the log. We keep a long but
+// finite window: a year of history and a hard row ceiling, both overridable
+// per-install. Anything older is dropped only after the ceiling is hit, and
+// admins who need permanent retention have the CSV export.
+const AUDIT_RETENTION_DAYS = parseInt(process.env.SPICE_AUDIT_RETENTION_DAYS || '365', 10);
+const AUDIT_MAX_ROWS       = parseInt(process.env.SPICE_AUDIT_MAX_ROWS || '200000', 10);
+let _auditWriteCount = 0;
+function auditPruneTick(db) {
+  // Counting rows on every insert would be wasteful; check periodically.
+  if (++_auditWriteCount % 1000 !== 0) return;
+  try {
+    if (AUDIT_RETENTION_DAYS > 0) {
+      db.run(`DELETE FROM audit_log WHERE created_at < datetime('now','localtime','-${AUDIT_RETENTION_DAYS} days')`);
+    }
+    if (AUDIT_MAX_ROWS > 0) {
+      const c = (db.get('SELECT COUNT(*) AS c FROM audit_log') || { c: 0 }).c || 0;
+      if (c > AUDIT_MAX_ROWS) {
+        // Oldest-first trim down to the ceiling, by id (monotonic).
+        db.run(`DELETE FROM audit_log WHERE id IN (
+                  SELECT id FROM audit_log ORDER BY id ASC LIMIT ?)`, [c - AUDIT_MAX_ROWS]);
+      }
+    }
+  } catch (_) { /* pruning is housekeeping — never let it break a request */ }
+}
+
+// Readable name for a trade/auction id ("A-102 · 2026-08-12"), so a lot's
+// audit row identifies WHICH trade it belonged to even after the lot itself
+// has been deleted. Best-effort — returns '' when the trade is gone.
+function auctionLabel(db, auctionId) {
+  try {
+    if (!auctionId) return '';
+    const a = db.get('SELECT ano, date FROM auctions WHERE id = ?', [parseInt(auctionId, 10)]);
+    if (!a) return '';
+    return [a.ano, a.date].filter(Boolean).join(' · ');
+  } catch (_) { return ''; }
+}
+
+// Human labels for lot columns, used by the field diff and the summary line
+// so the log says "Price 0 → 585" rather than "prate 0 → 585".
+const LOT_FIELD_LABELS = {
+  lot_no: 'Lot No', trader_id: 'Seller ID', name: 'Seller', branch: 'Branch',
+  state: 'State', crop: 'Crop', grade: 'Grade', crpt: 'Crop Type',
+  bags: 'Bags', litre: 'Litre', qty: 'Qty', gross_wt: 'Gross Wt',
+  sample_wt: 'Sample Wt', wt_with_gunny: 'Wt with Gunny', gunny_wt: 'Gunny Wt',
+  moisture: 'Moisture', reserved_price: 'Reserved Price',
+  code: 'Buyer Code', buyer: 'Buyer', buyer1: 'Buyer Trade Name', sale: 'Sale Type',
+  price: 'Price', prate: 'Purchase Rate', pqty: 'Purchase Qty', puramt: 'Purchase Amount',
+  com: 'Commission', sertax: 'Service Tax', cgst: 'CGST', sgst: 'SGST', igst: 'IGST',
+  advance: 'Advance', balance: 'Balance', bilamt: 'Bill Amount',
+  refund: 'Refund', refud: 'Refund Amt', invo: 'Invoice No', asp_invo: 'ASP Invoice No',
+  purno: 'Purchase No', bilno: 'Bill No', cr: 'GSTIN', pan: 'PAN', tel: 'Phone',
+  aadhar: 'Aadhaar', padd: 'Address', ppla: 'Place', ppin: 'PIN', pstate: 'Seller State',
+  pst_code: 'State Code', locked_at: 'Locked At', locked_by: 'Locked By',
+  user_id: 'Entered By',
+};
+
+// Lot columns that are pure bookkeeping noise in a change log — the row
+// stamps rewritten on every write. Everything else on the lots row IS
+// diffed, so a change to price, buyer, invoice number or any tax figure
+// shows up by name instead of vanishing into an untracked column.
+const LOT_DIFF_SKIP = new Set(['id', 'auction_id', 'modified_at', 'modified_by', 'created_at']);
+
+// Build a before→after diff across the whole lots row so the audit entry
+// records exactly WHAT changed on an edit. Numeric columns are compared as
+// numbers, so 585 vs "585.00" is correctly seen as no change. Returns {}
+// when nothing changed.
 function lotChangeDiff(before, after) {
-  const keys = ['lot_no', 'trader_id', 'name', 'branch', 'grade', 'bags', 'litre', 'qty', 'gross_wt', 'sample_wt', 'moisture', 'code'];
   const diff = {};
   if (!before || !after) return diff;
-  for (const k of keys) {
-    const a = before[k] == null ? '' : String(before[k]);
-    const b = after[k]  == null ? '' : String(after[k]);
-    if (a !== b) diff[k] = { from: before[k], to: after[k] };
+  for (const k of Object.keys(after)) {
+    if (LOT_DIFF_SKIP.has(k)) continue;
+    const a = before[k], b = after[k];
+    if (typeof a === 'number' || typeof b === 'number') {
+      const na = Number(a) || 0, nb = Number(b) || 0;
+      if (Math.abs(na - nb) < 1e-9) continue;
+    } else if (String(a == null ? '' : a) === String(b == null ? '' : b)) {
+      continue;
+    }
+    diff[k] = { from: a, to: b };
   }
   return diff;
 }
 
+// Snapshot the meaningful (non-empty, non-zero) fields of a lot row for a
+// create/delete audit entry — so a deleted lot can be read back in full
+// from the log, and a created one shows every value the operator entered.
+function lotSnapshot(row) {
+  if (!row) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (LOT_DIFF_SKIP.has(k)) continue;
+    if (v === null || v === undefined || v === '' || v === 0) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+// Build the WHERE clause shared by the audit-log read and export routes, so
+// a CSV download is always exactly what the screen is showing.
+// Supported filters: entity, action, user, app, from, to (dates, inclusive),
+// q (free-text across the summary, details JSON, actor, IP and route).
+function auditFilterSql(db, query) {
+  const where = [];
+  const params = [];
+  const q = query || {};
+  if (q.entity) { where.push('entity = ?'); params.push(String(q.entity)); }
+  if (q.action) { where.push('action = ?'); params.push(String(q.action)); }
+  if (q.user)   { where.push('user_id = ?'); params.push(String(q.user)); }
+  if (q.app)    { where.push('app = ?'); params.push(String(q.app)); }
+  // Date range on the localtime stamp. `to` is compared against the end of
+  // that day so "to = today" includes everything logged today.
+  if (q.from)   { where.push('created_at >= ?'); params.push(String(q.from).slice(0, 10) + ' 00:00:00'); }
+  if (q.to)     { where.push('created_at <= ?'); params.push(String(q.to).slice(0, 10) + ' 23:59:59'); }
+  // Free-text search — the "pinpoint" control. One typed lot number, seller
+  // name, invoice number, username or IP finds every row that mentions it,
+  // because the details JSON is searched as text alongside the columns.
+  if (q.q) {
+    const needle = '%' + String(q.q).trim() + '%';
+    where.push(`(summary LIKE ? OR details LIKE ? OR user_id LIKE ? OR ip LIKE ? OR path LIKE ? OR entity LIKE ?)`);
+    params.push(needle, needle, needle, needle, needle, needle);
+  }
+  // Business-mode scoping (Lot Activity Log): show only lot records whose
+  // auction was created in the current mode — "trades" in e-Trade,
+  // "auctions" in e-Auction. The auction id is read from the audit
+  // details (create/edit/delete stamp it) and, as a fallback, by joining
+  // the lot row that still exists. Records we can't classify (legacy rows,
+  // bulk deletes, edits whose lot was later removed) carry a NULL/empty
+  // mode and stay visible in both modes — matching modeWhereClause()'s
+  // legacy-tolerant behaviour elsewhere. Only lot-entity rows are scoped;
+  // any other entity passes through untouched.
+  const _mode = currentBusinessMode(db);
+  if (_mode) {
+    const resolved =
+      `COALESCE(
+         (SELECT a.mode FROM auctions a WHERE a.id = json_extract(audit_log.details, '$.auction_id')),
+         (SELECT a2.mode FROM auctions a2 JOIN lots l ON l.auction_id = a2.id WHERE l.id = audit_log.entity_id)
+       )`;
+    where.push(`(entity != 'lot' OR ${resolved} = ? OR ${resolved} IS NULL OR ${resolved} = '')`);
+    params.push(_mode);
+  }
+  return { whereSql: where.length ? ('WHERE ' + where.join(' AND ')) : '', params };
+}
+
+// Columns every audit read returns. Legacy rows predate the forensic
+// columns, so COALESCE keeps them rendering as blanks rather than nulls.
+const AUDIT_SELECT_COLS = `id, user_id, action, entity, entity_id, details, created_at,
+  COALESCE(role,'') AS role, COALESCE(app,'') AS app, COALESCE(ip,'') AS ip,
+  COALESCE(business_mode,'') AS business_mode, COALESCE(method,'') AS method,
+  COALESCE(path,'') AS path, status, duration_ms, COALESCE(summary,'') AS summary`;
+
 // GET /api/admin/audit-log — paginated activity feed, newest first.
-// Optional filters: ?entity=lot &action=create &user=ravi &page=1 &limit=50.
+// Filters: ?entity=lot &action=create &user=ravi &app=Mobile+PWA
+//          &from=2026-09-01 &to=2026-09-02 &q=lot+42 &page=1 &limit=50
 // requireView so any signed-in operator can review who entered/edited
 // lots from either app; the DELETE (clear) route below stays admin-only.
+// Also returns the distinct users / apps / areas present in the log so the
+// client can populate its filter dropdowns from real data.
 app.get('/api/admin/audit-log', requireView, (req, res) => {
   try {
     const db = getDb();
     const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
-    const where = [];
-    const params = [];
-    if (req.query.entity) { where.push('entity = ?'); params.push(String(req.query.entity)); }
-    if (req.query.action) { where.push('action = ?'); params.push(String(req.query.action)); }
-    if (req.query.user)   { where.push('user_id = ?'); params.push(String(req.query.user)); }
-    // Business-mode scoping (Lot Activity Log): show only lot records whose
-    // auction was created in the current mode — "trades" in e-Trade,
-    // "auctions" in e-Auction. The auction id is read from the audit
-    // details (create/edit/delete stamp it) and, as a fallback, by joining
-    // the lot row that still exists. Records we can't classify (legacy rows,
-    // bulk deletes, edits whose lot was later removed) carry a NULL/empty
-    // mode and stay visible in both modes — matching modeWhereClause()'s
-    // legacy-tolerant behaviour elsewhere. Only lot-entity rows are scoped;
-    // any other entity passes through untouched.
-    const _mode = currentBusinessMode(db);
-    if (_mode) {
-      const resolved =
-        `COALESCE(
-           (SELECT a.mode FROM auctions a WHERE a.id = json_extract(audit_log.details, '$.auction_id')),
-           (SELECT a2.mode FROM auctions a2 JOIN lots l ON l.auction_id = a2.id WHERE l.id = audit_log.entity_id)
-         )`;
-      where.push(`(entity != 'lot' OR ${resolved} = ? OR ${resolved} IS NULL OR ${resolved} = '')`);
-      params.push(_mode);
-    }
-    const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+    const { whereSql, params } = auditFilterSql(db, req.query);
     const total = (db.get(`SELECT COUNT(*) AS c FROM audit_log ${whereSql}`, params) || { c: 0 }).c || 0;
     const rows = db.all(
-      `SELECT id, user_id, action, entity, entity_id, details, created_at
+      `SELECT ${AUDIT_SELECT_COLS}
          FROM audit_log ${whereSql}
         ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, limit, (page - 1) * limit]
@@ -1972,7 +2596,18 @@ app.get('/api/admin/audit-log', requireView, (req, res) => {
       try { d = r.details ? JSON.parse(r.details) : {}; } catch (_) { d = { raw: r.details }; }
       return { ...r, details: d };
     });
-    res.json({ logs, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) });
+    // Filter vocabularies, read from the log itself so the dropdowns only
+    // ever offer values that exist. Scoped to the same entity as the feed
+    // (so the lot card lists lot-entry users, not every user in the app).
+    const facetWhere = req.query.entity ? 'WHERE entity = ?' : '';
+    const facetParams = req.query.entity ? [String(req.query.entity)] : [];
+    const facet = (col) => db.all(
+      `SELECT DISTINCT ${col} AS v FROM audit_log ${facetWhere} ORDER BY v`, facetParams
+    ).map(r => r.v).filter(v => v !== null && v !== '');
+    res.json({
+      logs, page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)),
+      facets: { users: facet('user_id'), apps: facet('app'), actions: facet('action'), entities: facet('entity') },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1989,25 +2624,9 @@ app.get('/api/admin/audit-log', requireView, (req, res) => {
 app.get('/api/admin/audit-log/export', requireView, (req, res) => {
   try {
     const db = getDb();
-    const where = [];
-    const params = [];
-    if (req.query.entity) { where.push('entity = ?'); params.push(String(req.query.entity)); }
-    if (req.query.action) { where.push('action = ?'); params.push(String(req.query.action)); }
-    if (req.query.user)   { where.push('user_id = ?'); params.push(String(req.query.user)); }
-    const _mode = currentBusinessMode(db);
-    if (_mode) {
-      const resolved =
-        `COALESCE(
-           (SELECT a.mode FROM auctions a WHERE a.id = json_extract(audit_log.details, '$.auction_id')),
-           (SELECT a2.mode FROM auctions a2 JOIN lots l ON l.auction_id = a2.id WHERE l.id = audit_log.entity_id)
-         )`;
-      where.push(`(entity != 'lot' OR ${resolved} = ? OR ${resolved} IS NULL OR ${resolved} = '')`);
-      params.push(_mode);
-    }
-    const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+    const { whereSql, params } = auditFilterSql(db, req.query);
     const rows = db.all(
-      `SELECT id, user_id, action, entity, entity_id, details, created_at
-         FROM audit_log ${whereSql} ORDER BY id DESC`,
+      `SELECT ${AUDIT_SELECT_COLS} FROM audit_log ${whereSql} ORDER BY id DESC`,
       params
     );
     // CSV: quote any field containing comma/quote/newline; double inner quotes.
@@ -2015,16 +2634,26 @@ app.get('/api/admin/audit-log/export', requireView, (req, res) => {
       const s = v == null ? '' : String(v);
       return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
-    const lines = [['When', 'User', 'From', 'Action', 'Area', 'Entity ID', 'Details'].join(',')];
+    // One row per action with the full forensic context. `What happened`
+    // is the readable sentence; `Full detail (JSON)` is the raw payload for
+    // anyone who needs the field-by-field record.
+    const lines = [[
+      'When', 'User', 'Role', 'App', 'IP', 'Mode', 'Action', 'Area', 'Record ID',
+      'What happened', 'Method', 'Route', 'Status', 'Took (ms)', 'Full detail (JSON)'
+    ].join(',')];
     for (const r of rows) {
       let d = {};
       try { d = r.details ? JSON.parse(r.details) : {}; } catch (_) { d = { raw: r.details }; }
-      const device = d.device || '';
       const rest = Object.assign({}, d); delete rest.device;
       const detailStr = Object.keys(rest).length ? JSON.stringify(rest) : '';
+      // Legacy rows (written before the forensic columns) fall back to the
+      // device tag that used to live inside details.
+      const app = r.app || d.device || '';
       lines.push([
-        esc(r.created_at), esc(r.user_id), esc(device), esc(r.action),
-        esc(r.entity), esc(r.entity_id), esc(detailStr)
+        esc(r.created_at), esc(r.user_id), esc(r.role), esc(app), esc(r.ip), esc(r.business_mode),
+        esc(r.action), esc(auditAreaLabel(r.entity)), esc(r.entity_id),
+        esc(r.summary || auditSummarize(r.action, r.entity, r.entity_id, rest)),
+        esc(r.method), esc(r.path), esc(r.status), esc(r.duration_ms), esc(detailStr)
       ].join(','));
     }
     const csv = '﻿' + lines.join('\r\n');   // UTF-8 BOM so Excel opens it cleanly
@@ -2039,11 +2668,21 @@ app.get('/api/admin/audit-log/export', requireView, (req, res) => {
 });
 
 // DELETE /api/admin/audit-log — clear the activity feed (admin only).
+// The wipe itself is logged immediately afterwards, so the trail can never
+// go silently empty: the first row of the fresh log says who cleared it,
+// when, from where, and how many entries were destroyed.
 app.delete('/api/admin/audit-log', requireAdmin, (req, res) => {
   try {
     const db = getDb();
+    const before = (db.get('SELECT COUNT(*) AS c FROM audit_log') || { c: 0 }).c || 0;
+    const oldest = (db.get('SELECT MIN(created_at) AS m FROM audit_log') || {}).m || '';
     db.run('DELETE FROM audit_log');
-    res.json({ success: true });
+    auditLog(req, 'clear', 'audit-log', null, {
+      entries_destroyed: before,
+      covered_from: oldest,
+      reason: 'activity log wiped by admin',
+    });
+    res.json({ success: true, cleared: before });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -5291,8 +5930,16 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   lvClearGate(_db, l.auction_id);   // new lot → trade must be re-validated before price import
   // Seller name for a readable audit trail (already resolved above).
   let _traderName = _name || (_seller ? _seller.name : '');
-  auditLog(req, 'create', 'lot', _ins && _ins.lastInsertRowid, {
+  // Full snapshot of the row as stored, so the log answers "what exactly was
+  // entered for this lot, by whom, from where" without needing the lot to
+  // still exist. `values` carries every non-blank column; the flat fields
+  // above stay for the summary line and the existing filters.
+  const _newLotId = _ins && _ins.lastInsertRowid;
+  const _createdRow = _newLotId ? _db.get('SELECT * FROM lots WHERE id = ?', [_newLotId]) : null;
+  auditLog(req, 'create', 'lot', _newLotId, {
     lot_no: l.lot_no, trader: _traderName, qty: Number(l.qty) || 0, branch: l.branch || '', auction_id: l.auction_id,
+    trade: auctionLabel(_db, l.auction_id),
+    values: lotSnapshot(_createdRow),
   });
   // Booking-limit check: recompute this seller's running weight for the
   // trade and (when over threshold) alert the depot manager / superior.
@@ -5477,11 +6124,18 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   // Audit the edit with a compact before→after diff so the admin can see
   // exactly which fields changed (and who changed them, from which app).
   const _after = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+  const _auctionId = (_after && _after.auction_id) || (_before && _before.auction_id) || null;
   auditLog(req, 'edit', 'lot', parseInt(req.params.id, 10), {
     lot_no: _after ? _after.lot_no : (_before ? _before.lot_no : ''),
+    trader: (_after && _after.name) || (_before && _before.name) || '',
     branch: _after ? _after.branch : '',
-    auction_id: (_after && _after.auction_id) || (_before && _before.auction_id) || null,
+    auction_id: _auctionId,
+    trade: auctionLabel(db, _auctionId),
     changes: lotChangeDiff(_before, _after),
+    // Which fields the client actually sent. Distinguishes "the operator
+    // typed this value" from "a recalculation moved it", when the two land
+    // in the same UPDATE.
+    fields_sent: Object.keys(l || {}),
   });
   // Re-run the booking-limit check — an edit that raises qty can cross a
   // threshold the same way a new lot does.
@@ -5509,13 +6163,19 @@ app.delete('/api/lots/:id', requireDelete, (req, res) => {
       locked: true,
     });
   }
-  // Snapshot the row before it's gone so the audit trail keeps a
-  // readable record (lot_no, qty, branch) of what was deleted.
-  const _row = db.get('SELECT auction_id, lot_no, qty, branch FROM lots WHERE id = ?', [req.params.id]);
+  // Snapshot the WHOLE row before it's gone. A deleted lot is the case
+  // where the audit trail is the only surviving copy of what the record
+  // held, so the log keeps every non-blank column (price, buyer, invoice
+  // numbers, seller details) — enough to reconstruct or dispute the row.
+  const _row = db.get('SELECT * FROM lots WHERE id = ?', [req.params.id]);
+  const _tradeLabel = _row ? auctionLabel(db, _row.auction_id) : '';
   db.run('DELETE FROM lots WHERE id = ?', [req.params.id]);
   if (_row && _row.auction_id) { pcClearGate(db, _row.auction_id); lvClearGate(db, _row.auction_id); }
   if (_row) auditLog(req, 'delete', 'lot', parseInt(req.params.id, 10), {
-    lot_no: _row.lot_no, qty: Number(_row.qty) || 0, branch: _row.branch || '', auction_id: _row.auction_id,
+    lot_no: _row.lot_no, trader: _row.name || '', qty: Number(_row.qty) || 0,
+    branch: _row.branch || '', auction_id: _row.auction_id, trade: _tradeLabel,
+    was_locked: _row.locked_at ? (_row.locked_by || 'yes') : '',
+    values: lotSnapshot(_row),
   });
   res.json({ success: true });
 });
@@ -5548,6 +6208,24 @@ function partitionLotsByLock(db, ids, req) {
   return { allowedIds, skipped };
 }
 
+// Lot numbers (and the trades they sit in) for a set of lot ids, read BEFORE
+// a bulk write so the audit row names the affected lots rather than their
+// internal ids. Capped at 50 numbers — beyond that the count carries the
+// meaning and the full list would bloat every row.
+function auditLotRefs(db, ids) {
+  try {
+    if (!ids || !ids.length) return { lot_nos: [], trades: [] };
+    const ph = ids.map(() => '?').join(',');
+    const rows = db.all(
+      `SELECT l.lot_no, a.ano FROM lots l LEFT JOIN auctions a ON a.id = l.auction_id
+        WHERE l.id IN (${ph}) ORDER BY l.lot_no`, ids);
+    return {
+      lot_nos: rows.map(r => r.lot_no).slice(0, 50),
+      trades: [...new Set(rows.map(r => r.ano).filter(Boolean))],
+    };
+  } catch (_) { return { lot_nos: [], trades: [] }; }
+}
+
 // POST /api/lots/bulk-buyer — set buyer code on multiple lots. The
 // new buyer's `buyer1` (trade name) and `sale` type are auto-resolved
 // from the buyers master, so the operator only has to type the code.
@@ -5566,9 +6244,19 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
       return res.status(423).json({ error: 'Every selected lot is locked. Ask an admin to unlock first.', locked: true, skipped: partC.skipped });
     }
     const phC = partC.allowedIds.map(() => '?').join(',');
+    // Read the buyer codes being wiped BEFORE the UPDATE — after it, the log
+    // could only say "a buyer was cleared", not which one.
+    const _refsC = auditLotRefs(db, partC.allowedIds);
+    const _priorC = db.all(`SELECT lot_no, buyer, code, invo FROM lots WHERE id IN (${phC}) AND (buyer <> '' OR code <> '')`, partC.allowedIds);
     db.run(`UPDATE lots SET buyer='', buyer1='', code='', sale='', invo='' WHERE id IN (${phC})`, partC.allowedIds);
     const _aidsC = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${phC})`, partC.allowedIds);
     for (const r of _aidsC) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+    auditLog(req, 'bulk-edit', 'lot', null, {
+      operation: 'clear buyer code', count: partC.allowedIds.length,
+      lot_nos: _refsC.lot_nos, trades: _refsC.trades,
+      cleared_from: _priorC.slice(0, 50).map(r => `#${r.lot_no}: ${r.code || r.buyer}${r.invo ? ' (invoice ' + r.invo + ' unlinked)' : ''}`),
+      skipped_locked: partC.skipped.map(s => s.lot_no),
+    });
     return res.json({ success: true, updated: partC.allowedIds.length, cleared: true, skipped: partC.skipped });
   }
   const buyerCode = String(req.body.buyer || '').trim();
@@ -5607,6 +6295,11 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   // We also clear `invo` so the lot is treated as un-invoiced again
   // (it'll need a fresh invoice after a buyer reassignment).
   const placeholders = part.allowedIds.map(() => '?').join(',');
+  // Prior buyer per lot, captured pre-write: a reassignment dispute needs
+  // to know what the lot was sold to before, not just after.
+  const _refs = auditLotRefs(db, part.allowedIds);
+  const _prior = db.all(
+    `SELECT lot_no, buyer, code, price, invo FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   if (special) {
     // Withdrawn / N/A: zero the sale price AND amount, then recompute every
     // money field to 0. We can't lean on POST /api/lots/calculate/:id here —
@@ -5634,6 +6327,18 @@ app.post('/api/lots/bulk-buyer', requireLotWrite, (req, res) => {
   // Stale price-check for every affected trade.
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+  auditLog(req, 'bulk-edit', 'lot', null, {
+    operation: special ? `mark ${buyer.buyer1} (${buyer.buyer})` : 'set buyer code',
+    count: part.allowedIds.length,
+    buyer_code: buyer.buyer, buyer_name: buyer.buyer1 || '', sale_type: buyer.sale || 'L',
+    lot_nos: _refs.lot_nos, trades: _refs.trades,
+    // Only lots that actually changed hands are worth listing.
+    reassigned_from: _prior.filter(r => (r.code || r.buyer) && String(r.code || r.buyer).toUpperCase() !== String(buyer.buyer).toUpperCase())
+      .slice(0, 50).map(r => `#${r.lot_no}: ${r.code || r.buyer} → ${buyer.buyer}`),
+    prices_zeroed: special ? _prior.filter(r => Number(r.price) > 0).map(r => `#${r.lot_no} @ ${r.price}`).slice(0, 50) : undefined,
+    invoices_unlinked: _prior.filter(r => r.invo).map(r => `#${r.lot_no}: ${r.invo}`).slice(0, 50),
+    skipped_locked: part.skipped.map(s => s.lot_no),
+  });
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -5674,6 +6379,8 @@ app.post('/api/lots/bulk-seller', requireLotWrite, (req, res) => {
   // Stamp trader_id + the denormalised seller columns on each lot in one
   // batched UPDATE. (trader.pin → lot.ppin on denormalise, per PUT.)
   const placeholders = part.allowedIds.map(() => '?').join(',');
+  const _refs = auditLotRefs(db, part.allowedIds);
+  const _prior = db.all(`SELECT lot_no, name FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   db.run(
     `UPDATE lots SET trader_id=?, name=?, cr=?, pan=?, tel=?, aadhar=?, padd=?, ppla=?, ppin=?, pstate=?, pst_code=?
      WHERE id IN (${placeholders})`,
@@ -5684,6 +6391,16 @@ app.post('/api/lots/bulk-seller', requireLotWrite, (req, res) => {
   // Stale price-check / validation for every affected trade.
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+  auditLog(req, 'bulk-edit', 'lot', null, {
+    operation: 'reassign seller', count: part.allowedIds.length,
+    trader: seller.name || '', trader_id: seller.id,
+    lot_nos: _refs.lot_nos, trades: _refs.trades,
+    // Payments follow the seller, so who each lot moved AWAY from is the
+    // detail a payment dispute turns on.
+    reassigned_from: _prior.filter(r => r.name && r.name !== seller.name)
+      .slice(0, 50).map(r => `#${r.lot_no}: ${r.name} → ${seller.name}`),
+    skipped_locked: part.skipped.map(s => s.lot_no),
+  });
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -5714,6 +6431,8 @@ app.post('/api/lots/bulk-grade', requireLotWrite, (req, res) => {
   // Stamp grade, then recalc (only the rows that already had a price
   // entered; un-priced lots have nothing to recompute).
   const placeholders = part.allowedIds.map(() => '?').join(',');
+  const _refs = auditLotRefs(db, part.allowedIds);
+  const _prior = db.all(`SELECT lot_no, grade FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   db.run(`UPDATE lots SET grade=? WHERE id IN (${placeholders})`, [grade, ...part.allowedIds]);
   const toCalc = db.all(`SELECT * FROM lots WHERE id IN (${placeholders}) AND amount > 0`, part.allowedIds);
   let recalced = 0;
@@ -5727,6 +6446,16 @@ app.post('/api/lots/bulk-grade', requireLotWrite, (req, res) => {
   }
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
+  auditLog(req, 'bulk-edit', 'lot', null, {
+    operation: 'set grade', count: part.allowedIds.length, grade,
+    lot_nos: _refs.lot_nos, trades: _refs.trades,
+    // Grade drives the discount in calculateLot(), so a grade change that
+    // silently moved money is recorded with its old value and the recalc count.
+    regraded_from: _prior.filter(r => String(r.grade || '') !== grade)
+      .slice(0, 50).map(r => `#${r.lot_no}: ${r.grade || '∅'} → ${grade}`),
+    recalculated: recalced,
+    skipped_locked: part.skipped.map(s => s.lot_no),
+  });
   res.json({
     success: true,
     updated: part.allowedIds.length,
@@ -5751,13 +6480,25 @@ app.post('/api/lots/bulk-delete', requireDelete, (req, res) => {
   }
   const placeholders = part.allowedIds.map(() => '?').join(',');
   const _aids = db.all(`SELECT DISTINCT auction_id FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
-  // Grab the lot numbers before deletion for a readable audit summary.
-  const _delRows = db.all(`SELECT lot_no FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  // Grab the full rows before deletion. A bulk delete is the single most
+  // destructive lot action, so the log keeps a per-lot record (seller, qty,
+  // price, buyer, invoice) — the only surviving trace of what was removed.
+  const _delRows = db.all(`SELECT * FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
+  const _trades = [...new Set(_delRows.map(r => auctionLabel(db, r.auction_id)).filter(Boolean))];
   db.run(`DELETE FROM lots WHERE id IN (${placeholders})`, part.allowedIds);
   for (const r of _aids) { pcClearGate(db, r.auction_id); lvClearGate(db, r.auction_id); }
   auditLog(req, 'bulk-delete', 'lot', null, {
     count: part.allowedIds.length,
     lot_nos: _delRows.map(r => r.lot_no).slice(0, 50),
+    trades: _trades,
+    qty_total: Number(_delRows.reduce((s, r) => s + (Number(r.qty) || 0), 0).toFixed(3)),
+    value_total: Number(_delRows.reduce((s, r) => s + (Number(r.amount) || 0), 0).toFixed(2)),
+    deleted_lots: _delRows.slice(0, 50).map(r => ({
+      lot_no: r.lot_no, seller: r.name || '', branch: r.branch || '', grade: r.grade || '',
+      bags: r.bags || 0, qty: r.qty || 0, price: r.price || 0, amount: r.amount || 0,
+      buyer: r.code || r.buyer || '', invoice: r.invo || '',
+    })),
+    skipped_locked: part.skipped.map(s => s.lot_no),
   });
   res.json({
     success: true,
@@ -5777,11 +6518,16 @@ app.post('/api/lots/lock', requireLotWrite, (req, res) => {
   // Only stamp `locked_at` on currently-unlocked rows so re-locking
   // preserves the original lock timestamp.
   const placeholders = ids.map(() => '?').join(',');
+  const _refs = auditLotRefs(db, ids);
   const info = db.run(
     `UPDATE lots SET locked_at = datetime('now','localtime'), locked_by = ?
      WHERE id IN (${placeholders}) AND (locked_at IS NULL OR locked_at = '')`,
     [username, ...ids]
   );
+  auditLog(req, 'lock', 'lot', null, {
+    count: info.changes || 0, requested: ids.length,
+    lot_nos: _refs.lot_nos, trades: _refs.trades,
+  });
   res.json({
     success: true,
     locked: info.changes || 0,
@@ -5790,18 +6536,28 @@ app.post('/api/lots/lock', requireLotWrite, (req, res) => {
 });
 
 // POST /api/lots/unlock — admin only. Clears the lock so non-admins
-// can edit/delete the lot again. We DO NOT log an audit row here; the
-// admin doing the unlock is implicit (only they can hit this route).
+// can edit/delete the lot again. Audited: an unlock is what makes a
+// subsequent edit or delete of a protected lot possible, so the log has to
+// show who opened the gate and which lots it opened — including who had
+// locked them in the first place.
 app.post('/api/lots/unlock', requireAdmin, (req, res) => {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : [];
   if (!ids.length) return res.status(400).json({ error: 'ids array required' });
   const db = getDb();
   const placeholders = ids.map(() => '?').join(',');
+  const _refs = auditLotRefs(db, ids);
+  const _locks = db.all(
+    `SELECT lot_no, locked_by, locked_at FROM lots WHERE id IN (${placeholders}) AND locked_at IS NOT NULL`, ids);
   const info = db.run(
     `UPDATE lots SET locked_at = NULL, locked_by = NULL
      WHERE id IN (${placeholders}) AND locked_at IS NOT NULL`,
     ids
   );
+  auditLog(req, 'unlock', 'lot', null, {
+    count: info.changes || 0, requested: ids.length,
+    lot_nos: _refs.lot_nos, trades: _refs.trades,
+    was_locked_by: _locks.slice(0, 50).map(r => `#${r.lot_no}: ${r.locked_by || '?'} @ ${r.locked_at}`),
+  });
   res.json({
     success: true,
     unlocked: info.changes || 0,
@@ -6809,6 +7565,9 @@ app.post('/api/price-check/apply-fix', requireLotWrite, (req, res) => {
 
 // ── Calculate all lots for an auction (GENERATE.PRG) ─────────
 app.post('/api/lots/calculate/:auctionId', requireLotWrite, (req, res) => {
+  // Rewrites stored money columns from the CURRENT global state — refuse
+  // unless the caller declares the state it thinks it is calculating for.
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const lots = db.all('SELECT * FROM lots WHERE auction_id = ? AND amount > 0', [req.params.auctionId]);
   let count = 0;
@@ -6842,6 +7601,10 @@ app.post('/api/lots/calculate/:auctionId', requireLotWrite, (req, res) => {
 //
 // Only touches lots with `amount > 0` (skips empty/auction-floor entries).
 app.post('/api/lots/calculate-all', requireLotWrite, (req, res) => {
+  // The widest write in the app — every lot in every trade, recomputed
+  // from the current global state. Never run it on an assumption the
+  // caller can't name.
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const mwLots = modeWhereClause(db, '(SELECT mode FROM auctions WHERE id=lots.auction_id)');
   const lots = db.all(`SELECT * FROM lots WHERE amount > 0 ${mwLots.sql}`, mwLots.params);
@@ -7274,6 +8037,8 @@ function clearPriorSalesInvoice(db, auctionId, buyer, invoiceState, saleType) {
 }
 
 app.post('/api/invoices/generate/:auctionId', requireInvoiceWrite, (req, res) => {
+  // Stamps ASP-vs-ISP identity and intra/inter GST from the global state.
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'invoices', auctionIdForGate);
@@ -7484,6 +8249,7 @@ app.get('/api/invoices/eligibility-debug/:auctionId', requireView, (req, res) =>
 
 // Batch: generate sales invoice for ALL buyers in an auction
 app.post('/api/invoices/generate-all/:auctionId', requireInvoiceWrite, (req, res) => {
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'invoices', auctionIdForGate);
@@ -8363,6 +9129,7 @@ app.get('/api/purchases', requireView, (req, res) => {
 });
 
 app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) => {
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'purchases', auctionIdForGate);
@@ -8421,6 +9188,7 @@ app.get('/api/purchases/eligible-sellers/:auctionId', requireView, (req, res) =>
 
 // Batch: generate purchase invoice for ALL registered dealers in an auction
 app.post('/api/purchases/generate-all/:auctionId', requireInvoiceWrite, (req, res) => {
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'purchases', auctionIdForGate);
@@ -8735,6 +9503,7 @@ app.get('/api/bills', requireView, (req, res) => {
 
 // Generate agri bill for a seller
 app.post('/api/bills/generate/:auctionId', requireInvoiceWrite, (req, res) => {
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'bills', auctionIdForGate);
@@ -8777,6 +9546,7 @@ app.get('/api/bills/eligible-sellers/:auctionId', requireView, (req, res) => {
 
 // Batch: generate bill of supply for ALL agriculturists (no GSTIN) in an auction
 app.post('/api/bills/generate-all/:auctionId', requireInvoiceWrite, (req, res) => {
+  if (!assertMoneyContext(req, res)) return;
   const db = getDb(); const cfg = getSettingsFlat(db);
   const auctionIdForGate = parseInt(req.params.auctionId, 10);
   const _gen = _checkGenerationGate(db, 'bills', auctionIdForGate);
