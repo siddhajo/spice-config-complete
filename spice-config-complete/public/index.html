@@ -3593,10 +3593,9 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
              the "Lot no" filter above, when a matched lot already carries a
              price and/or a buyer code. Advisory only: nothing is blocked, it
              just makes overwriting finished work a deliberate act. -->
-        <div id="pe-priced-warn" style="display:none;align-items:flex-start;gap:9px;margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;font-size:12.5px;color:#78350f;line-height:1.55">
-          <span style="font-size:14px;line-height:1.3">⚠️</span>
+        <div id="pe-priced-warn" role="alert" style="display:none;align-items:flex-start;gap:10px;margin-top:10px;padding:11px 14px;background:#fef4f3;border:1px solid #f3c0bb;border-left:4px solid #dc2626;border-radius:8px;font-size:12.5px;color:#7f1d1d;line-height:1.6">
           <div id="pe-priced-warn-text" style="flex:1;min-width:0"></div>
-          <button type="button" onclick="peDismissPricedWarn()" title="Dismiss" aria-label="Dismiss this warning" style="border:none;background:transparent;cursor:pointer;color:#92400e;font-size:13px;line-height:1;padding:2px 4px">✕</button>
+          <button type="button" onclick="peDismissPricedWarn()" title="Dismiss" aria-label="Dismiss this warning" style="border:none;background:transparent;cursor:pointer;color:#b91c1c;font-size:13px;line-height:1;padding:2px 4px">✕</button>
         </div>
         <!-- Bulk buyer-code bar — appears only when one or more lots are
              ticked in the grid below. Set applies a buyer code (via the
@@ -28009,13 +28008,23 @@ function _peWarnMatches(){
     (keys.size  && keys.has(_peNormLot(l.lot_no))) ||
     (needle     && String(l.lot_no || '').toLowerCase().includes(needle)));
 }
-// "priced at ₹2,942.00 and has buyer code ABC" — whichever parts apply.
-function _peWorkPhrase(l){
+// One bullet line per lot:
+//   Lot 001 (SPICE LAND TRADING COMPANY) — already priced at ₹3,420.00
+//   and assigned to buyer GL3 / JOBY3 · GREEN LEAF TRADING COMPANY
+// The buyer identity mirrors the grid's three columns — auction Code /
+// Buyer Code · Buyer Name — so it's recognisable at a glance. Whichever
+// half (price, buyer) isn't set is simply left out.
+function _peWarnLine(l){
+  const seller = String(l.name || '').trim();
   const bits = [];
-  if (Number(l.price) > 0) bits.push(`priced at ₹${_peFmt(l.price)}`);
+  if (Number(l.price) > 0) bits.push(`<b>priced at ₹${_peFmt(l.price)}</b>`);
+  const who   = [String(l.code || '').trim(), String(l.buyer || '').trim()].filter(Boolean).join(' / ');
+  const name  = String(l.buyer1 || '').trim();
   const buyer = String(l.buyer || '').trim();
-  if (buyer) bits.push(`has buyer code <b>${esc(buyer)}</b>`);
-  return bits.join(' and ');
+  // Only call it a buyer assignment when there IS a buyer — a bare auction
+  // code on an unassigned lot isn't one.
+  if (buyer || name) bits.push(`assigned to buyer <b>${esc([who, name].filter(Boolean).join(' · '))}</b>`);
+  return `<b>Lot ${esc(l.lot_no)}</b>${seller ? ` (${esc(seller)})` : ''} — already ${bits.join(' and ')}`;
 }
 // Recompute and show/hide the banner. Called from both input handlers.
 function peUpdatePricedWarn(){
@@ -28027,24 +28036,20 @@ function peUpdatePricedWarn(){
   const key = hit.map(l => l.id).sort((a, b) => a - b).join(',');
   if (key === _peWarnDismissed) { box.style.display = 'none'; return; }
   _peWarnDismissed = '';
-  if (hit.length === 1) {
-    const l = hit[0];
-    txt.innerHTML = `Lot <b>${esc(l.lot_no)}</b> is already ${_peWorkPhrase(l)}. ` +
-      `<b>Do you still want to change it?</b>`;
-  } else {
-    // Cap the per-lot detail so a broad filter ("1") can't flood the banner.
-    const SHOWN = 6;
-    const list = hit.slice(0, SHOWN).map(l => {
-      const parts = [];
-      if (Number(l.price) > 0) parts.push('₹' + _peFmt(l.price));
-      const buyer = String(l.buyer || '').trim();
-      if (buyer) parts.push(esc(buyer));
-      return `<b>${esc(l.lot_no)}</b> (${parts.join(' · ')})`;
-    }).join(', ');
-    const more = hit.length > SHOWN ? ` and ${hit.length - SHOWN} more` : '';
-    txt.innerHTML = `<b>${hit.length} lots</b> you're picking are already priced or have a buyer code — ` +
-      `${list}${more}. <b>Do you still want to change them?</b>`;
-  }
+  const one = hit.length === 1;
+  // Cap the per-lot detail so a broad filter ("1") can't flood the banner.
+  const SHOWN = 6;
+  // Hanging indent so a wrapped line stays clear of its bullet.
+  const lines = hit.slice(0, SHOWN).map(l =>
+    `<div style="padding-left:15px;text-indent:-15px;margin-top:2px">• ${_peWarnLine(l)}</div>`).join('');
+  const more = hit.length > SHOWN
+    ? `<div style="padding-left:15px;margin-top:2px;color:#9a3f3f">…and ${hit.length - SHOWN} more</div>` : '';
+  txt.innerHTML =
+    `<div style="color:#b91c1c;font-weight:700">⚠ ${one
+      ? 'A lot you picked is already done:'
+      : `${hit.length} of the lots you picked are already done:`}</div>` +
+    lines + more +
+    `<div style="font-weight:700;margin-top:5px">Do you still want to change ${one ? 'it' : 'them'}?</div>`;
   box.style.display = 'flex';
 }
 // Dismiss the banner for the lots it is currently naming. It reappears as
