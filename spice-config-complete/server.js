@@ -25,7 +25,7 @@ const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund, exportSettingsBundle, importSettingsBundle } = require('./company-config');
 const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
-const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF } = require('./invoice-pdf');
+const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateLotFilingPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
 const { exportPdf: exportAnyPdf } = require('./exports-pdf');
@@ -13199,6 +13199,76 @@ app.post('/api/lot-receipt/pdf', requireView, async (req, res) => {
     res.send(pdf);
   } catch (e) {
     console.error('lot-receipt pdf error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Lot Filing Copy PDF (whole trade on A4) ──────────────────
+// Backs lot-entry's "Print All for Filing". Rendering this in the browser
+// (HTML → popup → Save as PDF) took tens of seconds inside Chrome's print
+// pipeline; PDFKit does it server-side in well under a second and the client
+// just opens the finished file.
+//
+// Body: { auctionId } for the whole trade, or { lotIds:[...] } for a subset
+// (the print modal's Filing option on a selection). Header fields mirror the
+// on-screen filing copy exactly: the state-aware lot-receipt short name and
+// GSTIN from Settings, not effectiveCompany()'s invoice identity.
+app.post('/api/lot-filing/pdf', requireView, async (req, res) => {
+  try {
+    const db = getDb(); const cfg = getSettingsFlat(db);
+    const body = req.body || {};
+    const ids = Array.isArray(body.lotIds) ? body.lotIds.map(Number).filter(Number.isFinite) : [];
+    const auctionId = Number(body.auctionId);
+    let lots;
+    if (ids.length) {
+      const ph = ids.map(() => '?').join(',');
+      lots = db.all(
+        `SELECT l.id, l.lot_no, l.bags, l.qty, l.sample_wt, l.gross_wt, l.name, l.branch,
+                l.trader_id, l.state, a.ano, a.date AS auction_date
+           FROM lots l JOIN auctions a ON a.id = l.auction_id
+          WHERE l.id IN (${ph})
+          ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no`, ids);
+    } else if (Number.isFinite(auctionId)) {
+      lots = db.all(
+        `SELECT l.id, l.lot_no, l.bags, l.qty, l.sample_wt, l.gross_wt, l.name, l.branch,
+                l.trader_id, l.state, a.ano, a.date AS auction_date
+           FROM lots l JOIN auctions a ON a.id = l.auction_id
+          WHERE l.auction_id = ?
+          ORDER BY CAST(l.lot_no AS INTEGER), l.lot_no`, [auctionId]);
+    } else {
+      return res.status(400).json({ error: 'auctionId or lotIds required' });
+    }
+    if (!lots.length) return res.status(404).json({ error: 'No lots found' });
+
+    // Group by trader — trader_id first so two sellers sharing a name don't
+    // merge — keeping first-seen order, which is lot_no order.
+    const map = new Map();
+    for (const l of lots) {
+      const key = l.trader_id != null ? `id:${l.trader_id}` : `name:${l.name || ''}`;
+      if (!map.has(key)) map.set(key, { name: l.name || '', branch: l.branch || '', lots: [] });
+      map.get(key).lots.push(l);
+    }
+
+    // Same state-aware identity the browser copy prints (see leBuildReceiptHtml):
+    // Kerala → ASP short name + KL GSTIN, otherwise ISP/TN.
+    const isKerala = String(cfg.business_state || (lots[0] && lots[0].state) || '').toUpperCase().includes('KERALA');
+    const coName = String(isKerala ? (cfg.lot_receipt_short_name_kl || '') : (cfg.lot_receipt_short_name_tn || '')).trim()
+                || String(cfg.praman_company || '').trim()
+                || cfg.trade_name || cfg.short_name || '';
+    const gstin = isKerala ? (cfg.kl_gstin || cfg.tn_gstin || '') : (cfg.tn_gstin || '');
+
+    const pdf = await generateLotFilingPDF([...map.values()], {
+      coName, gstin,
+      ano: lots[0].ano || '',
+      dateStr: String(lots[0].auction_date || '').slice(0, 10),
+      printedAt: new Date().toLocaleDateString('en-GB'),
+      isTrade: cfg.business_mode === 'e-Trade',
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="Filing_${lots[0].ano || 'trade'}.pdf"`);
+    res.send(pdf);
+  } catch (e) {
+    console.error('lot-filing pdf error:', e);
     res.status(500).json({ error: e.message });
   }
 });

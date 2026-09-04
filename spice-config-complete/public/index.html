@@ -26898,6 +26898,45 @@ async function leConfirmPrint() {
     _le.receiptFormat = fmt;
   }
 
+  // Filing copy is rendered SERVER-side (PDFKit) and handed over as a
+  // finished PDF. The browser route — build HTML, open a popup, window.print()
+  // — spends tens of seconds in Chrome's print pipeline on a full trade, and
+  // "Save as PDF" is the slowest part of it. The server does the same page in
+  // well under a second. Falls back to the HTML route if the endpoint is
+  // unavailable (older server), so nothing here can leave the user stuck.
+  if (fmt === 'filing') {
+    const btn = document.getElementById('le-print-confirm');
+    const prevTxt = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Building PDF…'; }
+    try {
+      // Send the exact lot ids so a selection prints a selection; the
+      // "Print All for Filing" entry point has already loaded the whole trade.
+      const lotIds = lots.map(l => l.id).filter(v => v != null);
+      const blob = await _fetchPdfBlob('/api/lot-filing/pdf', { lotIds });
+      const url = URL.createObjectURL(blob);
+      // Opening a tab after an await can trip the popup blocker (the click
+      // gesture has expired), so fall back to a plain download rather than
+      // silently doing nothing.
+      const tab = window.open(url, '_blank');
+      if (!tab) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Filing_${(auction && auction.ano) || 'trade'}.pdf`;
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Filing copy downloaded');
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      hideModal('le-print-modal');
+      _le_pending_print = null;
+      return;
+    } catch (e) {
+      // Server couldn't build it — fall through to the in-browser route.
+      showErr('Server PDF unavailable — falling back to browser print.');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevTxt; }
+    }
+  }
+
   // Build HTML and open in a new window. Browser print dialog is the
   // final preview — users can pick A4 / 80mm thermal / save-as-PDF.
   // For scope='by-seller', split lots into one batch per trader and

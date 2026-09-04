@@ -897,7 +897,205 @@ function generateLotReceiptThermalPDF(p) {
   });
 }
 
-module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF };
+// ── Lot Filing Copy PDF (whole trade, packed onto A4) ────────
+// The office-filing copy: every seller's receipt in one A4 document, laid
+// out 2 columns × 5 rows = 10 receipts per sheet. A seller with more than
+// ROWS_PER_CARD lots continues on the next card ("(2/2)"); the closing card
+// carries the whole-seller total and the Sample/Gross line.
+//
+// This exists on the SERVER because the browser route (build HTML → popup →
+// window.print() → Save as PDF) spends tens of seconds in Chrome's print
+// pipeline for a full trade. PDFKit writes the same page in well under a
+// second, and the client just downloads the finished file.
+//
+// `groups` is [{ name, branch, lots:[{lot_no,bags,qty,sample_wt,gross_wt}] }],
+// already ordered. `opts` carries the resolved header fields — this renderer
+// does no settings lookup of its own.
+function generateLotFilingPDF(groups, opts) {
+  opts = opts || {};
+  const { coName = '', gstin = '', ano = '', dateStr = '', printedAt = '' } = opts;
+  const isTrade = !!opts.isTrade;
+  const ROWS_PER_CARD = 5;   // lot lines per card before it continues
+  const COLS = 2, ROWS = 5;  // cells per sheet
+  const PER_PAGE = COLS * ROWS;
+
+  // Split sellers into cards of at most ROWS_PER_CARD lots.
+  const cards = [];
+  for (const g of (groups || [])) {
+    const lots = g.lots || [];
+    const parts = Math.max(1, Math.ceil(lots.length / ROWS_PER_CARD));
+    for (let i = 0; i < parts; i++) {
+      cards.push({
+        g, part: i + 1, parts, offset: i * ROWS_PER_CARD,
+        chunk: lots.slice(i * ROWS_PER_CARD, (i + 1) * ROWS_PER_CARD),
+      });
+    }
+  }
+
+  const M = 24;                       // page margin (pt)
+  const doc = new PDFDocument({ size: 'A4', margin: M, autoFirstPage: false });
+  const buffers = [];
+  doc.on('data', b => buffers.push(b));
+
+  const PW = 595.28, PH = 841.89;     // A4 in points
+  const X = M, W = PW - 2 * M;        // 547pt of usable width
+  const COL_GAP = 14, ROW_GAP = 8;
+  const colW = (W - COL_GAP * (COLS - 1)) / COLS;
+
+  const fmtN = (n, dp = 3) => Number(n || 0).toFixed(dp);
+  const sum = (arr, f) => arr.reduce((s, l) => s + (Number(f(l)) || 0), 0);
+
+  // Truncate to fit — a long seller name must not wrap and push the card
+  // past its cell. PDFKit's own ellipsis option is unreliable for this.
+  const fit = (text, maxW) => {
+    const s = String(text == null ? '' : text);
+    if (!s || doc.widthOfString(s) <= maxW) return s;
+    let lo = 0, hi = s.length;
+    const ellW = doc.widthOfString('…');
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (doc.widthOfString(s.slice(0, mid)) + ellW <= maxW) lo = mid; else hi = mid - 1;
+    }
+    return s.slice(0, lo).trimEnd() + '…';
+  };
+
+  const pageCount = Math.max(1, Math.ceil(cards.length / PER_PAGE));
+  const title = isTrade ? 'WEIGHT RECEIPTS — FILING COPY' : 'LOT RECEIPTS — FILING COPY';
+  const metaBits = [
+    `${isTrade ? 'P.No' : 'Trade'}: ${ano}`,
+    `Date: ${dateStr}`,
+    `${(groups || []).length} seller${(groups || []).length === 1 ? '' : 's'}`,
+    `Printed: ${printedAt}`,
+  ].join('  ·  ');
+
+  // Sheet header — repeated on every page so a loose sheet still identifies
+  // itself. Returns the y where the card grid starts.
+  const drawSheetHeader = (pageNo) => {
+    let y = M;
+    doc.fillColor('#000').font('Helvetica-Bold').fontSize(13)
+       .text(String(coName || '').toUpperCase(), X, y, { width: W, align: 'center' });
+    y += 16;
+    if (gstin) {
+      doc.font('Helvetica').fontSize(8).text('GSTIN: ' + gstin, X, y, { width: W, align: 'center' });
+      y += 10;
+    }
+    doc.font('Helvetica-Bold').fontSize(9).text(title, X, y, { width: W, align: 'center' });
+    y += 12;
+    doc.font('Helvetica').fontSize(7.5).fillColor('#333')
+       .text(`${metaBits}  ·  Sheet ${pageNo} of ${pageCount}`, X, y, { width: W, align: 'center' });
+    y += 11;
+    doc.fillColor('#000').lineWidth(1).moveTo(X, y).lineTo(X + W, y).stroke();
+    return y + 8;
+  };
+
+  // Column geometry inside a card: # / Lot / Bags / Wt(kg).
+  const cardCols = (cx, cw) => {
+    const pad = 6, inner = cw - pad * 2;
+    const fr = [0.12, 0.30, 0.24, 0.34];
+    return fr.map((f, i) => ({
+      cx: cx + pad + fr.slice(0, i).reduce((s, v) => s + v, 0) * inner,
+      cw: f * inner,
+      align: i === 0 ? 'left' : (i === 1 ? 'left' : 'right'),
+    }));
+  };
+
+  const NAME_H = 12, BR_H = 9, TH_H = 11, TD_H = 10.5, FOOT_H = 12, XTRA_H = 10, PAD = 6;
+
+  const drawCard = (m, cx, cy, cw) => {
+    const { g, chunk, offset, part, parts } = m;
+    const isLast = part === parts;
+    const hasBranch = !!g.branch;
+    // Sample/Gross are seller-level, so only the closing card carries them.
+    const totSample = sum(g.lots, l => l.sample_wt);
+    const totGross  = sum(g.lots, l => l.gross_wt);
+    const xtraBits = [];
+    if (isLast && isTrade && totSample > 0) xtraBits.push(`Sample ${fmtN(totSample)}`);
+    if (isLast && isTrade && totGross  > 0) xtraBits.push(`Gross ${fmtN(totGross)}`);
+    const hasXtra = xtraBits.length > 0;
+
+    const h = PAD + NAME_H + (hasBranch ? BR_H : 0) + 3 + TH_H
+            + chunk.length * TD_H + FOOT_H + (hasXtra ? XTRA_H : 0) + PAD;
+    doc.lineWidth(0.7).rect(cx, cy, cw, h).stroke();
+
+    const cols = cardCols(cx, cw);
+    let y = cy + PAD;
+
+    // Name, with the continuation tag set beside it in the smaller face.
+    // Each width is measured in the font that will actually draw it —
+    // measuring the name in the tag's font puts the tag on top of it.
+    const partTag = parts > 1 ? `(${part}/${parts})` : '';
+    doc.font('Helvetica').fontSize(7.5);
+    const tagW = partTag ? doc.widthOfString(partTag) + 4 : 0;
+    doc.fillColor('#000').font('Helvetica-Bold').fontSize(9.5);
+    const nameW = cw - PAD * 2 - tagW;
+    const nameTxt = fit(g.name || '—', nameW);
+    const nameTxtW = doc.widthOfString(nameTxt);
+    doc.text(nameTxt, cx + PAD, y, { width: nameW, lineBreak: false });
+    if (partTag) {
+      doc.font('Helvetica').fontSize(7.5).fillColor('#444')
+         .text(partTag, cx + PAD + nameTxtW + 4, y + 1.5, { lineBreak: false });
+    }
+    y += NAME_H;
+    if (hasBranch) {
+      doc.font('Helvetica').fontSize(7).fillColor('#444')
+         .text(fit(String(g.branch).toUpperCase(), cw - PAD * 2), cx + PAD, y, { width: cw - PAD * 2, lineBreak: false });
+      y += BR_H;
+    }
+    y += 3;
+
+    // Table header + rule.
+    doc.fillColor('#000').font('Helvetica-Bold').fontSize(7);
+    const labels = ['#', 'Lot', 'Bags', 'Wt(kg)'];
+    cols.forEach((c, i) => doc.text(labels[i], c.cx, y, { width: c.cw, align: c.align, lineBreak: false }));
+    y += TH_H - 3;
+    doc.lineWidth(0.6).moveTo(cx + PAD, y).lineTo(cx + cw - PAD, y).stroke();
+    y += 3;
+
+    doc.font('Helvetica').fontSize(7.5);
+    chunk.forEach((l, i) => {
+      const vals = [String(offset + i + 1), String(l.lot_no || ''),
+                    String(parseInt(l.bags, 10) || 0), fmtN(l.qty)];
+      cols.forEach((c, ci) => doc.text(vals[ci], c.cx, y, { width: c.cw, align: c.align, lineBreak: false }));
+      y += TD_H;
+    });
+
+    // Footer: part subtotal on a continuing card, whole-seller total on the last.
+    doc.lineWidth(0.6).moveTo(cx + PAD, y).lineTo(cx + cw - PAD, y).stroke();
+    y += 3;
+    const useAll  = parts === 1 || isLast;
+    const src     = useAll ? g.lots : chunk;
+    const footLbl = parts === 1 ? 'Total' : (isLast ? `Total (${g.lots.length} lots)` : `Part ${part}/${parts}`);
+    doc.font('Helvetica-Bold').fontSize(7.5);
+    doc.text(footLbl, cols[0].cx, y, { width: cols[0].cw + cols[1].cw, align: 'left', lineBreak: false });
+    doc.text(String(sum(src, l => parseInt(l.bags, 10))), cols[2].cx, y, { width: cols[2].cw, align: 'right', lineBreak: false });
+    doc.text(fmtN(sum(src, l => l.qty)),                  cols[3].cx, y, { width: cols[3].cw, align: 'right', lineBreak: false });
+    y += FOOT_H - 3;
+
+    if (hasXtra) {
+      doc.font('Helvetica').fontSize(7).fillColor('#000')
+         .text(xtraBits.join('  ·  ') + ' kg', cx + PAD, y, { width: cw - PAD * 2, align: 'right', lineBreak: false });
+    }
+  };
+
+  for (let pi = 0; pi < pageCount; pi++) {
+    doc.addPage();
+    const gridTop = drawSheetHeader(pi + 1);
+    const rowH = (PH - M - gridTop - ROW_GAP * (ROWS - 1)) / ROWS;
+    const slice = cards.slice(pi * PER_PAGE, (pi + 1) * PER_PAGE);
+    slice.forEach((m, i) => {
+      const col = i % COLS, row = Math.floor(i / COLS);
+      drawCard(m, X + col * (colW + COL_GAP), gridTop + row * (rowH + ROW_GAP), colW);
+    });
+  }
+  if (!cards.length) { doc.addPage(); drawSheetHeader(1); }
+
+  return new Promise((resolve) => {
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.end();
+  });
+}
+
+module.exports = { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateLotFilingPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF };
 
 /**
  * Sales Invoice PDF (Tax Invoice)
