@@ -602,11 +602,19 @@ function requireAuth(req, res, next) {
   // instead of surfacing a "Session expired" toast to the user.
   if (!session) return res.status(401).json({ error: 'Session expired — please sign in again' });
   // Single-session policy: this session was displaced by a later sign-in on
-  // the same account. Deliver the explanation once, then drop the row — the
-  // screen shows "you were signed out because…" rather than a bare expiry,
-  // which is the difference between an understood policy and a bug report.
+  // the same account. The screen shows "you were signed out because…" rather
+  // than a bare expiry, which is the difference between an understood policy
+  // and a bug report.
+  //
+  // The row is KEPT, deliberately. It used to be deleted the moment the
+  // explanation was handed out once — but a screen has several requests in
+  // flight or on timers at any moment, and whichever one happened to arrive
+  // first consumed the message. If that was a background poller (they
+  // swallow their errors, as they should) the operator was bounced to the
+  // login form with no explanation at all, and it looked like a random
+  // logout. So every request on a displaced token gets the same answer, for
+  // as long as the row lives; the sweep in /api/login clears it out later.
   if (session.revoked_at) {
-    db.run('DELETE FROM sessions WHERE token = ?', [token]);
     return res.status(401).json({
       code: 'SESSION_REVOKED',
       error: (session.revoked_reason || 'This account signed in elsewhere')
@@ -863,6 +871,17 @@ app.post('/api/login', async (req, res) => {
   // datetime('now','localtime') — so the threshold must also be localtime,
   // otherwise the process-TZ (IST) shift skews the 30-day window by 5.5h.
   db.run(`DELETE FROM sessions WHERE last_used_at < datetime('now','localtime','-30 days')`);
+  // Displaced rows are kept so the ousted screen can be told why on every
+  // request it makes (see requireAuth). They only need to outlive that
+  // screen, so retire this account's older ones on the way past — a day is
+  // far longer than anyone leaves a dead tab open, and scoping it to this
+  // user means a sign-in never disturbs anybody else's pending explanation.
+  db.run(
+    `DELETE FROM sessions
+      WHERE user_id = ? AND revoked_at IS NOT NULL
+        AND revoked_at < datetime('now','localtime','-1 day')`,
+    [user.id]
+  );
   // Return the user's capabilities array so the client can hide buttons
   // they're not allowed to use. Server still validates every request.
   const permissions = Array.from(effectivePermissions(user));

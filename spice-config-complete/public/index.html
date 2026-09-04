@@ -6727,29 +6727,57 @@ function noteLoginRev(resp){
   window._loginRev = n;
   if (_loginFetchInFlight) return;
   _loginFetchInFlight = true;
-  // Raw fetch, not j(): this must not recurse back through noteServerContext
-  // while we are inside it, and a failure here is not worth surfacing.
-  fetch(B + '/api/business-context', { headers: { 'Authorization': 'Bearer ' + T } })
-    .then(r => r.ok ? r.json() : null)
+  // Goes through j() so a 401 here lands in the shared auth handler. A raw
+  // fetch swallowed its errors, and on a displaced session this poller was
+  // often the FIRST request to notice — it consumed the one-shot
+  // SESSION_REVOKED reply and dropped it on the floor, so the operator was
+  // bounced to the login form with no explanation. The server repeats that
+  // reply now, but there is no reason for the earliest signal to be the one
+  // that goes unheard. The rev has already been advanced above, so the
+  // response this triggers cannot loop back in here.
+  j('/api/business-context')
     .then(d => { if (d && d.loginMeta) showLoginNotice(d.loginMeta); })
     .catch(()=>{})
     .finally(()=>{ _loginFetchInFlight = false; });
 }
 
-// A corner card rather than a toast: a sign-in is worth noticing but must
-// never interrupt what the supervisor is doing, and it should still be
-// there if they were looking away. Auto-dismisses after 30s; stacks are
-// avoided by reusing the one element.
+// ── Top notification stack ───────────────────────────────────
+// Three things now want the operator's attention from outside the page
+// flow, and the bottom-right corner turned out to be somewhere nobody
+// looks — a sign-in notice sat there unseen. They all live along the top
+// instead, in a fixed priority order, each pushed below the one above it
+// so they can never cover each other.
+const _TOP_BARS = ['ctx-stale-bar', 'session-revoked-bar', 'login-notice'];
+function restackTopBars(){
+  let y = 0, pad = 0;
+  for (const id of _TOP_BARS){
+    const el = document.getElementById(id);
+    if (!el || el.style.display === 'none') continue;
+    el.style.top = y + 'px';
+    const hgt = el.offsetHeight || 0;
+    y += hgt;
+    // Full-width bars displace the page so they don't cover the topbar;
+    // the floating sign-in card overlays it instead of pushing it down.
+    if (el.dataset.fullWidth === '1') pad = y;
+  }
+  document.body.style.paddingTop = pad ? pad + 'px' : '';
+}
+
+// A sign-in is worth noticing but must never interrupt what the supervisor
+// is doing, so it stays a card rather than a full-width bar — but at the
+// TOP, centred, where it is actually seen. Auto-dismisses after 30s; one
+// reused element, so repeat sign-ins replace rather than stack.
 function showLoginNotice(m){
   let el = document.getElementById('login-notice');
   if (!el){
     el = document.createElement('div');
     el.id = 'login-notice';
-    el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99998;max-width:320px;'
-      + 'background:#065F46;color:#fff;border-radius:10px;padding:12px 14px;font-size:12.5px;'
-      + 'line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:pointer';
+    el.style.cssText = 'position:fixed;top:0;left:50%;transform:translateX(-50%);'
+      + 'margin-top:10px;z-index:99998;max-width:min(420px,92vw);'
+      + 'background:#065F46;color:#fff;border-radius:10px;padding:12px 16px;font-size:12.5px;'
+      + 'line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:pointer;text-align:center';
     el.title = 'Click to dismiss · full history in the App Activity Log';
-    el.onclick = () => { el.style.display = 'none'; };
+    el.onclick = () => { el.style.display = 'none'; restackTopBars(); };
     document.body.appendChild(el);
   }
   const where = [m.app, m.ip].filter(Boolean).join(' · ');
@@ -6759,8 +6787,33 @@ function showLoginNotice(m){
     + (where ? '<div style="opacity:.85">' + esc(where) + '</div>' : '')
     + (m.at ? '<div style="opacity:.7;font-size:11.5px;margin-top:3px">' + esc(m.at) + '</div>' : '');
   el.style.display = 'block';
+  restackTopBars();
   clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.display = 'none'; }, 30000);
+  el._t = setTimeout(() => { el.style.display = 'none'; restackTopBars(); }, 30000);
+}
+
+// Shown when THIS screen was signed out because the same account signed in
+// somewhere else. The operator is about to land on a login form in the
+// middle of their work; without this it reads as the app dropping them for
+// no reason. Full-width and at the top, because the inline line on the
+// login card was easy to miss entirely.
+function showSessionRevokedNotice(msg){
+  let el = document.getElementById('session-revoked-bar');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'session-revoked-bar';
+    el.dataset.fullWidth = '1';
+    el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#B45309;'
+      + 'color:#fff;padding:12px 16px;font-size:13px;font-weight:600;display:flex;'
+      + 'align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.25)';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '<span style="flex:1">⚠ ' + esc(msg) + '</span>'
+    + '<button type="button" style="background:#fff;color:#B45309;border:0;border-radius:6px;'
+    + 'padding:6px 14px;font-weight:700;cursor:pointer">Dismiss</button>';
+  el.querySelector('button').onclick = () => { el.style.display = 'none'; restackTopBars(); };
+  el.style.display = 'flex';
+  restackTopBars();
 }
 
 // Ask the server outright. Used by the idle poll and whenever this window
@@ -6784,6 +6837,7 @@ function showContextBanner(info){
   if (!el){
     el = document.createElement('div');
     el.id = 'ctx-stale-bar';
+    el.dataset.fullWidth = '1';
     el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#C62828;color:#fff;'
       + 'padding:10px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:12px;'
       + 'box-shadow:0 2px 8px rgba(0,0,0,.25)';
@@ -6797,12 +6851,12 @@ function showContextBanner(info){
     + '<button type="button" onclick="location.reload()" style="background:#fff;color:#C62828;border:0;'
     + 'border-radius:6px;padding:6px 14px;font-weight:700;cursor:pointer">Reload now</button>';
   el.style.display = 'flex';
-  document.body.style.paddingTop = el.offsetHeight + 'px';
+  restackTopBars();
 }
 
 function hideContextBanner(){
   const el = document.getElementById('ctx-stale-bar');
-  if (el){ el.style.display = 'none'; document.body.style.paddingTop = ''; }
+  if (el){ el.style.display = 'none'; restackTopBars(); }
 }
 
 // An idle screen issues no requests, so nothing would otherwise teach it
@@ -6881,12 +6935,17 @@ async function _jOnce(t, o){
       //
       // ONE exception: a session displaced by the single-session policy.
       // Landing on a blank login form after being kicked mid-work reads as
-      // a bug, so that case gets an explicit reason on the login screen.
+      // a bug, so that case says so — in the login card AND as a bar across
+      // the top, because the inline line alone was missed. The server now
+      // repeats SESSION_REVOKED on every request from a displaced token, so
+      // this fires whichever request happens to notice first.
       if (body && body.code === 'SESSION_REVOKED'){
+        const why = body.error || 'You were signed out because this account signed in elsewhere.';
         try {
           const le = document.getElementById('login-err');
-          if (le) le.textContent = body.error || 'You were signed out because this account signed in elsewhere.';
+          if (le) le.textContent = why;
         } catch(_) {}
+        try { showSessionRevokedNotice(why); } catch(_) {}
       }
       console.warn('Got 401 — clearing stale token');
       localStorage.removeItem('t'); T = '';

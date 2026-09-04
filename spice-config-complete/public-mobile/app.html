@@ -747,7 +747,14 @@ function fmtDate(d){if(!d)return'';var p=d.split('-');return p.length===3?p[2]+'
 function setTitle(t){appTitle=t;document.getElementById('login-logo').textContent=t;var ssImg=document.querySelector('#ss-title .appbar-logo');document.getElementById('ss-title').innerHTML=(ssImg?ssImg.outerHTML:'')+t;document.title=t}
 function isEditLocked(c){if(!editTimeoutMinutes||editTimeoutMinutes<=0||!c)return false;return(new Date()-new Date(c.replace(' ','T')))/(1000*60)>editTimeoutMinutes}
 
-let _hl=false;const _of=window.fetch;window.fetch=async function(...a){const r=await _of.apply(this,a);const u=typeof a[0]==='string'?a[0]:'';if(u.includes('/api/')&&!u.includes('/api/auth/login')&&!u.includes('/api/config')&&!u.includes('/api/status')&&r.status===401&&!_hl){_hl=true;token='';localStorage.removeItem('sa_token');show('s-login');_hl=false}return r};
+// Global 401 catch: drop the token and go back to the login screen. When the
+// server says the session was DISPLACED (single-session policy — the same
+// account signed in on another device), say so on the login screen. Landing
+// back on a blank login form mid-entry otherwise reads as the app crashing,
+// which is how it got reported. The body is read from a CLONE so the caller
+// still gets its own response to parse.
+function _escTxt(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+let _hl=false;const _of=window.fetch;window.fetch=async function(...a){const r=await _of.apply(this,a);const u=typeof a[0]==='string'?a[0]:'';if(u.includes('/api/')&&!u.includes('/api/auth/login')&&!u.includes('/api/config')&&!u.includes('/api/status')&&r.status===401&&!_hl){_hl=true;let why='';try{const d=await r.clone().json();if(d&&d.code==='SESSION_REVOKED')why=d.error||''}catch(_){}token='';localStorage.removeItem('sa_token');show('s-login');try{const er=document.getElementById('l-err');if(er)er.innerHTML=why?'<div class="eb">'+_escTxt(why)+'</div>':''}catch(_){}_hl=false}return r};
 
 function showTab(t){
   // Close any open modals
