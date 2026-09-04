@@ -6772,20 +6772,27 @@ function showLoginNotice(m){
   if (!el){
     el = document.createElement('div');
     el.id = 'login-notice';
+    // Explicit blue, not var(--blue) — that token is aliased to saffron in
+    // this theme, so it would come out orange.
     el.style.cssText = 'position:fixed;top:0;left:50%;transform:translateX(-50%);'
-      + 'margin-top:10px;z-index:99998;max-width:min(420px,92vw);'
-      + 'background:#065F46;color:#fff;border-radius:10px;padding:12px 16px;font-size:12.5px;'
+      + 'margin-top:10px;z-index:99998;width:min(760px,94vw);box-sizing:border-box;'
+      + 'background:#1D4ED8;color:#fff;border-radius:10px;padding:12px 20px;font-size:13px;'
       + 'line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.28);cursor:pointer;text-align:center';
     el.title = 'Click to dismiss · full history in the App Activity Log';
     el.onclick = () => { el.style.display = 'none'; restackTopBars(); };
     document.body.appendChild(el);
   }
-  const where = [m.app, m.ip].filter(Boolean).join(' · ');
-  el.innerHTML = '<div style="font-weight:700;margin-bottom:3px">Someone signed in</div>'
-    + '<div><strong>' + esc(m.by || '—') + '</strong>'
-    + (m.role ? ' <span style="opacity:.85">(' + esc(m.role) + ')</span>' : '') + '</div>'
-    + (where ? '<div style="opacity:.85">' + esc(where) + '</div>' : '')
-    + (m.at ? '<div style="opacity:.7;font-size:11.5px;margin-top:3px">' + esc(m.at) + '</div>' : '');
+  // One flowing line rather than four stacked ones — at this width the
+  // stacked version left most of the banner empty and pushed the timestamp
+  // down under the topbar.
+  const parts = [];
+  if (m.app || m.ip) parts.push(esc([m.app, m.ip].filter(Boolean).join(' · ')));
+  if (m.at) parts.push('<span style="opacity:.8">' + esc(m.at) + '</span>');
+  el.innerHTML = '<span style="font-weight:700">Someone signed in</span>'
+    + '<span style="opacity:.6;margin:0 8px">·</span>'
+    + '<strong>' + esc(m.by || '—') + '</strong>'
+    + (m.role ? ' <span style="opacity:.85">(' + esc(m.role) + ')</span>' : '')
+    + (parts.length ? '<span style="opacity:.6;margin:0 8px">·</span>' + parts.join('<span style="opacity:.6;margin:0 8px">·</span>') : '');
   el.style.display = 'block';
   restackTopBars();
   clearTimeout(el._t);
@@ -6866,6 +6873,7 @@ function hideContextBanner(){
 // refocused after the operator was in the other one).
 setInterval(() => {
   if (document.visibilityState !== 'visible') return;
+  if (window._printBusy) return;   // don't compete with an open print window
   checkContextNow();
 }, 25000);
 document.addEventListener('visibilitychange', () => {
@@ -25816,6 +25824,12 @@ function leAutoRefreshTick(){
   const onTab = document.getElementById('tc-lotentry')?.classList.contains('active');
   if (!onTab) return;
   if (typeof document.hidden === 'boolean' && document.hidden) return;
+  // A print/preview window opened from here is a same-origin popup, so the
+  // browser runs it on THIS page's renderer thread. Polling — and worse, the
+  // loadLeRecent() re-render a changed count triggers — competes with the
+  // print engine and is why "Save as PDF" could crawl. document.hidden stays
+  // false while the print window is on top, so this flag is what pauses us.
+  if (window._printBusy) return;
   const aid = document.getElementById('le-auction')?.value;
   if (!aid) return;
   const ae = document.activeElement;
@@ -26798,6 +26812,39 @@ function leOpenPrintModal() {
   showModal('le-print-modal');
 }
 
+// ── Print-window quiet period ───────────────────────────────────
+// A print window opened with window.open() is same-origin and keeps an
+// opener link, so the browser runs it in THIS tab's renderer process —
+// on the same main thread. Every poll tick, fetch callback and re-render
+// the app does while the print preview is up therefore steals time from
+// the print engine, which is what made a big filing print sit on
+// "Saving…". While _printBusy is set, the background pollers stand down.
+//
+// Cleared when the print dialog finishes (onafterprint, either way — print
+// or cancel). Two backstops, because that event isn't guaranteed: a focus
+// check that prunes windows the user closed by hand, and a hard timeout so
+// a lost event can never freeze auto-refresh for the rest of the session.
+let _lePrintWins = [];
+let _lePrintBusyTimer = null;
+function lePrintBusyBegin(win) {
+  if (win) _lePrintWins.push(win);
+  window._printBusy = true;
+  clearTimeout(_lePrintBusyTimer);
+  _lePrintBusyTimer = setTimeout(lePrintBusyReset, 5 * 60 * 1000);
+}
+function lePrintBusyEnd() {
+  _lePrintWins = _lePrintWins.filter(w => { try { return w && !w.closed; } catch (_) { return false; } });
+  if (!_lePrintWins.length) lePrintBusyReset();
+}
+function lePrintBusyReset() {
+  _lePrintWins = [];
+  window._printBusy = false;
+  clearTimeout(_lePrintBusyTimer);
+  _lePrintBusyTimer = null;
+}
+// Coming back to the app is a reliable sign the print windows are done with.
+window.addEventListener('focus', () => { if (window._printBusy) lePrintBusyEnd(); });
+
 async function leConfirmPrint() {
   if (!_le_pending_print) return;
   const selectedCard = document.querySelector('.le-print-fmt.selected');
@@ -26872,6 +26919,10 @@ async function leConfirmPrint() {
     const html = leBuildReceiptHtml(fmt, batch, { cfg, auction, traderInfo });
     const win = window.open('', '_blank', 'width=720,height=840');
     if (!win) { firstFailed = true; break; }
+    // Quiet this tab's background polling for as long as the print window is
+    // up (see leAutoRefreshTick) — a same-origin popup shares our renderer
+    // thread, so work here slows the preview and the "Save as PDF" step.
+    lePrintBusyBegin(win);
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -26881,14 +26932,15 @@ async function leConfirmPrint() {
     win.onload = () => {
       try {
         win.focus();
-        const closeIfOpen = () => { try { if (!win.closed) win.close(); } catch (_) {} };
+        // win.closed can lag close() by a tick, so re-check on the next turn.
+        const closeIfOpen = () => { try { if (!win.closed) win.close(); } catch (_) {} setTimeout(lePrintBusyEnd, 250); };
         win.onafterprint = closeIfOpen;
         if (win.matchMedia) {
           const mql = win.matchMedia('print');
           mql.addEventListener && mql.addEventListener('change', (e) => { if (!e.matches) closeIfOpen(); });
         }
         win.print();
-      } catch (e) {}
+      } catch (e) { lePrintBusyEnd(); }
     };
   }
   if (firstFailed) { showErr('Popup blocked. Allow popups for this site and retry.'); return; }
@@ -27187,48 +27239,78 @@ function leBuildCompactHtml(p) {
 
 // ── Filing copy: many receipts packed onto A4 ───────────────────
 // Office-filing layout — the SAME per-seller receipt content as the
-// compact slip, but flowed into multiple columns on A4 so a whole
-// trade's receipts fit in a few sheets instead of one page each.
-// CSS multi-column (column-count) packs variable-height cards tightly;
-// break-inside:avoid keeps each seller's card whole. A run-once sheet
-// header (column-span:all) carries the company + trade + date so the
-// individual cards stay minimal.
+// compact slip, laid out as a readable grid on A4 so a whole trade's
+// receipts fit in a few sheets instead of one page each.
+//
+// Layout is a FIXED grid: 2 columns × 5 rows = 10 receipts per sheet,
+// each card capped at ROWS_PER_CARD lot lines (a seller with more lots
+// continues on the next card, "(2/2)"). Fixed cells mean the eye lands
+// in the same places on every sheet, and the type can stay ~11px
+// instead of the 9px the old 3-column pack needed.
+//
+// It is also MUCH faster to print. The previous version used CSS
+// multi-column (column-count) with column-span:all plus break-inside:
+// avoid on every card — Chrome has to fragment that whole flow, and
+// re-fragment it for every page of the print preview, which is what
+// made "Save as PDF" sit on "Saving…" for tens of seconds. Pre-paginated
+// blocks give the print engine nothing to solve: each .page is an
+// independent fixed-height box with a hard break after it.
 function leBuildFilingHtml(p) {
   const { groups, co, dateStr, ano, printedAt, escapeHtml, isTrade } = p;
   const { nickname, gstin } = co;
-  // Columns per A4 sheet. 3 is the density that keeps ~9px text legible
-  // while fitting a typical trade's sellers onto 3-5 sheets.
-  const COLS = 3;
+  const ROWS_PER_CARD  = 5;   // lot lines per card before it continues
+  const CARDS_PER_PAGE = 10;  // 2 columns × 5 rows
 
-  const cards = groups.map(g => {
-    const rows = g.lots.map((l, i) => {
-      const wt = Number(l.qty || 0).toFixed(3);
-      return `<tr>
-        <td class="c">${i + 1}</td>
+  // Split each seller into cards of at most ROWS_PER_CARD lots. Totals are
+  // whole-seller figures and print on the seller's LAST card only; earlier
+  // cards close with their own part subtotal so each card still balances.
+  const models = [];
+  for (const g of groups) {
+    const lots = g.lots || [];
+    const parts = Math.max(1, Math.ceil(lots.length / ROWS_PER_CARD));
+    for (let i = 0; i < parts; i++) {
+      models.push({ g, part: i + 1, parts, offset: i * ROWS_PER_CARD,
+                    chunk: lots.slice(i * ROWS_PER_CARD, (i + 1) * ROWS_PER_CARD) });
+    }
+  }
+
+  const renderCard = (m) => {
+    const { g, chunk, offset, part, parts } = m;
+    const isLast = part === parts;
+    const rows = chunk.map((l, i) => `<tr>
+        <td class="c">${offset + i + 1}</td>
         <td>${escapeHtml(l.lot_no || '')}</td>
         <td class="r">${escapeHtml(String(l.bags || 0))}</td>
-        <td class="r">${wt}</td>
-      </tr>`;
-    }).join('');
-    const totalQty    = g.lots.reduce((s, l) => s + (Number(l.qty)        || 0), 0);
-    const totalBags   = g.lots.reduce((s, l) => s + (parseInt(l.bags, 10) || 0), 0);
-    const totalSample = g.lots.reduce((s, l) => s + (Number(l.sample_wt)  || 0), 0);
-    const totalGross  = g.lots.reduce((s, l) => s + (Number(l.gross_wt)   || 0), 0);
-    const sampleLine = (isTrade && totalSample > 0)
-      ? `<div class="xtra">Sample: <b>${totalSample.toFixed(3)} kg</b></div>` : '';
-    const grossLine = (isTrade && totalGross > 0)
-      ? `<div class="xtra">Gross: <b>${totalGross.toFixed(3)} kg</b></div>` : '';
+        <td class="r">${Number(l.qty || 0).toFixed(3)}</td>
+      </tr>`).join('');
+    const sum = (arr, f) => arr.reduce((s, l) => s + (f(l) || 0), 0);
+    // Part subtotal (this card's rows) vs seller total (all the lots).
+    const partBags = sum(chunk,  l => parseInt(l.bags, 10));
+    const partQty  = sum(chunk,  l => Number(l.qty));
+    const allBags  = sum(g.lots, l => parseInt(l.bags, 10));
+    const allQty   = sum(g.lots, l => Number(l.qty));
+    const totSample = sum(g.lots, l => Number(l.sample_wt));
+    const totGross  = sum(g.lots, l => Number(l.gross_wt));
+    const footLabel = parts === 1 ? 'Total' : (isLast ? `Total (${g.lots.length} lots)` : `Part ${part}/${parts}`);
+    const footBags  = (parts === 1 || isLast) ? allBags : partBags;
+    const footQty   = (parts === 1 || isLast) ? allQty  : partQty;
+    // Sample/Gross are seller-level, so only the closing card carries them —
+    // on ONE line, because the cell height budget has room for exactly one.
+    const xtraBits = [];
+    if (isLast && isTrade && totSample > 0) xtraBits.push(`Sample <b>${totSample.toFixed(3)}</b>`);
+    if (isLast && isTrade && totGross  > 0) xtraBits.push(`Gross <b>${totGross.toFixed(3)}</b>`);
+    const extras = xtraBits.length ? `<div class="xtra">${xtraBits.join(' &nbsp;·&nbsp; ')} kg</div>` : '';
     return `<div class="card">
-      <div class="nm">${escapeHtml(g.name || '—')}</div>
+      <div class="nm">${escapeHtml(g.name || '—')}${parts > 1 ? ` <span class="pt">(${part}/${parts})</span>` : ''}</div>
       ${g.branch ? `<div class="br">${escapeHtml(String(g.branch).toUpperCase())}</div>` : ''}
       <table>
         <thead><tr><th class="c">#</th><th>Lot</th><th class="r">Bags</th><th class="r">Wt(kg)</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="2">Total</td><td class="r">${totalBags}</td><td class="r">${totalQty.toFixed(3)}</td></tr></tfoot>
+        <tfoot><tr><td colspan="2">${footLabel}</td><td class="r">${footBags}</td><td class="r">${footQty.toFixed(3)}</td></tr></tfoot>
       </table>
-      ${sampleLine}${grossLine}
+      ${extras}
     </div>`;
-  }).join('');
+  };
 
   const title = isTrade ? 'WEIGHT RECEIPTS — FILING COPY' : 'LOT RECEIPTS — FILING COPY';
   const metaBits = [
@@ -27238,47 +27320,65 @@ function leBuildFilingHtml(p) {
     `Printed: ${escapeHtml(printedAt)}`,
   ].join(' &nbsp;·&nbsp; ');
 
+  // Pre-paginate: chunk the cards into sheets ourselves rather than asking
+  // the browser to fragment a continuous flow.
+  const pageCount = Math.max(1, Math.ceil(models.length / CARDS_PER_PAGE));
+  const pages = [];
+  for (let pi = 0; pi < pageCount; pi++) {
+    const slice = models.slice(pi * CARDS_PER_PAGE, (pi + 1) * CARDS_PER_PAGE);
+    // Blank filler cells keep the last sheet's grid aligned.
+    const fillers = Array(Math.max(0, CARDS_PER_PAGE - slice.length)).fill('<div class="pad"></div>').join('');
+    pages.push(`<div class="page">
+      <div class="sheet-hdr">
+        <div class="co">${escapeHtml(nickname)}${gstin ? ` <span class="gst">GSTIN: ${escapeHtml(gstin)}</span>` : ''}</div>
+        <div class="ttl">${title}</div>
+        <div class="meta">${metaBits} &nbsp;·&nbsp; Sheet ${pi + 1} of ${pageCount}</div>
+      </div>
+      <div class="grid">${slice.map(renderCard).join('')}${fillers}</div>
+    </div>`);
+  }
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Lot Receipts — Filing</title>
 <style>
   @page { size: A4; margin: 8mm }
   * { box-sizing:border-box }
   html, body { margin:0; padding:0; background:#eee; font-family: Arial, Helvetica, sans-serif; color:#000 }
-  body { padding:16px }
-  .sheet-hdr { column-span:all; -webkit-column-span:all; text-align:center; border-bottom:1.5px solid #000; padding-bottom:5px; margin-bottom:8px }
+  body { padding:16px 0 }
+  /* One .page = one A4 sheet. 194mm × 276mm is the printable area inside
+     the 8mm @page margin, kept a few mm short of 281mm so rounding can
+     never spill a sheet onto a blank overflow page. */
+  .page { width:194mm; height:276mm; margin:0 auto 14px; padding:0; background:#fff;
+          display:flex; flex-direction:column; page-break-after:always; break-after:page; overflow:hidden }
+  .page:last-child { page-break-after:auto; break-after:auto }
+  .sheet-hdr { text-align:center; border-bottom:1.5px solid #000; padding-bottom:4px; margin-bottom:3mm; flex:none }
   .sheet-hdr .co { font-weight:700; font-size:15px; letter-spacing:.4px }
-  .sheet-hdr .gst { font-size:10px; margin-top:1px }
-  .sheet-hdr .ttl { font-weight:700; font-size:11px; margin-top:3px }
+  .sheet-hdr .gst { font-weight:400; font-size:10px; letter-spacing:0 }
+  .sheet-hdr .ttl { font-weight:700; font-size:11px; margin-top:2px }
   .sheet-hdr .meta { font-size:10px; margin-top:2px; color:#333 }
-  .grid { column-count:${COLS}; column-gap:6mm }
-  .card { break-inside:avoid; -webkit-column-break-inside:avoid; page-break-inside:avoid;
-          border:1px solid #333; border-radius:4px; padding:5px 7px; margin:0 0 6px;
-          background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.12); font-size:9px; display:block; width:100%; max-width:100%; overflow-wrap:anywhere; word-break:break-word }
-  .card .nm { font-weight:700; font-size:11px; line-height:1.2 }
-  .card .br { font-size:9px; color:#444; margin-top:1px }
+  /* Fixed 2 × 5 cell grid — cards sit at the top of their cell so a
+     1-lot seller doesn't stretch to fill the whole ~49mm row. */
+  .grid { flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:repeat(5, 1fr);
+          gap:3mm 6mm; align-items:start; min-height:0 }
+  .card { border:1px solid #333; border-radius:3px; padding:6px 8px; background:#fff;
+          font-size:10.5px; overflow:hidden; overflow-wrap:break-word }
+  .card .nm { font-weight:700; font-size:12.5px; line-height:1.2 }
+  .card .nm .pt { font-weight:400; font-size:10px; color:#444 }
+  .card .br { font-size:10px; color:#444; margin-top:1px }
   .card table { width:100%; border-collapse:collapse; margin-top:4px }
-  .card th { border-bottom:1px solid #000; padding:1px 2px; font-size:8.5px; text-align:left }
-  .card td { padding:1px 2px }
+  .card th { border-bottom:1px solid #000; padding:1.5px 2px; font-size:10px; text-align:left }
+  .card td { padding:1.5px 2px }
+  .card td.c, .card th.c { text-align:center; width:8% }
   .card td.r, .card th.r { text-align:right }
-  .card td.c, .card th.c { text-align:center }
   .card tfoot td { border-top:1px solid #000; font-weight:700 }
-  .card .xtra { margin-top:2px; text-align:right; font-size:9px }
+  .card .xtra { margin-top:2px; text-align:right; font-size:10px }
+  .pad { }
   @media print {
     html, body { background:#fff }
     body { padding:0 }
-    .card { box-shadow:none }
+    .page { margin:0; width:auto; height:276mm }
   }
-</style></head><body>
-  <div class="grid">
-    <div class="sheet-hdr">
-      <div class="co">${escapeHtml(nickname)}</div>
-      ${gstin ? `<div class="gst">GSTIN: ${escapeHtml(gstin)}</div>` : ''}
-      <div class="ttl">${title}</div>
-      <div class="meta">${metaBits}</div>
-    </div>
-    ${cards}
-  </div>
-</body></html>`;
+</style></head><body>${pages.join('')}</body></html>`;
 }
 
 // ── Detailed A4 receipt ─────────────────────────────────────────
