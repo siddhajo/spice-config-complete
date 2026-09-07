@@ -127,7 +127,7 @@ function preprocessRows(rows, opts) {
 }
 
 // ── Generic table-to-PDF renderer ───────────────────────────
-function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTotals, layout, companyHeader }) {
+function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTotals, layout, companyHeader, singleLine }) {
   // layout: 'portrait' (default) or 'landscape'. All exports default to
   // portrait per user preference. Override per-type via PDF_LAYOUT below
   // if a specific report ever needs landscape (e.g. very wide column sets).
@@ -266,11 +266,16 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
       y = m + 18;
     }
 
-    // Compute header height by wrapping each header label
+    // Compute header height by wrapping each header label. In `singleLine`
+    // reports the header strip stays one line tall too — labels that don't
+    // fit shrink (never wrap, never ellipsize) so the strip lines up with the
+    // single-line data rows below it.
     const HEAD_LINE_H = 10;
     const HEAD_PAD = 4;
     doc.font('Helvetica-Bold').fontSize(8);
-    const headerWrapped = columns.map((c, i) => wrapText(doc, c.header, colWidths[i] - 6));
+    const headerWrapped = singleLine
+      ? columns.map(c => [String(c.header == null ? '' : c.header)])
+      : columns.map((c, i) => wrapText(doc, c.header, colWidths[i] - 6));
     const headerLines = Math.max(1, ...headerWrapped.map(ls => ls.length));
     const headH = headerLines * HEAD_LINE_H + HEAD_PAD * 2;
 
@@ -280,8 +285,12 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
     columns.forEach((c, i) => {
       const lines = headerWrapped[i];
       lines.forEach((line, li) => {
+        const cellW = colWidths[i] - 6;
+        if (singleLine) doc.fontSize(fitNumericFontSize(line, cellW, 8, true));
+        else doc.font('Helvetica-Bold').fontSize(8);
+        doc.fillColor('#000');
         doc.text(line, colX[i] + 3, y + HEAD_PAD + li * HEAD_LINE_H, {
-          width: colWidths[i] - 6,
+          width: cellW,
           align: isNumericCol(c) ? 'right' : 'left',
           lineBreak: false,
         });
@@ -392,7 +401,9 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
   // Pre-measure a row's required height by wrapping each cell.
   // Numeric cells are NOT wrapped — they're laid out single-line and the font
   // shrinks if the value overflows, since wrapping a number across lines
-  // (e.g. "10,71,225." / "00") looks broken. Non-numeric cells word-wrap.
+  // (e.g. "10,71,225." / "00") looks broken. Non-numeric cells word-wrap,
+  // unless `singleLine` is set for this report — then every record occupies
+  // exactly one row and over-long text cells are ellipsized instead.
   function measureRow(row) {
     doc.font('Helvetica').fontSize(7.5);
     const LINE_H = 10;
@@ -407,6 +418,7 @@ function renderTablePdf({ title, subtitle, columns, rows, totals, summaryAfterTo
         // Single-line; auto-shrink handled at draw time.
         return [String(text)];
       }
+      if (singleLine) return [fitText(doc, text, cellW)];
       return wrapText(doc, text, cellW);
     });
     const maxLines = Math.max(1, ...wrapped.map(ls => ls.length));
@@ -540,14 +552,12 @@ const COLS = {
   lot_buyer: [
     { header: 'LOT',   key: 'lot',   width: 8  },
     { header: 'BUYER', key: 'buyer', width: 24 },
-    { header: 'BR',    key: 'br',    width: 6  },
     { header: 'BAG',   key: 'bag',   width: 6  },
     { header: 'QTY',   key: 'qty',   width: 12 },
   ],
   lot_name: [
     { header: 'LOT',     key: 'lot',     width: 8  },
     { header: 'NAME',    key: 'name',    width: 30 },
-    { header: 'BR',      key: 'br',      width: 6  },
     { header: 'BAG',     key: 'bag',     width: 6  },
     { header: 'QTY',     key: 'qty',     width: 12 },
     { header: 'PRICE',   key: 'price',   width: 10 },
@@ -562,8 +572,6 @@ const COLS = {
     { header: 'BIDDER', key: 'bidder', width: 20 },
   ],
   price_list_before: [
-    { header: 'TRADE NO', key: 'trade_no', width: 10 },
-    { header: 'DATE',     key: 'date',     width: 14 },
     { header: 'LOT',   key: 'lot',   width: 10 },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'BAG',   key: 'bag',   width: 8  },
@@ -591,8 +599,8 @@ const COLS = {
     // STATE column dropped per user request; serial number shown per-name
     // (resets within each name group), with a subtotal row for each name.
     { header: 'SL.NO',  key: '_sn',         width: 6  },
-    { header: 'NAME',   key: 'poolername',  width: 28 },
-    { header: 'BRANCH', key: 'br',          width: 12 },
+    { header: 'NAME',   key: 'poolername',  width: 24 },
+    { header: 'BRANCH', key: 'br',          width: 16 },
     { header: 'LOT',    key: 'lot',         width: 7  },
     { header: 'QTY',    key: 'qty',         width: 12 },
     { header: 'PRICE',  key: 'price',       width: 9  },
@@ -648,7 +656,6 @@ const COLS = {
   dealer_list_partywise: [
     // Party-wise: one aggregated row per dealer (bags/qty, no money).
     { header: 'SL.NO', key: '_sn',   width: 6  },
-    { header: 'STATE', key: 'state', width: 12 },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'GSTIN', key: 'gstin', width: 18 },
     { header: 'LOTS',  key: 'lots',  width: 8  },
@@ -658,7 +665,6 @@ const COLS = {
   pooler_list_consolidated: [
     // Party-wise roll-up of sold lots — lot count + Qty/Amount/PQty/PurAmt.
     { header: 'SL.NO',  key: '_sn',        width: 6  },
-    { header: 'STATE',  key: 'state',      width: 12 },
     { header: 'NAME',   key: 'poolername', width: 26 },
     { header: 'BRANCH', key: 'br',         width: 14 },
     { header: 'LOTS',   key: 'lots',       width: 8  },
@@ -670,7 +676,6 @@ const COLS = {
   pooler_list_consolidated_before: [
     // Pre-trade party-wise roster — bags/qty only, no money.
     { header: 'SL.NO',  key: '_sn',        width: 6  },
-    { header: 'STATE',  key: 'state',      width: 12 },
     { header: 'NAME',   key: 'poolername', width: 30 },
     { header: 'BRANCH', key: 'br',         width: 14 },
     { header: 'LOTS',   key: 'lots',       width: 8  },
@@ -750,14 +755,11 @@ const COLS = {
   ],
   // Purchase Register — lot-wise seller-side ledger (landscape).
   purchase_register: [
-    { header: 'STATE',  key: 'state',  width: 12 },
-    { header: 'TNO',    key: 'tno',    width: 5  },
-    { header: 'DATE',   key: 'date',   width: 11 },
     { header: 'LOT',    key: 'lot',    width: 6  },
-    { header: 'BRANCH', key: 'branch', width: 9  },
-    { header: 'NAME',   key: 'name',   width: 22 },
-    { header: 'PLACE',  key: 'place',  width: 12 },
-    { header: 'GSTIN',  key: 'gstin',  width: 16 },
+    { header: 'BRANCH', key: 'branch', width: 17 },
+    { header: 'NAME',   key: 'name',   width: 30 },
+    { header: 'PLACE',  key: 'place',  width: 14 },
+    { header: 'GSTIN',  key: 'gstin',  width: 21 },
     { header: 'BAG',    key: 'bag',    width: 5  },
     { header: 'QTY',    key: 'qty',    width: 10 },
     { header: 'PRICE',  key: 'price',  width: 9  },
@@ -765,8 +767,8 @@ const COLS = {
     { header: 'PQTY',   key: 'pqty',   width: 10 },
     { header: 'PRATE',  key: 'prate',  width: 9  },
     { header: 'PURAMT', key: 'puramt', width: 13 },
-    { header: 'DISCOUNT', key: 'discount', width: 11 },
-    { header: 'GST5',   key: 'gst5',   width: 10 },
+    { header: 'DISCOUNT', key: 'discount', width: 10 },
+    { header: 'GST5',   key: 'gst5',   width: 9  },
     { header: 'PAYABLE', key: 'payable', width: 13 },
   ],
   // Sales Register — invoice-wise (landscape).
@@ -828,15 +830,13 @@ const COLS = {
 const CARBON_COLS = {
   lot_buyer: [
     { header: 'LOT',   key: 'lot',   weight: 0.16, align: 'center' },
-    { header: 'BUYER', key: 'buyer', weight: 0.40, align: 'left', fit: true },
-    { header: 'BR',    key: 'br',    weight: 0.12, align: 'center' },
+    { header: 'BUYER', key: 'buyer', weight: 0.52, align: 'left', fit: true },
     { header: 'BAG',   key: 'bag',   weight: 0.13, align: 'right' },
     { header: 'QTY',   key: 'qty',   weight: 0.19, align: 'right', kind: 'qty' },
   ],
   lot_name: [
     { header: 'LOT',     key: 'lot',     weight: 0.10, align: 'center' },
-    { header: 'NAME',    key: 'name',    weight: 0.27, align: 'left', fit: true },
-    { header: 'BR',      key: 'br',      weight: 0.08, align: 'center' },
+    { header: 'NAME',    key: 'name',    weight: 0.35, align: 'left', fit: true },
     { header: 'BAG',     key: 'bag',     weight: 0.09, align: 'right' },
     { header: 'QTY',     key: 'qty',     weight: 0.16, align: 'right', kind: 'qty' },
     { header: 'PRICE',   key: 'price',   weight: 0.16, align: 'right', kind: 'price' },
@@ -920,6 +920,16 @@ const PDF_LAYOUT = {
   sales_register: 'landscape',
 };
 
+// Reports whose rows must stay on ONE line each (per user request). Long text
+// cells are ellipsized to the column width instead of wrapping onto a second
+// line, so every record reads as a single aligned row.
+const PDF_SINGLE_LINE = {
+  pooler_register: true,
+  pooler_list_consolidated: true,
+  pooler_list_consolidated_before: true,
+  purchase_register: true,
+};
+
 // Per-type row preprocessing: add a serial-number column, optionally group
 // rows by a name field with a subtotal row inserted after each group. Keys
 // here line up with the COLS definitions (e.g. `_sn` for the SL.NO column,
@@ -985,23 +995,12 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
 
     case 'lot_buyer':
       return db.all(
-        `SELECT lot_no as lot, COALESCE(buyer,'') as buyer,
-                CASE UPPER(COALESCE(state,''))
-                  WHEN 'KERALA' THEN 'KL'
-                  WHEN 'TAMIL NADU' THEN 'TN'
-                  ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
-                END AS br,
-                bags as bag, qty
+        `SELECT lot_no as lot, COALESCE(buyer,'') as buyer, bags as bag, qty
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
     case 'lot_name':
       return db.all(
         `SELECT lot_no as lot, COALESCE(name,'') as name,
-                CASE UPPER(COALESCE(state,''))
-                  WHEN 'KERALA' THEN 'KL'
-                  WHEN 'TAMIL NADU' THEN 'TN'
-                  ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
-                END AS br,
                 bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 '' as control
@@ -1012,20 +1011,14 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT lot_no as lot, bags as bag, qty, price, code, buyer as bidder
          FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
-    case 'price_list_before': {
-      // Trade No (ano) + Date (DD/MM/YYYY) repeat on every row as leading
-      // identifier columns. PRICE blanked when 0 so the column reads empty
-      // instead of "0.00".
-      const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
-      const tradeNo = auc.ano == null ? '' : String(auc.ano);
-      const dateStr = String(auc.date || '').slice(0, 10).split('-').reverse().join('/');
+    case 'price_list_before':
+      // PRICE blanked when 0 so the column reads empty instead of "0.00".
+      // The trade no / date live in the brand-band meta, not in columns.
       return db.all(
         `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 COALESCE(code,'') AS code
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
-      ).map(r => ({ ...r, trade_no: tradeNo, date: dateStr }));
-    }
+         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
 
     case 'bank_payment': {
       const { getBankPaymentData } = require('./calculations');
@@ -1052,26 +1045,26 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       // Party-wise roll-up of SOLD lots (amount > 0), one row per pooler.
       // Mirrors the XLSX exportPoolerListConsolidated query. See exports.js.
       return db.all(
-        `SELECT state, name as poolername, branch as br,
+        `SELECT name as poolername, branch as br,
            COUNT(*) as lots,
            SUM(COALESCE(qty,0))    as qty,
            SUM(COALESCE(amount,0)) as amount,
            SUM(COALESCE(pqty,0))   as pqty,
            SUM(COALESCE(puramt,0)) as puramt
          FROM lots WHERE auction_id = ? AND amount > 0
-         GROUP BY state, name, branch
+         GROUP BY name, branch
          ORDER BY name`, [auctionId]);
 
     case 'pooler_list_consolidated_before':
       // Pre-trade party-wise roster — bags/qty only, no money (works before
       // prices import). Mirrors the XLSX exportPoolerListConsolidatedBefore query.
       return db.all(
-        `SELECT state, name as poolername, branch as br,
+        `SELECT name as poolername, branch as br,
            COUNT(*) as lots,
            SUM(COALESCE(bags,0)) as bags,
            SUM(COALESCE(qty,0))  as qty
          FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
-         GROUP BY state, name, branch
+         GROUP BY name, branch
          ORDER BY name`, [auctionId]);
 
     case 'full_file':
@@ -1098,13 +1091,13 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       // dealer (bags/qty, no money), pre-trade safe. Mirrors the XLSX
       // exportDealerListPartywise query. See exports.js.
       return db.all(
-        `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
+        `SELECT name, SUBSTR(cr, 7, 15) as gstin,
            COUNT(*) as lots,
            SUM(COALESCE(bags,0)) as bags,
            SUM(COALESCE(qty,0))  as qty
          FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
-         GROUP BY state, name, SUBSTR(cr, 7, 15)
-         ORDER BY state, name`, [auctionId]);
+         GROUP BY name, SUBSTR(cr, 7, 15)
+         ORDER BY name`, [auctionId]);
 
     case 'lot_payment':
       // Fully-populated post-auction payment summary, one row per lot ordered
@@ -1400,6 +1393,7 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
     rows,
     totals,
     layout: PDF_LAYOUT[type],
+    singleLine: PDF_SINGLE_LINE[type],
     companyHeader: getCompanyHeader(db),
   });
 }

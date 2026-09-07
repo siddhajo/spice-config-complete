@@ -234,25 +234,18 @@ async function exportLotSlipAfter(db, auctionId, state) {
 // Surfaced from the Price Import modal: importing prices overwrites the
 // lots table with the auctioneer's data, so these reports are the
 // operator's record of the pre-trade state. Ported from the eTrade
-// build. State → BR is folded inline (KERALA→KL, TAMIL NADU→TN, else
-// first two letters) so each function stays self-contained.
+// build. The state-derived BR column was dropped per user request — these
+// slips are read lot-wise, and the branch is already known on the floor.
 
-// Lot ↔ Buyer crosswalk: which buyer bought each lot, with branch code.
+// Lot ↔ Buyer crosswalk: which buyer bought each lot.
 async function exportLotBuyer(db, auctionId) {
   const rows = db.all(
-    `SELECT lot_no AS lot, COALESCE(buyer,'') AS buyer,
-            CASE UPPER(COALESCE(state,''))
-              WHEN 'KERALA' THEN 'KL'
-              WHEN 'TAMIL NADU' THEN 'TN'
-              ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
-            END AS br,
-            bags AS bag, qty
+    `SELECT lot_no AS lot, COALESCE(buyer,'') AS buyer, bags AS bag, qty
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
   );
   const cols = [
     { header: 'LOT',   key: 'lot',   width: 8  },
     { header: 'BUYER', key: 'buyer', width: 24 },
-    { header: 'BR',    key: 'br',    width: 6  },
     { header: 'BAG',   key: 'bag',   width: 6  },
     { header: 'QTY',   key: 'qty',   width: 12 },
   ];
@@ -265,11 +258,6 @@ async function exportLotBuyer(db, auctionId) {
 async function exportLotName(db, auctionId) {
   const rows = db.all(
     `SELECT lot_no AS lot, COALESCE(name,'') AS name,
-            CASE UPPER(COALESCE(state,''))
-              WHEN 'KERALA' THEN 'KL'
-              WHEN 'TAMIL NADU' THEN 'TN'
-              ELSE UPPER(SUBSTR(COALESCE(state,''), 1, 2))
-            END AS br,
             bags AS bag, qty,
             CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
             '' AS control
@@ -278,7 +266,6 @@ async function exportLotName(db, auctionId) {
   const cols = [
     { header: 'LOT',     key: 'lot',     width: 8  },
     { header: 'NAME',    key: 'name',    width: 30 },
-    { header: 'BR',      key: 'br',      width: 6  },
     { header: 'BAG',     key: 'bag',     width: 6  },
     { header: 'QTY',     key: 'qty',     width: 12 },
     { header: 'PRICE',   key: 'price',   width: 10 },
@@ -306,12 +293,8 @@ async function exportPriceListBefore(db, auctionId) {
             COALESCE(code,'') AS code
      FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
   );
-  // Trade No (ano) + Date repeat on every row as leading identifier columns
-  // (DD/MM/YYYY, matching the brand-band meta). Kept textual so a re-import
-  // never re-interprets the date string as an Excel serial.
-  const auc = db.get('SELECT ano, date FROM auctions WHERE id = ?', [auctionId]) || {};
-  const tradeNo = auc.ano == null ? '' : String(auc.ano);
-  const dateStr = String(auc.date || '').slice(0, 10).split('-').reverse().join('/');
+  // The trade-no / date identifier columns were dropped per user request —
+  // both already appear in the brand-band meta at the top of the sheet.
   const padLot = (v) => {
     const s = String(v == null ? '' : v).trim();
     return /^\d+$/.test(s) ? s.padStart(3, '0') : s;
@@ -319,12 +302,8 @@ async function exportPriceListBefore(db, auctionId) {
   const rows = rawRows.map(r => ({
     ...r,
     lot: bare ? padLot(r.lot) : r.lot,
-    trade_no: tradeNo,
-    date: dateStr,
   }));
   const cols = [
-    { header: 'TRADE NO', key: 'trade_no', width: 10, text: true },
-    { header: 'DATE',     key: 'date',     width: 12, text: true },
     { header: 'LOT',   key: 'lot',   width: 10, text: bare },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'BAG',   key: 'bag',   width: 8  },
@@ -727,21 +706,20 @@ async function exportPoolerRegister(db, auctionId) {
 // Pooler Register (amount > 0) so the totals reconcile to the rupee.
 async function exportPoolerListConsolidated(db, auctionId) {
   const rows = db.all(
-    `SELECT state, name as poolername, branch as br,
+    `SELECT name as poolername, branch as br,
        COUNT(*) as lots,
        SUM(COALESCE(qty,0))    as qty,
        SUM(COALESCE(amount,0)) as amount,
        SUM(COALESCE(pqty,0))   as pqty,
        SUM(COALESCE(puramt,0)) as puramt
      FROM lots WHERE auction_id = ? AND amount > 0
-     GROUP BY state, name, branch
+     GROUP BY name, branch
      ORDER BY name`, [auctionId]
   );
   // Sequential SL.NO, one per party row.
   rows.forEach((r, i) => { r._sn = i + 1; });
   const cols = [
     { header: 'SL.NO',  key: '_sn',        width: 6  },
-    { header: 'STATE',  key: 'state',      width: 12 },
     { header: 'NAME',   key: 'poolername', width: 30 },
     { header: 'BRANCH', key: 'br',         width: 15 },
     { header: 'LOTS',   key: 'lots',       width: 8  },
@@ -772,23 +750,22 @@ async function exportPoolerListConsolidated(db, auctionId) {
 // pooler (party) with lot count + summed Bags / Qty and NO money columns, so
 // it works BEFORE prices are imported (lots carry no amount/puramt until price
 // import — same reasoning as the Dealer List / Planter List pre-trade exports).
-// Qualifies on a real (qty>0) lot instead of amount>0. Grouped by state, name,
-// branch so the party rows match the post-trade Pooler List Consolidated.
+// Qualifies on a real (qty>0) lot instead of amount>0. Grouped by name + branch
+// so the party rows match the post-trade Pooler List Consolidated.
 async function exportPoolerListConsolidatedBefore(db, auctionId) {
   const rows = db.all(
-    `SELECT state, name as poolername, branch as br,
+    `SELECT name as poolername, branch as br,
        COUNT(*) as lots,
        SUM(COALESCE(bags,0)) as bags,
        SUM(COALESCE(qty,0))  as qty
      FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
-     GROUP BY state, name, branch
+     GROUP BY name, branch
      ORDER BY name`, [auctionId]
   );
   // Sequential SL.NO, one per party row.
   rows.forEach((r, i) => { r._sn = i + 1; });
   const cols = [
     { header: 'SL.NO',  key: '_sn',        width: 6  },
-    { header: 'STATE',  key: 'state',      width: 12 },
     { header: 'NAME',   key: 'poolername', width: 30 },
     { header: 'BRANCH', key: 'br',         width: 15 },
     { header: 'LOTS',   key: 'lots',       width: 8  },
@@ -893,22 +870,21 @@ async function exportDealerList(db, auctionId) {
 // (party) with lot count and summed Bags / Qty — instead of the lot-wise
 // Dealer List's per-lot rows + subtotals. Same qualification as the Dealer
 // List (GSTIN-bearing seller, qty > 0), so it stays pre-trade safe (no
-// dependency on price/amount). Grouped by state + name + GSTIN.
+// dependency on price/amount). Grouped by name + GSTIN.
 async function exportDealerListPartywise(db, auctionId) {
   const rows = db.all(
-    `SELECT state, name, SUBSTR(cr, 7, 15) as gstin,
+    `SELECT name, SUBSTR(cr, 7, 15) as gstin,
        COUNT(*) as lots,
        SUM(COALESCE(bags,0)) as bags,
        SUM(COALESCE(qty,0))  as qty
      FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
-     GROUP BY state, name, SUBSTR(cr, 7, 15)
-     ORDER BY state, name`, [auctionId]
+     GROUP BY name, SUBSTR(cr, 7, 15)
+     ORDER BY name`, [auctionId]
   );
   // Sequential SL.NO, one per party row.
   rows.forEach((r, i) => { r._sn = i + 1; });
   const cols = [
     { header: 'SL.NO', key: '_sn',   width: 6  },
-    { header: 'STATE', key: 'state', width: 12 },
     { header: 'NAME',  key: 'name',  width: 30 },
     { header: 'GSTIN', key: 'gstin', width: 18 },
     { header: 'LOTS',  key: 'lots',  width: 8  },
@@ -1508,10 +1484,9 @@ function registerMeta(db, opts) {
 async function exportPurchaseRegister(db, opts = {}) {
   const { getPurchaseRegister } = require('./calculations');
   const rows = getPurchaseRegister(db, opts);
+  // STATE / TNO / DATE dropped per user request — the trade or period is
+  // already carried by the brand-band meta (registerMeta).
   const cols = [
-    { header: 'STATE',  key: 'state',  width: 14 },
-    { header: 'TNO',    key: 'tno',    width: 6  },
-    { header: 'DATE',   key: 'date',   width: 12 },
     { header: 'LOT',    key: 'lot',    width: 8  },
     { header: 'BRANCH', key: 'branch', width: 10 },
     { header: 'NAME',   key: 'name',   width: 28 },
