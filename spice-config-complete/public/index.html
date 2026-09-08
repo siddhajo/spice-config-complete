@@ -5685,7 +5685,7 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
   </div>
 </div></div>
 
-<div class="modal-bg" id="trader-modal"><div class="modal">
+<div class="modal-bg" id="trader-modal"><div class="modal" style="max-width:880px">
   <h2 id="trader-modal-title">Add Seller</h2>
   <input type="hidden" id="t-id">
   <div class="sgrid">
@@ -13755,6 +13755,24 @@ function renderBankRows(banks){
   if (!c) return;
   c.innerHTML = '';
   for (const b of banks) appendBankRow(b);
+  backfillBlankBankNames(c);
+}
+
+// Sellers imported from the old DBF data (and any row saved before the
+// IFSC auto-lookup existed) carry an account no + IFSC but no bank name —
+// the lookup only ever fired while TYPING an IFSC, so opening such a seller
+// showed an empty Bank Name for no visible reason. Resolve those rows from
+// their stored IFSC when the modal opens. Only blank names are touched, so a
+// name the operator typed is never overwritten; failures stay silent and
+// leave the field editable, exactly as lookupBankByIfsc does elsewhere.
+function backfillBlankBankNames(container){
+  for (const row of container.querySelectorAll('.bank-row')) {
+    const nameEl = row.querySelector('.bank-name');
+    const ifscEl = row.querySelector('.bank-ifsc');
+    if (!nameEl || !ifscEl || nameEl.value.trim()) continue;
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifscEl.value.trim().toUpperCase())) continue;
+    lookupBankByIfsc(ifscEl);
+  }
 }
 function addBankRow(){ appendBankRow({}); }
 function appendBankRow(b){
@@ -13762,21 +13780,25 @@ function appendBankRow(b){
   if (!c) return;
   const row = document.createElement('div');
   row.className = 'bank-row';
-  row.style.cssText = 'display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1.2fr auto;gap:8px;align-items:end;padding:8px;background:#fff;border:1px solid var(--border);border-radius:6px';
-  // Use fieldsets so the inputs are clearly grouped, with mini-labels.
-  // The bank-branch hint sits under Bank Name and is populated by the
-  // IFSC auto-lookup (Razorpay public API) when the IFSC field changes.
+  row.style.cssText = 'padding:8px;background:#fff;border:1px solid var(--border);border-radius:6px';
+  // Four mini-labelled inputs on one line + the remove button. The branch
+  // hint (filled by the IFSC auto-lookup below) is a full-width line UNDER
+  // the grid rather than a fifth element inside the Bank Name cell — inside,
+  // it made that one cell taller than its neighbours and, with end-alignment,
+  // knocked the Bank Name label out of line with the other three.
   row.innerHTML = `
-    <div class="fg" style="margin:0">
-      <label style="font-size:11px">Bank Name</label>
-      <input class="bank-name" value="${esc(b.bank_name||'')}" placeholder="e.g. HDFC">
-      <div class="bank-branch-hint" style="font-size:11px;color:var(--text3);margin-top:2px;min-height:14px">${b.branch ? 'Branch: '+esc(b.branch) : ''}</div>
-      <input type="hidden" class="bank-branch" value="${esc(b.branch||'')}">
+    <div style="display:grid;grid-template-columns:1.3fr 1.4fr 1.1fr 1.3fr auto;gap:8px;align-items:end">
+      <div class="fg" style="margin:0">
+        <label style="font-size:11px">Bank Name</label>
+        <input class="bank-name" value="${esc(b.bank_name||'')}" placeholder="e.g. HDFC">
+      </div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">Account No</label><input class="bank-acctnum" value="${esc(b.acctnum||'')}"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">IFSC</label><input class="bank-ifsc" value="${esc(b.ifsc||'')}" style="text-transform:uppercase" oninput="onBankIfscInput(this)" onblur="lookupBankByIfsc(this)"></div>
+      <div class="fg" style="margin:0"><label style="font-size:11px">Holder Name</label><input class="bank-holder" value="${esc(b.holder_name||'')}"></div>
+      <button type="button" class="btn btn-o" onclick="this.closest('.bank-row').remove()" title="Remove this bank" style="padding:6px 10px;font-size:12px">✕</button>
     </div>
-    <div class="fg" style="margin:0"><label style="font-size:11px">Account No</label><input class="bank-acctnum" value="${esc(b.acctnum||'')}"></div>
-    <div class="fg" style="margin:0"><label style="font-size:11px">IFSC</label><input class="bank-ifsc" value="${esc(b.ifsc||'')}" style="text-transform:uppercase" oninput="onBankIfscInput(this)" onblur="lookupBankByIfsc(this)"></div>
-    <div class="fg" style="margin:0"><label style="font-size:11px">Holder Name</label><input class="bank-holder" value="${esc(b.holder_name||'')}"></div>
-    <button type="button" class="btn btn-o" onclick="this.closest('.bank-row').remove()" title="Remove this bank" style="padding:6px 10px;font-size:12px">✕</button>
+    <div class="bank-branch-hint" style="font-size:11px;color:var(--text3);margin-top:4px">${b.branch ? 'Branch: '+esc(b.branch) : ''}</div>
+    <input type="hidden" class="bank-branch" value="${esc(b.branch||'')}">
   `;
   c.appendChild(row);
 }
