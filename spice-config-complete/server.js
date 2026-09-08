@@ -2956,6 +2956,35 @@ function _gstCaptureCredits(db, body) {
   return out;
 }
 
+// Build the best address line from a gstincheck.co.in `pradr` object.
+// The portal ships TWO representations: a pre-formatted flat string
+// `pradr.adr` (which carries the real door no / building / road) and a
+// structured `pradr.addr` object (which often DROPS those, leaving a
+// junk "0" bno — the source of addresses that read "0, ANAKKARA").
+// Prefer the flat string; only reconstruct from parts when it's missing.
+// We then:
+//   • split on commas, trim, drop empties (and bare "0" / "-" placeholders)
+//   • collapse consecutive duplicate segments (the portal repeats them,
+//     e.g. "CP/VII/532, CP/VII/532" / "Anakkara, Anakkara")
+//   • strip trailing district / state / PIN segments, since those are
+//     surfaced separately as place/state/pin and shouldn't be doubled
+//     inside the address line.
+function _gstBuildAddress(pradr) {
+  const addr = (pradr && pradr.addr) || {};
+  const flat = (pradr && pradr.adr) || '';
+  const junk = (s) => !s || s === '0' || s === '-' || /^0+$/.test(s);
+  let segs = (flat
+    ? flat.split(',').map(s => s.trim())
+    : [addr.bno, addr.bnm, addr.st, addr.loc].map(s => String(s || '').trim())
+  ).filter(s => !junk(s));
+  // Collapse consecutive duplicates (case-insensitive).
+  segs = segs.filter((s, i) => i === 0 || s.toLowerCase() !== segs[i - 1].toLowerCase());
+  // Strip trailing district / state / PIN if they leak into the tail.
+  const tail = new Set([addr.dst, addr.stcd, addr.pncd].map(s => String(s || '').trim().toLowerCase()).filter(Boolean));
+  while (segs.length && tail.has(segs[segs.length - 1].toLowerCase())) segs.pop();
+  return segs.join(', ');
+}
+
 // GST lookup API status — credits remaining, plan expiry, last-checked
 // timestamp + raw envelope. Drives the Settings → Integrations card and
 // the topbar credit pill. Read-only; never triggers a live lookup.
@@ -3725,14 +3754,22 @@ app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
     if (body && body.flag && body.data) {
       const d = body.data;
       const addr = (d.pradr && d.pradr.addr) || {};
+      // The portal returns mixed case ("Bodinayakanur", "M/s. Ram Exports").
+      // Party master data in this app is held upper-case throughout — the
+      // built-in state table, the seller/buyer forms, every report and the
+      // Tally ledgers — so normalise here, at the single point the portal's
+      // values enter the system, rather than in each caller. Applies to the
+      // text fields that get stored on the party record; pin/status/regDate
+      // are left alone (no case to normalise / not party text).
+      const up = (v) => String(v == null ? '' : v).toUpperCase();
       return res.json({
         valid: true, gstin, pan, st_code: stCode,
-        name:     d.lgnm || d.tradeNam || '',
-        tradeName:d.tradeNam || d.lgnm || '',
-        address:  [addr.bno, addr.bnm, addr.st, addr.loc].filter(Boolean).join(', '),
-        place:    addr.dst || addr.loc || '',
+        name:     up(d.lgnm || d.tradeNam || ''),
+        tradeName:up(d.tradeNam || d.lgnm || ''),
+        address:  up(_gstBuildAddress(d.pradr)),
+        place:    up(addr.dst || addr.loc || ''),
         pin:      addr.pncd || '',
-        state:    addr.stcd || state,
+        state:    up(addr.stcd || state),
         status:   d.sts || '',
         regDate:  d.rgdt || '',
         source:   'live',
