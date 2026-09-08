@@ -3698,7 +3698,8 @@ app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
   const pan    = gstin.substring(2, 12);
   const state  = STATE_CODES[stCode] || '';
 
-  const cfg = getSettingsFlat(getDb());
+  const db = getDb();
+  const cfg = getSettingsFlat(db);
   const apiKey = cfg.gst_api_key || '';
 
   // No API key → return structural details only
