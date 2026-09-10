@@ -1159,6 +1159,14 @@ function mountMobile(app, deps) {
   //   - Phone (tel) + Name — same combo treated as a duplicate
   // These checks run BEFORE insert so neither app can race two creates
   // for the same person.
+  //
+  // `allowDuplicate: true` bypasses all three. Two sellers CAN be different
+  // parties sharing a trade name, PAN and even a GSTIN, and the operator has
+  // to be able to say so. The desktop client only sends the flag after
+  // showing the matched row and having the user confirm; the PWA never sends
+  // it, so mobile quick-create keeps its silent-dedupe behaviour. Everything
+  // downstream keys on traders.id, so the two rows stay separate parties
+  // (own lots, purchase invoice, TDS, debit notes and bank account).
   app.post('/api/traders', requireAuth, (req, res) => {
     const t = req.body || {};
     if (!t.name || !String(t.name).trim()) {
@@ -1174,35 +1182,46 @@ function mountMobile(app, deps) {
     const panTrim  = String(t.pan || '').trim().toUpperCase();
     const telTrim  = String(t.tel || '').trim();
 
+    // Deliberate second party — skip the dedupe entirely.
+    const allowDuplicate = t.allowDuplicate === true || t.allowDuplicate === 'true';
     // Strict uniqueness — GSTIN (cr) is the strongest identifier
-    if (crTrim) {
+    if (!allowDuplicate && crTrim) {
       const dup = db.get('SELECT * FROM traders WHERE cr = ? COLLATE NOCASE LIMIT 1', [crTrim]);
       if (dup) {
         dup.banks = db.all(
           'SELECT * FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id', [dup.id]
         );
-        return res.json({ trader: dup, deduped: true, reason: 'GSTIN match' });
+        return res.json({ trader: dup, deduped: true, reason: 'GSTIN match',
+          // Overridable: re-post with allowDuplicate:true to create a second,
+          // separate seller that happens to share this identifier.
+          confirmable: true, existing: dup });
       }
     }
     // PAN is the next strongest
-    if (panTrim) {
+    if (!allowDuplicate && panTrim) {
       const dup = db.get('SELECT * FROM traders WHERE pan = ? COLLATE NOCASE LIMIT 1', [panTrim]);
       if (dup) {
         dup.banks = db.all(
           'SELECT * FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id', [dup.id]
         );
-        return res.json({ trader: dup, deduped: true, reason: 'PAN match' });
+        return res.json({ trader: dup, deduped: true, reason: 'PAN match',
+          // Overridable: re-post with allowDuplicate:true to create a second,
+          // separate seller that happens to share this identifier.
+          confirmable: true, existing: dup });
       }
     }
     // Soft dedup — same name + same phone is treated as a single person
-    if (telTrim) {
+    if (!allowDuplicate && telTrim) {
       const dup = db.get('SELECT * FROM traders WHERE name = ? AND tel = ? LIMIT 1',
         [nameTrim, telTrim]);
       if (dup) {
         dup.banks = db.all(
           'SELECT * FROM trader_banks WHERE trader_id = ? ORDER BY is_default DESC, id', [dup.id]
         );
-        return res.json({ trader: dup, deduped: true, reason: 'name+phone match' });
+        return res.json({ trader: dup, deduped: true, reason: 'name+phone match',
+          // Overridable: re-post with allowDuplicate:true to create a second,
+          // separate seller that happens to share this identifier.
+          confirmable: true, existing: dup });
       }
     }
 
@@ -1258,16 +1277,18 @@ function mountMobile(app, deps) {
     if (emailClean && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
-    // Uniqueness re-check on cr / pan changes
-    if (t.cr != null && String(t.cr).trim() && String(t.cr).trim() !== trader.cr) {
+    // Uniqueness re-check on cr / pan changes — overridable for the genuine
+    // two-parties-one-identifier case (see the create handler above).
+    const allowDup = t.allowDuplicate === true || t.allowDuplicate === 'true';
+    if (!allowDup && t.cr != null && String(t.cr).trim() && String(t.cr).trim() !== trader.cr) {
       const dup = db.get('SELECT id FROM traders WHERE cr = ? COLLATE NOCASE AND id != ?',
         [String(t.cr).trim(), id]);
-      if (dup) return res.status(409).json({ error: 'Another seller already has this GSTIN' });
+      if (dup) return res.status(409).json({ error: 'Another seller already has this GSTIN', duplicate: true, confirmable: true, existing: dup });
     }
-    if (t.pan != null && String(t.pan).trim() && String(t.pan).trim().toUpperCase() !== trader.pan) {
+    if (!allowDup && t.pan != null && String(t.pan).trim() && String(t.pan).trim().toUpperCase() !== trader.pan) {
       const dup = db.get('SELECT id FROM traders WHERE pan = ? COLLATE NOCASE AND id != ?',
         [String(t.pan).trim().toUpperCase(), id]);
-      if (dup) return res.status(409).json({ error: 'Another seller already has this PAN' });
+      if (dup) return res.status(409).json({ error: 'Another seller already has this PAN', duplicate: true, confirmable: true, existing: dup });
     }
     // Partial update — only write fields that were sent. Mobile sends a
     // subset (just acctnum/ifsc/whatsapp/email on edit-from-banks);

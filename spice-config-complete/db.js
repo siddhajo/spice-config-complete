@@ -1075,10 +1075,72 @@ async function initDb() {
     // delivered that message.
     "ALTER TABLE sessions ADD COLUMN revoked_at TEXT",
     "ALTER TABLE sessions ADD COLUMN revoked_reason TEXT DEFAULT ''",
+    // Seller identity on the money documents. Two sellers may legitimately
+    // share a name AND a PAN (different parties, same trade name), so the
+    // seller NAME can no longer be the key that ties a purchase invoice or
+    // debit note back to a party — money would merge across them and the
+    // bank file would pay one seller's lots into the other's account.
+    // These columns carry traders.id; the name stays for display and for
+    // legacy rows whose party can't be resolved. See sellerKeyExpr in
+    // calculations.js for how reads key off id with a name fallback.
+    'ALTER TABLE purchases ADD COLUMN trader_id INTEGER',
+    'ALTER TABLE debit_notes ADD COLUMN trader_id INTEGER',
+    'ALTER TABLE bills ADD COLUMN trader_id INTEGER',
+    'ALTER TABLE debit_notes_planter ADD COLUMN trader_id INTEGER',
   ];
   for (const m of migrations) {
     try { wrapped.exec(m); console.log('Migration applied:', m); }
     catch (e) { /* column already exists — ignore */ }
+  }
+
+  // ── BACKFILL: seller id on existing money documents ────────────
+  // Point historical purchases / debit_notes at their trader row so the
+  // id-keyed reads resolve them exactly as the name-keyed ones used to.
+  // Deliberately conservative: a row is only stamped when its name maps to
+  // exactly ONE trader. Ambiguous names (the very case this work exists for)
+  // are left NULL and fall back to name matching, so a backfill can never
+  // silently attach a document to the wrong party. Runs once — the guard
+  // means later boots match nothing.
+  //
+  // The stamping triggers are suspended for the duration. They fire on ANY
+  // update, so without this the backfill would rewrite modified_at/
+  // modified_by on every linked row — replacing "edited by sidda on 28 Jun"
+  // with "system, today" across hundreds of invoices and destroying the audit
+  // trail this migration has no business touching. They are recreated
+  // immediately afterwards (and again by the canonical block below), so an
+  // interrupted boot cannot leave the database unstamped.
+  const _AUDIT_BACKFILL_TABLES = ['purchases', 'debit_notes', 'bills', 'debit_notes_planter'];
+  try {
+    for (const tbl of _AUDIT_BACKFILL_TABLES) {
+      try {
+        wrapped.exec(`DROP TRIGGER IF EXISTS trg_${tbl}_modins`);
+        wrapped.exec(`DROP TRIGGER IF EXISTS trg_${tbl}_modupd`);
+      } catch (_) { /* trigger may not exist yet on a fresh database */ }
+    }
+    for (const tbl of _AUDIT_BACKFILL_TABLES) {
+      const n = wrapped.run(
+        `UPDATE ${tbl} SET trader_id = (
+           SELECT t.id FROM traders t
+            WHERE UPPER(TRIM(t.name)) = UPPER(TRIM(${tbl}.name))
+         )
+         WHERE trader_id IS NULL
+           AND COALESCE(TRIM(name),'') <> ''
+           AND (SELECT COUNT(*) FROM traders t2
+                 WHERE UPPER(TRIM(t2.name)) = UPPER(TRIM(${tbl}.name))) = 1`
+      );
+      if (n && n.changes) console.log(`Migration: linked ${n.changes} ${tbl} row(s) to their seller id`);
+    }
+  } catch (_) { /* tables may be absent on a partial schema */ }
+  finally {
+    // Put the stamping triggers back before anything else can write.
+    for (const t of _AUDIT_BACKFILL_TABLES) {
+      try {
+        wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modins AFTER INSERT ON ${t}
+          BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+        wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modupd AFTER UPDATE ON ${t}
+          BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+      } catch (_) { /* table may be absent on a partial schema */ }
+    }
   }
 
   // ── SINGLE-SESSION CLEANUP ─────────────────────────────────────
@@ -1115,14 +1177,17 @@ async function initDb() {
   // UPDATE does NOT recurse: PRAGMA recursive_triggers is OFF by default
   // (verified at boot below), so an AFTER UPDATE trigger that updates its
   // own row will not re-fire itself.
-  for (const t of AUDITED_TABLES) {
-    try {
-      wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modins AFTER INSERT ON ${t}
-        BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
-      wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modupd AFTER UPDATE ON ${t}
-        BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
-    } catch (e) { /* table may not exist on a partial schema — ignore */ }
-  }
+  const ensureAuditTriggers = (tables) => {
+    for (const t of tables) {
+      try {
+        wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modins AFTER INSERT ON ${t}
+          BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+        wrapped.exec(`CREATE TRIGGER IF NOT EXISTS trg_${t}_modupd AFTER UPDATE ON ${t}
+          BEGIN UPDATE ${t} SET modified_at = datetime('now','localtime'), modified_by = current_actor() WHERE rowid = NEW.rowid; END;`);
+      } catch (e) { /* table may not exist on a partial schema — ignore */ }
+    }
+  };
+  ensureAuditTriggers(AUDITED_TABLES);
 
   // Price-check backfill: any auction that was already verified BEFORE
   // the price_check_first_passed_at column existed gets its first-pass

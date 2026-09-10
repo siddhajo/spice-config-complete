@@ -24,7 +24,7 @@ const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 const { initDb, getDb, flushDb, replaceDbFromBuffer, setActor, DB_PATH } = require('./db');
 const { initCompanySettings, CATEGORIES, getAllSettings, updateSettings, getSettingsFlat, getGSTRates, getAllPresets, setActivePresetCode, savePreset, getActivePresetCode, getPreset, syncSampleRefund, exportSettingsBundle, importSettingsBundle } = require('./company-config');
-const { calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
+const { SELLER_KEY_SQL, sellerKey, calculateLot, buildSalesInvoice, buildPurchaseInvoice, buildAgriBill, buildDebitNote, listAgriSellers, getPaymentSummary, ispLotDiscount, getBankPaymentData, getTDSReturnData, getSalesJournal, getPurchaseJournal, paymentTdsContext, distributeRoundedPayable } = require('./calculations');
 const { generatePurchaseInvoicePDF, generateCropReceiptPDF, generateAgriBillPDF, generateSalesInvoicePDF, generateSalesInvoicesBatchPDF, generatePurchaseInvoicesBatchPDF, generateAgriBillsBatchPDF, generateLotReceiptPDF, generateLotFilingPDF, generateCommissionBoSPDF, generateCommissionBoSBatchPDF } = require('./invoice-pdf');
 const { generateDebitNoteBatchPDF } = require('./debit-note-print');
 const { EXPORT_TYPES } = require('./exports');
@@ -3624,7 +3624,18 @@ function _resolveSellerPhone(db, { traderId, sellerName, phone }) {
   if (Number.isFinite(tid) && tid > 0) {
     row = db.get('SELECT name, tel, whatsapp FROM traders WHERE id = ?', [tid]);
   } else if (sellerName) {
-    row = db.get('SELECT name, tel, whatsapp FROM traders WHERE LOWER(name) = LOWER(?) LIMIT 1', [String(sellerName).trim()]);
+    // Name lookup is a fallback for callers that have no trader_id. When the
+    // name matches more than one seller there is no honest answer — messaging
+    // the first row could send one seller's figures to another — so resolve
+    // only when it is unambiguous.
+    const matches = db.all(
+      'SELECT id, name, tel, whatsapp FROM traders WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))',
+      [String(sellerName).trim()]
+    );
+    if (matches.length === 1) row = matches[0];
+    else if (matches.length > 1) {
+      return { phone: '', name: sellerName || '', ambiguous: true, candidates: matches.map(m => m.id) };
+    }
   }
   if (!row) return { phone: '', name: sellerName || '' };
   return { phone: (row.whatsapp || row.tel || ''), name: row.name || sellerName || '' };
@@ -3645,7 +3656,9 @@ app.post('/api/whatsapp/notify-seller', requireView, async (req, res) => {
   if (!c.token || !c.phoneId) return res.status(501).json({ error: 'WhatsApp not configured' });
   if (!c.tplText) return res.status(400).json({ error: 'No text template configured', fallback: true });
   const b = req.body || {};
-  const { phone, name } = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const _res = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const { phone, name } = _res;
+  if (_res.ambiguous) return res.status(400).json({ error: `More than one seller is named "${b.seller_name}" — send from the seller's own row so the right party is messaged.`, ambiguous: true });
   const wa = _waNormPhone(phone);
   if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
   const cfg = getSettingsFlat(db);
@@ -3673,7 +3686,9 @@ app.post('/api/whatsapp/seller-lot-sold/:auctionId', requireView, async (req, re
   const auctionId = parseInt(req.params.auctionId, 10);
   if (!auctionId) return res.status(400).json({ error: 'auctionId required' });
   const b = req.body || {};
-  const { phone, name } = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const _res = _resolveSellerPhone(db, { traderId: b.trader_id, sellerName: b.seller_name, phone: b.phone });
+  const { phone, name } = _res;
+  if (_res.ambiguous) return res.status(400).json({ error: `More than one seller is named "${b.seller_name}" — send from the seller's own row so the right party is messaged.`, ambiguous: true });
   const wa = _waNormPhone(phone);
   if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
 
@@ -3939,15 +3954,21 @@ function findDuplicateSeller(db, pan, excludeId) {
 app.post('/api/traders', requireTraderWrite, (req, res) => {
   const t = req.body;
   const db = getDb();
-  // Duplicate-PAN guard. Hard block (409) so the operator goes back
-  // and edits the existing row rather than maintaining two.
+  // Duplicate-PAN guard. Two sellers CAN legitimately be different parties
+  // under one trade name and one PAN, so this is no longer an absolute
+  // block — but it stays a stop-and-confirm, because the overwhelmingly
+  // common case is an operator re-adding a seller that already exists.
+  // The client re-posts with `allowDuplicate: true` once the user has seen
+  // the existing row and confirmed they mean a second, separate party.
   const dup = findDuplicateSeller(db, t.pan);
-  if (dup) {
+  if (dup && !t.allowDuplicate) {
     return res.status(409).json({
       error: `A seller with PAN "${dup.pan}" already exists: ${dup.name || '(unnamed)'}`,
       duplicate: true,
       field: 'pan',
       existing: dup,
+      // Tells the client this is confirmable rather than fatal.
+      confirmable: true,
     });
   }
   const info = db.run(`INSERT INTO traders (name,cr,pan,tel,email,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
@@ -3963,15 +3984,17 @@ app.post('/api/traders', requireTraderWrite, (req, res) => {
 app.put('/api/traders/:id', requireTraderWrite, (req, res) => {
   const t = req.body;
   const db = getDb();
-  // Same duplicate-PAN check applied to updates, excluding the row
-  // being edited. Prevents renaming a PAN to collide with a sibling.
+  // Same duplicate-PAN check applied to updates, excluding the row being
+  // edited, and likewise overridable with `allowDuplicate` for the genuine
+  // two-parties-one-PAN case.
   const dup = findDuplicateSeller(db, t.pan, parseInt(req.params.id, 10));
-  if (dup) {
+  if (dup && !t.allowDuplicate) {
     return res.status(409).json({
       error: `Another seller with PAN "${dup.pan}" already exists: ${dup.name || '(unnamed)'}`,
       duplicate: true,
       field: 'pan',
       existing: dup,
+      confirmable: true,
     });
   }
   db.run(`UPDATE traders SET name=?,cr=?,pan=?,tel=?,email=?,aadhar=?,padd=?,ppla=?,pin=?,pstate=?,pst_code=?,ifsc=?,acctnum=?,holder_name=? WHERE id=?`,
@@ -5283,6 +5306,10 @@ function runLotImport(db, filePath, body) {
 
     let imported = 0, updated = 0, skipped = 0;
     const skipReasons = []; // [{row, lot, reason}]
+    // Lots whose seller name matched more than one seller row and couldn't be
+    // narrowed by CR/GSTIN — imported unlinked, surfaced so the UI can point
+    // the operator straight at them.
+    const ambiguousSellers = []; // [{row, lot, name, candidates:[id]}]
     const auctionStats = new Map(); // key = "ano|date" → count
 
     // Helper: check if row is completely empty (all values blank/undefined)
@@ -5414,10 +5441,42 @@ function runLotImport(db, filePath, body) {
 
         // Try to find trader by name for linking
         const sellerName = mapCol(row, 'NAME', 'SELLER', 'POOLER', 'TRADER');
+        // Link the lot to its seller ROW, not just a name. Two sellers can be
+        // different parties under one trade name, and the auctioneer's file
+        // carries only the name — so a bare name match would attach the lot to
+        // whichever row happened to sort first, sending that lot's money to
+        // the wrong party's bank account. Resolution order:
+        //   1. unique name match                        → link
+        //   2. ambiguous name, narrowed by the file's CR/GSTIN → link
+        //   3. still ambiguous                          → leave UNLINKED
+        // An unlinked lot is not silently wrong: Validate Lots already blocks
+        // the trade on "lots with no seller", so the operator assigns it with
+        // the existing bulk Reassign Seller before anything can be paid.
+        const rowCr = String(mapCol(row, 'CR', 'GSTIN', 'GST', 'CR_NO', 'CRNO') || '').trim();
         let traderId = null;
         if (sellerName) {
-          const trader = db.get('SELECT id FROM traders WHERE name = ?', [sellerName]);
-          if (trader) traderId = trader.id;
+          const matches = db.all(
+            'SELECT id, cr, pan FROM traders WHERE UPPER(TRIM(name)) = UPPER(TRIM(?))', [sellerName]);
+          if (matches.length === 1) {
+            traderId = matches[0].id;
+          } else if (matches.length > 1) {
+            // Compare on the digits/letters of the GSTIN only, so "GSTIN.32AB…",
+            // "32AB…" and a lower-cased variant all reconcile.
+            const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^GSTIN/, '');
+            const want = norm(rowCr);
+            const byCr = want ? matches.filter(m => norm(m.cr) === want || norm(m.pan) === want) : [];
+            if (byCr.length === 1) {
+              traderId = byCr[0].id;
+            } else {
+              ambiguousSellers.push({ row: rowNum, lot: lotNo, name: sellerName, candidates: matches.map(m => m.id) });
+              skipReasons.push({
+                row: rowNum, lot: lotNo,
+                reason: `Warning: ${matches.length} sellers are named "${sellerName}"`
+                  + (rowCr ? ` and none matched CR/GSTIN "${rowCr}"` : ' and the file carries no CR/GSTIN to tell them apart')
+                  + '. Lot imported WITHOUT a seller — assign it via Lots → Reassign Seller before generating anything.',
+              });
+            }
+          }
         }
 
         try {
@@ -5490,6 +5549,7 @@ function runLotImport(db, filePath, body) {
       auctionCount: auctionBreakdown.length,
       auctionBreakdown,
       skipReasons,
+      ambiguousSellers,
       // Actual header names parsed from the sheet — surfaced so a column that
       // didn't map (price/buyer named differently than expected) is
       // diagnosable from the UI without re-opening the file.
@@ -7904,13 +7964,21 @@ function _hasRemainingParties(db, docType, auctionId) {
   }
   if (docType === 'purchases') {
     // Mirrors /api/purchases/generate-all (UPPER(cr) LIKE 'GSTIN%').
+    // "Already has one" is tested against the PARTY, not the name: two
+    // different sellers can share a trade name, and a name-only test made
+    // the second look done the moment the first was generated — the gate
+    // then locked the trade and the second party could never be billed.
+    // Legacy purchases rows with no trader_id still fall back to the name.
     return !!db.get(
       `SELECT 1 FROM lots l
        WHERE l.auction_id = ? AND l.amount > 0
          AND l.name IS NOT NULL AND l.name != ''
          AND UPPER(l.cr) LIKE 'GSTIN%'
          AND NOT EXISTS (
-           SELECT 1 FROM purchases p WHERE p.auction_id = l.auction_id AND p.name = l.name
+           SELECT 1 FROM purchases p
+            WHERE p.auction_id = l.auction_id
+              AND ( (p.trader_id IS NOT NULL AND p.trader_id = l.trader_id)
+                 OR (p.trader_id IS NULL AND p.name = l.name) )
          )
        LIMIT 1`,
       [auctionId]
@@ -7926,7 +7994,10 @@ function _hasRemainingParties(db, docType, auctionId) {
          AND (l.cr IS NULL OR l.cr = ''
               OR (UPPER(l.cr) NOT LIKE 'GSTIN%' AND l.cr NOT GLOB '[0-9][0-9]*'))
          AND NOT EXISTS (
-           SELECT 1 FROM bills b WHERE b.auction_id = l.auction_id AND b.name = l.name
+           SELECT 1 FROM bills b
+            WHERE b.auction_id = l.auction_id
+              AND ( (b.trader_id IS NOT NULL AND b.trader_id = l.trader_id)
+                 OR (b.trader_id IS NULL AND b.name = l.name) )
          )
        LIMIT 1`,
       [auctionId]
@@ -7942,7 +8013,10 @@ function _hasRemainingParties(db, docType, auctionId) {
       `SELECT 1 FROM purchases p
        WHERE p.ano = ?
          AND NOT EXISTS (
-           SELECT 1 FROM debit_notes d WHERE d.ano = p.ano AND d.name = p.name
+           SELECT 1 FROM debit_notes d
+            WHERE d.ano = p.ano
+              AND ( (d.trader_id IS NOT NULL AND d.trader_id = p.trader_id)
+                 OR (d.trader_id IS NULL AND d.name = p.name) )
          )
        LIMIT 1`,
       [String(auc.ano)]
@@ -7960,12 +8034,17 @@ function _hasRemainingParties(db, docType, auctionId) {
          AND b.name IS NOT NULL AND b.name != ''
          AND EXISTS (
            SELECT 1 FROM lots l2
-            WHERE l2.auction_id = b.auction_id AND l2.name = b.name
+            WHERE l2.auction_id = b.auction_id
+              AND ( (b.trader_id IS NOT NULL AND l2.trader_id = b.trader_id)
+                 OR (b.trader_id IS NULL AND l2.name = b.name) )
               AND TRIM(COALESCE(l2.grade,'')) = '1'
               AND (COALESCE(l2.com,0) + COALESCE(l2.sertax,0)) > 0
          )
          AND NOT EXISTS (
-           SELECT 1 FROM debit_notes_planter dn WHERE dn.ano = ? AND dn.name = b.name
+           SELECT 1 FROM debit_notes_planter dn
+            WHERE dn.ano = ?
+              AND ( (dn.trader_id IS NOT NULL AND dn.trader_id = b.trader_id)
+                 OR (dn.trader_id IS NULL AND dn.name = b.name) )
          )
        LIMIT 1`,
       [String(auc.ano).trim(), String(auc.ano)]
@@ -9282,7 +9361,7 @@ app.get('/api/purchases', requireView, (req, res) => {
   for (const r of rows) {
     if (!r.auction_id || !r.name) continue;
     try {
-      const inv = buildPurchaseInvoice(db, r.auction_id, r.name, cfgP, { ispView: true, useStoredTds: true });
+      const inv = buildPurchaseInvoice(db, r.auction_id, r.name, cfgP, { ispView: true, useStoredTds: true, traderId: r.trader_id });
       if (inv && inv.summary) {
         const s = inv.summary;
         // totalPuramt is a raw sum (isp_puramt) and can carry float noise —
@@ -9313,20 +9392,20 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
   // equals the invoice / the Purchases screen. Without this the generate path
   // stored the active-context (ASP/legacy) PurAmt while the PDF showed ISP,
   // leaving the stored value out of step with what's displayed and printed.
-  const invoice = buildPurchaseInvoice(db, req.params.auctionId, sellerName, cfg, { ispView: true });
+  const invoice = buildPurchaseInvoice(db, req.params.auctionId, sellerName, cfg, { ispView: true, traderId: req.body.traderId });
   if (!invoice) return res.status(404).json({ error: 'No data for this seller' });
   
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [req.params.auctionId]);
   const s = invoice.summary;
-  db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  db.run(`INSERT INTO purchases (auction_id,trader_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     // Stamp the BUSINESS-CONTEXT state (TAMIL NADU=ISP, KERALA=ASP), not the
     // auction's physical state — mirrors the sales-invoice generate (see the
     // invoiceState line above). In e-Trade the purchases list filters rows by
     // the active business state, so a purchase generated while in KERALA must
     // be stamped KERALA or it vanishes from the list ("generated but not
     // showing"). stateForRecord still returns business_state for e-Auction.
-    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
+    [req.params.auctionId,(invoice.seller&&invoice.seller.trader_id)||null,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
      invoice.seller.place||'',invoice.seller.cr||'',String(invoiceNo),s.totalQty,s.totalPuramt,
      s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
   res.json({ success: true, invoice: s });
@@ -9335,7 +9414,14 @@ app.post('/api/purchases/generate/:auctionId', requireInvoiceWrite, (req, res) =
 // List eligible sellers for purchase invoices (with GSTIN, amount > 0).
 // ?excludeGenerated=1 hides dealers who ALREADY have a purchase invoice for
 // this trade, so the single-generate picker lists only sellers still needing
-// one. Match on seller NAME (purchases has no lot FK), case/space-insensitive.
+// one.
+//
+// Grouped by seller KEY (traders.id, name only as a fallback), and the
+// already-generated test matches on that same key: two different parties can
+// share a trade name, and matching on the name alone both merged them into
+// one picker row and made the second look "already invoiced" the moment the
+// first was generated — so it could never be billed. Legacy purchases rows
+// carrying no trader_id still fall back to a name match.
 app.get('/api/purchases/eligible-sellers/:auctionId', requireView, (req, res) => {
   const aid = req.params.auctionId;
   const excludeGenerated = req.query.excludeGenerated === '1' || req.query.excludeGenerated === 'true';
@@ -9345,15 +9431,19 @@ app.get('/api/purchases/eligible-sellers/:auctionId', requireView, (req, res) =>
     notGen = ` AND NOT EXISTS (
                  SELECT 1 FROM purchases p
                   WHERE p.auction_id = ?
-                    AND UPPER(TRIM(p.name)) = UPPER(TRIM(lots.name)) )`;
+                    AND ( (p.trader_id IS NOT NULL AND p.trader_id = lots.trader_id)
+                       OR (p.trader_id IS NULL
+                           AND UPPER(TRIM(p.name)) = UPPER(TRIM(lots.name))) ) )`;
     params.push(aid);
   }
   res.json(getDb().all(
-    `SELECT name, COUNT(*) as lot_count, SUM(qty) as total_qty, SUM(amount) as total_amount, MAX(cr) as cr
+    `SELECT ${SELLER_KEY_SQL('lots')} AS seller_key, MAX(trader_id) AS trader_id,
+            MAX(name) AS name, COUNT(*) as lot_count, SUM(qty) as total_qty,
+            SUM(amount) as total_amount, MAX(cr) as cr
      FROM lots
      WHERE auction_id = ? AND name IS NOT NULL AND name != ''
        AND UPPER(cr) LIKE 'GSTIN%' AND amount > 0${notGen}
-     GROUP BY name
+     GROUP BY seller_key
      ORDER BY name`,
     params
   ));
@@ -9395,15 +9485,15 @@ app.post('/api/purchases/generate-all/:auctionId', requireInvoiceWrite, (req, re
     try {
       // ispView: store ISP planter figures so the stored row matches the
       // invoice PDF + Purchases screen (see the single-generate note above).
-      const invoice = buildPurchaseInvoice(db, req.params.auctionId, row.name, cfg, { ispView: true });
+      const invoice = buildPurchaseInvoice(db, req.params.auctionId, row.name, cfg, { ispView: true, traderId: row.trader_id });
       if (!invoice) { errors.push({ seller: row.name, error: 'Build failed' }); continue; }
       const s = invoice.summary;
       const invoNo = String(nextNo);
-      db.run(`INSERT INTO purchases (auction_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      db.run(`INSERT INTO purchases (auction_id,trader_id,ano,date,state,br,name,add_line,place,gstin,invo,qty,amount,cgst,sgst,igst,rund,total,tds)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         // Stamp the business-context state (see single-generate note above) so
         // KERALA/ASP purchases stay visible in the KERALA list.
-        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
+        [req.params.auctionId,(invoice.seller&&invoice.seller.trader_id)||null,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',invoice.seller.name,invoice.seller.address||'',
          invoice.seller.place||'',invoice.seller.cr||'',invoNo,s.totalQty,s.totalPuramt,
          s.totalCgst,s.totalSgst,s.totalIgst,s.roundDiff,s.grandTotal,s.tdsAmount]);
       results.push({ seller: row.name, invoiceNo: invoNo, grandTotal: s.grandTotal });
@@ -9463,7 +9553,7 @@ app.get('/api/purchases/pdf/:auctionId/:sellerName', requireView, async (req, re
     // Try to build fresh invoice from lots. ispView → print ISP planter
     // P_Rate / PurAmt (and matching Qty) on the downloaded purchase
     // invoice regardless of the active business state.
-    let invoice = buildPurchaseInvoice(db, auctionId, sellerName, cfg, { ispView: true, useStoredTds: true });
+    let invoice = buildPurchaseInvoice(db, auctionId, sellerName, cfg, { ispView: true, useStoredTds: true, traderId: req.query.traderId });
     
     // Fallback: if lots data missing, rebuild from stored purchase record
     if (!invoice) {
@@ -9580,7 +9670,7 @@ app.post('/api/purchases/pdf-bulk', requireView, async (req, res) => {
       // Try fresh rebuild from lots first (richer line-item detail).
       // ispView → ISP planter P_Rate / PurAmt on the downloaded invoice.
       let invoice = stored.auction_id
-        ? buildPurchaseInvoice(db, stored.auction_id, stored.name, cfg, { ispView: true, useStoredTds: true })
+        ? buildPurchaseInvoice(db, stored.auction_id, stored.name, cfg, { ispView: true, useStoredTds: true, traderId: stored.trader_id })
         : null;
       if (!invoice) {
         // Fallback: stored summary only (one line item)
@@ -9695,16 +9785,16 @@ app.post('/api/bills/generate/:auctionId', requireInvoiceWrite, (req, res) => {
       [c.pqty,c.prate,c.puramt,c.com,c.sertax,c.cgst,c.sgst,c.igst,c.advance,c.balance,c.bilamt,c.refund||0,c.refud||0,c.isp_pqty||0,c.isp_prate||0,c.isp_puramt||0,c.asp_pqty||0,c.asp_prate||0,c.asp_puramt||0,lot.id]);
   }
   
-  const bill = buildAgriBill(db, req.params.auctionId, sellerName, cfg);
+  const bill = buildAgriBill(db, req.params.auctionId, sellerName, cfg, { traderId: req.body.traderId });
   if (!bill || bill.error) {
     return res.status(404).json({ error: bill?.error || 'No eligible lots found' });
   }
   
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [req.params.auctionId]);
   const s = bill.summary;
-  db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
+  db.run(`INSERT INTO bills (auction_id,trader_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [req.params.auctionId,(bill.seller&&bill.seller.trader_id)||null,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
      parseInt(billNo),bill.seller.name,bill.seller.address||'',bill.seller.place||'',
      bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
      s.totalQty,s.totalPuramt,0,s.netAmount]);
@@ -9746,12 +9836,12 @@ app.post('/api/bills/generate-all/:auctionId', requireInvoiceWrite, (req, res) =
   
   for (const row of sellers) {
     try {
-      const bill = buildAgriBill(db, req.params.auctionId, row.name, cfg);
+      const bill = buildAgriBill(db, req.params.auctionId, row.name, cfg, { traderId: row.trader_id });
       if (!bill || bill.error) { errors.push({ seller: row.name, error: bill?.error || 'Build failed' }); continue; }
       const s = bill.summary;
-      db.run(`INSERT INTO bills (auction_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [req.params.auctionId,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
+      db.run(`INSERT INTO bills (auction_id,trader_id,ano,date,state,br,crpt,bil,name,add_line,pla,pstate,st_code,crr,pan,qty,cost,igst,net)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [req.params.auctionId,(bill.seller&&bill.seller.trader_id)||null,auction.ano,auction.date,stateForRecord(cfg, cfg.business_state || auction.state || ''),'',auction.crop_type||'ASP',
          nextNo,bill.seller.name,bill.seller.address||'',bill.seller.place||'',
          bill.seller.state||'',bill.seller.st_code||'',bill.seller.cr||'',bill.seller.pan||'',
          s.totalQty,s.totalPuramt,0,s.netAmount]);
@@ -9770,7 +9860,7 @@ app.get('/api/bills/pdf/:auctionId/:sellerName', requireView, async (req, res) =
     const sellerName = decodeURIComponent(req.params.sellerName);
     const billNo = req.query.billNo || '001';
     
-    let bill = buildAgriBill(db, req.params.auctionId, sellerName, cfg);
+    let bill = buildAgriBill(db, req.params.auctionId, sellerName, cfg, { traderId: req.query.traderId });
     if (!bill || bill.error) {
       // Fallback to stored record
       const stored = db.get('SELECT * FROM bills WHERE name = ? AND bil = ? LIMIT 1', [sellerName, parseInt(billNo)]);
@@ -10501,9 +10591,12 @@ app.post('/api/debit-notes/generate', requireInvoiceWrite, (req, res) => {
   }
 
   db.run(
-    `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [ano, dnDate, stateForRecord(db, purchase.state || ''), dealerName,
+    // trader_id carried over from the purchase invoice this note derives
+    // from, so the deduction lands on that party even when another seller
+    // shares the name (see sellerDebitMap in calculations.js).
+    `INSERT INTO debit_notes (ano,date,state,trader_id,name,note_no,amount,cgst,sgst,igst,total)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [ano, dnDate, stateForRecord(db, purchase.state || ''), purchase.trader_id || null, dealerName,
      noteNo, discountAmt, cgst, sgst, igst, total]
   );
 
@@ -10560,9 +10653,14 @@ app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
     });
   }
 
-  // Existing DN keys for this trade (single query — cheap).
+  // Existing DN keys for this trade (single query — cheap). Keyed by the
+  // seller KEY, not the bare name: two dealers can share a trade name, and a
+  // name-only key would make the second one look "already done" and silently
+  // skip its debit note.
+  const { sellerKey: _sellerKey } = require('./calculations');
   const existingKeys = new Set(
-    db.all(`SELECT name FROM debit_notes WHERE ano = ?`, [ano]).map(r => r.name || '')
+    db.all(`SELECT trader_id, name FROM debit_notes WHERE ano = ?`, [ano])
+      .map(r => _sellerKey(r.trader_id, r.name))
   );
 
   // Resolve DN date once per trade.
@@ -10584,7 +10682,7 @@ app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
 
   // Eligible count for the up-front range check.
   const eligibleCount = purchases.filter(
-    p => !existingKeys.has(p.name || '') && Number(p.amount || 0) > 0
+    p => !existingKeys.has(_sellerKey(p.trader_id, p.name)) && Number(p.amount || 0) > 0
   ).length;
 
   // Resolve next note number. User-supplied `startNoteNo` anchors the
@@ -10631,7 +10729,8 @@ app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
 
   for (const p of purchases) {
     const dealerName = p.name || '';
-    if (existingKeys.has(dealerName)) {
+    const dealerKey  = _sellerKey(p.trader_id, p.name);
+    if (existingKeys.has(dealerKey)) {
       skipped.push({ invo: p.invo, ano, buyer: dealerName, reason: 'duplicate (DN already exists for this dealer in this trade)' });
       continue;
     }
@@ -10665,13 +10764,13 @@ app.post('/api/debit-notes/generate-bulk', requireInvoiceWrite, (req, res) => {
     const total = _dnRound2(discountAmt + cgst + sgst + igst);
 
     db.run(
-      `INSERT INTO debit_notes (ano,date,state,name,note_no,amount,cgst,sgst,igst,total)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [ano, dnDate, stateForRecord(db, p.state || ''), dealerName,
+      `INSERT INTO debit_notes (ano,date,state,trader_id,name,note_no,amount,cgst,sgst,igst,total)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [ano, dnDate, stateForRecord(db, p.state || ''), p.trader_id || null, dealerName,
        String(nextNoteNo), discountAmt, cgst, sgst, igst, total]
     );
     generated.push({ note_no: nextNoteNo, purchno: p.invo, dealer: dealerName, total });
-    existingKeys.add(dealerName);
+    existingKeys.add(dealerKey);
     nextNoteNo++;
   }
 
@@ -10696,11 +10795,14 @@ app.get('/api/debit-notes/eligible-purchases/:auctionId', requireView, (req, res
   if (!auction) return res.status(404).json({ error: 'Auction not found' });
   const ano = auction.ano;
   const rows = db.all(
-    `SELECT p.id, p.invo, p.name, p.amount, p.cgst, p.sgst, p.igst, p.total, p.date, p.state
+    `SELECT p.id, p.invo, p.name, p.trader_id, p.amount, p.cgst, p.sgst, p.igst, p.total, p.date, p.state
        FROM purchases p
       WHERE p.ano = ? AND p.amount > 0
         AND NOT EXISTS (
-          SELECT 1 FROM debit_notes dn WHERE dn.ano = p.ano AND dn.name = p.name
+          SELECT 1 FROM debit_notes dn
+           WHERE dn.ano = p.ano
+             AND ( (dn.trader_id IS NOT NULL AND dn.trader_id = p.trader_id)
+                OR (dn.trader_id IS NULL AND dn.name = p.name) )
         )
       ORDER BY p.id`,
     [ano]
@@ -10836,13 +10938,19 @@ function requireDebitNotePlanterEnabled(req, res, next) {
 // Taxable base for a planter DN = sum(commission + service-tax/handling)
 // on the planter's GRADE-1 lots in this auction. Returns 0 when there's
 // nothing to debit.
-function _planterServiceBase(db, auctionId, sellerName) {
-  if (!auctionId || !sellerName) return 0;
+function _planterServiceBase(db, auctionId, sellerName, traderId) {
+  if (!auctionId) return 0;
+  // Prefer the party id — two planters can share a name, and summing by name
+  // would charge one of them for the other's grade-1 commission.
+  const tid = Number(traderId);
+  const byId = Number.isFinite(tid) && tid > 0;
+  if (!byId && !sellerName) return 0;
   const row = db.get(
     `SELECT COALESCE(SUM(COALESCE(com,0) + COALESCE(sertax,0)), 0) AS base
        FROM lots
-      WHERE auction_id = ? AND name = ? AND TRIM(COALESCE(grade,'')) = '1'`,
-    [auctionId, sellerName]
+      WHERE auction_id = ? AND ${byId ? 'trader_id = ?' : 'name = ?'}
+        AND TRIM(COALESCE(grade,'')) = '1'`,
+    [auctionId, byId ? tid : sellerName]
   );
   return row ? Number(row.base) || 0 : 0;
 }
@@ -10923,7 +11031,7 @@ app.post('/api/debit-notes-planter/generate', requireInvoiceWrite, requireDebitN
   }
 
   // Taxable base = commission + handling on the planter's grade-1 lots.
-  const dnAmount = _planterServiceBase(db, bill.auction_id, planterName);
+  const dnAmount = _planterServiceBase(db, bill.auction_id, planterName, bill.trader_id);
   if (dnAmount <= 0) {
     return res.status(400).json({ error: `No grade-1 commission/handling found for ${planterName} in trade #${ano} — nothing to debit` });
   }
@@ -10966,9 +11074,9 @@ app.post('/api/debit-notes-planter/generate', requireInvoiceWrite, requireDebitN
   }
 
   db.run(
-    `INSERT INTO debit_notes_planter (ano,date,state,name,note_no,amount,cgst,sgst,igst,total,auction_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [ano, dnDate, stateForRecord(db, bill.pstate || bill.state || ''), planterName,
+    `INSERT INTO debit_notes_planter (ano,date,state,trader_id,name,note_no,amount,cgst,sgst,igst,total,auction_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [ano, dnDate, stateForRecord(db, bill.pstate || bill.state || ''), bill.trader_id || null, planterName,
      noteNo, dnAmount, cgst, sgst, igst, total, bill.auction_id || null]
   );
 
@@ -11002,8 +11110,11 @@ app.post('/api/debit-notes-planter/generate-bulk', requireInvoiceWrite, requireD
     });
   }
 
+  // Keyed by the seller KEY, not the bare name — otherwise the second of two
+  // same-named planters looks "already done" and never gets its note.
   const existingKeys = new Set(
-    db.all(`SELECT name FROM debit_notes_planter WHERE ano = ?`, [ano]).map(r => r.name || '')
+    db.all(`SELECT trader_id, name FROM debit_notes_planter WHERE ano = ?`, [ano])
+      .map(r => sellerKey(r.trader_id, r.name))
   );
   const trade = db.get('SELECT date FROM auctions WHERE ano = ? LIMIT 1', [ano]);
   const dnDate = trade && trade.date
@@ -11013,7 +11124,8 @@ app.post('/api/debit-notes-planter/generate-bulk', requireInvoiceWrite, requireD
   const dnGstRate = Number(cfg.gst_service) || 18;
 
   const eligibleCount = bills.filter(
-    b => !existingKeys.has(b.name || '') && _planterServiceBase(db, b.auction_id, b.name || '') > 0
+    b => !existingKeys.has(sellerKey(b.trader_id, b.name))
+         && _planterServiceBase(db, b.auction_id, b.name || '', b.trader_id) > 0
   ).length;
 
   let nextNoteNo;
@@ -11049,11 +11161,12 @@ app.post('/api/debit-notes-planter/generate-bulk', requireInvoiceWrite, requireD
   const skipped   = [];
   for (const b of bills) {
     const planterName = b.name || '';
-    if (existingKeys.has(planterName)) {
+    const planterKey = sellerKey(b.trader_id, b.name);
+    if (existingKeys.has(planterKey)) {
       skipped.push({ invo: b.bil, ano, buyer: planterName, reason: 'duplicate (DN already exists for this planter in this trade)' });
       continue;
     }
-    const dnAmount = _planterServiceBase(db, b.auction_id, planterName);
+    const dnAmount = _planterServiceBase(db, b.auction_id, planterName, b.trader_id);
     if (dnAmount <= 0) {
       skipped.push({ invo: b.bil, ano, buyer: planterName, reason: 'no grade-1 commission/handling' });
       continue;
@@ -11070,13 +11183,13 @@ app.post('/api/debit-notes-planter/generate-bulk', requireInvoiceWrite, requireD
     const total = _dnRound2(dnAmount + cgst + sgst + igst);
 
     db.run(
-      `INSERT INTO debit_notes_planter (ano,date,state,name,note_no,amount,cgst,sgst,igst,total,auction_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [ano, dnDate, stateForRecord(db, b.pstate || b.state || ''), planterName,
+      `INSERT INTO debit_notes_planter (ano,date,state,trader_id,name,note_no,amount,cgst,sgst,igst,total,auction_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [ano, dnDate, stateForRecord(db, b.pstate || b.state || ''), b.trader_id || null, planterName,
        String(nextNoteNo), dnAmount, cgst, sgst, igst, total, b.auction_id || null]
     );
     generated.push({ note_no: nextNoteNo, bilno: b.bil, planter: planterName, total });
-    existingKeys.add(planterName);
+    existingKeys.add(planterKey);
     nextNoteNo++;
   }
 
@@ -11099,22 +11212,29 @@ app.get('/api/debit-notes-planter/eligible-bills/:auctionId', requireView, (req,
   // `amount` is the DN BASE (commission + handling on grade-1 lots), not
   // the bill value. Only planters with grade-1 service charges are eligible.
   const rows = db.all(
-    `SELECT b.id, b.bil, b.name,
+    `SELECT b.id, b.bil, b.name, b.trader_id,
             (SELECT COALESCE(SUM(COALESCE(l.com,0) + COALESCE(l.sertax,0)), 0)
                FROM lots l
-              WHERE l.auction_id = b.auction_id AND l.name = b.name
+              WHERE l.auction_id = b.auction_id
+                AND ( (b.trader_id IS NOT NULL AND l.trader_id = b.trader_id)
+                   OR (b.trader_id IS NULL AND l.name = b.name) )
                 AND TRIM(COALESCE(l.grade,'')) = '1') AS amount,
             b.date, b.pstate AS state
        FROM bills b
       WHERE TRIM(b.ano) = ?
         AND EXISTS (
           SELECT 1 FROM lots l2
-           WHERE l2.auction_id = b.auction_id AND l2.name = b.name
+           WHERE l2.auction_id = b.auction_id
+             AND ( (b.trader_id IS NOT NULL AND l2.trader_id = b.trader_id)
+                OR (b.trader_id IS NULL AND l2.name = b.name) )
              AND TRIM(COALESCE(l2.grade,'')) = '1'
              AND (COALESCE(l2.com,0) + COALESCE(l2.sertax,0)) > 0
         )
         AND NOT EXISTS (
-          SELECT 1 FROM debit_notes_planter dn WHERE dn.ano = ? AND dn.name = b.name
+          SELECT 1 FROM debit_notes_planter dn
+           WHERE dn.ano = ?
+             AND ( (dn.trader_id IS NOT NULL AND dn.trader_id = b.trader_id)
+                OR (dn.trader_id IS NULL AND dn.name = b.name) )
         )
       ORDER BY b.id`,
     [String(ano).trim(), ano]
@@ -11400,9 +11520,9 @@ app.post('/api/invoices/preview/:auctionId', requireView, (req, res) => {
   let invoice;
   if (type === 'purchase') {
     // ispView so the preview matches the generated invoice / PDF (ISP figures).
-    invoice = buildPurchaseInvoice(db, req.params.auctionId, buyerCode, cfg, { ispView: true }); // buyerCode = sellerName for purchase
+    invoice = buildPurchaseInvoice(db, req.params.auctionId, buyerCode, cfg, { ispView: true, traderId: (req.body && req.body.traderId) || req.query.traderId }); // buyerCode = sellerName for purchase
   } else if (type === 'agri') {
-    invoice = buildAgriBill(db, req.params.auctionId, buyerCode, cfg);
+    invoice = buildAgriBill(db, req.params.auctionId, buyerCode, cfg, { traderId: (req.body && req.body.traderId) || req.query.traderId });
     if (invoice && invoice.error) return res.status(404).json({ error: invoice.error });
   } else {
     invoice = buildSalesInvoice(db, req.params.auctionId, buyerCode, saleType, cfg, { includeTI });
@@ -11648,6 +11768,15 @@ app.get('/api/payments/bank/:auctionId', requireView, (req, res) => {
 // modal, ticks the lots being settled now, prints just those).
 function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   const auction = db.get('SELECT * FROM auctions WHERE id = ?', [auctionId]) || { ano:'', date:'' };
+  // `sellerName` may be a seller KEY ("id:42") — the Payments tab sends one so
+  // a statement addresses exactly one party. Two sellers can share a name, and
+  // a name-matched statement would list both parties' lots on one page.
+  const _keyM = /^id:(\d+)$/.exec(String(sellerName || '').trim());
+  const _traderId = _keyM ? Number(_keyM[1]) : null;
+  if (_traderId) {
+    const _t = db.get('SELECT name FROM traders WHERE id = ?', [_traderId]);
+    sellerName = (_t && _t.name) || sellerName;
+  }
   // Match seller by trimmed/case-insensitive name so legacy rows whose
   // `name` was stored with trailing whitespace or mixed case still pair
   // up. `prate` (per-kg purchase rate) is aliased as `rate` for display.
@@ -11665,9 +11794,9 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
         puramt, refund, balance, cgst, sgst, igst
        FROM lots
       WHERE auction_id = ?
-        AND TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))
+        AND ${_traderId ? 'trader_id = ?' : "TRIM(LOWER(COALESCE(name,''))) = TRIM(LOWER(?))"}
         AND amount > 0`;
-  const lotParams = [auctionId, sellerName];
+  const lotParams = [auctionId, _traderId != null ? _traderId : sellerName];
   if (lotIdFilter.length) {
     const placeholders = lotIdFilter.map(() => '?').join(',');
     lotSql += ` AND id IN (${placeholders})`;
@@ -12066,9 +12195,11 @@ app.post('/api/tax-statement/whatsapp', requireView, async (req, res) => {
   const scope = _taxStatementScope(req.body || {});
   if (!scope.ok) return res.status(400).json({ error: scope.error });
   const cfg = getSettingsFlat(db);
-  const { phone, name } = _resolveSellerPhone(db, {
+  const _res2 = _resolveSellerPhone(db, {
     traderId: (req.body || {}).trader_id, sellerName: scope.opts.sellerName, phone: (req.body || {}).phone,
   });
+  const { phone, name } = _res2;
+  if (_res2.ambiguous) return res.status(400).json({ error: `More than one seller is named "${scope.opts.sellerName}" — send from the seller's own row so the right party is messaged.`, ambiguous: true });
   const wa = _waNormPhone(phone);
   if (!wa) return res.status(400).json({ error: 'Seller has no WhatsApp/phone on file' });
   try {

@@ -393,10 +393,15 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
   // beneficiaryName tracks the bank account holder which can be a
   // different entity. When opts.names is absent or empty the full
   // payment set is exported, preserving the original behaviour.
+  // Entries may be a seller KEY ("id:42") or a plain name. A key addresses
+  // exactly one party, which is what the UI now sends — two sellers can share
+  // a name, and a name-only filter would put BOTH in the bank file when the
+  // operator ticked one of them. Names still work for older callers.
   if (opts && Array.isArray(opts.names) && opts.names.length) {
     const wanted = new Set(opts.names.map(n => String(n || '').trim().toUpperCase()));
     payments = payments.filter(p =>
-      wanted.has(String(p.name || '').trim().toUpperCase())
+      wanted.has(String(p.seller_key || '').toUpperCase())
+      || wanted.has(String(p.name || '').trim().toUpperCase())
     );
   }
   // Optional per-seller lot-picks AND already-exported exclusions.
@@ -430,11 +435,17 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
       const excludeArr = excludeLots && Array.isArray(excludeLots[sellerName]) ? excludeLots[sellerName] : null;
       if ((!picksArr || !picksArr.length) && (!excludeArr || !excludeArr.length)) continue;
       const wantedUpper = String(sellerName || '').trim().toUpperCase();
-      const idx = payments.findIndex(p =>
-        String(p.name || '').trim().toUpperCase() === wantedUpper
-      );
+      // The map key is a seller KEY ("id:42") from the current UI, or a plain
+      // name from an older one. Resolve to the one payment row it addresses —
+      // and scope the re-query the same way, so a lot-pick for one seller
+      // never sweeps in a same-named seller's lots.
+      const keyMatch = /^ID:(\d+)$/.exec(wantedUpper);
+      const idx = keyMatch
+        ? payments.findIndex(p => String(p.seller_key || '') === 'id:' + keyMatch[1])
+        : payments.findIndex(p => String(p.name || '').trim().toUpperCase() === wantedUpper);
       if (idx < 0) continue;   // seller not in the current payments set (e.g. fully paid)
-      const params = [auctionId, wantedUpper];
+      const sellerWhere = keyMatch ? 'l.trader_id = ?' : 'UPPER(TRIM(l.name)) = ?';
+      const params = [auctionId, keyMatch ? Number(keyMatch[1]) : wantedUpper];
       let extraWhere = '';
       if (picksArr && picksArr.length) {
         extraWhere += ` AND l.lot_no IN (${picksArr.map(() => '?').join(',')})`;
@@ -454,7 +465,7 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
            FROM lots l
           WHERE l.auction_id = ? AND l.amount > 0
             AND (l.paid IS NULL OR l.paid = '')
-            AND UPPER(TRIM(l.name)) = ?${extraWhere}`,
+            AND ${sellerWhere}${extraWhere}`,
         params
       ) || { payable: 0, puramt: 0, lot_nos: '' };
       const rawAmount = Number(sub.payable) || 0;
@@ -969,30 +980,36 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   const discountCol = (mode === 'auction') ? 'advance' : 'refund';
   const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
   const ano = auction ? auction.ano : null;
-  // Build name → manual debit total map (debit_notes can have multiple
-  // rows per seller per auction; we sum)
-  const debitMap = {};
-  if (ano) {
-    const debits = db.all(
-      'SELECT name, SUM(amount) as total FROM debit_notes WHERE ano = ? GROUP BY name',
-      [ano]
-    );
-    for (const d of debits) debitMap[d.name] = Number(d.total) || 0;
-  }
+  // Manual debit notes, totalled per seller KEY (traders.id, name only as a
+  // fallback) — same helper the Payments screen uses, so both apply the same
+  // notes to the same party even when two sellers share a trade name.
+  const { sellerKey, sellerDebitMap } = require('./calculations');
   // Optional seller-name filter — "Export Payment XLSX (Selected)"
   // limits the rows to the ticked sellers. We push the filter into the
   // SQL with a `name IN (…)` clause so we don't waste the SELECT on rows
   // we'll throw away. Names are matched case-insensitively to be
   // resilient to slight casing drift between the UI and the DB.
+  // Entries are seller KEYS ("id:42") from the Payments tab, or plain names
+  // from older callers. Keys address one party; names would sweep in a
+  // same-named seller, so both shapes are matched explicitly.
   const filterNames = (opts && Array.isArray(opts.names) && opts.names.length)
     ? opts.names.map(n => String(n || '').trim()).filter(Boolean)
     : null;
   let whereExtra = '';
   const params = [auctionId];
   if (filterNames && filterNames.length) {
-    const placeholders = filterNames.map(() => '?').join(',');
-    whereExtra = ` AND UPPER(TRIM(name)) IN (${placeholders})`;
-    for (const n of filterNames) params.push(n.toUpperCase());
+    const ids = [], plainNames = [];
+    for (const n of filterNames) {
+      const m = /^id:(\d+)$/i.exec(n);
+      if (m) ids.push(Number(m[1])); else plainNames.push(n.toUpperCase());
+    }
+    const clauses = [];
+    if (ids.length) { clauses.push(`trader_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids); }
+    if (plainNames.length) {
+      clauses.push(`UPPER(TRIM(name)) IN (${plainNames.map(() => '?').join(',')})`);
+      params.push(...plainNames);
+    }
+    if (clauses.length) whereExtra = ` AND (${clauses.join(' OR ')})`;
   }
   // e-Trade + Tamil Nadu: sort sellers by name ascending and, within each
   // seller, by lot number ascending. Other contexts keep the state-then-name
@@ -1004,7 +1021,7 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
     ? 'name COLLATE NOCASE, CAST(lot_no AS INTEGER), lot_no'
     : 'state, name';
   let rows = db.all(
-    `SELECT name as poolername, lot_no as lot, bags as bag, qty, price, amount,
+    `SELECT trader_id, name as poolername, lot_no as lot, bags as bag, qty, price, amount,
       pqty, prate, puramt, ${discountCol} as lot_discount, balance as payable
      FROM lots WHERE auction_id = ? AND amount > 0${whereExtra}
      ORDER BY ${_payOrder}`, params
@@ -1055,15 +1072,20 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   const showPolicyDisc = mode !== 'e-trade'
     || (cfg && (cfg.flag_pay_calc_discount === true
                 || String(cfg.flag_pay_calc_discount || '').toLowerCase() === 'true'));
+  // Party identity per row. Two sellers can share `poolername`, so the debit
+  // note, the TDS share and the subtotal grouping all key off this instead.
+  rows.forEach(r => { r._skey = sellerKey(r.trader_id, r.poolername); });
+  const debitMap = sellerDebitMap(db, ano,
+    rows.map(r => ({ seller_key: r._skey, name: r.poolername })));
   const seenSellers = new Set();
   const enrichedFlat = rows.map(r => {
     const lotDisc = showPolicyDisc ? (Number(r.lot_discount) || 0) : 0;
-    const manualDisc = (!seenSellers.has(r.poolername))
-      ? (Number(debitMap[r.poolername]) || 0)
+    const manualDisc = (!seenSellers.has(r._skey))
+      ? (Number(debitMap[r._skey]) || 0)
       : 0;
-    seenSellers.add(r.poolername);
+    seenSellers.add(r._skey);
     const total = (Number(r.payable) || 0) - manualDisc;   // pre-TDS payable
-    const tds = tdsCtx.share(r.poolername, r.puramt);
+    const tds = tdsCtx.share(r._skey, r.puramt);
     return {
       ...r,
       discount: lotDisc + manualDisc,
@@ -1078,20 +1100,24 @@ async function exportPaymentSummary(db, auctionId, cfg, _state, opts) {
   // already sorted by (state, name) so a single linear pass groups them.
   const SUB_KEYS = ['bag', 'qty', 'amount', 'pqty', 'puramt', 'discount', 'total', 'tds', 'payable'];
   const enriched = [];
+  let curKey = null;
   let curName = null;
   let acc = null;
   let serial = 0;   // SL.NO — restarts per pooler group
   const flushSub = () => {
-    if (!acc || curName == null) return;
+    if (!acc || curKey == null) return;
     const sub = { _isSubtotal: true, _sn: '', poolername: `${curName} TOTAL` };
     SUB_KEYS.forEach(k => { sub[k] = acc[k] || 0; });
     enriched.push(sub);
   };
   for (const r of enrichedFlat) {
-    const k = r.poolername || '';
-    if (k !== curName) {
+    // Break on the party, not the name — two same-named sellers each get
+    // their own block and subtotal instead of being summed together.
+    const k = r._skey || '';
+    if (k !== curKey) {
       flushSub();
-      curName = k;
+      curKey = k;
+      curName = r.poolername || '';
       acc = Object.fromEntries(SUB_KEYS.map(x => [x, 0]));
       serial = 0;
     }

@@ -13887,23 +13887,38 @@ async function saveTrader(){
     }
   }
   try{
-    const r = await fetch(B+(id?`/api/traders/${id}`:'/api/traders'),{method:id?'PUT':'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(body)});
-    // Single body read — r.json() consumes the stream so calling it
-    // twice (once in the !ok branch, once in the duplicate branch)
-    // would throw "body stream already read". Parse once, then branch.
-    const text = await r.text();
-    let d = {};
-    try { d = text ? JSON.parse(text) : {}; } catch (_) { d = {}; }
-    // 409 + duplicate flag = duplicate PAN. Hard block — show the
-    // existing seller so the operator finds and edits that row
-    // instead of creating a second one.
-    if (r.status === 409 && d && d.duplicate) {
-      const ex = d.existing || {};
-      alert((d.error || 'Duplicate seller.')
+    const post = async () => {
+      const r = await fetch(B+(id?`/api/traders/${id}`:'/api/traders'),{method:id?'PUT':'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+T},body:JSON.stringify(body)});
+      // Single body read — r.json() consumes the stream so calling it
+      // twice (once in the !ok branch, once in the duplicate branch)
+      // would throw "body stream already read". Parse once, then branch.
+      const text = await r.text();
+      let d = {};
+      try { d = text ? JSON.parse(text) : {}; } catch (_) { d = {}; }
+      return { r, d };
+    };
+    let { r, d } = await post();
+    // Two shapes mean "this looks like someone you already have":
+    //   • 409 + duplicate — the PAN guard
+    //   • 200 + deduped   — the seller-create bridge, which matches on
+    //     GSTIN / PAN / name+phone and hands back the EXISTING row instead of
+    //     inserting. Without this branch a deliberate second seller reported
+    //     "Seller added" and silently wasn't created.
+    // Usually the operator is re-adding someone who already exists, so show
+    // that row first. But two genuinely different parties CAN share a name,
+    // PAN and GSTIN — confirming re-posts with allowDuplicate and creates the
+    // second row, which the app keeps separate by seller id (its own lots,
+    // purchase invoice, TDS, debit notes and bank account).
+    if ((r.status === 409 && d && d.duplicate) || (d && d.deduped)) {
+      const ex = d.existing || d.trader || {};
+      const msg = (d.error || `A seller matching this one already exists${d.reason ? ` (${d.reason})` : ''}.`)
         + `\n\nExisting row:\n  • ${ex.name || '(unnamed)'}\n  • PAN: ${ex.pan || '—'}\n  • CR: ${ex.cr || '—'}\n  • Phone: ${ex.tel || '—'}`
-        + '\n\nEdit the existing seller instead.');
-      return;
+        + '\n\nIf this is the SAME seller, cancel and edit that row instead.'
+        + '\n\nCreate a SECOND, separate seller anyway?';
+      if (!d.confirmable || !(await appConfirm(msg))) return;
+      body.allowDuplicate = true;
+      ({ r, d } = await post());
     }
     if (!r.ok) throw new Error(d.error || ('Save failed (' + r.status + ')'));
     hideModal('trader-modal');
@@ -16507,8 +16522,18 @@ async function loadPurEligibleSellers(){
       const h=document.getElementById('gp-hint');if(h)h.innerHTML='<span style="color:var(--text3)">All registered dealers in this ' + termAuction(false, true) + ' already have a purchase invoice. Delete one to regenerate, or use Bills of Supply for agriculturists.</span>';
       return;
     }
-    dd.innerHTML='<option value="">— Select seller —</option>'+sellers.map(s=>
-      `<option value="${esc(s.name)}">${esc(s.name)} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`).join('');
+    // Two sellers can share a trade name, so the option VALUE is the party's
+    // seller key (id-based) rather than the name — that key is what the
+    // generate call sends, so the invoice is built from exactly this row's
+    // lots. A shared name is spelled out with the CR/GSTIN so the operator
+    // can tell the two apart in the list.
+    const _dupNames={};
+    sellers.forEach(x=>{const n=String(x.name||'').toUpperCase();_dupNames[n]=(_dupNames[n]||0)+1});
+    dd.innerHTML='<option value="">— Select seller —</option>'+sellers.map(s=>{
+      const dup=_dupNames[String(s.name||'').toUpperCase()]>1;
+      const tag=dup?` [${esc(String(s.cr||'no GSTIN').replace(/^GSTIN\./i,''))}]`:'';
+      return `<option value="${esc(s.seller_key||s.name)}" data-trader="${s.trader_id==null?'':s.trader_id}" data-name="${esc(s.name)}">${esc(s.name)}${tag} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`;
+    }).join('');
     const h=document.getElementById('gp-hint');if(h)h.textContent=`${sellers.length} dealer(s) pending`;
   }catch(e){console.warn(e)}
 }
@@ -19374,7 +19399,12 @@ async function delInvoice(id){if(!await appConfirm('Delete this invoice? Related
 async function generatePurchase(){
   const aid=document.getElementById('pur-auction').value;
   if(!aid){alert('Please select ' + termAuction(false, true) + ' first');return}
-  const sellerName=document.getElementById('gp-seller').value.trim();
+  const _sel=document.getElementById('gp-seller');
+  const _opt=_sel&&_sel.selectedOptions&&_sel.selectedOptions[0];
+  // The picker's value is a seller key ("id:42"); the display name rides
+  // along for legacy rows whose lots carry no trader_id.
+  const sellerName=(_opt&&_opt.dataset.name)||(_sel?_sel.value.trim():'');
+  const traderId=(_opt&&_opt.dataset.trader)?Number(_opt.dataset.trader):null;
   const invoiceNo=document.getElementById('gp-invno').value.trim();
   if(!sellerName){alert('Enter seller name');return}
   if(!invoiceNo){alert('Enter invoice number');return}
@@ -19382,7 +19412,7 @@ async function generatePurchase(){
     const r=await fetch(B+`/api/purchases/generate/${aid}`,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
-      body:JSON.stringify({sellerName,invoiceNo})});
+      body:JSON.stringify({sellerName,invoiceNo,traderId})});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Failed to generate purchase invoice');
     hideModal('gen-pur-modal');
@@ -19576,6 +19606,9 @@ async function loadPayments(opts){
       const d = await j(`/api/payments/${aid}`);
       rows = Array.isArray(d) ? d : [];
       _paymentsAll = rows;
+      // Carry any name-keyed lot-picks / exported marks from an older build
+      // over to the party key before anything reads them.
+      _payMigrateState(aid, rows);
       // Bank-routing info for the Actions column's ⚠ multi-bank badge.
       // Best-effort: a failure here must not break the payments table, so
       // we swallow errors and just render without badges. Keyed by
@@ -19584,6 +19617,9 @@ async function loadPayments(opts){
         const bd = await j(`/api/payments/bank/${aid}`);
         _payBankInfo = {};
         for (const b of (Array.isArray(bd) ? bd : [])) {
+          // Index by party key AND name — two sellers can share a name, and
+          // the ⚠ multi-bank badge must reflect the row's own party.
+          if (b.seller_key) _payBankInfo[String(b.seller_key)] = b;
           _payBankInfo[String(b.name || '').trim().toUpperCase()] = b;
         }
       } catch (_) { _payBankInfo = {}; }
@@ -19605,7 +19641,7 @@ async function loadPayments(opts){
       // Paid (exported) vs to-be-paid (not fully exported). "Paid" = fully
       // exported; "unpaid" = anything still owed (none or partial export).
       if (expFilter) {
-        const exported = _payExportStatus(aid, p.name, p.lot_count) === 'full';
+        const exported = _payExportStatus(aid, _payKey(p), p.lot_count) === 'full';
         if (expFilter === 'paid'   && !exported) return false;
         if (expFilter === 'unpaid' &&  exported) return false;
       }
@@ -19689,7 +19725,7 @@ async function loadPayments(opts){
       // Fully-exported sellers can't be re-exported until restored — tint
       // the whole row red + blocked cursor (CSS: tr.row-exported) so it
       // reads as locked, matching the disabled checkbox.
-      rowClass: (p) => (p && _payExportStatus(aid, p.name, p.lot_count) === 'full') ? 'row-exported' : '',
+      rowClass: (p) => (p && _payExportStatus(aid, _payKey(p), p.lot_count) === 'full') ? 'row-exported' : '',
       columns: [
         // Selection column. Payments has no per-row id from the server
         // (the rows are per-seller rollups), so we key checkboxes by
@@ -19701,21 +19737,21 @@ async function loadPayments(opts){
           // Fully-exported sellers can't be re-ticked until restored via
           // the ↶ icon — prevents accidental double-export.
           render:(p)=>{
-            const full = _payExportStatus(aid, p.name, p.lot_count) === 'full';
-            return `<input type="checkbox" class="pay-select-cb" data-pay-name="${esc(p.name||'')}"${full ? ' disabled title="Already fully exported — use ↶ to restore"' : ''} onclick="event.stopPropagation()" style="cursor:${full ? 'not-allowed' : 'pointer'}">`;
+            const full = _payExportStatus(aid, _payKey(p), p.lot_count) === 'full';
+            return `<input type="checkbox" class="pay-select-cb" data-pay-name="${esc(p.name||'')}" data-pay-key="${esc(_payKey(p))}"${full ? ' disabled title="Already fully exported — use ↶ to restore"' : ''} onclick="event.stopPropagation()" style="cursor:${full ? 'not-allowed' : 'pointer'}">`;
           } },
         { key:'name', label:'Seller', sort:'text',
           render:(p)=>{
             // Export-status badge sits right beside the name so the
             // operator sees "already exported / X-of-Y partial" at a
             // glance without opening the Actions menu.
-            const st = _payExportStatus(aid, p.name, p.lot_count);
+            const st = _payExportStatus(aid, _payKey(p), p.lot_count);
             const full = st === 'full';
             let badge = '';
             if (st === 'full') {
               badge = ` <span title="Already exported — excluded from new Selected exports until restored" style="background:#FEE2E2;color:#B91C1C;font-weight:700;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap;letter-spacing:.3px">🚫 EXPORTED</span>`;
             } else if (st === 'partial') {
-              const done = (_payExportedLotsFor(aid, p.name) || []).length;
+              const done = (_payExportedLotsFor(aid, _payKey(p)) || []).length;
               badge = ` <span title="${done} of ${p.lot_count} lots already exported — the rest are still payable" style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🚫 ${done}/${p.lot_count}</span>`;
             }
             return `<span style="font-weight:600;color:${full ? '#991B1B' : 'var(--spice-text-main)'}">${esc(p.name||'')}</span>${badge}`;
@@ -19740,22 +19776,22 @@ async function loadPayments(opts){
         { key:'_actions', label:'Actions', sortable:false, searchable:false,
           render:(p)=>{
             const nm = esc(p.name||'');
-            const picks = _payGetLotPicks(aid, p.name);
+            const picks = _payGetLotPicks(aid, _payKey(p));
             const pickBadge = (picks && picks.length)
               ? `<span title="Next Selected export sends only ${picks.length} picked lot(s)" style="background:#FEF3C7;color:#B45309;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🎯 ${picks.length} lots</span>`
               : '';
-            const bi = _payBankInfo[String(p.name||'').trim().toUpperCase()];
+            const bi = _payBankInfo[_payKey(p)] || _payBankInfo[String(p.name||'').trim().toUpperCase()];
             const bankBadge = (bi && bi.multipleBanks)
               ? `<span title="This seller's lots point at more than one bank account. Use Pick lots to export each account's lots separately." style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">⚠ multi-bank</span>`
               : '';
             // Per-row restore (↶) icon shows once anything's been exported.
-            const st = _payExportStatus(aid, p.name, p.lot_count);
+            const st = _payExportStatus(aid, _payKey(p), p.lot_count);
             const undoBtn = (st !== 'none')
               ? `<button class="btn" style="padding:3px 8px;font-size:12px;background:#fff;border:1px solid var(--border)" data-seller="${nm}" onclick="event.stopPropagation();undoPaymentExport(this.getAttribute('data-seller'))" title="Restore this seller — re-enable for export">↶</button>`
               : '';
             const waBtn = `<button class="btn act-ico feat-whatsapp" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background:#fff;border:1px solid #bbf7d0;border-radius:8px" data-seller="${nm}" data-payable="${Number(p.total_payable)||0}" onclick="event.stopPropagation();whatsappPayment('${esc(String(aid))}',this.getAttribute('data-seller'),Number(this.getAttribute('data-payable')))" title="WhatsApp a payment-credited message to this seller"><svg viewBox="0 0 24 24" width="16" height="16" fill="#25D366"><path d="M.057 24l1.687-6.163a11.867 11.867 0 0 1-1.587-5.946C.16 5.335 5.495 0 12.05 0a11.817 11.817 0 0 1 8.413 3.488 11.824 11.824 0 0 1 3.48 8.414c-.003 6.557-5.338 11.892-11.893 11.892a11.9 11.9 0 0 1-5.688-1.448L.057 24zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg></button>`;
             return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">`
-              + `<button class="btn act-ico" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background:#fff;border:1px solid var(--border);border-radius:8px" data-seller="${nm}" onclick="event.stopPropagation();openPayLotsModal('${esc(String(aid))}',this.getAttribute('data-seller'))" title="Pick lots — view this seller's lots, pick a subset, save the export filter, or print a partial-payment statement"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" fill="#cbb072" stroke="#b89b55"/></svg></button>`
+              + `<button class="btn act-ico" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background:#fff;border:1px solid var(--border);border-radius:8px" data-seller="${nm}" data-seller-key="${esc(_payKey(p))}" data-trader="${p.trader_id==null?'':p.trader_id}" onclick="event.stopPropagation();openPayLotsModal('${esc(String(aid))}',this.getAttribute('data-seller'),this.getAttribute('data-seller-key'),this.getAttribute('data-trader'))" title="Pick lots — view this seller's lots, pick a subset, save the export filter, or print a partial-payment statement"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" fill="#cbb072" stroke="#b89b55"/></svg></button>`
               + waBtn + pickBadge + bankBadge + undoBtn
               + `</div>`;
           } }
@@ -19950,6 +19986,25 @@ function _paySaveState(aid, state){
   try { localStorage.setItem(_PAY_STATE_KEY(aid), JSON.stringify(state)); }
   catch (_) { /* quota; ignore */ }
 }
+// Party identity for a payments row. Two sellers can share a name, so the
+// lot-picks, the "already exported" marks and the ticked-row exports are all
+// keyed by the party (seller_key = "id:42") rather than the name.
+function _payKey(p){ return String((p && (p.seller_key || p.name)) || ''); }
+// Older builds keyed that state by NAME. Re-key it on load so a trade already
+// in progress keeps its picks and its exported marks — losing an exported
+// mark is what would let a seller be paid twice.
+function _payMigrateState(aid, rows){
+  try {
+    const s = _payLoadState(aid); let changed = false;
+    for (const p of (rows || [])) {
+      const k = _payKey(p), nm = String((p && p.name) || '');
+      if (!k || !nm || k === nm) continue;
+      if (s.picks[nm] !== undefined && s.picks[k] === undefined) { s.picks[k] = s.picks[nm]; delete s.picks[nm]; changed = true; }
+      if (s.exportedLots[nm] !== undefined && s.exportedLots[k] === undefined) { s.exportedLots[k] = s.exportedLots[nm]; delete s.exportedLots[nm]; changed = true; }
+    }
+    if (changed) _paySaveState(aid, s);
+  } catch (_) { /* state is a convenience; never block the screen on it */ }
+}
 function _payGetLotPicks(aid, sellerName){
   const arr = _payLoadState(aid).picks[sellerName];
   return Array.isArray(arr) && arr.length ? arr.slice() : null;
@@ -20111,16 +20166,20 @@ function undoLastPaymentExport(){
 // discount/GST/payable per lot + a live totals strip. Drives both the
 // export filter (Save/Clear Lot Selection) and the partial-payment PDF
 // (Print Payment for Selected). Already-exported lots are locked + 🚫.
-const _payLotsState = { aid: 0, seller: '', lots: [], bankLabels: {}, defaultBankId: null, tdsRate: 0, hasTds: false };
+// `seller` is the display name; `key` / `traderId` are the party identity the
+// lot-picks, exported marks and per-seller exports are stored and sent under.
+const _payLotsState = { aid: 0, seller: '', key: '', traderId: null, lots: [], bankLabels: {}, defaultBankId: null, tdsRate: 0, hasTds: false };
 // Per-lot TDS share = lot puramt × the seller's TDS rate (sellerTds ÷ Σ
 // puramt), so the modal's TDS column sums to the seller's purchase TDS and
 // Payable (= balance − this) foots to the main-list Payable.
 function _payLotTds(l){
   return Math.round((Number(l.isp_puramt || l.puramt || l.amount) || 0) * (_payLotsState.tdsRate || 0) * 100) / 100;
 }
-async function openPayLotsModal(auctionId, sellerName){
+async function openPayLotsModal(auctionId, sellerName, sellerKey, traderId){
   _payLotsState.aid = Number(auctionId) || 0;
   _payLotsState.seller = String(sellerName || '');
+  _payLotsState.key = String(sellerKey || sellerName || '');
+  _payLotsState.traderId = (traderId !== undefined && traderId !== null && String(traderId) !== '') ? Number(traderId) : null;
   _payLotsState.lots = [];
   document.getElementById('pay-lots-seller').textContent = _payLotsState.seller || '—';
   const tradeLabel = document.getElementById('pay-lots-trade');
@@ -20140,8 +20199,12 @@ async function openPayLotsModal(auctionId, sellerName){
     const all = await j(`/api/lots/${_payLotsState.aid}?name=${encodeURIComponent(_payLotsState.seller)}`);
     const arr = Array.isArray(all) ? all : (all && all.rows) || [];
     const target = _payLotsState.seller.trim().toLowerCase();
+    // Narrow to the PARTY when we know it — otherwise a second seller with
+    // the same name would have their lots listed (and pickable) here too.
+    const _partyId = _payLotsState.traderId;
     const filtered = arr.filter(l =>
-      String(l.name || '').trim().toLowerCase() === target &&
+      (_partyId != null ? Number(l.trader_id) === _partyId
+                        : String(l.name || '').trim().toLowerCase() === target) &&
       (Number(l.amount) || 0) > 0
     );
     filtered.sort((a, b) => {
@@ -20205,11 +20268,11 @@ function _renderPayLotsTable(){
     document.getElementById('pay-lots-totals').innerHTML = '';
     return;
   }
-  const savedPicks = _payGetLotPicks(_payLotsState.aid, _payLotsState.seller);
+  const savedPicks = _payGetLotPicks(_payLotsState.aid, _payLotsState.key);
   const savedSet = savedPicks ? new Set(savedPicks.map(String)) : null;
   // Lots already shipped in a previous export — locked (pre-ticked +
   // disabled + 🚫) so the operator sees what's gone out.
-  const exportedLotsRaw = _payExportedLotsFor(_payLotsState.aid, _payLotsState.seller);
+  const exportedLotsRaw = _payExportedLotsFor(_payLotsState.aid, _payLotsState.key);
   const exportedAll = exportedLotsRaw === '*';
   const exportedSet = Array.isArray(exportedLotsRaw)
     ? new Set(exportedLotsRaw.map(String))
@@ -20316,7 +20379,7 @@ function updatePayLotsTotals(){
   const saveBtn = document.getElementById('pay-lots-save-btn');
   if (saveBtn) saveBtn.disabled = (tickableChecked === 0);
   // Pick-state indicator.
-  const picks = _payGetLotPicks(_payLotsState.aid, _payLotsState.seller);
+  const picks = _payGetLotPicks(_payLotsState.aid, _payLotsState.key);
   const stateEl = document.getElementById('pay-lots-pick-state');
   if (stateEl) {
     if (!picks) {
@@ -20339,13 +20402,14 @@ function updatePayLotsTotals(){
 // the seller's Payments row so the next Export Selected picks it up.
 async function saveSelectedPayLots(){
   const aid = _payLotsState.aid;
-  const seller = _payLotsState.seller;
+  const seller = _payLotsState.seller;          // display name
+  const sellerKey = _payLotsState.key || seller; // party identity
   if (!aid || !seller) return;
   const lotNos = Array.from(document.querySelectorAll('.pay-lot-cb:not([disabled]):checked'))
     .map(cb => String(cb.dataset.lot || '').trim())
     .filter(Boolean);
   if (!lotNos.length) { alert('Tick at least one not-yet-exported lot first.'); return; }
-  _paySetLotPicks(aid, seller, lotNos);
+  _paySetLotPicks(aid, sellerKey, lotNos);
   // Re-render the table FIRST so the lot-pick badge appears, THEN tick
   // the seller row (the other order races the async re-render).
   await loadPayments({ keepPage: true, useCache: true });
@@ -20353,7 +20417,7 @@ async function saveSelectedPayLots(){
   const body = document.getElementById('payments-list');
   if (body) {
     const cb = Array.from(body.querySelectorAll('.pay-select-cb'))
-      .find(c => String(c.getAttribute('data-pay-name') || '') === seller);
+      .find(c => String(c.getAttribute('data-pay-key') || c.getAttribute('data-pay-name') || '') === sellerKey);
     if (cb && !cb.disabled) { cb.checked = true; autoTicked = true; syncPayMaster(); }
   }
   toast(`Saved ${lotNos.length} lot${lotNos.length === 1 ? '' : 's'} for ${seller}.` +
@@ -20365,8 +20429,9 @@ async function saveSelectedPayLots(){
 async function clearSelectedPayLots(){
   const aid = _payLotsState.aid;
   const seller = _payLotsState.seller;
+  const sellerKey = _payLotsState.key || seller;
   if (!aid || !seller) return;
-  _paySetLotPicks(aid, seller, null);
+  _paySetLotPicks(aid, sellerKey, null);
   toast(`Cleared lot filter for ${seller}.`);
   await loadPayments({ keepPage: true, useCache: true });
   updatePayLotsTotals();
@@ -20392,7 +20457,9 @@ function _collectSelectedPaymentNames(){
   const body = document.getElementById('payments-list');
   if (!body) return [];
   return Array.from(body.querySelectorAll('.pay-select-cb:checked'))
-    .map(cb => String(cb.getAttribute('data-pay-name') || '')).filter(Boolean);
+    // Send the party key when we have one — it addresses exactly this seller,
+    // where a bare name would also sweep in a same-named one.
+    .map(cb => String(cb.getAttribute('data-pay-key') || cb.getAttribute('data-pay-name') || '')).filter(Boolean);
 }
 function exportSelectedBankPayment(){
   _payDownloadSelected('bank_payment', document.getElementById('pay-auction')?.value || '', _collectSelectedPaymentNames());
@@ -21746,8 +21813,16 @@ async function loadEligibleSellers(){
       document.getElementById('gb-hint').innerHTML='<span style="color:var(--amber)">⚠ No agriculturist sellers (without GSTIN) found in this auction. Check if lots have been calculated or if all sellers have GSTIN.</span>';
       return;
     }
-    dd.innerHTML='<option value="">— Select seller —</option>'+sellers.map(s=>
-      `<option value="${esc(s.name)}">${esc(s.name)} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`).join('');
+    // Option value is the party's seller key — two agriculturists can share a
+    // name, and the bill must be built from exactly this row's lots. A shared
+    // name is spelled out with the CR so the two are distinguishable.
+    const _dupB={};
+    sellers.forEach(x=>{const n=String(x.name||'').toUpperCase();_dupB[n]=(_dupB[n]||0)+1});
+    dd.innerHTML='<option value="">— Select seller —</option>'+sellers.map(s=>{
+      const dup=_dupB[String(s.name||'').toUpperCase()]>1;
+      const tag=dup?` [${esc(String(s.cr||'no CR'))}]`:'';
+      return `<option value="${esc(s.seller_key||s.name)}" data-trader="${s.trader_id==null?'':s.trader_id}" data-name="${esc(s.name)}">${esc(s.name)}${tag} — ${s.lot_count} lot(s), ₹${(s.total_amount||0).toFixed(2)}</option>`;
+    }).join('');
     document.getElementById('gb-hint').textContent=`${sellers.length} eligible seller(s) available`;
   }catch(e){console.warn(e)}}
 // Populate the branch filter dropdown from Settings → Branches (br1..br9).
@@ -21861,13 +21936,16 @@ async function saveBillEdit(){
   }catch(e){showError(e)}}
 async function generateBill(){
   const aid=document.getElementById('bill-auction').value;if(!aid){alert('Select auction');return}
-  const sellerName=document.getElementById('gb-seller').value.trim();
+  const _gbSel=document.getElementById('gb-seller');
+  const _gbOpt=_gbSel&&_gbSel.selectedOptions&&_gbSel.selectedOptions[0];
+  const sellerName=(_gbOpt&&_gbOpt.dataset.name)||(_gbSel?_gbSel.value.trim():'');
+  const traderId=(_gbOpt&&_gbOpt.dataset.trader)?Number(_gbOpt.dataset.trader):null;
   const billNo=document.getElementById('gb-billno').value.trim();
   if(!sellerName||!billNo){alert('Enter seller name and bill no');return}
   try{
     const r=await fetch(B+`/api/bills/generate/${aid}`,{method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+T,...ctxHeaders()},
-      body:JSON.stringify({sellerName,billNo})});
+      body:JSON.stringify({sellerName,billNo,traderId})});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Failed');
     hideModal('gen-bill-modal');
@@ -23468,9 +23546,22 @@ async function populateRegParties(){
   let names = [];
   try { names = await j('/api/registers/individual-parties?' + p.toString()); }
   catch(e){ names = []; }
+  // Sellers/poolers come back as {key,name,trader_id} so the option VALUE
+  // addresses one party (two can share a name); merchants stay plain strings.
+  const opts = (names||[]).map(n => (typeof n === 'string')
+    ? { key: n, name: n }
+    : { key: n.key || n.name, name: n.name });
+  const dupes = {};
+  opts.forEach(o => { const u = String(o.name||'').toUpperCase(); dupes[u] = (dupes[u]||0)+1; });
+  const seenLabel = {};
   sel.innerHTML = '<option value="">— All parties —</option>' +
-    (names||[]).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
-  if (keep && (names||[]).includes(keep)) sel.value = keep;
+    opts.map(o => {
+      const u = String(o.name||'').toUpperCase();
+      let label = o.name;
+      if (dupes[u] > 1) { seenLabel[u] = (seenLabel[u]||0)+1; label = `${o.name} (${seenLabel[u]})`; }
+      return `<option value="${esc(o.key)}">${esc(label)}</option>`;
+    }).join('');
+  if (keep && opts.some(o => o.key === keep)) sel.value = keep;
 }
 // Build the trade/date/sale query params shared by load + export.
 function regParams(){

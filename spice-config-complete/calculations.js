@@ -28,6 +28,30 @@ const round2 = (n) => {
   return (x < 0 ? -1 : 1) * Math.round(Math.abs(x) * 100) / 100;
 };
 
+// ── Seller identity ────────────────────────────────────────────────
+// Two sellers can legitimately be different parties while sharing every
+// identifying field — same trade name, same PAN, different bank accounts.
+// So money is keyed by traders.id, never by the seller name: grouping by
+// name merges two parties into one payment row and, because the bank
+// details are then picked with MAX(), routes BOTH sellers' lots into
+// whichever account happens to win. Lots that carry no trader_id (rows
+// predating the FK, or an import the operator hasn't assigned yet) fall
+// back to the upper-cased name so they group exactly as they always did.
+//
+// Key shape is "id:<n>" or "nm:<UPPER NAME>" — a single string that can be
+// used as a SQL GROUP BY, a JS object key and a UI identity interchangeably.
+const SELLER_KEY_SQL = (alias) => {
+  const a = alias ? alias + '.' : '';
+  return `CASE WHEN ${a}trader_id IS NOT NULL AND ${a}trader_id <> 0
+            THEN 'id:' || ${a}trader_id
+            ELSE 'nm:' || UPPER(TRIM(COALESCE(${a}name,''))) END`;
+};
+function sellerKey(traderId, name) {
+  const id = Number(traderId);
+  if (Number.isFinite(id) && id > 0) return 'id:' + id;
+  return 'nm:' + String(name == null ? '' : name).trim().toUpperCase();
+}
+
 /**
  * Compact a GROUP_CONCAT'd lot-number list into a clean, de-duplicated,
  * sorted comma string (e.g. "12,13,14"). Lots that look numeric sort
@@ -575,6 +599,17 @@ function buildSalesInvoice(db, auctionId, buyerCode, saleType, cfg, opts = {}) {
  * Aggregates lots by seller for a given auction (registered dealers only)
  */
 function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
+  // `opts.traderId` (or a "id:<n>" seller key passed as sellerName) scopes the
+  // invoice to ONE party. Without it we fall back to matching on name, which
+  // is what every caller did historically — fine for a unique name, wrong
+  // when two different parties share one: their lots would land on a single
+  // invoice under a single GSTIN. Callers that know the party pass the id.
+  let traderId = opts.traderId != null ? Number(opts.traderId) : null;
+  if (typeof sellerName === 'string' && /^id:\d+$/.test(sellerName.trim())) {
+    traderId = Number(sellerName.trim().slice(3));
+    sellerName = null;
+  }
+  if (!Number.isFinite(traderId) || traderId <= 0) traderId = null;
   // ispView: print the ISP planter figures (isp_pqty/isp_prate/isp_puramt)
   // on the purchase invoice regardless of the active business state. The
   // legacy pqty/prate/puramt fields mirror whichever state is active, so
@@ -588,10 +623,10 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
   // GSTIN starting with 2 digits (Excel import format). We accept both.
   const lots = db.all(
     `SELECT * FROM lots
-     WHERE auction_id = ? AND name = ? AND amount > 0
+     WHERE auction_id = ? AND ${traderId ? 'trader_id = ?' : 'name = ?'} AND amount > 0
        AND (UPPER(cr) LIKE 'GSTIN%' OR cr GLOB '[0-9][0-9]*')
      ORDER BY lot_no`,
-    [auctionId, sellerName]
+    [auctionId, traderId || sellerName]
   );
   
   if (!lots.length) return null;
@@ -707,8 +742,12 @@ function buildPurchaseInvoice(db, auctionId, sellerName, cfg, opts = {}) {
   const invoiceAmount = grandTotal - tdsAmount;
 
   return {
-    seller: { name: firstLot.name, address: firstLot.padd, place: firstLot.ppla, 
-              cr: firstLot.cr, pan: firstLot.pan, state: firstLot.pstate },
+    // trader_id travels with the invoice so the stored `purchases` row can be
+    // stamped with the party it actually belongs to, rather than only a name
+    // that a second seller might share.
+    seller: { name: firstLot.name, address: firstLot.padd, place: firstLot.ppla,
+              cr: firstLot.cr, pan: firstLot.pan, state: firstLot.pstate,
+              trader_id: firstLot.trader_id != null ? Number(firstLot.trader_id) : null },
     lineItems,
     summary: {
       totalQty, totalBags, totalPuramt, totalCgst, totalSgst, totalIgst,
@@ -746,6 +785,48 @@ function ispLotDiscount(lot, cfg) {
 }
 
 /**
+ * Manual debit notes for a trade, totalled per seller KEY.
+ *
+ * `sellers` is the trade's grouped seller rows (each carrying seller_key +
+ * name) — used to resolve legacy notes that carry only a name. Shared by the
+ * Payments screen and the XLSX/PDF payment exports so all three apply the
+ * same notes to the same parties.
+ */
+function sellerDebitMap(db, ano, sellers) {
+  const map = {};
+  if (!ano) return map;
+  // name → keys present in this trade (to place name-only notes)
+  const keysByName = {};
+  for (const s of (sellers || [])) {
+    const n = String(s.name || '').trim().toUpperCase();
+    if (!n) continue;
+    (keysByName[n] = keysByName[n] || new Set()).add(s.seller_key);
+  }
+  let rows = [];
+  try {
+    rows = db.all(
+      'SELECT trader_id, name, SUM(amount) as total FROM debit_notes WHERE ano = ? GROUP BY trader_id, name',
+      [ano]
+    );
+  } catch (_) { return map; }
+  for (const d of rows) {
+    const amt = Number(d.total) || 0;
+    if (!amt) continue;
+    let key = sellerKey(d.trader_id, d.name);
+    if (key.startsWith('nm:')) {
+      // Name-only note: attach to the single seller carrying that name.
+      // Ambiguous (two same-named parties) → skip, so a manual deduction is
+      // never silently applied to the wrong seller or double-counted.
+      const set = keysByName[key.slice(3)];
+      if (!set || set.size !== 1) continue;
+      key = [...set][0];
+    }
+    map[key] = (map[key] || 0) + amt;
+  }
+  return map;
+}
+
+/**
  * Generate payment summary for sellers (PAYCHECK.PRG equivalent)
  */
 /**
@@ -759,36 +840,69 @@ function ispLotDiscount(lot, cfg) {
  * for dealers below the ₹50-lakh threshold (purchases.tds stamped as 0).
  */
 function paymentTdsContext(db, auctionId) {
-  const tdsByName = {};     // seller name (UPPER/trim) → stamped purchase TDS
-  const puramtByName = {};  // seller name → full payable-lot puramt (denominator)
+  const tdsByKey = {};     // seller key → stamped purchase TDS
+  const puramtByKey = {};  // seller key → full payable-lot puramt (denominator)
+  // name → set of keys, so a document that predates trader_id (or that no
+  // backfill could resolve) can still be matched by name — but ONLY when the
+  // name is unambiguous. With two same-named sellers, a name-only row has no
+  // honest owner, so it is left unattributed rather than applied to both.
+  const keysByName = {};
+  const noteName = (key, name) => {
+    const n = String(name || '').trim().toUpperCase();
+    if (!n) return;
+    (keysByName[n] = keysByName[n] || new Set()).add(key);
+  };
+  const resolve = (keyOrName) => {
+    const s = String(keyOrName || '').trim();
+    if (/^(id|nm):/.test(s)) return s;
+    const set = keysByName[s.toUpperCase()];
+    return (set && set.size === 1) ? [...set][0] : sellerKey(null, s);
+  };
   try {
     for (const r of db.all(
-      `SELECT name, COALESCE(SUM(tds),0) AS tds
-         FROM purchases WHERE auction_id = ? GROUP BY name`, [auctionId])) {
+      `SELECT trader_id, name, COALESCE(SUM(tds),0) AS tds
+         FROM purchases WHERE auction_id = ? GROUP BY trader_id, name`, [auctionId])) {
       // Accumulate (+=) rather than assign: the same seller can appear under
       // more than one casing (a known name-drift data state), which GROUP BY
-      // keeps as separate rows — collapsing them by upper-cased key must SUM,
-      // not overwrite, or one casing would zero out the other's TDS.
-      const key = String(r.name || '').trim().toUpperCase();
-      tdsByName[key] = (tdsByName[key] || 0) + (Number(r.tds) || 0);
+      // keeps as separate rows — collapsing them by key must SUM, not
+      // overwrite, or one casing would zero out the other's TDS.
+      const key = sellerKey(r.trader_id, r.name);
+      tdsByKey[key] = (tdsByKey[key] || 0) + (Number(r.tds) || 0);
+      noteName(key, r.name);
     }
   } catch (_) { /* purchases table may be absent on partial migrations */ }
   try {
     for (const r of db.all(
-      `SELECT name, COALESCE(SUM(puramt),0) AS puramt
-         FROM lots WHERE auction_id = ? AND amount > 0 GROUP BY name`, [auctionId])) {
-      const key = String(r.name || '').trim().toUpperCase();
-      puramtByName[key] = (puramtByName[key] || 0) + (Number(r.puramt) || 0);
+      `SELECT ${SELLER_KEY_SQL('l')} AS seller_key, MAX(l.name) AS name,
+              COALESCE(SUM(l.puramt),0) AS puramt
+         FROM lots l WHERE l.auction_id = ? AND l.amount > 0 GROUP BY seller_key`, [auctionId])) {
+      puramtByKey[r.seller_key] = (puramtByKey[r.seller_key] || 0) + (Number(r.puramt) || 0);
+      noteName(r.seller_key, r.name);
     }
   } catch (_) { /* lots always present, but stay defensive */ }
+  // A purchase invoice keyed only by name (trader_id NULL) still has to line
+  // up with the lots, which are keyed by id. Fold such name-only TDS onto the
+  // single seller that carries the name; ambiguous names stay put.
+  for (const [nkey, tds] of Object.entries(tdsByKey)) {
+    if (!nkey.startsWith('nm:') || puramtByKey[nkey] != null) continue;
+    const set = keysByName[nkey.slice(3)];
+    if (!set) continue;
+    const idKeys = [...set].filter(k => k.startsWith('id:'));
+    if (idKeys.length !== 1) continue;   // ambiguous — leave it alone
+    tdsByKey[idKeys[0]] = (tdsByKey[idKeys[0]] || 0) + tds;
+    delete tdsByKey[nkey];
+  }
   return {
-    tdsByName,
-    puramtByName,
-    share(name, puramt) {
-      const key = String(name || '').trim().toUpperCase();
-      const tds = tdsByName[key] || 0;
+    tdsByKey,
+    puramtByKey,
+    // Accepts a seller key ("id:42" / "nm:ABC") or a bare seller name, so
+    // callers that only carry a name (e.g. the PDF payment export) keep
+    // working; a bare name resolves to its key when unambiguous.
+    share(keyOrName, puramt) {
+      const key = resolve(keyOrName);
+      const tds = tdsByKey[key] || 0;
       if (!(tds > 0)) return 0;
-      const full = puramtByName[key] || 0;
+      const full = puramtByKey[key] || 0;
       if (!(full > 0)) return 0;
       const frac = Math.min(1, Math.max(0, (Number(puramt) || 0) / full));
       return round2(tds * frac);
@@ -851,7 +965,8 @@ function getPaymentSummary(db, auctionId, state, cfg) {
            * (CASE WHEN (UPPER(COALESCE(l.cr,'')) LIKE 'GSTIN%' OR l.cr GLOB '[0-9][0-9]*') THEN ? ELSE ? END)
            * ? ) END)`;
   const discSql = useIspDisc ? ispDiscSql : `SUM(l.${discountCol})`;
-  let query = `SELECT l.name, l.cr,
+  let query = `SELECT ${SELLER_KEY_SQL('l')} AS seller_key,
+    MAX(l.trader_id) AS trader_id, MAX(l.name) AS name, MAX(l.cr) AS cr,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_qty,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_puramt ELSE l.puramt END) as total_amount,
     SUM(CASE WHEN l.isp_puramt > 0 THEN l.isp_pqty   ELSE l.pqty   END) as total_pqty,
@@ -868,8 +983,13 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // so the state key is moot). Other contexts keep the state-then-name order.
   const _tnETrade = mode === 'e-trade'
     && String(cfg && cfg.business_state || '').toUpperCase().includes('TAMIL');
-  query += ' GROUP BY l.name, l.cr ORDER BY '
-    + (_tnETrade ? 'l.name COLLATE NOCASE' : 'l.state, l.name');
+  // GROUP BY the seller KEY, not the name: two different parties sharing a
+  // name must stay two payment rows (each with its own lots, TDS and bank
+  // account). `cr` left the GROUP BY at the same time — splitting on it
+  // produced duplicate rows whenever one seller's lots held inconsistent
+  // GSTIN values, so it is now MAX()'d for display only.
+  query += ' GROUP BY seller_key ORDER BY '
+    + (_tnETrade ? 'name COLLATE NOCASE' : 'MAX(l.state), name');
   const sellers = db.all(query, params);
 
   // Fetch this auction's identifier (ano) so we can match debit_notes.
@@ -877,15 +997,12 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // mirroring the legacy FoxPro flow.
   const auction = db.get('SELECT ano FROM auctions WHERE id = ?', [auctionId]);
   const ano = auction ? auction.ano : null;
-  // Build a name → debit_note total map for fast lookup
-  const debitMap = {};
-  if (ano) {
-    const debits = db.all(
-      'SELECT name, SUM(amount) as total FROM debit_notes WHERE ano = ? GROUP BY name',
-      [ano]
-    );
-    for (const d of debits) debitMap[d.name] = Number(d.total) || 0;
-  }
+  // Build a seller-key → debit_note total map. Notes stamped with a
+  // trader_id attach to that party alone; older notes carrying only a name
+  // are folded onto the seller holding that name, but ONLY when exactly one
+  // seller in this trade has it — with two same-named parties there is no
+  // honest owner, so the note stays unapplied rather than hitting both.
+  const debitMap = sellerDebitMap(db, ano, sellers);
   // Payment TDS mirrors the stamped purchase-invoice TDS exactly (see
   // paymentTdsContext): the seller's full TDS when paying the whole seller,
   // spread ∝ puramt when a state filter narrows the lot set. 0 for
@@ -900,12 +1017,12 @@ function getPaymentSummary(db, auctionId, state, cfg) {
   // Merge: total_discount = lot-policy discount + any manual debit notes
   return sellers.map(s => {
     const lotDisc = showPolicyDisc ? (Number(s.lot_discount) || 0) : 0;
-    const manualDisc = Number(debitMap[s.name]) || 0;
+    const manualDisc = Number(debitMap[s.seller_key]) || 0;
     // Pre-TDS net = balance − manual debit notes. In e-Trade `balance` no
     // longer nets the policy discount (it's display-only), so Payable is
     // discount-independent; manual debit notes still apply.
     const totalBeforeTds = (Number(s.total_payable) || 0) - manualDisc;
-    const tds = tdsCtx.share(s.name, s.total_puramt);
+    const tds = tdsCtx.share(s.seller_key, s.total_puramt);
     return {
       ...s,
       total_discount: lotDisc + manualDisc,
@@ -945,16 +1062,20 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
   // address/IFSC; we then COALESCE with trader_banks default for
   // sellers who maintain multiple bank accounts.
   const payments = db.all(
-    // GROUP BY l.name (only) — same fix as getPaymentSummary. Splitting
-    // by `cr` produced duplicate bank-payment rows whenever a seller's
-    // lots held inconsistent GSTIN values, leading to NEFT files with
-    // the dealer listed twice for partial amounts.
+    // GROUP BY the seller KEY (traders.id, name only as a fallback) — NOT
+    // the name. Two different parties can share a trade name and a PAN, and
+    // grouping those together produced ONE bank row whose account number
+    // came from MAX() — i.e. every rupee, including the other seller's lots,
+    // paid into whichever account happened to sort highest. Splitting by
+    // `cr` is still avoided: it produced duplicate rows whenever one
+    // seller's lots held inconsistent GSTIN values.
     // JOIN trader by lots.trader_id (FK), not by name. Joining by name
     // multiplied each lot row by the number of traders sharing that
     // name (multi-branch sellers / accidental dupes), then SUM(puramt)
-    // etc. summed those duplicates → inflated payable. GROUP BY name
-    // alone wasn't enough; the fan-out happened BEFORE the aggregate.
-    `SELECT MAX(l.state) AS state, l.name, MAX(l.cr) AS cr,
+    // etc. summed those duplicates → inflated payable. GROUP BY alone
+    // wasn't enough; the fan-out happened BEFORE the aggregate.
+    `SELECT ${SELLER_KEY_SQL('l')} AS seller_key,
+      MAX(l.state) AS state, MAX(l.name) AS name, MAX(l.cr) AS cr,
       SUM(l.puramt) as puramt, SUM(l.refund) as advance, SUM(l.balance) as payable,
       GROUP_CONCAT(l.lot_no) as lot_nos,
       MAX(t.id) AS trader_id,
@@ -972,8 +1093,8 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
     LEFT JOIN traders t ON t.id = l.trader_id
     WHERE l.auction_id = ? AND l.amount > 0
       AND (l.paid IS NULL OR l.paid = '')
-    GROUP BY l.name
-    ORDER BY MAX(l.state), l.name`,
+    GROUP BY seller_key
+    ORDER BY MAX(l.state), name`,
     [auctionId]
   );
 
@@ -1011,7 +1132,7 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
     // before the deduction policy is applied. 'after' (default) uses
     // payable = puramt − discount − GST, then nets the seller's purchase
     // TDS (Section 194Q) so the credited amount matches the Payments tab.
-    const tds = useBefore ? 0 : tdsCtx.share(p.name, p.puramt);
+    const tds = useBefore ? 0 : tdsCtx.share(p.seller_key, p.puramt);
     const rawAmount = (useBefore ? (p.puramt || 0) : (p.payable || 0)) - tds;
     const amount = roundAmounts ? round0(rawAmount) : rawAmount;
     const tb = p.trader_id != null ? bankByTraderId[p.trader_id] : null;
@@ -1042,6 +1163,11 @@ function getBankPaymentData(db, auctionId, cfg, opts) {
       // account holder, which may be a different person/entity) so it's
       // not safe to filter against beneficiaryName.
       name: p.name,
+      // Party identity. Two sellers can share `name`, so anything that has
+      // to address ONE of them (per-seller export, lot picker, paid-marking)
+      // must filter on seller_key / trader_id rather than the name.
+      seller_key: p.seller_key,
+      trader_id: p.trader_id != null ? Number(p.trader_id) : null,
       transactionType: rawAmount >= 200000 ? 'RTGS' : 'NEFT',
       ifsc,
       accountNo: acctnum,
@@ -1105,18 +1231,32 @@ function getTDSReturnData(db, fromDate, toDate, orderBy) {
  * Returns: { seller, lineItems, summary } if successful
  *          { error, detail } object if no data (to help debug)
  */
-function buildAgriBill(db, auctionId, sellerName, cfg) {
+function buildAgriBill(db, auctionId, sellerName, cfg, opts = {}) {
+  // `opts.traderId` (or an "id:<n>" key in place of the name) scopes the bill
+  // to ONE party. Falling back to the name is what every caller did before,
+  // which is right for a unique name and wrong when two agriculturists share
+  // one: their lots would land on a single bill under a single party.
+  let traderId = opts.traderId != null ? Number(opts.traderId) : null;
+  if (typeof sellerName === 'string' && /^id:\d+$/.test(sellerName.trim())) {
+    traderId = Number(sellerName.trim().slice(3));
+    sellerName = null;
+  }
+  if (!Number.isFinite(traderId) || traderId <= 0) traderId = null;
   const trimmedName = String(sellerName || '').trim();
-  if (!trimmedName) return { error: 'Seller name is empty' };
+  if (!trimmedName && !traderId) return { error: 'Seller name is empty' };
 
-  // First check: any lots at all for this seller (case-insensitive)?
+  // First check: any lots at all for this seller?
   const allLots = db.all(
-    `SELECT * FROM lots WHERE auction_id = ? AND UPPER(TRIM(name)) = UPPER(?) ORDER BY lot_no`,
-    [auctionId, trimmedName]
+    `SELECT * FROM lots WHERE auction_id = ?
+       AND ${traderId ? 'trader_id = ?' : 'UPPER(TRIM(name)) = UPPER(?)'}
+     ORDER BY lot_no`,
+    [auctionId, traderId || trimmedName]
   );
-  
+
   if (!allLots.length) {
-    return { error: `No lots found for seller "${trimmedName}" in this auction. Check the exact spelling.` };
+    return { error: traderId
+      ? `No lots found for that seller in this auction.`
+      : `No lots found for seller "${trimmedName}" in this auction. Check the exact spelling.` };
   }
 
   // Check if any have GSTIN — those aren't eligible for Bills of Supply
@@ -1171,6 +1311,9 @@ function buildAgriBill(db, auctionId, sellerName, cfg) {
   return {
     seller: {
       name: firstLot.name,
+      // Party id travels with the bill so the stored `bills` row records
+      // which seller it belongs to, not just a name another may share.
+      trader_id: firstLot.trader_id != null ? Number(firstLot.trader_id) : null,
       address: firstLot.padd,
       place: firstLot.ppla,
       pin: firstLot.ppin,
@@ -1199,14 +1342,20 @@ function listAgriSellers(db, auctionId) {
   // An "agri seller" is one without a GSTIN. Reject both prefixed
   // ("GSTIN.<gstin>") and bare ("<gstin>") forms — anything else (empty,
   // CR codes, plain text) qualifies.
+  //
+  // One row per PARTY (traders.id), not per name: two agriculturists can
+  // share a name, and grouping by name put both on a single bill of supply
+  // under one party's CR — and paid one of them for the other's lots.
   return db.all(
-    `SELECT name, COUNT(*) as lot_count, SUM(qty) as total_qty, SUM(amount) as total_amount
-     FROM lots 
-     WHERE auction_id = ? 
+    `SELECT ${SELLER_KEY_SQL('lots')} AS seller_key, MAX(trader_id) AS trader_id,
+            MAX(name) AS name, MAX(cr) AS cr,
+            COUNT(*) as lot_count, SUM(qty) as total_qty, SUM(amount) as total_amount
+     FROM lots
+     WHERE auction_id = ?
        AND (cr IS NULL OR cr = ''
             OR (UPPER(cr) NOT LIKE 'GSTIN%' AND cr NOT GLOB '[0-9][0-9]*'))
        AND amount > 0
-     GROUP BY name
+     GROUP BY seller_key
      ORDER BY name`,
     [auctionId]
   );
@@ -1379,13 +1528,18 @@ function _groupRegister(rows, summaryFn) {
   let cur = null;
   for (const r of rows) {
     const name = r.party || '';
-    if (!cur || cur.name !== name) {
-      cur = { name, gstin: '', rows: [] };
+    // Break on the party KEY (traders.id where the row carries one), not the
+    // display name: two sellers can share a name, and grouping by name merged
+    // their statements into one — every figure in it belonging to two people.
+    // Rows with no id fall back to the name and group exactly as before.
+    const key = r.party_key || ('nm:' + String(name).trim().toUpperCase());
+    if (!cur || cur.key !== key) {
+      cur = { key, name, trader_id: r.trader_id != null ? Number(r.trader_id) : null, gstin: '', rows: [] };
       parties.push(cur);
     }
     if (!cur.gstin && r.gstin) cur.gstin = String(r.gstin).trim();
     // The party + gstin live on the group, not on each row.
-    const { party, gstin, ...rest } = r;
+    const { party, party_key, trader_id, gstin, ...rest } = r;
     cur.rows.push(rest);
   }
   for (const p of parties) p.summary = summaryFn(p.rows);
@@ -1401,6 +1555,7 @@ const _sum = (rows, k) => rows.reduce((s, r) => s + _num(r[k]), 0);
 // Sold (code != WD, value > 0) vs Withdrawn (code = WD; amount is always 0).
 function getPoolerRegister(db, opts = {}) {
   let q = `SELECT a.ano AS tno, a.date AS date, l.lot_no AS lot, l.name AS party,
+      ${SELLER_KEY_SQL('l')} AS party_key, l.trader_id AS trader_id,
       l.cr AS gstin, l.qty AS qty, l.price AS rate, l.amount AS value,
       l.pqty AS pqty, l.prate AS prate, l.puramt AS puramt,
       UPPER(TRIM(COALESCE(l.code,''))) AS code
@@ -1408,8 +1563,14 @@ function getPoolerRegister(db, opts = {}) {
     WHERE 1=1`;
   const params = [];
   if (opts.from && opts.to) { q += ' AND a.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
-  if (opts.party) { q += ' AND UPPER(TRIM(l.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
-  q += ' ORDER BY l.name, a.date, a.ano, CAST(l.lot_no AS INTEGER), l.lot_no';
+  // `opts.party` may be a seller key ("id:42") — which addresses exactly one
+  // party — or a plain name, kept for links and saved filters that predate it.
+  if (opts.party) {
+    const m = /^id:(\d+)$/.exec(String(opts.party).trim());
+    if (m) { q += ' AND l.trader_id = ?'; params.push(Number(m[1])); }
+    else { q += ' AND UPPER(TRIM(l.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
+  }
+  q += ' ORDER BY l.name, l.trader_id, a.date, a.ano, CAST(l.lot_no AS INTEGER), l.lot_no';
   const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
   const isWd = (r) => String(r.code || '').trim().toUpperCase() === 'WD';
   const parties = _groupRegister(rows, (rs) => {
@@ -1437,14 +1598,19 @@ function getPoolerRegister(db, opts = {}) {
 // Seller Register ("SELLERS INDIVIDUAL") — purchase invoices to the pooler,
 // summarised per trade. DATE | ANO | INVO(count) | QTY | INVOICE.
 function getSellerRegister(db, opts = {}) {
-  let q = `SELECT p.name AS party, MAX(p.gstin) AS gstin, p.ano AS ano, p.date AS date,
+  let q = `SELECT p.name AS party, ${SELLER_KEY_SQL('p')} AS party_key, MAX(p.trader_id) AS trader_id,
+      MAX(p.gstin) AS gstin, p.ano AS ano, p.date AS date,
       COUNT(*) AS invo, SUM(p.qty) AS qty,
       SUM(CASE WHEN COALESCE(p.total,0) > 0 THEN p.total ELSE p.amount END) AS invoice
     FROM purchases p WHERE 1=1`;
   const params = [];
   if (opts.from && opts.to) { q += ' AND p.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
-  if (opts.party) { q += ' AND UPPER(TRIM(p.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
-  q += ' GROUP BY p.name, p.ano, p.date ORDER BY p.name, p.date, p.ano';
+  if (opts.party) {
+    const m = /^id:(\d+)$/.exec(String(opts.party).trim());
+    if (m) { q += ' AND p.trader_id = ?'; params.push(Number(m[1])); }
+    else { q += ' AND UPPER(TRIM(p.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
+  }
+  q += ' GROUP BY party_key, p.ano, p.date ORDER BY p.name, party_key, p.date, p.ano';
   const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
   const parties = _groupRegister(rows, (rs) => {
     const invoice = _sum(rs, 'invoice');
@@ -1483,19 +1649,29 @@ function listRegisterParties(db, opts = {}) {
     if (opts.from && opts.to) { q += ' AND i.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
     q += ' ORDER BY i.buyer1';
   } else if (kind === 'seller') {
-    q = `SELECT DISTINCT p.name AS name FROM purchases p WHERE COALESCE(p.name,'') != ''`;
+    q = `SELECT ${SELLER_KEY_SQL('p')} AS key, MAX(p.name) AS name, MAX(p.trader_id) AS trader_id
+           FROM purchases p WHERE COALESCE(p.name,'') != ''`;
     if (opts.from && opts.to) { q += ' AND p.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
-    q += ' ORDER BY p.name';
+    q += ' GROUP BY key ORDER BY name';
   } else {
-    q = `SELECT DISTINCT l.name AS name FROM lots l JOIN auctions a ON a.id = l.auction_id
-         WHERE COALESCE(l.name,'') != '' AND UPPER(TRIM(COALESCE(l.code,''))) != 'WD'`;
+    q = `SELECT ${SELLER_KEY_SQL('l')} AS key, MAX(l.name) AS name, MAX(l.trader_id) AS trader_id
+           FROM lots l JOIN auctions a ON a.id = l.auction_id
+          WHERE COALESCE(l.name,'') != '' AND UPPER(TRIM(COALESCE(l.code,''))) != 'WD'`;
     if (opts.from && opts.to) { q += ' AND a.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
-    q += ' ORDER BY l.name';
+    q += ' GROUP BY key ORDER BY name';
   }
-  return db.all(q, params).map(r => r.name);
+  // Sellers/poolers come back as {key, name, trader_id} so the picker can
+  // address ONE party even when two share a name; merchants (buyer side)
+  // stay plain names. Callers that only want names read `.name`.
+  const rows = db.all(q, params);
+  if (kind === 'merchant') return rows.map(r => r.name);
+  return rows.map(r => ({ key: r.key, name: r.name, trader_id: r.trader_id != null ? Number(r.trader_id) : null }));
 }
 
 module.exports = {
+  sellerKey,
+  SELLER_KEY_SQL,
+  sellerDebitMap,
   calculateLot,
   calculateTDS,
   calculateTCS,
