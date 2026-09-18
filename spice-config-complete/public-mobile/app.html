@@ -1442,18 +1442,21 @@ async function saveNewSeller(){
     // POST /api/traders requires trader_write) AND so the response
     // includes the trader row pickTrader needs. Both endpoints share
     // the same hard PAN-duplicate guard server-side.
+    // Uppercased on the way out as well as while typing — a value the
+    // keyboard autofilled never fires an input event. Email keeps its case.
+    const uc=id=>ucText(document.getElementById(id).value.trim());
     const r=await fetch(B+'/api/traders/quick',{method:'POST',headers:ah(),body:JSON.stringify({
-      name,
-      cr:document.getElementById('ns-cr').value.trim(),
-      pan:document.getElementById('ns-pan').value.trim(),
-      tel:document.getElementById('ns-tel').value.trim(),
-      whatsapp:document.getElementById('ns-whatsapp').value.trim(),
+      name:ucText(name),
+      cr:uc('ns-cr'),
+      pan:uc('ns-pan'),
+      tel:uc('ns-tel'),
+      whatsapp:uc('ns-whatsapp'),
       email:email,
-      padd:document.getElementById('ns-padd').value.trim(),
-      ppla:document.getElementById('ns-ppla').value.trim(),
-      pin:document.getElementById('ns-pin').value.trim(),
-      pstate:document.getElementById('ns-pstate').value.trim(),
-      pst_code:document.getElementById('ns-pst').value.trim()
+      padd:uc('ns-padd'),
+      ppla:uc('ns-ppla'),
+      pin:uc('ns-pin'),
+      pstate:uc('ns-pstate'),
+      pst_code:uc('ns-pst')
     })});
     const d=await r.json();
     if(!r.ok){
@@ -1496,6 +1499,45 @@ var lotValidateTimer=null,lotIsValid=true;
 function validateLotNo(val){
   // No longer needed - lot grid handles validation visually
 }
+
+// ── UPPERCASE MASTER DATA ──
+// Seller master data is stored in CAPS (same rule as the desktop app —
+// the DBF exports and every report assume it), so the seller form and
+// the bank sub-forms uppercase as the operator types instead of relying
+// on the phone keyboard's autocapitalise. Email is exempt: the local
+// part of an address can be case-sensitive.
+var UC_SKIP_IDS = ['ns-email'];
+function ucText(v){ return String(v == null ? '' : v).toUpperCase(); }
+
+// Uppercase in place, keeping the caret put — assigning .value would
+// otherwise jump it to the end mid-word.
+function ucInput(el){
+  if (!el || el.tagName !== 'INPUT') return;
+  if (el.type === 'email' || el.type === 'hidden' || el.type === 'checkbox') return;
+  if (UC_SKIP_IDS.indexOf(el.id) !== -1) return;
+  var up = el.value.toUpperCase();
+  if (up === el.value) return;
+  var a = el.selectionStart, b = el.selectionEnd;
+  el.value = up;
+  try { el.setSelectionRange(a, b); } catch (_) {}
+}
+
+// One delegated listener per form. The bank forms are shown/hidden
+// rather than rebuilt, so binding once at startup is enough.
+function ucBindForm(containerId){
+  var c = document.getElementById(containerId);
+  if (!c || c._ucBound) return;
+  c._ucBound = true;
+  c.addEventListener('input', function(ev){
+    if (ev.isComposing) return; // don't fight an IME mid-composition
+    ucInput(ev.target);
+  });
+}
+function ucBindMasterForms(){
+  ['seller-modal', 'le-bank-form', 'ed-bank-form'].forEach(ucBindForm);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ucBindMasterForms);
+else ucBindMasterForms();
 
 // ── INPUT SANITIZERS ──
 
@@ -1787,7 +1829,7 @@ function checkEdAcctChanged(){
 }
 async function saveEditBankAccount(){
   if(!editTraderId)return;
-  var acct=document.getElementById('ed-acct').value.trim();var ifsc=document.getElementById('ed-ifsc').value.trim().toUpperCase();var label=document.getElementById('ed-bank-label').value.trim();var holder=document.getElementById('ed-holder').value.trim();var eid=document.getElementById('ed-bank-edit-id').value;var confirmVal=document.getElementById('ed-acct-confirm').value.trim();
+  var acct=document.getElementById('ed-acct').value.trim();var ifsc=document.getElementById('ed-ifsc').value.trim().toUpperCase();var label=ucText(document.getElementById('ed-bank-label').value.trim());var holder=ucText(document.getElementById('ed-holder').value.trim());var eid=document.getElementById('ed-bank-edit-id').value;var confirmVal=document.getElementById('ed-acct-confirm').value.trim();
   var orig=(document.getElementById('ed-acct').dataset.original||'').trim();
   if(!acct){toast('Enter account number',true);return}
   if(!/^\d{9,18}$/.test(acct)){toast('Account number must be 9-18 digits',true);return}
@@ -1997,8 +2039,8 @@ async function saveBankAccount() {
   if (!selT) return;
   var acct = document.getElementById('le-acct').value.trim();
   var ifsc = document.getElementById('le-ifsc').value.trim().toUpperCase();
-  var label = document.getElementById('le-bank-label').value.trim();
-  var holder = document.getElementById('le-holder').value.trim();
+  var label = ucText(document.getElementById('le-bank-label').value.trim());
+  var holder = ucText(document.getElementById('le-holder').value.trim());
   var editId = document.getElementById('le-bank-edit-id').value;
   var confirmVal = document.getElementById('le-acct-confirm').value.trim();
   var orig = (document.getElementById('le-acct').dataset.original || '').trim();

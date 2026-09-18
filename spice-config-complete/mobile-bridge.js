@@ -1177,10 +1177,10 @@ function mountMobile(app, deps) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
     const db = getDb();
-    const nameTrim = String(t.name).trim().toUpperCase();
-    const crTrim   = String(t.cr  || '').trim();
-    const panTrim  = String(t.pan || '').trim().toUpperCase();
-    const telTrim  = String(t.tel || '').trim();
+    const nameTrim = ucMaster(t.name);
+    const crTrim   = ucMaster(t.cr);
+    const panTrim  = ucMaster(t.pan);
+    const telTrim  = ucMaster(t.tel);
 
     // Deliberate second party — skip the dedupe entirely.
     const allowDuplicate = t.allowDuplicate === true || t.allowDuplicate === 'true';
@@ -1233,14 +1233,14 @@ function mountMobile(app, deps) {
         crTrim,
         panTrim,
         telTrim,
-        (t.aadhar || '').toString().trim(),
-        (t.padd || '').toString().trim(),
-        (t.ppla || '').toString().trim().toUpperCase(),
-        (t.pin || '').toString().trim(),
-        (t.pstate || 'TAMIL NADU').toString().trim().toUpperCase(),
-        (t.pst_code || '33').toString().trim(),
+        ucMaster(t.aadhar),
+        ucMaster(t.padd),
+        ucMaster(t.ppla),
+        ucMaster(t.pin),
+        ucMaster(t.pstate || 'TAMIL NADU'),
+        ucMaster(t.pst_code || '33'),
         '', '', '',
-        (t.whatsapp || '').toString().trim(),
+        ucMaster(t.whatsapp),
         emailClean,
       ]
     );
@@ -1297,20 +1297,21 @@ function mountMobile(app, deps) {
     const setField = (col, val, transform = (v) => v) => {
       if (val !== undefined) { sets.push(col + ' = ?'); vals.push(transform(val)); }
     };
-    setField('name',        t.name,        (v) => String(v).trim().toUpperCase());
-    setField('cr',          t.cr,          (v) => String(v).trim());
-    setField('pan',         t.pan,         (v) => String(v).trim().toUpperCase());
-    setField('tel',         t.tel,         (v) => String(v).trim());
-    setField('aadhar',      t.aadhar,      (v) => String(v).trim());
-    setField('padd',        t.padd,        (v) => String(v).trim());
-    setField('ppla',        t.ppla,        (v) => String(v).trim().toUpperCase());
-    setField('pin',         t.pin,         (v) => String(v).trim());
-    setField('pstate',      t.pstate,      (v) => String(v).trim().toUpperCase());
-    setField('pst_code',    t.pst_code,    (v) => String(v).trim());
-    setField('ifsc',        t.ifsc,        (v) => String(v).trim().toUpperCase());
-    setField('acctnum',     t.acctnum,     (v) => String(v).trim());
-    setField('holder_name', t.holder_name, (v) => String(v).trim());
-    setField('whatsapp',    t.whatsapp,    (v) => String(v).trim());
+    // Every stored field is CAPS (see ucMaster) — email alone keeps its case.
+    setField('name',        t.name,        ucMaster);
+    setField('cr',          t.cr,          ucMaster);
+    setField('pan',         t.pan,         ucMaster);
+    setField('tel',         t.tel,         ucMaster);
+    setField('aadhar',      t.aadhar,      ucMaster);
+    setField('padd',        t.padd,        ucMaster);
+    setField('ppla',        t.ppla,        ucMaster);
+    setField('pin',         t.pin,         ucMaster);
+    setField('pstate',      t.pstate,      ucMaster);
+    setField('pst_code',    t.pst_code,    ucMaster);
+    setField('ifsc',        t.ifsc,        ucMaster);
+    setField('acctnum',     t.acctnum,     ucMaster);
+    setField('holder_name', t.holder_name, ucMaster);
+    setField('whatsapp',    t.whatsapp,    ucMaster);
     if (emailClean !== null) { sets.push('email = ?'); vals.push(emailClean); }
     // No flat-field changes is fine — we may still have a `banks` array
     // to sync below. Only short-circuit when neither flat fields nor
@@ -1406,6 +1407,13 @@ function mountMobile(app, deps) {
   //
   // Skips entirely when `banks` is missing or not an array, so the PWA
   // payload (which doesn't include `banks`) is unchanged.
+  // Seller master data is stored in CAPS (the desktop form uppercases as
+  // the operator types, and the DBF exports/imports assume it), so every
+  // write that lands here — mobile PWA included — is normalised the same
+  // way. Email is left as typed: the local part of an address can be
+  // case-sensitive.
+  const ucMaster = (v) => String(v == null ? '' : v).trim().toUpperCase();
+
   function syncTraderBanksFromArray(db, traderId, banks) {
     if (!Array.isArray(banks)) return;
     const arr = banks.filter(b => b && (b.acctnum || b.ifsc));
@@ -1416,11 +1424,11 @@ function mountMobile(app, deps) {
          VALUES (?, ?, ?, ?, ?, ?)`,
         [
           traderId,
-          String(b.bank_name || '').trim(),
-          String(b.branch || '').trim(),
-          String(b.acctnum || '').trim(),
-          String(b.ifsc || '').trim().toUpperCase(),
-          String(b.holder_name || '').trim(),
+          ucMaster(b.bank_name),
+          ucMaster(b.branch),
+          ucMaster(b.acctnum),
+          ucMaster(b.ifsc),
+          ucMaster(b.holder_name),
         ]
       );
     }
@@ -1428,9 +1436,9 @@ function mountMobile(app, deps) {
     db.run(
       'UPDATE traders SET ifsc = ?, acctnum = ?, holder_name = ? WHERE id = ?',
       [
-        String(first.ifsc || '').trim().toUpperCase(),
-        String(first.acctnum || '').trim(),
-        String(first.holder_name || '').trim(),
+        ucMaster(first.ifsc),
+        ucMaster(first.acctnum),
+        ucMaster(first.holder_name),
         traderId,
       ]
     );
@@ -1455,10 +1463,10 @@ function mountMobile(app, deps) {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
         traderId,
-        String(label || '').trim(),
-        String(acctnum).trim(),
-        String(ifsc || '').trim().toUpperCase(),
-        String(holder_name || '').trim(),
+        ucMaster(label),
+        ucMaster(acctnum),
+        ucMaster(ifsc),
+        ucMaster(holder_name),
         is_default ? 1 : 0,
       ]
     );
@@ -1466,7 +1474,7 @@ function mountMobile(app, deps) {
     if (is_default) {
       db.run(
         'UPDATE traders SET acctnum = ?, ifsc = ?, holder_name = ? WHERE id = ?',
-        [String(acctnum).trim(), String(ifsc || '').trim().toUpperCase(), String(holder_name || '').trim(), traderId]
+        [ucMaster(acctnum), ucMaster(ifsc), ucMaster(holder_name), traderId]
       );
     }
     res.json({ id: info.lastInsertRowid });
@@ -1489,10 +1497,10 @@ function mountMobile(app, deps) {
            holder_name = COALESCE(?, holder_name)
        WHERE id = ?`,
       [
-        acctnum != null ? String(acctnum).trim() : null,
-        ifsc != null ? String(ifsc).trim().toUpperCase() : null,
-        label != null ? String(label).trim() : null,
-        holder_name != null ? String(holder_name).trim() : null,
+        acctnum != null ? ucMaster(acctnum) : null,
+        ifsc != null ? ucMaster(ifsc) : null,
+        label != null ? ucMaster(label) : null,
+        holder_name != null ? ucMaster(holder_name) : null,
         bid,
       ]
     );

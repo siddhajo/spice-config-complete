@@ -3909,6 +3909,27 @@ app.get('/api/traders/:id', requireView, (req, res) => {
   );
   res.json(row);
 });
+// ── Master-data casing ────────────────────────────────────────
+// Sellers and Buyers are stored in CAPS — the DBF/FoxPro exports, the
+// XLS imports and every report assume it, and the master forms now
+// uppercase as the operator types. Normalising here as well keeps the
+// rule true for anything that reaches these routes another way (the
+// mobile bridge, a re-post of an older payload). `email` is passed
+// through untouched: the local part of an address can be
+// case-sensitive, so caps would be wrong rather than merely loud.
+const ucMaster = v => String(v == null ? '' : v).trim().toUpperCase();
+function upperMasterFields(src, fields) {
+  const out = { ...src };
+  for (const f of fields) {
+    if (f === 'email') { out[f] = String(src[f] == null ? '' : src[f]).trim(); continue; }
+    if (src[f] != null) out[f] = ucMaster(src[f]);
+  }
+  return out;
+}
+const TRADER_UC_FIELDS = ['name','cr','pan','tel','email','aadhar','padd','ppla','pin','pstate','pst_code','ifsc','acctnum','holder_name'];
+const BUYER_UC_FIELDS  = ['buyer','buyer1','code','sbl','add1','add2','pla','pin','state','st_code','gstin','pan','tel','ti','sale','email','tdsq',
+  'cbuyer1','cadd1','cadd2','cpla','cpin','cstate','cst_code','cgstin'];
+
 // Sync a trader's banks array into the trader_banks table.
 // Strategy: clear existing rows for this trader, reinsert. Simple and
 // correct; the number of banks per trader is tiny (typically 1-3) so
@@ -3922,14 +3943,14 @@ function syncTraderBanks(db, traderId, banks) {
   for (const b of arr) {
     db.run(
       'INSERT INTO trader_banks (trader_id, bank_name, branch, acctnum, ifsc, holder_name) VALUES (?,?,?,?,?,?)',
-      [traderId, b.bank_name||'', b.branch||'', String(b.acctnum||''), String(b.ifsc||''), b.holder_name||'']
+      [traderId, ucMaster(b.bank_name), ucMaster(b.branch), ucMaster(b.acctnum), ucMaster(b.ifsc), ucMaster(b.holder_name)]
     );
   }
   // Mirror first bank into traders row for legacy compatibility
   const first = arr[0] || {};
   db.run(
     'UPDATE traders SET ifsc=?, acctnum=?, holder_name=? WHERE id=?',
-    [first.ifsc||'', first.acctnum||'', first.holder_name||'', traderId]
+    [ucMaster(first.ifsc), ucMaster(first.acctnum), ucMaster(first.holder_name), traderId]
   );
 }
 
@@ -3952,7 +3973,7 @@ function findDuplicateSeller(db, pan, excludeId) {
 }
 
 app.post('/api/traders', requireTraderWrite, (req, res) => {
-  const t = req.body;
+  const t = upperMasterFields(req.body || {}, TRADER_UC_FIELDS);
   const db = getDb();
   // Duplicate-PAN guard. Two sellers CAN legitimately be different parties
   // under one trade name and one PAN, so this is no longer an absolute
@@ -3982,7 +4003,7 @@ app.post('/api/traders', requireTraderWrite, (req, res) => {
   res.json({ success: true, id: info.lastInsertRowid });
 });
 app.put('/api/traders/:id', requireTraderWrite, (req, res) => {
-  const t = req.body;
+  const t = upperMasterFields(req.body || {}, TRADER_UC_FIELDS);
   const db = getDb();
   // Same duplicate-PAN check applied to updates, excluding the row being
   // edited, and likewise overridable with `allowDuplicate` for the genuine
@@ -4019,7 +4040,9 @@ app.delete('/api/traders/:id', requireDelete, (req, res) => {
 // Sellers tab. Permissioned for trader_write OR lot_write so both
 // office operators AND lot_entry-role users can hit it.
 app.post('/api/traders/quick', requireAnyPermission('trader_write', 'lot_write'), (req, res) => {
-  const t = req.body || {};
+  // Normalised to CAPS up front (see upperMasterFields) so the dedupe
+  // lookups below compare the same shape that gets stored.
+  const t = upperMasterFields(req.body || {}, TRADER_UC_FIELDS);
   if (!t.name || !String(t.name).trim()) {
     return res.status(400).json({ error: 'Name is required' });
   }
@@ -4050,16 +4073,16 @@ app.post('/api/traders/quick', requireAnyPermission('trader_write', 'lot_write')
   const info = db.run(`INSERT INTO traders (name,cr,pan,tel,aadhar,padd,ppla,pin,pstate,pst_code,ifsc,acctnum,holder_name)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
-      String(t.name).trim().toUpperCase(),
-      (t.cr || '').toString().trim(),
-      (t.pan || '').toString().trim().toUpperCase(),
-      (t.tel || '').toString().trim(),
-      (t.aadhar || '').toString().trim(),
-      (t.padd || '').toString().trim(),
-      (t.ppla || '').toString().trim().toUpperCase(),
-      (t.pin || '').toString().trim(),
-      (t.pstate || 'TAMIL NADU').toString().trim().toUpperCase(),
-      (t.pst_code || '33').toString().trim(),
+      t.name,
+      t.cr || '',
+      t.pan || '',
+      t.tel || '',
+      t.aadhar || '',
+      t.padd || '',
+      t.ppla || '',
+      t.pin || '',
+      t.pstate || 'TAMIL NADU',
+      t.pst_code || '33',
       '', '', ''
     ]);
   const created = db.get('SELECT * FROM traders WHERE id = ?', [info.lastInsertRowid]);
@@ -4233,7 +4256,7 @@ function findDuplicateBuyer(db, buyer, code, excludeId) {
 }
 
 app.post('/api/buyers', requireBuyerWrite, (req, res) => {
-  const b = req.body;
+  const b = upperMasterFields(req.body || {}, BUYER_UC_FIELDS);
   const db = getDb();
   // Duplicate-by-code guard. Hard block so two buyers can't share the
   // same primary code or short alias (both are used as lookup keys
@@ -4258,7 +4281,7 @@ app.post('/api/buyers', requireBuyerWrite, (req, res) => {
   res.json({ success: true });
 });
 app.put('/api/buyers/:id', requireBuyerWrite, (req, res) => {
-  const b = req.body;
+  const b = upperMasterFields(req.body || {}, BUYER_UC_FIELDS);
   const db = getDb();
   // Same duplicate guard on updates, excluding the row being edited.
   const dup = findDuplicateBuyer(db, b.buyer, b.code, parseInt(req.params.id, 10));

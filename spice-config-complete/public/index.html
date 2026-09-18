@@ -13579,6 +13579,44 @@ function applyClientSidePagination(pager, pagerHostId, gotoFn, rows){
   return arr.slice((pager.page - 1) * pager.pageSize, pager.page * pager.pageSize);
 }
 
+// ── Uppercase master data (Sellers / Buyers) ──────────────────
+// Names, addresses, places and codes are stored in CAPS everywhere —
+// the DBF/FoxPro side, the imports and every report assume it — so the
+// master forms uppercase as the operator types rather than leaving the
+// case to whoever filled the row. Email is the one exemption: the local
+// part of an address is case-sensitive on some mail servers and caps
+// read as shouting in a mailer.
+const UC_SKIP_IDS = new Set(['t-email', 'b-email', 'le-ns-email']);
+function ucText(v){ return String(v == null ? '' : v).toUpperCase(); }
+
+// Uppercase an input in place, keeping the caret where the operator left
+// it (assigning .value would otherwise jump it to the end mid-word).
+function ucInput(el){
+  if (!el || el.tagName !== 'INPUT') return;
+  if (el.type === 'email' || el.type === 'hidden' || el.type === 'date' || el.type === 'number') return;
+  if (UC_SKIP_IDS.has(el.id)) return;
+  const up = el.value.toUpperCase();
+  if (up === el.value) return;
+  const s = el.selectionStart, e = el.selectionEnd;
+  el.value = up;
+  try { el.setSelectionRange(s, e); } catch (_) {}
+}
+
+// One delegated listener per form, so inputs added later (the repeating
+// bank rows) are covered without re-binding.
+function ucBindForm(containerId){
+  const c = document.getElementById(containerId);
+  if (!c || c._ucBound) return;
+  c._ucBound = true;
+  c.addEventListener('input', ev => {
+    if (ev.isComposing) return; // don't fight an IME mid-composition
+    ucInput(ev.target);
+  });
+}
+function ucBindMasterForms(){ ['trader-modal', 'buyer-modal', 'le-newseller-modal'].forEach(ucBindForm); }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ucBindMasterForms);
+else ucBindMasterForms();
+
 // Traders now support MULTIPLE bank accounts via a repeating section in the
 // modal. The flat trader fields here cover everything EXCEPT banking — that's
 // collected separately from the #t-banks-container rows at save time.
@@ -13857,11 +13895,11 @@ function collectBankRows(){
   const rows = Array.from(c.querySelectorAll('.bank-row'));
   const banks = [];
   for (const r of rows) {
-    const bank_name   = r.querySelector('.bank-name').value.trim();
-    const branch      = (r.querySelector('.bank-branch')?.value || '').trim();
+    const bank_name   = ucText(r.querySelector('.bank-name').value.trim());
+    const branch      = ucText((r.querySelector('.bank-branch')?.value || '').trim());
     const acctnum     = r.querySelector('.bank-acctnum').value.trim();
     const ifsc        = r.querySelector('.bank-ifsc').value.trim().toUpperCase();
-    const holder_name = r.querySelector('.bank-holder').value.trim();
+    const holder_name = ucText(r.querySelector('.bank-holder').value.trim());
     if (!acctnum && !ifsc) continue; // blank row — skip
     banks.push({ bank_name, branch, acctnum, ifsc, holder_name });
   }
@@ -13871,7 +13909,9 @@ function collectBankRows(){
 async function saveTrader(){
   const id=document.getElementById('t-id').value;
   const body={};
-  T_FIELDS.forEach(f=>{const el=document.getElementById(T_IDS[f]);body[f]=el?el.value:''});
+  // Uppercase on the way out too — the GST fetch and the browser's own
+  // autofill set .value directly, which fires no input event.
+  T_FIELDS.forEach(f=>{const el=document.getElementById(T_IDS[f]);const v=el?el.value.trim():'';body[f]=(f==='email')?v:ucText(v)});
   if(!body.name){alert('Name is required');return}
   // Banks: collect from the repeating section. The server persists these
   // into trader_banks AND mirrors the FIRST bank back into the legacy
@@ -14661,7 +14701,9 @@ async function gstLookup(prefix){
     gstinEl.value = prefix==='t' ? 'GSTIN.'+gstin : gstin;
 
     // Always available: PAN, state, st_code
-    const set=(id,val)=>{const e=document.getElementById(id);if(e&&val!==undefined&&val!==null&&val!=='')e.value=val};
+    // Masters are stored in caps, so the GSTN payload is uppercased on the
+    // way into the form — same as anything typed there (see ucInput).
+    const set=(id,val)=>{const e=document.getElementById(id);if(e&&val!==undefined&&val!==null&&val!=='')e.value=ucText(val)};
     if(prefix==='t'){
       set('t-pan', d.pan);
       set('t-pstate', d.state);
@@ -14861,7 +14903,7 @@ function openBuyerClone(b){
 }
 async function saveBuyer(){
   const id=document.getElementById('b-id').value;
-  const body={};B_FIELDS.forEach(f=>{const el=document.getElementById(B_IDS[f]);body[f]=el?el.value:''});
+  const body={};B_FIELDS.forEach(f=>{const el=document.getElementById(B_IDS[f]);const v=el?el.value.trim():'';body[f]=(f==='email')?v:ucText(v)});
   if(!body.buyer){alert('Buyer code is required');return}
   try{
     const r = await fetch(B+(id?`/api/buyers/${id}`:'/api/buyers'),{method:id?'PUT':'POST',
