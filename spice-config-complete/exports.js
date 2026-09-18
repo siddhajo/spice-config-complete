@@ -163,7 +163,9 @@ function auctionMeta(db, auctionId) {
       'SELECT ano, date, crop_type, mode FROM auctions WHERE id = ?', [auctionId]
     );
     if (!a) return [];
-    const dt = String(a.date || '').slice(0, 10).split('-').reverse().join('/');
+    // Settings → Display → Date format, like every other displayed date
+    // (fmtUserDate). The DBF and Tally paths keep their own fixed formats.
+    const dt = fmtUserDate(String(a.date || '').slice(0, 10));
     const meta = [];
     // Mode-aware: 'e-TRADE No:' or 'e-AUCTION No:' from auction.mode.
     // Empty/legacy mode falls back to e-AUCTION (matches the historical
@@ -1500,7 +1502,7 @@ const EXPORT_TYPES = {
 function registerMeta(db, opts) {
   const lines = [];
   if (opts && opts.auctionId) lines.push(...auctionMeta(db, opts.auctionId));
-  else if (opts && opts.from && opts.to) lines.push(`Period: ${opts.from} to ${opts.to}`);
+  else if (opts && opts.from && opts.to) lines.push(`Period: ${fmtUserDate(opts.from)} to ${fmtUserDate(opts.to)}`);
   else lines.push('All trades');
   if (opts && opts.saleType) lines.push(`Sale: ${opts.saleType}`);
   return lines.filter(Boolean);

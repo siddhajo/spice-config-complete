@@ -7,7 +7,9 @@ const { getSettingsFlat, getGSTRates } = require('./company-config');
 
 // Display date formatter for journal/register exports — honours the user's
 // Settings → Display → Date format choice via the shared module.
-const { fmtDate: _ddmmyyyy } = require('./date-format');
+// Display dates follow Settings → Display → Date format — NOT a fixed
+// dd/mm/yyyy (the old alias name for this helper suggested otherwise).
+const { fmtDate: fmtUserDate } = require('./date-format');
 
 // `round0` = round to integer (whole rupee — used by the Round on/off line).
 // Sign-aware (Excel's "round half away from zero").
@@ -1471,7 +1473,7 @@ function getPurchaseRegister(db, opts = {}) {
   else if (opts.from && opts.to) { q += ' AND a.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
   q += ' ORDER BY l.state, a.ano, CAST(l.lot_no AS INTEGER), l.lot_no';
   const rows = db.all(q, params);
-  return rows.map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  return rows.map(r => ({ ...r, date: fmtUserDate(r.date) }));
 }
 
 /**
@@ -1503,7 +1505,7 @@ function getSalesRegister(db, opts = {}) {
   if (where.length) q += ' WHERE ' + where.join(' AND ');
   q += ' ORDER BY i.state, i.ano, i.date, i.sale, i.invo';
   const rows = db.all(q, params);
-  return rows.map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  return rows.map(r => ({ ...r, date: fmtUserDate(r.date) }));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1571,7 +1573,7 @@ function getPoolerRegister(db, opts = {}) {
     else { q += ' AND UPPER(TRIM(l.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
   }
   q += ' ORDER BY l.name, l.trader_id, a.date, a.ano, CAST(l.lot_no AS INTEGER), l.lot_no';
-  const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  const rows = db.all(q, params).map(r => ({ ...r, date: fmtUserDate(r.date) }));
   const isWd = (r) => String(r.code || '').trim().toUpperCase() === 'WD';
   const parties = _groupRegister(rows, (rs) => {
     const qty = _sum(rs, 'qty');
@@ -1611,7 +1613,7 @@ function getSellerRegister(db, opts = {}) {
     else { q += ' AND UPPER(TRIM(p.name)) = UPPER(?)'; params.push(String(opts.party).trim()); }
   }
   q += ' GROUP BY party_key, p.ano, p.date ORDER BY p.name, party_key, p.date, p.ano';
-  const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  const rows = db.all(q, params).map(r => ({ ...r, date: fmtUserDate(r.date) }));
   const parties = _groupRegister(rows, (rs) => {
     const invoice = _sum(rs, 'invoice');
     return { qty: _sum(rs, 'qty'), invoice, closing: invoice };
@@ -1629,7 +1631,7 @@ function getMerchantRegister(db, opts = {}) {
   if (opts.from && opts.to) { q += ' AND i.date BETWEEN ? AND ?'; params.push(opts.from, opts.to); }
   if (opts.party) { q += ' AND UPPER(TRIM(i.buyer1)) = UPPER(?)'; params.push(String(opts.party).trim()); }
   q += " ORDER BY i.buyer1, i.date, i.ano, CAST(NULLIF(i.invo,'') AS INTEGER), i.invo";
-  const rows = db.all(q, params).map(r => ({ ...r, date: _ddmmyyyy(r.date) }));
+  const rows = db.all(q, params).map(r => ({ ...r, date: fmtUserDate(r.date) }));
   const parties = _groupRegister(rows, (rs) => {
     const invoice = _sum(rs, 'invoice');
     const receipt = _sum(rs, 'receipt');

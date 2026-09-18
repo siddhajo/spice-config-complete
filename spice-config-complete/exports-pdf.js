@@ -19,6 +19,10 @@ const {
   fmtMoney, fmtQty, fmtPrice,
   getCompanyHeader, drawCompanyHeader, xlsxNumFmtForHeader,
 } = require('./report-formatters');
+// Every date PRINTED on a PDF follows Settings → Display → Date format,
+// the same as the XLSX meta lines and the on-screen tables. (Row dates
+// arrive pre-formatted from calculations.js, which uses this same helper.)
+const { fmtDate: fmtUserDate } = require('./date-format');
 
 // Manually truncate `text` to fit `maxWidth` using doc.widthOfString. PDFKit
 // 0.15's `lineBreak: false` + `ellipsis: true` is unreliable for long single
@@ -1287,7 +1291,8 @@ async function renderIndividualRegisterPdf(db, type, extra) {
       { kind: 'wd',   cells: { tno: 'WITHDRAWN', qty: wdQty, value: 0 } },
     ];
   }
-  const subtitle = (opts.from && opts.to) ? `Period: ${opts.from} to ${opts.to}` : 'All dates';
+  const subtitle = (opts.from && opts.to)
+    ? `Period: ${fmtUserDate(opts.from)} to ${fmtUserDate(opts.to)}` : 'All dates';
   return renderTablePdf({
     title: TITLES[type] || type,
     subtitle,
@@ -1366,13 +1371,14 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
 
   let subtitle = '';
   if (type === 'tds_return') {
-    subtitle = `Period: ${extra.from || ''} to ${extra.to || ''}`;
+    subtitle = `Period: ${fmtUserDate(extra.from || '')} to ${fmtUserDate(extra.to || '')}`;
   } else if ((type === 'purchase_register' || type === 'sales_register') && !auctionId) {
-    subtitle = (extra.from && extra.to) ? `Period: ${extra.from} to ${extra.to}` : 'All trades';
+    subtitle = (extra.from && extra.to)
+      ? `Period: ${fmtUserDate(extra.from)} to ${fmtUserDate(extra.to)}` : 'All trades';
   } else if (auctionId) {
     const auction = db.get('SELECT ano, date, crop_type, mode FROM auctions WHERE id = ?', [auctionId]);
     if (auction) {
-      const d = auction.date ? auction.date.split('-').reverse().join('/') : '';
+      const d = auction.date ? fmtUserDate(auction.date) : '';
       // Two clean meta lines, joined by " — " so renderTablePdf can split
       // them back into separate right-side rows. The crop type (ISP/ASP) is
       // omitted — the active preset is already obvious from the logo and
