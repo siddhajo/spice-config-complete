@@ -154,6 +154,10 @@ select:focus{border-color:var(--green)}
 .ico-btn{background:var(--bg2);border:1.5px solid var(--border);border-radius:8px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
 .ico-btn:active{transform:scale(.85)}.ico-btn.ed{color:var(--green);border-color:var(--green)}.ico-btn.dl{color:var(--red);border-color:var(--red)}.ico-btn.pr{color:#2563eb;border-color:#2563eb}
 .ico-btn svg{width:14px;height:14px}
+.ico-btn.wa{color:#25D366;border-color:#25D366}
+/* WhatsApp mark inside the two filled (green) text buttons. */
+.wa-ico{display:inline-flex;align-items:center;justify-content:center;flex:none}
+.wa-ico svg{width:13px;height:13px;display:block}
 .lot-empty{text-align:center;padding:40px 16px;color:var(--text3);font-size:13px;font-weight:500}
 .undo-item{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow)}
 .appbar-logo{height:30px;width:30px;object-fit:cover;margin-right:8px;vertical-align:middle;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.15);border:2px solid rgba(255,255,255,.3)}
@@ -396,7 +400,7 @@ select:focus{border-color:var(--green)}
             <button onclick="printLastSeller()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📋 All by Seller</button>
             <!-- Send the just-saved lot's receipt to its seller on WhatsApp.
                  Shown only when flag_whatsapp is on (applyWhatsappVis). -->
-            <button id="le-wa-btn" onclick="whatsappLastLot()" style="display:none;background:#25D366;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📲 WhatsApp</button>
+            <button id="le-wa-btn" onclick="whatsappLastLot()" style="display:none;align-items:center;gap:5px;background:#25D366;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit"><span class="wa-ico"></span><span>WhatsApp</span></button>
           </div>
         </div>
 
@@ -458,7 +462,7 @@ select:focus{border-color:var(--green)}
       <label style="display:flex;align-items:center;gap:5px;height:30px;padding:0 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;user-select:none" title="Select / clear all listed lots"><input type="checkbox" id="ml-select-all" onchange="toggleAllMyLots(this.checked)" style="width:16px;height:16px">Select all</label>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">🖨 Print selected</button>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">🖨 Print all by seller</button>
-      <button id="ml-wa-btn" style="display:none;background:#25D366;color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,211,102,.25)" onclick="whatsappSelectedMyLots()" title="Send each seller their selected lots' receipt on WhatsApp">📲 WhatsApp selected</button>
+      <button id="ml-wa-btn" style="display:none;align-items:center;gap:5px;background:#25D366;color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,211,102,.25)" onclick="whatsappSelectedMyLots()" title="Send each seller their selected lots' receipt on WhatsApp"><span class="wa-ico"></span><span id="ml-wa-label">WhatsApp selected</span></button>
       <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">🗑 Delete Selected</button>
       <span style="font-size:11px;color:var(--text3)" id="ml-sel-count"></span>
     </div>
@@ -670,12 +674,19 @@ function onReserveToggle(){
 }
 
 // Show/hide the WhatsApp actions: the Saved bar button, the "WhatsApp selected"
-// bulk button in My Lots, and (via renderMyLots) the per-lot 📲 action.
+// bulk button in My Lots, and (via renderMyLots) the per-lot WhatsApp action.
 function applyWhatsappVis(){
+  // Fill the icon slots from the single ICO_WA source. Idempotent — only
+  // paints an empty slot, so the repeated config polls don't churn the DOM.
+  document.querySelectorAll('.wa-ico').forEach(function(el){
+    if(!el.innerHTML) el.innerHTML=ICO_WA;
+  });
+  // inline-flex (not inline-block): both buttons lay the mark out beside
+  // their label with a gap, so they need to be flex containers when shown.
   var b=document.getElementById('le-wa-btn');
-  if(b) b.style.display=cfgWhatsapp?'inline-block':'none';
+  if(b) b.style.display=cfgWhatsapp?'inline-flex':'none';
   var mb=document.getElementById('ml-wa-btn');
-  if(mb) mb.style.display=cfgWhatsapp?'':'none';
+  if(mb) mb.style.display=cfgWhatsapp?'inline-flex':'none';
 }
 
 // Toggle the entry-form + edit-modal e-Auction rows + their two cells.
@@ -819,6 +830,11 @@ function _incrementCrpt(prev){
 const ICO_EDIT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 const ICO_DEL='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 const ICO_PRINT='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>';
+// WhatsApp mark. Single source of truth: the two static buttons (Saved bar +
+// My Lots bulk) are filled from this by applyWhatsappVis(), and the per-lot
+// list button inlines it directly. fill="currentColor" so it takes the
+// button's colour — green on the outline button, white on the filled ones.
+const ICO_WA='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>';
 
 function togglePwdVis(id,btn){var inp=document.getElementById(id);if(inp.type==='password'){inp.type='text';btn.textContent='🙈'}else{inp.type='password';btn.textContent='👁'}}
 function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');var bn=document.getElementById('global-bnav');if(bn){if(id==='s-lots'||id==='s-mylots'){bn.classList.add('visible')}else{bn.classList.remove('visible')}}}
@@ -1931,15 +1947,16 @@ async function whatsappSelectedMyLots(){
   var keys=Object.keys(groups);
   if(!keys.length){toast('No matching lots',true);return}
   if(btn)btn.disabled=true;
+  var lbl=document.getElementById('ml-wa-label');
   var sent=0,failed=0,noPhone=0,done=0;
   for(var k of keys){
     var g=groups[k];
     try{
       var norm=_waNormPhone(await _lookupSellerWa({traderId:g.traderId,name:g.name}));
-      if(!norm){noPhone++;done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;continue}
+      if(!norm){noPhone++;done++;if(lbl)lbl.textContent=done+'/'+keys.length;continue}
       var url=B+'/api/lots/print-batch?ids='+g.ids.join(',')+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt();
       var pr=await fetch(url,{headers:{'Authorization':'Bearer '+token}});
-      if(!pr.ok){failed++;done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;continue}
+      if(!pr.ok){failed++;done++;if(lbl)lbl.textContent=done+'/'+keys.length;continue}
       var blob=await pr.blob();
       var fname='Receipt_'+String(g.name||'Seller').replace(/[^A-Za-z0-9]+/g,'_')+'.pdf';
       var summary=g.ids.length+' lot(s) receipt is attached.';
@@ -1950,9 +1967,10 @@ async function whatsappSelectedMyLots(){
       var sr=await fetch(B+'/api/whatsapp/send-template-document',{method:'POST',headers:{'Authorization':'Bearer '+token},body:fd});
       if(sr.ok)sent++;else failed++;
     }catch(e){failed++}
-    done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;
+    done++;if(lbl)lbl.textContent=done+'/'+keys.length;
   }
-  if(btn){btn.disabled=false;btn.textContent='📲 WhatsApp selected'}
+  if(btn)btn.disabled=false;
+  if(lbl)lbl.textContent='WhatsApp selected';
   toast('WhatsApp: '+sent+' sent'+(noPhone?', '+noPhone+' no number':'')+(failed?', '+failed+' failed':''),(failed>0||noPhone>0));
 }
 
@@ -1990,7 +2008,7 @@ list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(
 // Held (reserved) lots get an amber card + RESERVED chip. The per-lot WhatsApp
 // action appears only when flag_whatsapp is on (cfgWhatsapp).
 const isRes=!!Number(l.reserved);
-const waBtn=cfgWhatsapp?` <button class="ico-btn" style="color:#25D366" onclick="whatsappLotById(${l.id})" title="Send receipt on WhatsApp">📲</button>`:'';
+const waBtn=cfgWhatsapp?` <button class="ico-btn wa" onclick="whatsappLotById(${l.id})" title="Send receipt on WhatsApp">${ICO_WA}</button>`:'';
 return`<div class="lot-card${isRes?' reserved':''}"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span>${isRes?'<span class="res-badge">RESERVED</span>':''}</label><span style="font-size:10px;color:var(--text3)">${l.user_id} · ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${waBtn}${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> · ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
 
 // Select / clear every listed lot's checkbox (respects the active search
