@@ -192,7 +192,7 @@ function lotSheetTotals(rows) {
 async function exportLotSlip(db, auctionId, state) {
   const rows = db.all(
     `SELECT state, lot_no as lot, name, grade, bags as bag, qty, litre
-     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''}
+     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''} ${NOT_RESERVED}
      ORDER BY lot_no`, state ? [auctionId, state] : [auctionId]
   );
   const cols = [
@@ -214,7 +214,7 @@ async function exportLotSlip(db, auctionId, state) {
 async function exportLotSlipAfter(db, auctionId, state) {
   const rows = db.all(
     `SELECT lot_no as lot, name, bags as bag, qty, price, amount, code
-     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''}
+     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''} ${NOT_RESERVED}
      ORDER BY lot_no`, state ? [auctionId, state] : [auctionId]
   );
   const cols = [
@@ -243,7 +243,7 @@ async function exportLotSlipAfter(db, auctionId, state) {
 async function exportLotBuyer(db, auctionId) {
   const rows = db.all(
     `SELECT lot_no AS lot, COALESCE(buyer,'') AS buyer, bags AS bag, qty
-     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+     FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]
   );
   const cols = [
     { header: 'LOT',   key: 'lot',   width: 8  },
@@ -263,7 +263,7 @@ async function exportLotName(db, auctionId) {
             bags AS bag, qty,
             CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
             '' AS control
-     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+     FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]
   );
   const cols = [
     { header: 'LOT',     key: 'lot',     width: 8  },
@@ -293,7 +293,7 @@ async function exportPriceListBefore(db, auctionId) {
     `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
             CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
             COALESCE(code,'') AS code
-     FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]
+     FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]
   );
   // The trade-no / date identifier columns were dropped per user request —
   // both already appear in the brand-band meta at the top of the sheet.
@@ -688,11 +688,51 @@ async function exportBankPaymentBefore(db, auctionId, cfg) {
   });
 }
 
+// ── Held (reserved) lots ──────────────────────────────────────
+// A reserved lot is a HOLD: it claims its lot number for a seller and carries
+// no bags, weight or price. Every LOT-LEVEL pre-trade export must skip them —
+// a 0-kg row on a Lot Slip is meaningless, and on the Price List / Praman CSV
+// it invites the auctioneer to price a lot that isn't really there. Post-trade
+// exports gate on `amount > 0` and so exclude holds already.
+//
+// Bare SQL fragment (leading AND) for an unaliased `lots` query.
+const NOT_RESERVED = `AND COALESCE(reserved,0) = 0`;
+
+// ── Pooler grade scope ────────────────────────────────────────
+// A "pooler" IS the Grade-1 (agriculturist / planter) side of a trade — that's
+// why the rate settings call the Grade-1 margin the "Pooler Deduction" and the
+// Grade-2 one the "Dealer Deduction". The pooler lists therefore carry Grade 1
+// only. Settings → Flags → "Pooler lists include Grade 2 lots" widens them to
+// Grade 1 + Grade 2 for operators who bill both sides off one list.
+//
+// Returns a bare SQL fragment (leading AND) for an unaliased `lots` query.
+// TRIM/COALESCE because lot grades arrive from DBF imports with stray
+// whitespace, and ungraded lots (blank, '1A', '2A'…) are NOT poolers here —
+// only the exact '1' (and '2' when widened) qualify, matching how
+// calculations.js classifies a lot as pooler vs dealer.
+function poolerGradeClause(db) {
+  const cfg = require('./company-config').getSettingsFlat(db) || {};
+  const incl2 = cfg.flag_pooler_grade2 === true
+    || String(cfg.flag_pooler_grade2 || '').toLowerCase() === 'true';
+  return incl2
+    ? `AND TRIM(COALESCE(grade,'')) IN ('1','2')`
+    : `AND TRIM(COALESCE(grade,'')) = '1'`;
+}
+
+// Human-readable suffix for the report title so a printed sheet says which
+// grade scope produced it — otherwise two runs of the same report with the
+// flag flipped are indistinguishable on paper.
+function poolerGradeLabel(db) {
+  return poolerGradeClause(db).includes(`IN ('1','2')`)
+    ? ' — Grade 1 + Grade 2'
+    : ' — Grade 1';
+}
+
 // ── Export Type 5: Pooler-wise Register ───────────────────────
 async function exportPoolerRegister(db, auctionId) {
   const rows = db.all(
     `SELECT state, lot_no as lot, name as poolername, branch as br, qty, price, amount, pqty, prate, puramt
-     FROM lots WHERE auction_id = ? AND amount > 0
+     FROM lots WHERE auction_id = ? AND amount > 0 ${poolerGradeClause(db)} ${NOT_RESERVED}
      ORDER BY name`, [auctionId]
   );
   const cols = [
@@ -708,7 +748,7 @@ async function exportPoolerRegister(db, auctionId) {
     { header: 'PURAMT', key: 'puramt', width: 14 },
   ];
   return createExcelBuffer('PoolerRegister', cols, rows, {
-    db, title: 'Pooler Register', metaLines: auctionMeta(db, auctionId),
+    db, title: 'Pooler Register' + poolerGradeLabel(db), metaLines: auctionMeta(db, auctionId),
   });
 }
 
@@ -725,7 +765,7 @@ async function exportPoolerListConsolidated(db, auctionId) {
        SUM(COALESCE(amount,0)) as amount,
        SUM(COALESCE(pqty,0))   as pqty,
        SUM(COALESCE(puramt,0)) as puramt
-     FROM lots WHERE auction_id = ? AND amount > 0
+     FROM lots WHERE auction_id = ? AND amount > 0 ${poolerGradeClause(db)} ${NOT_RESERVED}
      GROUP BY name, branch
      ORDER BY name`, [auctionId]
   );
@@ -753,7 +793,7 @@ async function exportPoolerListConsolidated(db, auctionId) {
     },
   };
   return createExcelBuffer('PoolerListConsolidated', cols, rows, {
-    db, title: 'Pooler List Consolidated (Party-wise)',
+    db, title: 'Pooler List Consolidated (Party-wise)' + poolerGradeLabel(db),
     metaLines: auctionMeta(db, auctionId), grandTotal,
   });
 }
@@ -771,7 +811,7 @@ async function exportPoolerListConsolidatedBefore(db, auctionId) {
        COUNT(*) as lots,
        SUM(COALESCE(bags,0)) as bags,
        SUM(COALESCE(qty,0))  as qty
-     FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
+     FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0 ${poolerGradeClause(db)} ${NOT_RESERVED}
      GROUP BY name, branch
      ORDER BY name`, [auctionId]
   );
@@ -791,7 +831,7 @@ async function exportPoolerListConsolidatedBefore(db, auctionId) {
     values: { lots: sum('lots'), bags: sum('bags'), qty: sum('qty') },
   };
   return createExcelBuffer('PoolerListConsolidatedBefore', cols, rows, {
-    db, title: 'Pooler List Consolidated (Party-wise)',
+    db, title: 'Pooler List Consolidated (Party-wise)' + poolerGradeLabel(db),
     metaLines: auctionMeta(db, auctionId), grandTotal,
   });
 }
@@ -861,7 +901,7 @@ async function exportDealerList(db, auctionId) {
   const rows = db.all(
     `SELECT state, name, SUBSTR(cr, 7, 15) as gstin, lot_no as lot,
       bags, qty
-     FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
+     FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0 ${NOT_RESERVED}
      ORDER BY state, name, lot_no`, [auctionId]
   );
   const grouped = _lotwiseGroupSubtotals(rows, 'name', ['bags', 'qty']);
@@ -930,7 +970,7 @@ async function exportPlanterList(db, auctionId) {
         CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
              ELSE COALESCE(cr,'') END AS cr,
         lot_no as lot, bags, qty
-     FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
+     FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1' ${NOT_RESERVED}
      ORDER BY state, name, lot_no`, [auctionId]
   );
   const grouped = _lotwiseGroupSubtotals(rows, 'name', ['bags', 'qty']);
@@ -1362,7 +1402,7 @@ async function exportPurchaseJournal(db, fromDate, toDate, type) {
 async function exportPramanCSV(db, auctionId, cfg, state) {
   const rows = db.all(
     `SELECT lot_no, branch, grade, name, cr, qty, litre, bags, tel
-     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''}
+     FROM lots WHERE auction_id = ? ${state ? 'AND state = ?' : ''} ${NOT_RESERVED}
      ORDER BY CAST(lot_no AS INTEGER), lot_no`,
     state ? [auctionId, state] : [auctionId]
   );
@@ -1668,6 +1708,9 @@ async function exportIndividualRegister(db, kind, opts = {}) {
 module.exports = {
   EXPORT_TYPES,
   createExcelBuffer,
+  // Shared with exports-pdf.js so the PDF renderer's own pooler queries
+  // honour the same Grade-1 / Grade-1+2 scope as the XLSX ones.
+  poolerGradeClause, poolerGradeLabel, NOT_RESERVED,
   exportLotSlip, exportLotSlipAfter, exportLotBuyer, exportLotName, exportLotPayment, exportPriceListBefore,
   exportPramanCSV, exportPriceList, exportBankPayment, exportBankPaymentNew, exportBankPaymentBefore,
   exportPoolerRegister, exportPoolerListConsolidated, exportPoolerListConsolidatedBefore,

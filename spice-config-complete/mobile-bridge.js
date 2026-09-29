@@ -892,6 +892,11 @@ function mountMobile(app, deps) {
     const isEAuc = String(get('business_mode', 'e-Auction')).toLowerCase() === 'e-auction';
     const showCropReceipt   = isEAuc && getBool('flag_crop_receipt',   false);
     const showReservedPrice = isEAuc && getBool('flag_reserved_price', false);
+    // Reserve Lot + WhatsApp are NOT mode-scoped (unlike the two above):
+    // holding a lot number and sharing a receipt both make sense in e-Trade
+    // and e-Auction alike, so each keys on its flag alone.
+    const reserveLot = getBool('flag_reserve_lot', false);
+    const whatsapp   = getBool('flag_whatsapp',    false);
 
     // Full config object — what app.html expects from a no-arg GET.
     res.json({
@@ -907,6 +912,13 @@ function mountMobile(app, deps) {
       defaultLitre:    get('default_litre', ''),
       showCropReceipt,
       showReservedPrice,
+      // "Reserve this lot" checkbox on the mobile Lot Entry + Edit Lot forms.
+      // OFF hides the control; lots.reserved is untouched either way.
+      reserveLot,
+      // WhatsApp actions on the mobile app: the Saved bar's "WhatsApp" button,
+      // the per-lot 📲 action in My Lots, and "WhatsApp selected" (bulk).
+      // Gated by the same master flag the desktop share buttons use.
+      whatsapp,
       // Gunny tare default + unified extra-fields toggle. The mobile UI
       // uses gunnyWeight to derive Net Wt (= Weight-w/-Gunny − gunny ×
       // bags) and showExtraLotFields to reveal the Weight-w/-Gunny +
@@ -1338,8 +1350,13 @@ function mountMobile(app, deps) {
   // ── 8c. TRADER GET BY ID — ensures fresh fetch ──────────────────
   // Mobile uses this after edits to refresh the displayed trader. Always
   // reads from the DB (no cache); both apps see the same data.
-  app.get('/api/traders/:id', requireAuth, (req, res) => {
+  app.get('/api/traders/:id', requireAuth, (req, res, next) => {
     const db = getDb();
+    // This bridge route mounts BEFORE server.js's own /api/traders/* routes, so
+    // a non-numeric segment (e.g. /api/traders/contact) would be swallowed here
+    // and answered with a 404 instead of reaching its real handler. Hand those
+    // straight on to the next matching route.
+    if (!/^\d+$/.test(String(req.params.id || '').trim())) return next();
     const id = parseInt(req.params.id, 10);
     const trader = db.get('SELECT * FROM traders WHERE id = ?', [id]);
     if (!trader) return res.status(404).json({ error: 'Seller not found' });

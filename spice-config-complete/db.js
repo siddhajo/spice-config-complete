@@ -510,6 +510,12 @@ async function initDb() {
     gunny_wt REAL DEFAULT 0,
     moisture TEXT DEFAULT '',
     reserved_price REAL DEFAULT 0,
+    -- 1 = the lot is a HELD (reserved) entry, not a booking: it only claims the
+    -- lot number for a seller. Rendered in a distinct colour, kept out of
+    -- pricing / invoicing, and needs no bags or weight. Distinct from
+    -- reserved_price above (a bid floor on a real lot). Untick Reserve on the
+    -- lot-entry form to convert a hold into a booking.
+    reserved INTEGER DEFAULT 0,
     price REAL DEFAULT 0,
     amount REAL DEFAULT 0,
     code TEXT DEFAULT '',
@@ -1031,6 +1037,12 @@ async function initDb() {
     // Feeds the Spices Board e-Auction CSV's reserved-price column on
     // export. Stored as REAL — value is in rupees per kg.
     'ALTER TABLE lots ADD COLUMN reserved_price REAL DEFAULT 0',
+    // Lot RESERVATION status — distinct from reserved_price above. 1 = the lot
+    // is a held placeholder claiming its lot number for a seller (no bags/qty,
+    // no price, never invoiced); 0 = an ordinary booked lot. Gated in the UI by
+    // flag_reserve_lot, but the column always exists so turning the flag off
+    // never loses existing holds.
+    'ALTER TABLE lots ADD COLUMN reserved INTEGER DEFAULT 0',
     // Sister-company (ASP/Kerala) invoice number paired with an ISP
     // (Tamil Nadu) invoice. Populated for IMPORTED sales invoices by the
     // ASP↔ISP linkage pass (matched on trade + buyer). Generated invoices

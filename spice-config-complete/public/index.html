@@ -980,6 +980,16 @@ body:not([data-feat-disc-in-prate="1"]) .feat-disc-in-prate{display:none !import
    keep working. */
 body:not([data-feat-crop-receipt="1"]):not([data-feat-extra-lot="1"]) .feat-crop-receipt{display:none !important}
 body:not([data-feat-reserved-price="1"]):not([data-feat-extra-lot="1"]) .feat-reserved-price{display:none !important}
+/* Reserve Lot (Lot Entry) — gated by flag_reserve_lot. When OFF the "Reserve
+   this lot" checkbox and its batch-reserve hint collapse via .feat-reserve-lot.
+   Unlike the two above this is NOT mode-scoped: holding a lot number is useful
+   in e-Trade and e-Auction alike. Existing lots.reserved values are untouched
+   when the flag goes off — they just stop being editable from the form. */
+body:not([data-feat-reserve-lot="1"]) .feat-reserve-lot{display:none !important}
+/* Held (reserved) lot rows — pale amber, so a hold reads as "claimed but not
+   booked" against the zebra stripes without competing with the red locked tint. */
+tr.row-reserved > td{background:#FFEDD5 !important;border-top:1px solid #FDBA74}
+tr.row-reserved:hover > td{background:#FED7AA !important}
 /* Spice Board reports — sidebar entry + tab content carry
    .mode-eauction-only and are visible only when the saved business
    mode is "e-Auction" (set by applyModeLabels() at boot + on mode
@@ -2115,6 +2125,13 @@ html.sidebar-collapsed .sidebar .side-item.locked:not(:hover)::after{content:non
   cursor:not-allowed;opacity:.95;box-shadow:0 1px 2px rgba(13,124,95,.25);
 }
 .le-lot-chip.used:hover{transform:none;background:linear-gradient(135deg,var(--green) 0%,#0a6a50 100%);color:#fff}
+/* A held (reserved) lot: used — so not clickable — but orange rather than
+   green, so the grid distinguishes "someone holds this number" from
+   "a real lot is entered here". */
+.le-lot-chip.used.reserved,.le-lot-chip.used.reserved:hover{
+  background:linear-gradient(135deg,#F97316 0%,#EA580C 100%);
+  border-color:#EA580C;box-shadow:0 1px 2px rgba(234,88,12,.3);
+}
 .le-lot-chip.selected{
   background:#FEF3C7;color:#92400E;border-style:solid;border-color:#F59E0B;
   box-shadow:0 0 0 2px rgba(245,158,11,.25);
@@ -5409,6 +5426,25 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
           <div class="feat-reserved-price">
             <div style="font-size:10.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Reserved Price</div>
             <span class="le-clr-wrap"><input type="number" id="le-reserved-price" step="any" min="0" placeholder="e.g. 1500" style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"><button type="button" class="le-clr" aria-label="Clear">✕</button></span>
+          </div>
+        </div>
+
+        <!-- Reserve (hold) this lot instead of booking it. A reserved lot only
+             claims its lot number for the chosen seller: bags / litre / net
+             weight are optional, the lot is skipped by Price Entry and never
+             invoiced, and no other seller can take that number. Untick it
+             while editing a held lot to convert the hold into a booking.
+             Gated by flag_reserve_lot via .feat-reserve-lot. -->
+        <div class="feat-reserve-lot">
+          <label for="le-reserved" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:10px 14px;border:1.5px solid var(--border);border-radius:8px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="le-reserved" onchange="leOnReserveToggle()" style="width:18px;height:18px;accent-color:#EA580C;cursor:pointer">
+            <span style="font-size:13.5px;font-weight:600;color:var(--text)">Reserve this lot <span style="font-weight:400;color:var(--text3)">— hold the lot number without booking it</span></span>
+          </label>
+          <!-- Batch-reserve hint. With Reserve on, the Lot No field accepts a
+               range or list so several numbers can be held for one seller in
+               one save (see leExpandLotList / leSaveReservedBatch). -->
+          <div id="le-reserve-hint" style="display:none;font-size:12px;color:#9A3412;background:#FFEDD5;border:1px solid #FDBA74;border-radius:8px;padding:8px 12px;margin-bottom:16px;line-height:1.45">
+            Reserving — the <b>Lot No</b> field accepts several lots at once: a range like <b>001-010</b> or a list like <b>001,003,007</b>. Each becomes a held lot for this seller (bags / weight not needed).
           </div>
         </div>
 
@@ -11384,6 +11420,13 @@ function applyFeatureFlags(){
   };
   setFlag('data-feat-crop-receipt',   isEAuc && lookupFlag('flag_crop_receipt'));
   setFlag('data-feat-reserved-price', isEAuc && lookupFlag('flag_reserved_price'));
+  // Reserve Lot — the "hold this lot number" checkbox on the Lot Entry form.
+  // Not mode-scoped (holding a number is useful in both modes), so it keys on
+  // the flag alone. When the flag flips OFF mid-session the checkbox hides and
+  // is force-unticked (see leSyncReserveFlag) so the next save can't silently
+  // create a hold the operator can no longer see.
+  setFlag('data-feat-reserve-lot', lookupFlag('flag_reserve_lot'));
+  if (typeof leSyncReserveFlag === 'function') leSyncReserveFlag();
   // Price List Mapping — sidebar entry + Lots toolbar button + the
   // Price List Mapping tab. Available in BOTH e-Trade and e-Auction now,
   // so it's gated on the flag alone (no business-mode restriction).
@@ -13032,7 +13075,9 @@ const FIELD_HELP = {
   flag_bills:      'Shows the Bills of Supply module (sidebar tab + related actions).',
   flag_debit_notes:'Shows the Debit Notes module (sidebar tab + related actions).',
   flag_debit_note_planter:'Shows the Debit Notes - Planter module (sidebar tab + related actions).',
-  flag_whatsapp:   'Shows WhatsApp share buttons (e.g. the Lot Entry receipt share).',
+  flag_whatsapp:   'Shows WhatsApp share buttons (e.g. the Lot Entry receipt share), and the WhatsApp actions on the mobile app’s Lot Entry + My Lots screens.',
+  flag_pooler_grade2: 'OFF (default): the three Pooler reports — Pooler Register and both Pooler List Consolidated (Party-wise) sheets — list Grade 1 lots only, since a pooler IS the Grade-1 (agriculturist) side of a trade. ON: Grade 2 lots are listed too. Dealer lists are unaffected either way.',
+  flag_reserve_lot: 'Shows the “Reserve this lot” checkbox on the Lot Entry form (desktop and mobile). A reserved lot holds its lot number for a seller without booking it — no bags/weight needed, it stays out of pricing and invoicing, and no one else can take that number. Untick it on edit to convert the hold into a real booking.',
   flag_set_buyer:  'Enables the Lots tab bulk "Set Buyer" action on ticked lots.',
   flag_print_purchase: 'Shows the "Print Selected Purchase" button in the Sales tab — only in ASP context (Kerala + e-Trade).',
   flag_price_check:'Enables the Price Check transaction gate: stamps each trade on a successful check and surfaces the stale/never-checked banner on the Lots tab. OFF = no gate (default).',
@@ -15268,12 +15313,15 @@ function renderReassignTiles(){
     grid.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:14px;text-align:center">No allocations yet</div>';
     return;
   }
-  // Per-tile colour driven by `state` (free / allocated / booked) plus
-  // an override for "selected". Booked tiles are non-clickable.
+  // Per-tile colour driven by `state` (free / allocated / booked / reserved)
+  // plus an override for "selected". Booked AND reserved tiles are
+  // non-clickable: both already have a row in `lots`, so moving the number to
+  // another branch would orphan that row (the server refuses it too).
   const stateStyle = (st, selected) => {
     if (selected) return 'background:var(--spice-cardamom);color:#fff;border:1px solid var(--spice-cardamom-dk)';
     switch (st) {
       case 'booked':    return 'background:#FCA5A5;color:#7f1d1d;border:1px solid #ef4444;cursor:not-allowed';
+      case 'reserved':  return 'background:#FFEDD5;color:#9A3412;border:1px solid #EA580C;cursor:not-allowed';
       case 'allocated': return 'background:#DBEAFE;color:#1e3a8a;border:1px solid #93c5fd';
       default:          return 'background:#E5E7EB;color:#1f2937;border:1px solid #cbd5e1';
     }
@@ -15290,8 +15338,10 @@ function renderReassignTiles(){
     for (const r of (s.ranges || [])) {
       for (const t of (r.lots || [])) {
         const selected = _raSelected.has(t.lot);
-        const dis = (t.state === 'booked');
-        const tip = t.booked ? `Booked: ${t.seller || '—'}` : 'Free for reassign';
+        const dis = (t.state === 'booked' || t.state === 'reserved');
+        const tip = t.state === 'reserved'
+          ? `Reserved (held): ${t.seller || '—'} — cannot be reassigned`
+          : (t.booked ? `Booked: ${t.seller || '—'}` : 'Free for reassign');
         const handlers = dis ? '' : ` onmousedown="raTileMouseDown(event,this)" onmouseover="raTileMouseOver(event,this)" onclick="raToggleTile(this)"`;
         html += `<div title="${esc(tip)}" data-lot="${esc(t.lot)}" data-branch="${esc(branch)}" data-state="${esc(t.state)}"${handlers} style="${stateStyle(t.state, selected)};padding:4px 6px;border-radius:4px;font-size:11px;font-family:monospace;min-width:42px;text-align:center;${dis?'opacity:.85':'cursor:pointer'};user-select:none">${esc(t.lot)}</div>`;
       }
@@ -17529,6 +17579,11 @@ async function loadLots(opts){
   //   e-Trade:   show Discount, P_Qty, P_Rate, PurAmt; HIDE Refund, Commission, Handling
   const baseCols = [
     { key:'lot_no', label:'Lot', sort:'text', totalKind:'count',
+      // Held (reserved) lots carry a HELD chip beside the number (the row is
+      // also tinted amber via the row-reserved class) so a hold is obvious in
+      // a list where it otherwise looks like a lot with no bags or price.
+      render:(l)=> esc(l.lot_no||'') + (Number(l.reserved)
+        ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:9px;background:#EA580C;color:#fff;font-weight:700;letter-spacing:.3px" title="Held / reserved lot — not priced or invoiced">HELD</span>' : ''),
       totalLabel: (n)=> String(n) },
     { key:'name', label:'Name', sort:'text' },
     { key:'buyer', label:'Buyer', sort:'text' },
@@ -17650,9 +17705,11 @@ async function loadLots(opts){
   const _lotsSlice = applyClientSidePagination(_lotsPager, 'lots-pager', gotoLotsPage, arr);
   DataTable.mount('lots-list', _lotsSlice, {
     emptyState: { icon: 'lots', title: 'No lots in this ' + termAuction(false, true) + ' yet', body: 'Add your first lot using the form on the left — enter Lot #, Name, Qty, and Price to get started.' },
-    // Locked rows get an amber tint. The class is defined in CSS at
-    // the top of the file (tr.row-locked > td { background:#FFFBEB }).
-    rowClass: (row) => row && row.locked_at ? 'row-locked' : '',
+    // Locked rows tint pale yellow; held (reserved) lots tint pale amber.
+    // Locked wins when a lot is both — a lock is the stronger constraint.
+    // Both classes are defined in CSS at the top of the file.
+    rowClass: (row) => row && row.locked_at ? 'row-locked'
+                     : (row && Number(row.reserved) ? 'row-reserved' : ''),
     columns });
   // Reset the bulk-button visibility after re-render (the master
   // checkbox + per-row checkboxes are freshly DOM-mounted with
@@ -25403,6 +25460,95 @@ function _leIncrementCrpt(prev){
   return prefix + padded;
 }
 
+// ── Reserve Lot (hold a lot number) ─────────────────────────────
+// Show/hide the batch-reserve hint when the Reserve checkbox flips.
+function leOnReserveToggle(){
+  const on = document.getElementById('le-reserved')?.checked;
+  const hint = document.getElementById('le-reserve-hint');
+  if (hint) hint.style.display = on ? 'block' : 'none';
+}
+
+// Keep the checkbox honest when flag_reserve_lot flips off mid-session: the
+// control is hidden by CSS, but a left-over tick would still ride along in the
+// next save payload and silently create a hold nobody can see. Called from
+// applyFeatureFlags().
+function leSyncReserveFlag(){
+  if (document.body.getAttribute('data-feat-reserve-lot') === '1') return;
+  const cb = document.getElementById('le-reserved');
+  if (cb && cb.checked) { cb.checked = false; leOnReserveToggle(); }
+}
+
+// Expand a lot-number field into a list of lot numbers. Accepts a single value
+// ("001"), a comma list ("001,003,007"), a range ("001-010"), or a mix
+// ("001-003, 010"). A range keeps the prefix and zero-padding of its start
+// token, so "A001-A003" → A001, A002, A003. Anything unparseable passes through
+// verbatim so the server rejects that one number rather than the whole batch.
+// Returns a de-duplicated array, order preserved.
+function leExpandLotList(str){
+  const raw = String(str || '').trim();
+  if (!raw) return [];
+  const out = [];
+  for (let part of raw.split(',')) {
+    part = part.trim();
+    if (!part) continue;
+    const m = part.match(/^(\D*)(\d+)\s*-\s*(\D*)(\d+)$/);
+    if (m) {
+      const prefix = m[1], n1 = parseInt(m[2], 10), pad = m[2].length, n2 = parseInt(m[4], 10);
+      // Expand only a sane, ascending span whose end carries the same (or no)
+      // prefix. The 5000 cap stops a typo like "1-999999" from hanging the tab.
+      if ((!m[3] || m[3] === prefix) && n2 >= n1 && (n2 - n1) < 5000) {
+        for (let n = n1; n <= n2; n++) out.push(prefix + String(n).padStart(pad, '0'));
+        continue;
+      }
+    }
+    out.push(part);
+  }
+  return out.filter((v, i) => out.indexOf(v) === i);
+}
+
+// Create one held lot per number for the currently-picked seller. Held lots
+// carry no bags / litre / weight, so the payload sends zeros. Reserve mode
+// stays ON afterwards so the operator can hold another block straight away.
+// Each number is POSTed separately: the duplicate-lot guard is per-lot, so a
+// range that overlaps existing lots holds the free ones and reports the rest.
+async function leSaveReservedBatch(lotList){
+  const aid = document.getElementById('le-auction').value;
+  if (!aid) { leShowError('Select a trade first'); return; }
+  if (!_le.selectedSeller) { leShowError('Search and pick a seller'); return; }
+  const branch = (document.getElementById('le-branch').value || '').trim().toUpperCase();
+  if (!branch || branch === 'ALL') { leShowError('Pick a specific branch to reserve lots under'); return; }
+  const grade = document.getElementById('le-grade').value || '1';
+  const rpRaw = (document.getElementById('le-reserved-price')?.value || '').trim();
+  const reservedPrice = rpRaw === '' ? 0 : Number(rpRaw) || 0;
+  const s = _le.selectedSeller;
+  const btn = document.getElementById('le-save-btn');
+  btn.disabled = true;
+  let ok = 0; const failed = [];
+  for (const lotNo of lotList) {
+    const payload = {
+      auction_id: parseInt(aid, 10), lot_no: lotNo, trader_id: s.id, branch, grade,
+      bags: 0, litre: 0, qty: 0, sample_wt: 0, gross_wt: 0, wt_with_gunny: 0, gunny_wt: 0,
+      moisture: '', crpt: '', reserved_price: reservedPrice, reserved: 1,
+      state: s.pstate || getDefaultBusinessState(),
+      name: s.name || '', padd: s.padd || '', ppla: s.ppla || '', ppin: s.pin || '',
+      pstate: s.pstate || '', cr: s.cr || '', pan: s.pan || '', tel: s.tel || '', aadhar: s.aadhar || '',
+    };
+    try { await j('/api/lots', { method: 'POST', body: JSON.stringify(payload) }); ok++; }
+    catch (e) { failed.push(lotNo); }
+  }
+  btn.disabled = false;
+  if (ok) toast(`Reserved ${ok} lot${ok > 1 ? 's' : ''} for ${s.name}${failed.length ? ` · ${failed.length} failed` : ''}`);
+  if (failed.length) leShowError(`Could not reserve: ${failed.slice(0, 8).join(', ')}${failed.length > 8 ? '…' : ''}`);
+  if (String(_currentTradeId()) === String(aid) && typeof refreshTradeStage === 'function') {
+    try { refreshTradeStage(true); } catch (_) {}
+  }
+  document.getElementById('le-lotno').value = '';
+  try { await loadLeRecent(); } catch (_) {}
+  try { leUpdateStats(); } catch (_) {}
+  try { leLoadAllocBar(); } catch (_) {}
+  setTimeout(() => document.getElementById('le-lotno').focus(), 50);
+}
+
 async function leSaveLot(){
   const aid = document.getElementById('le-auction').value;
   if (!aid) { leShowError('Select a trade first'); return; }
@@ -25415,11 +25561,35 @@ async function leSaveLot(){
   const bags  = parseInt(document.getElementById('le-bags').value, 10);
   const litre = parseInt(document.getElementById('le-litre').value, 10);
   const qty   = parseFloat(document.getElementById('le-qty').value);
-  if (!Number.isFinite(bags) || bags < 0)   { leShowError('Bags must be a non-negative number'); return; }
-  if (!Number.isFinite(litre) || litre < 0) { leShowError('Litre weight must be a non-negative number'); return; }
-  if (!Number.isFinite(qty) || qty <= 0)    { leShowError('Net weight (kg) must be greater than 0'); return; }
+  // Reserve (hold) — read before validation, because a held lot is allowed to
+  // leave bags / litre / net weight blank: it claims the lot number, nothing
+  // more. Only honoured while the feature flag is on (the CSS hides the
+  // checkbox, and leSyncReserveFlag unticks it, but be explicit here too).
+  const reserveOn = document.body.getAttribute('data-feat-reserve-lot') === '1';
+  const isReserved = (reserveOn && document.getElementById('le-reserved')?.checked) ? 1 : 0;
+  // Batch reserve: with Reserve on and a range/list in the Lot No field, hold
+  // every listed number for this seller in one go. Never while editing — an
+  // edit targets one existing row.
+  if (isReserved && !_le.editingLotId) {
+    const _batch = leExpandLotList(lotNo);
+    if (_batch.length > 1) { return leSaveReservedBatch(_batch); }
+  }
+  if (isReserved) {
+    // Blank is fine on a hold; a typed value still has to make sense.
+    if (Number.isFinite(bags)  && bags  < 0) { leShowError('Bags cannot be negative'); return; }
+    if (Number.isFinite(litre) && litre < 0) { leShowError('Litre weight cannot be negative'); return; }
+    if (Number.isFinite(qty)   && qty   < 0) { leShowError('Net weight cannot be negative'); return; }
+  } else {
+    if (!Number.isFinite(bags) || bags < 0)   { leShowError('Bags must be a non-negative number'); return; }
+    if (!Number.isFinite(litre) || litre < 0) { leShowError('Litre weight must be a non-negative number'); return; }
+    if (!Number.isFinite(qty) || qty <= 0)    { leShowError('Net weight (kg) must be greater than 0'); return; }
+  }
+  // Payload-safe numerics — a held lot may leave these blank (NaN); send 0.
+  const bagsSafe  = Number.isFinite(bags)  ? bags  : 0;
+  const litreSafe = Number.isFinite(litre) ? litre : 0;
+  const qtySafe   = Number.isFinite(qty)   ? qty   : 0;
   const sample = parseFloat(document.getElementById('le-sample').value) || 0;
-  const gross  = parseFloat(document.getElementById('le-gross').value) || (qty + sample);
+  const gross  = parseFloat(document.getElementById('le-gross').value) || (qtySafe + sample);
   // Gunny weighing inputs — persisted (wt_with_gunny / gunny_wt columns) so a
   // lot's original weighing is recoverable. Read defensively; both are 0 when
   // the operator typed Net directly (gunny-entry mode off).
@@ -25455,9 +25625,12 @@ async function leSaveLot(){
       trader_id: _le.selectedSeller.id,
       branch: branch,
       grade: grade,
-      bags: bags,
-      litre: litre,
-      qty: qty,
+      bags: bagsSafe,
+      litre: litreSafe,
+      qty: qtySafe,
+      // Reservation flag (0/1) — see the conditional delete below: it is sent
+      // ONLY while the feature is on, so an install that turns Reserve off
+      // doesn't convert its existing holds into bookings on the next edit.
       // e-Trade's lots table uses sample_wt / gross_wt (NOT sample_weight /
       // gross_weight as in the PWA). Ship the e-Trade names so the INSERT
       // doesn't silently default these to 0.
@@ -25481,6 +25654,11 @@ async function leSaveLot(){
       tel: _le.selectedSeller.tel || '',
       aadhar: _le.selectedSeller.aadhar || '',
     };
+    // Reserve is a two-way control while the feature is on: ticked holds the
+    // lot, unticked (on an edit) converts a hold into a booking. With the
+    // feature OFF the key is omitted entirely — the server leaves the stored
+    // value alone on a PUT, and defaults a new lot to 0 on a POST.
+    if (reserveOn) payload.reserved = isReserved;
     await j(_le.editingLotId
       ? `/api/lots/${_le.editingLotId}`
       : '/api/lots',
@@ -25539,6 +25717,13 @@ async function leSaveLot(){
     // Reserved Price clears every save — user types per lot, no chain.
     const reservedEl = document.getElementById('le-reserved-price');
     if (reservedEl && !wasEditing) reservedEl.value = '';
+    // Reserve stays ticked after a fresh hold (operators hold several numbers
+    // in a row) but is cleared after an EDIT, so the next new entry doesn't
+    // inherit the edited lot's hold state.
+    if (wasEditing) {
+      const resCb = document.getElementById('le-reserved');
+      if (resCb && resCb.checked) { resCb.checked = false; leOnReserveToggle(); }
+    }
     setTimeout(() => document.getElementById('le-lotno').focus(), 50);
     await loadLeRecent();
     // After a successful create (not edit), auto-suggest the next lot
@@ -25575,6 +25760,9 @@ function leResetForm(){
   if (crptEl) crptEl.value = '';
   const reservedEl = document.getElementById('le-reserved-price');
   if (reservedEl) reservedEl.value = '';
+  // Clear drops Reserve mode as well — the button means "start over".
+  const resCb = document.getElementById('le-reserved');
+  if (resCb) { resCb.checked = false; leOnReserveToggle(); }
   document.getElementById('le-err').style.display = 'none';
   // Drop edit mode if active
   _le.editingLotId = null;
@@ -25695,6 +25883,10 @@ async function leEditLot(lotId){
     const rp = Number(lot.reserved_price);
     reservedEl.value = (Number.isFinite(rp) && rp !== 0) ? rp : '';
   }
+  // Reserve checkbox reflects the lot's stored hold state, so editing a held
+  // lot shows it as held — and unticking it here books the lot on save.
+  const resCb = document.getElementById('le-reserved');
+  if (resCb) { resCb.checked = !!Number(lot.reserved); leOnReserveToggle(); }
   leCalcGross();
   // Branch may differ from the toolbar — pre-fill so the user sees what
   // this lot's branch is. Don't overwrite the toolbar branch input
@@ -26194,10 +26386,18 @@ function renderLeRecent(){
       ${visible.map(l => {
         const safeLotNo = String(l.lot_no || '').replace(/'/g, "\\'");
         const checked = _le.selectedForPrint && _le.selectedForPrint.has(l.id) ? 'checked' : '';
+        // Held (reserved) rows sit on a pale-amber ground with a HELD chip on
+        // the lot number, so a hold is never mistaken for a booked entry. The
+        // hover colours are per-row because this list paints inline, not via
+        // the DataTable rowClass used on the Lots screen.
+        const isRes  = !!Number(l.reserved);
+        const baseBg = isRes ? '#FFEDD5' : '';
+        const hovBg  = isRes ? '#FED7AA' : 'var(--bg)';
+        const rowTip = isRes ? 'Held (reserved) lot — click to edit or convert to a booking' : 'Click to edit';
         return `
-        <div class="le-recent-row" data-lot-id="${l.id}" style="display:grid;${COLS};gap:0;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;transition:background .1s" onmouseenter="this.style.background='var(--bg)'" onmouseleave="this.style.background=''" onclick="leEditLot(${l.id})" title="Click to edit">
+        <div class="le-recent-row" data-lot-id="${l.id}" style="display:grid;${COLS};gap:0;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;transition:background .1s;background:${baseBg}" onmouseenter="this.style.background='${hovBg}'" onmouseleave="this.style.background='${baseBg}'" onclick="leEditLot(${l.id})" title="${esc(rowTip)}">
           <div style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="le-recent-cb" data-lot-id="${l.id}" ${checked} onchange="leToggleLotSelected(${l.id}, this.checked)" style="cursor:pointer"></div>
-          <div style="font-family:monospace;font-weight:700;color:var(--green)">${esc(l.lot_no || '')}</div>
+          <div style="font-family:monospace;font-weight:700;color:${isRes ? '#9A3412' : 'var(--green)'}">${esc(l.lot_no || '')}${isRes ? ' <span style="font-family:inherit;font-size:9.5px;padding:1px 5px;border-radius:9px;background:#EA580C;color:#fff;font-weight:700;letter-spacing:.3px">HELD</span>' : ''}</div>
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.name||'')}">${esc(l.name || '—')}</div>
           <div style="font-family:monospace;font-size:11px;color:var(--text2)">${esc(l.branch || '')}</div>
           <div style="text-align:right">${esc(String(l.bags ?? ''))}</div>
@@ -26436,10 +26636,14 @@ async function leLoadAllocBar() {
     for (const l of (rng.lots || [])) {
       const safe = String(l.lot).replace(/'/g, "\\'");
       let cls = 'le-lot-chip';
-      if (l.used) cls += ' used';
+      // A held lot is `used` (not pickable) but painted orange, so the grid
+      // separates "someone holds this number" from "a lot is entered here".
+      if (l.used) cls += l.reserved ? ' used reserved' : ' used';
       else if (currentLotno && l.lot === currentLotno) cls += ' selected';
       const onclick = l.used ? '' : ` onclick="lePickLot('${safe}')"`;
-      const title = l.used ? `Lot ${l.lot} — already saved` : `Click to select lot ${l.lot}`;
+      const title = l.used
+        ? `Lot ${l.lot} — ${l.reserved ? 'reserved (held)' : 'already saved'}${l.seller ? ' · ' + l.seller : ''}`
+        : `Click to select lot ${l.lot}`;
       chips.push(`<span class="${cls}" data-lot="${esc(l.lot)}" title="${esc(title)}"${onclick}>${esc(l.lot)}</span>`);
     }
   }

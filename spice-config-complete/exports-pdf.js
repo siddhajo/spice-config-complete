@@ -910,6 +910,19 @@ const TITLES = {
   merchant_individual: 'Merchants Individual',
 };
 
+// Report title for a PDF run. Identical to TITLES except the three pooler
+// reports, which append their grade scope ("— Grade 1" / "— Grade 1 + Grade 2")
+// so a printed sheet says which scope produced it. Mirrors the XLSX titles.
+const POOLER_GRADE_SCOPED = new Set([
+  'pooler_register', 'pooler_list_consolidated', 'pooler_list_consolidated_before',
+]);
+function pdfTitleFor(db, type) {
+  const base = TITLES[type] || type;
+  if (!POOLER_GRADE_SCOPED.has(type)) return base;
+  try { return base + require('./exports').poolerGradeLabel(db); }
+  catch (_) { return base; }
+}
+
 // Per-type page orientation override. Portrait is the default (set in
 // renderTablePdf). Add a type here only if a specific report needs landscape
 // because its column count is too high to fit comfortably in portrait.
@@ -984,23 +997,27 @@ const ROW_PREPROCESS = {
 };
 
 async function getRowsForType(db, type, auctionId, cfg, extra) {
+  // Held (reserved) lots are holds on a lot number with no bags, weight or
+  // price. Excluded from every lot-level pre-trade report, exactly as in the
+  // XLSX exporters (see NOT_RESERVED in exports.js).
+  const NOT_RESERVED = require('./exports').NOT_RESERVED;
   switch (type) {
     case 'lot_slip':
       return db.all(
         `SELECT state, lot_no as lot, name, grade, bags as bag, qty, litre
-         FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''}
+         FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''} ${NOT_RESERVED}
          ORDER BY lot_no`, extra.state ? [auctionId, extra.state] : [auctionId]);
 
     case 'lot_slip_after':
       return db.all(
         `SELECT lot_no as lot, name, bags as bag, qty, price, amount, code
-         FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''}
+         FROM lots WHERE auction_id = ? ${extra.state ? 'AND state = ?' : ''} ${NOT_RESERVED}
          ORDER BY lot_no`, extra.state ? [auctionId, extra.state] : [auctionId]);
 
     case 'lot_buyer':
       return db.all(
         `SELECT lot_no as lot, COALESCE(buyer,'') as buyer, bags as bag, qty
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+         FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]);
 
     case 'lot_name':
       return db.all(
@@ -1008,7 +1025,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
                 bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 '' as control
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+         FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]);
 
     case 'price_list':
       return db.all(
@@ -1022,7 +1039,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
         `SELECT lot_no as lot, COALESCE(name,'') AS name, bags as bag, qty,
                 CASE WHEN COALESCE(price,0) = 0 THEN '' ELSE price END AS price,
                 COALESCE(code,'') AS code
-         FROM lots WHERE auction_id = ? ORDER BY lot_no`, [auctionId]);
+         FROM lots WHERE auction_id = ? ${NOT_RESERVED} ORDER BY lot_no`, [auctionId]);
 
     case 'bank_payment': {
       const { getBankPaymentData } = require('./calculations');
@@ -1041,9 +1058,12 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
     }
 
     case 'pooler_register':
+      // Grade scope mirrors the XLSX exporter — Grade 1 only unless
+      // flag_pooler_grade2 widens it. See poolerGradeClause in exports.js.
       return db.all(
         `SELECT state, lot_no as lot, name as poolername, branch as br, qty, price, amount, pqty, prate, puramt
-         FROM lots WHERE auction_id = ? AND amount > 0 ORDER BY name`, [auctionId]);
+         FROM lots WHERE auction_id = ? AND amount > 0 ${require('./exports').poolerGradeClause(db)} ${NOT_RESERVED}
+         ORDER BY name`, [auctionId]);
 
     case 'pooler_list_consolidated':
       // Party-wise roll-up of SOLD lots (amount > 0), one row per pooler.
@@ -1055,7 +1075,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
            SUM(COALESCE(amount,0)) as amount,
            SUM(COALESCE(pqty,0))   as pqty,
            SUM(COALESCE(puramt,0)) as puramt
-         FROM lots WHERE auction_id = ? AND amount > 0
+         FROM lots WHERE auction_id = ? AND amount > 0 ${require('./exports').poolerGradeClause(db)} ${NOT_RESERVED}
          GROUP BY name, branch
          ORDER BY name`, [auctionId]);
 
@@ -1067,7 +1087,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
            COUNT(*) as lots,
            SUM(COALESCE(bags,0)) as bags,
            SUM(COALESCE(qty,0))  as qty
-         FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0
+         FROM lots WHERE auction_id = ? AND COALESCE(qty,0) > 0 ${require('./exports').poolerGradeClause(db)} ${NOT_RESERVED}
          GROUP BY name, branch
          ORDER BY name`, [auctionId]);
 
@@ -1087,7 +1107,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
       return db.all(
         `SELECT state, name, SUBSTR(cr, 7, 15) as gstin, lot_no as lot,
           bags, qty
-         FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0
+         FROM lots WHERE auction_id = ? AND cr LIKE '%GST%' AND COALESCE(qty,0) > 0 ${NOT_RESERVED}
          ORDER BY state, name, lot_no`, [auctionId]);
 
     case 'dealer_list_partywise':
@@ -1122,7 +1142,7 @@ async function getRowsForType(db, type, auctionId, cfg, extra) {
             CASE WHEN UPPER(COALESCE(cr,'')) LIKE 'CR.%' THEN TRIM(SUBSTR(cr, 4))
                  ELSE COALESCE(cr,'') END AS cr,
             lot_no as lot, bags, qty
-         FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1'
+         FROM lots WHERE auction_id = ? AND TRIM(COALESCE(grade,'')) = '1' ${NOT_RESERVED}
          ORDER BY state, name, lot_no`, [auctionId]);
 
     case 'sales_taxes':
@@ -1393,7 +1413,7 @@ async function exportPdf(db, type, auctionId, cfg, extra = {}) {
   }
 
   return renderTablePdf({
-    title: TITLES[type] || type,
+    title: pdfTitleFor(db, type),
     subtitle,
     columns,
     rows,

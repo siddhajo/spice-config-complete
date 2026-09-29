@@ -3881,6 +3881,54 @@ app.get('/api/traders/by-name/:name', requireViewOrLotEntry, (req, res) => {
   res.json(row);
 });
 
+// Seller contact (phone / WhatsApp) resolved by a UNIQUE key.
+//
+// Seller NAMES repeat — two growers can share one — so a name lookup can hand
+// back the wrong person's number, silently. This endpoint keys on the seller's
+// unique identifier first:
+//
+//   1. ?id=    traders.id — the FK every lot carries (lots.trader_id)
+//   2. ?name=  last resort, for legacy lots with no trader_id back-link
+//
+// The response says which key matched (`matchedBy`) and, on a name match,
+// whether the name was ambiguous (`ambiguous` + `candidates`) — so a caller can
+// refuse to send rather than message a namesake. Used by the mobile app's
+// WhatsApp receipt actions.
+//
+// NOTE: lots.user_id is the STAFF member who keyed the lot, not the seller.
+// Never pass it here.
+app.get('/api/traders/contact', requireViewOrLotEntry, (req, res) => {
+  const db = getDb();
+  const COLS = 'SELECT id, name, tel, whatsapp FROM traders';
+  const id   = String(req.query.id || '').trim();
+  const name = String(req.query.name || '').trim();
+  if (!id && !name) return res.status(400).json({ error: 'One of id or name is required' });
+  let row = null, matchedBy = '', ambiguous = false, candidates = 0;
+  if (id && /^\d+$/.test(id)) {
+    row = db.get(`${COLS} WHERE id = ?`, [parseInt(id, 10)]);
+    if (row) matchedBy = 'id';
+  }
+  if (!row && name) {
+    const hits = db.all(`${COLS} WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))`, [name]);
+    if (hits.length) {
+      row = hits[0];
+      matchedBy = 'name';
+      candidates = hits.length;
+      ambiguous = hits.length > 1;
+    }
+  }
+  if (!row) return res.status(404).json({ error: 'Seller not found' });
+  res.json({
+    id: row.id,
+    name: row.name,
+    tel: row.tel || '',
+    whatsapp: row.whatsapp || '',
+    // Prefer the dedicated WhatsApp number; fall back to the phone.
+    phone: String(row.whatsapp || '').trim() || String(row.tel || '').trim(),
+    matchedBy, ambiguous, candidates,
+  });
+});
+
 // Buyer phone lookup by trade name (or short code). Used by the WhatsApp
 // "send document" flow for sales invoices and debit notes — the recipient
 // is the dealer/buyer. Returns an array (possibly empty) so the frontend
@@ -4774,13 +4822,13 @@ app.get('/api/auctions/:id/allocation-stats', requireView, (req, res) => {
   // seller. We do one query instead of N (one per range) because the
   // total lot count per auction is small.
   const saved = db.all(
-    `SELECT lot_no, branch, name FROM lots WHERE auction_id = ?`,
+    `SELECT lot_no, branch, name, COALESCE(reserved,0) AS reserved FROM lots WHERE auction_id = ?`,
     [auctionId]
   );
   const savedMap = new Map();
   for (const r of saved) {
     const k = String(r.branch || '').trim().toUpperCase() + '::' + String(r.lot_no || '').trim();
-    savedMap.set(k, r.name || '');
+    savedMap.set(k, { seller: r.name || '', reserved: Number(r.reserved) ? 1 : 0 });
   }
   const rows = db.all(
     `SELECT id, branch, start_lot, end_lot FROM lot_allocations
@@ -4798,17 +4846,23 @@ app.get('/api/auctions/:id/allocation-stats', requireView, (req, res) => {
     try {
       lots = enumerateRange(row.start_lot, row.end_lot).map(lotNo => {
         const key = br + '::' + lotNo;
-        const seller = savedMap.get(key);
+        const hit = savedMap.get(key);
         // `state` is what the reassign tile UI keys colors off of:
         //   'free'      → allocated but no lot saved (assignable)
         //   'booked'    → a lot already exists, can't reassign
+        //   'reserved'  → a HELD lot: the number is claimed but not booked.
+        //                 Still not reassignable (a row exists), but the chip
+        //                 grid paints it differently so the operator can tell
+        //                 a hold from a real entry.
         const used = savedMap.has(key);
+        const reserved = used && !!hit.reserved;
         return {
           lot: lotNo,
           used,
-          seller: used ? seller : '',
-          state: used ? 'booked' : 'allocated',
-          booked: used,
+          reserved,
+          seller: used ? hit.seller : '',
+          state: used ? (reserved ? 'reserved' : 'booked') : 'allocated',
+          booked: used && !reserved,
         };
       });
     } catch (e) {
@@ -6142,6 +6196,12 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   // wipe values that the operator already entered. UI hides the input
   // when the flag is off so 0 is what flows in by default.
   const reservedPrice = Number(l.reserved_price);
+  // Lot RESERVATION (hold) flag — 0/1. Persisted unconditionally for the same
+  // reason as reserved_price: flipping flag_reserve_lot off must not silently
+  // drop holds that already exist. A held lot legitimately carries bags/litre/
+  // qty = 0, so the weight validation the clients apply is relaxed there, not
+  // here (this route has never required a positive qty).
+  const isReserved = Number(l.reserved) ? 1 : 0;
   const _db = getDb();
   // Duplicate-lot guard: a lot number must be unique within its trade.
   // Enforced server-side so no client (desktop, mobile PWA, or a raw API
@@ -6178,9 +6238,9 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   const _pan    = _fill(l.pan,      'pan');
   const _tel    = _fill(l.tel,      'tel');
   const _aadhar = _fill(l.aadhar,   'aadhar');
-  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,wt_with_gunny,gunny_wt,moisture,user_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.wt_with_gunny||0,l.gunny_wt||0,l.moisture||'',l.user_id||'']);
+  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,reserved,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,wt_with_gunny,gunny_wt,moisture,user_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,isReserved,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.wt_with_gunny||0,l.gunny_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
   lvClearGate(_db, l.auction_id);   // new lot → trade must be re-validated before price import
@@ -6310,6 +6370,12 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
   // across reporting and invoice eligibility.
   const codeIsWD = String(l.code || '').trim().toUpperCase() === 'WD';
   if (codeIsWD) { l.code = 'WD'; l.price = 0; l.amount = 0; }
+  // Reservation flag: normalise whatever shape the client sent (true/'1'/1) to
+  // the 0/1 integer the column stores, so a held lot never ends up with a
+  // truthy-but-non-numeric value that the `Number(l.reserved)` checks in
+  // reporting would read as 0. Absent key = untouched (partial updates stay
+  // partial), so an edit that doesn't mention `reserved` keeps the hold.
+  if (l.reserved !== undefined && l.reserved !== null) l.reserved = Number(l.reserved) ? 1 : 0;
   // Seller (trader) re-assignment OR a name-blank row → refresh the
   // denormalised seller fields from the trader master, mirroring the
   // backfill in POST /api/lots. The mobile edit sends trader_id but no
@@ -7409,10 +7475,15 @@ const hasValidGstin = (cr) => cleanGstin(cr).length === 15;
 //   errors   — block import (duplicate lot numbers, lots with no seller)
 //   warnings — acknowledge to proceed (missing GSTIN / bank / PAN / phone)
 function validateAuctionLots(db, auctionId) {
+  // Held (reserved) lots are excluded: they carry no bags, weight or price, so
+  // they are not lots to be priced — including them would report every hold as
+  // a zero-weight lot and inflate the reconciliation counts. The duplicate-lot
+  // check loses nothing by skipping them, because POST/PUT /api/lots already
+  // refuse a second row for the same lot number in a trade, held or not.
   const lots = db.all(
     `SELECT id, lot_no, trader_id, bank_id, name, cr, pan, tel, branch,
             litre, COALESCE(bags,0) AS bags, COALESCE(qty,0) AS qty
-       FROM lots WHERE auction_id = ?`,
+       FROM lots WHERE auction_id = ? AND COALESCE(reserved,0) = 0`,
     [auctionId]
   );
   // Trader IDs that actually have a bank account on file — one query,

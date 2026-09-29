@@ -140,6 +140,13 @@ select:focus{border-color:var(--green)}
 .lot-card:active{transform:scale(.99);box-shadow:0 1px 2px rgba(0,0,0,.04)}
 .lot-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
 .lot-num{font-size:14px;font-weight:800;color:var(--green)}
+/* Held (reserved) lot card — pale amber ground, orange lot number and a
+   RESERVED chip, so a hold never reads as an ordinary booked lot. The
+   !important beats the :nth-child(even) zebra rule above. */
+.lot-card.reserved,.lot-card.reserved:nth-child(even){background:#FFEDD5 !important;border-color:#FDBA74}
+.lot-card.reserved .lot-num{color:#9A3412}
+.res-badge{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.4px;padding:1px 6px;border-radius:9px;background:#EA580C;color:#fff}
+[data-theme="dark"] .lot-card.reserved,[data-theme="dark"] .lot-card.reserved:nth-child(even),[data-theme="dark"] .lot-card.reserved:nth-child(odd){background:#3b2410 !important;border-color:#9A3412}
 .lot-name{font-size:12px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lot-row{display:flex;align-items:center;gap:4px;margin-bottom:3px}
 .lot-meta{font-size:11px;color:var(--text2);line-height:1.5;font-weight:500}
@@ -362,6 +369,21 @@ select:focus{border-color:var(--green)}
           <div id="le-reserved-wrap" style="display:none"><div class="elb">RSRV PRICE</div><span class="eic"><input type="text" id="le-reserved-price" placeholder="0" inputmode="decimal" class="ein" oninput="sanitizeDec(this)"><button type="button" class="ein-clr" aria-label="Clear">✕</button></span></div>
         </div>
 
+        <!-- Reserve (hold) this lot. A held lot only claims its lot number for
+             the seller: bags / litre / net weight are optional, it is skipped
+             by Price Entry and never invoiced, and nobody else can take that
+             number. Untick Reserve on the Edit sheet to convert the hold into
+             a real booking. Shown only when flag_reserve_lot is on. -->
+        <div id="le-reserve-wrap" style="display:none;margin-bottom:6px">
+          <label for="le-reserved" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--border2);border-radius:10px;background:var(--input-bg);cursor:pointer;user-select:none">
+            <input type="checkbox" id="le-reserved" onchange="onReserveToggle()" style="width:17px;height:17px;accent-color:#EA580C;flex:none">
+            <span style="font-size:12.5px;font-weight:700;color:var(--text)">Reserve this lot <span style="font-weight:500;color:var(--text3)">— hold the number only</span></span>
+          </label>
+          <div id="le-reserve-hint" style="display:none;margin-top:5px;font-size:11px;line-height:1.45;color:#9A3412;background:#FFEDD5;border:1px solid #FDBA74;border-radius:9px;padding:6px 9px">
+            Holding lot <b id="le-reserve-hint-lot">—</b>. Bags, litre and weight are not needed — tap <b>Reserve</b> to claim the number.
+          </div>
+        </div>
+
         <!-- Buttons -->
         <div id="le-btn-save" style="display:flex;gap:8px">
           <button class="btn" id="le-save" onclick="saveLot()" title="Save lot" style="flex:2;height:40px;margin-top:0;font-size:14px;border-radius:10px">✓ Save</button>
@@ -372,6 +394,9 @@ select:focus{border-color:var(--green)}
             <span style="font-size:12px;font-weight:700;color:var(--green);flex:1" id="le-saved-label">✓ Saved #001</span>
             <button onclick="printLastLot()" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🖨 This Lot</button>
             <button onclick="printLastSeller()" style="background:var(--bg2);color:var(--text);border:1.5px solid var(--border);border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📋 All by Seller</button>
+            <!-- Send the just-saved lot's receipt to its seller on WhatsApp.
+                 Shown only when flag_whatsapp is on (applyWhatsappVis). -->
+            <button id="le-wa-btn" onclick="whatsappLastLot()" style="display:none;background:#25D366;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📲 WhatsApp</button>
           </div>
         </div>
 
@@ -433,6 +458,7 @@ select:focus{border-color:var(--green)}
       <label style="display:flex;align-items:center;gap:5px;height:30px;padding:0 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;user-select:none" title="Select / clear all listed lots"><input type="checkbox" id="ml-select-all" onchange="toggleAllMyLots(this.checked)" style="width:16px;height:16px">Select all</label>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printSelectedMyLots()" title="Print receipts for selected lots">🖨 Print selected</button>
       <button style="background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,99,235,.2)" onclick="printAllBySellerUser()" title="Print all lots grouped by seller">🖨 Print all by seller</button>
+      <button id="ml-wa-btn" style="display:none;background:#25D366;color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(37,211,102,.25)" onclick="whatsappSelectedMyLots()" title="Send each seller their selected lots' receipt on WhatsApp">📲 WhatsApp selected</button>
       <button style="background:linear-gradient(135deg,#dc3545,#b91c1c);color:#fff;border:none;border-radius:8px;height:30px;padding:0 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(220,53,69,.2)" onclick="deleteSelectedMyLots()" title="Delete only the lots you have selected">🗑 Delete Selected</button>
       <span style="font-size:11px;color:var(--text3)" id="ml-sel-count"></span>
     </div>
@@ -516,6 +542,15 @@ select:focus{border-color:var(--green)}
       <div id="ed-crpt-wrap" style="display:none"><div class="lb">CROP RCPT</div><input type="text" id="ed-crpt" placeholder="01208" autocomplete="off"></div>
       <div id="ed-reserved-wrap" style="display:none"><div class="lb">RSRV PRICE</div><input type="text" id="ed-reserved-price" placeholder="0" inputmode="decimal" oninput="sanitizeDec(this)"></div>
     </div></div>
+    <!-- Reserve (hold) state for this lot. Ticked = the lot only claims its
+         number; untick it to convert the hold into a real booking on save.
+         Visibility synced with cfgReserveLot on each open. -->
+    <div id="ed-reserve-wrap" style="display:none;margin-top:10px">
+      <label for="ed-reserved" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1.5px solid var(--border2);border-radius:10px;background:var(--input-bg);cursor:pointer;user-select:none">
+        <input type="checkbox" id="ed-reserved" style="width:17px;height:17px;accent-color:#EA580C;flex:none">
+        <span style="font-size:12.5px;font-weight:700;color:var(--text)">Reserved (held) <span style="font-weight:500;color:var(--text3)">— untick to book this lot</span></span>
+      </label>
+    </div>
     <div id="ed-err"></div>
   </div>
   <div class="modal-foot"><button class="btn btn-sm btn-outline" onclick="closeEdit()" style="flex:1">Cancel</button><button class="btn btn-sm" onclick="saveEdit()" id="ed-save" style="flex:2">Save</button></div>
@@ -596,6 +631,52 @@ let cfgGunnyWeight=0, cfgShowExtraFields=false;
 // e-Trade lets the operator override the auto-derived Gunny Wt (tare);
 // e-Auction keeps it read-only. Server-driven via /api/config.gunnyEditable.
 let cfgGunnyEditable=false;
+// Reserve Lot ("hold this lot number") + WhatsApp actions. Neither is
+// mode-scoped — the server sends them AND'ed with their flag only, so the
+// client just mirrors the boolean into the DOM (applyReserveLotVis /
+// applyWhatsappVis).
+let cfgReserveLot=false, cfgWhatsapp=false;
+
+// Show/hide the "Reserve this lot" checkboxes on the entry form + edit sheet.
+// Turning the feature off also unticks the entry-form box, so a left-over tick
+// can't ride along in the next save and create a hold nobody can see.
+function applyReserveLotVis(){
+  var w=document.getElementById('le-reserve-wrap');
+  if(w) w.style.display=cfgReserveLot?'block':'none';
+  var ew=document.getElementById('ed-reserve-wrap');
+  if(ew) ew.style.display=cfgReserveLot?'block':'none';
+  if(!cfgReserveLot){
+    var cb=document.getElementById('le-reserved');
+    if(cb) cb.checked=false;
+    onReserveToggle();
+  }
+}
+
+// Reserve mode relaxes the entry form: a held lot claims a number and nothing
+// else, so bags / litre / net weight become optional. Grey the three inputs and
+// swap the Save label so the operator can see which mode they're in.
+function onReserveToggle(){
+  var on=!!(cfgReserveLot && document.getElementById('le-reserved') && document.getElementById('le-reserved').checked);
+  var hint=document.getElementById('le-reserve-hint');
+  if(hint) hint.style.display=on?'block':'none';
+  var hl=document.getElementById('le-reserve-hint-lot');
+  if(hl) hl.textContent=(typeof selectedLots!=='undefined'&&selectedLots.length)?('#'+selectedLots[0]):'—';
+  ['le-bags','le-litre','le-qty'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el) el.style.opacity=on?'.55':'';
+  });
+  var btn=document.getElementById('le-save');
+  if(btn) btn.textContent=on?'✓ Reserve':'✓ Save';
+}
+
+// Show/hide the WhatsApp actions: the Saved bar button, the "WhatsApp selected"
+// bulk button in My Lots, and (via renderMyLots) the per-lot 📲 action.
+function applyWhatsappVis(){
+  var b=document.getElementById('le-wa-btn');
+  if(b) b.style.display=cfgWhatsapp?'inline-block':'none';
+  var mb=document.getElementById('ml-wa-btn');
+  if(mb) mb.style.display=cfgWhatsapp?'':'none';
+}
 
 // Toggle the entry-form + edit-modal e-Auction rows + their two cells.
 // Each cell wraps its own .display so the outer row can stay flex when
@@ -781,6 +862,8 @@ async function refreshConfig(){
     if(d.gunnyWeight!=cfgGunnyWeight){cfgGunnyWeight=d.gunnyWeight||0;changed=true}
     if(d.gunnyEditable!=cfgGunnyEditable){cfgGunnyEditable=!!d.gunnyEditable;changed=true}
     if(d.showExtraLotFields!=cfgShowExtraFields){cfgShowExtraFields=!!d.showExtraLotFields;changed=true}
+    if(d.reserveLot!=cfgReserveLot){cfgReserveLot=!!d.reserveLot;changed=true}
+    if(d.whatsapp!=cfgWhatsapp){cfgWhatsapp=!!d.whatsapp;changed=true}
     if((d.tradeNoun||'Trade')!=cfgTradeNoun){cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();var _lt=document.getElementById('le-title-text');if(_lt&&typeof tno!=='undefined'&&tno)_lt.textContent=cfgTradeNoun+' #'+tno+' — '+br;changed=true}
     if(d.editEnabled!==undefined)editEnabled=d.editEnabled!==false;
     if(d.editTimeout!==undefined)editTimeoutMinutes=d.editTimeout||0;
@@ -792,6 +875,8 @@ async function refreshConfig(){
       document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';
       document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';
       applyEAuctionVisibility();
+      applyReserveLotVis();
+      applyWhatsappVis();
       // Update litre if empty or still showing old default
       var litreEl=document.getElementById('le-litre');
       if(litreEl&&(litreEl.value===''||litreEl.value===oldLitre)){litreEl.value=cfgDefaultLitre||''}
@@ -827,9 +912,9 @@ function applyLabels(){
   var map={'elb-seller':L.seller||'Seller','elb-grade':L.grade,'elb-bags':L.bags,'elb-litre':L.litre_wt,'elb-net':L.net_wt,'elb-sample':L.sample_wt,'elb-gross':L.gross_wt,'elb-moisture':L.moisture};
   Object.keys(map).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=map[id]});
 }
-async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();loadAppLogo()}catch(e){}}
+async function loadTitle(){try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;cfgReserveLot=!!d.reserveLot;cfgWhatsapp=!!d.whatsapp;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();applyReserveLotVis();applyWhatsappVis();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();loadAppLogo()}catch(e){}}
 
-async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
+async function goSession(){document.getElementById('ss-user').textContent=user;const lb=localStorage.getItem('sa_branch');try{const r=await fetch(B+'/api/config');const d=await r.json();setTitle(d.title||'AMAZING SPICE PARK PVT LTD');editTimeoutMinutes=d.editTimeout||0;editEnabled=d.editEnabled!==false;cfgSampleWeight=d.sampleWeight||0;cfgShowMoisture=d.showMoisture||false;cfgDefaultLitre=d.defaultLitre||'';cfgShowCropReceipt=!!d.showCropReceipt;cfgShowReservedPrice=!!d.showReservedPrice;cfgGunnyWeight=d.gunnyWeight||0;cfgGunnyEditable=!!d.gunnyEditable;cfgShowExtraFields=!!d.showExtraLotFields;cfgReserveLot=!!d.reserveLot;cfgWhatsapp=!!d.whatsapp;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();applyReserveLotVis();applyWhatsappVis();if(d.labels)cfgLabels=Object.assign({lot_no:'Lot No',seller:'Seller',grade:'Grade',bags:'Bags',litre_wt:'Litre Wt',net_wt:'Net Wt (KG)',sample_wt:'Sample Wt',gross_wt:'Gross Wt',moisture:'Moisture %'},d.labels);applyLabels();cfgTradeNoun=d.tradeNoun||'Trade';applyTradeNoun();var brSel=document.getElementById('ss-branch');if(userRole!=='admin'&&userBranch){brSel.innerHTML='<option value="'+userBranch+'">'+userBranch+'</option>';brSel.disabled=true}else{brSel.disabled=false;brSel.innerHTML=(d.branches||[]).map(b=>'<option value="'+b.value+'"'+(b.value===(userBranch||lb)?' selected':'')+'>'+b.value+'</option>').join('')}}catch(e){}
 await loadAvailableTrades();
 show('s-session')}
 
@@ -918,7 +1003,7 @@ async function loadAvailableTrades(){
 
 async function startSession(){var sel=document.getElementById('ss-trade');var opt=sel.options[sel.selectedIndex];br=document.getElementById('ss-branch').value;var er=document.getElementById('ss-err');er.innerHTML='';if(!sel.value||!opt||!opt.value){er.innerHTML='<div class="eb">Select '+twA()+'</div>';return}if(!br){er.innerHTML='<div class="eb">Select branch</div>';return}aid=parseInt(sel.value);tno=parseInt(opt.getAttribute('data-ano'));sessionEnd=opt.getAttribute('data-end')||null;localStorage.setItem('sa_branch',br);
 // Reload config for sample weight + moisture + e-Auction extras
-try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgGunnyEditable=!!cd.gunnyEditable;cfgShowExtraFields=!!cd.showExtraLotFields;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility()}catch(e){}
+try{var cr=await fetch(B+'/api/config');var cd=await cr.json();cfgSampleWeight=cd.sampleWeight||0;cfgShowMoisture=cd.showMoisture||false;cfgShowCropReceipt=!!cd.showCropReceipt;cfgShowReservedPrice=!!cd.showReservedPrice;cfgGunnyWeight=cd.gunnyWeight||0;cfgGunnyEditable=!!cd.gunnyEditable;cfgShowExtraFields=!!cd.showExtraLotFields;cfgReserveLot=!!cd.reserveLot;cfgWhatsapp=!!cd.whatsapp;document.getElementById('le-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';document.getElementById('le-moisture-wrap').style.display=cfgShowMoisture?'block':'none';applyEAuctionVisibility();applyReserveLotVis();applyWhatsappVis()}catch(e){}
 await loadStats();goLots()}
 
 var allocStats=null;
@@ -1008,6 +1093,8 @@ function updateLotSelection(){
     el.textContent='Lot #'+selectedLots[0];
     bannerNum.textContent='#'+selectedLots[0];
   }
+  // Keep the Reserve hint naming the lot that's actually selected.
+  if(typeof onReserveToggle==='function')onReserveToggle();
 }
 
 function collapseLotGrid(){
@@ -1642,11 +1729,26 @@ async function saveLot(){
   var bags=parseInt(document.getElementById('le-bags').value);
   var litre=parseInt(document.getElementById('le-litre').value);
   var qty=parseFloat(document.getElementById('le-qty').value);
-  if(!bags&&bags!==0){toast('Enter bags',true);return}
-  if(bags<0){toast('Bags cannot be negative',true);return}
-  if(!litre&&litre!==0){toast('Enter litre weight',true);return}
-  if(litre<0){toast('Litre cannot be negative',true);return}
-  if(!qty||qty<=0){toast('Enter net weight',true);return}
+  // Reserve (hold): the lot claims its number and nothing else, so bags /
+  // litre / net weight are optional. A typed value still has to be sane.
+  // Only honoured while the feature flag is on (applyReserveLotVis also
+  // unticks the box when it goes off, so this is belt-and-braces).
+  var isReserved=(cfgReserveLot&&document.getElementById('le-reserved')&&document.getElementById('le-reserved').checked)?1:0;
+  if(isReserved){
+    if(Number.isFinite(bags)&&bags<0){toast('Bags cannot be negative',true);return}
+    if(Number.isFinite(litre)&&litre<0){toast('Litre cannot be negative',true);return}
+    if(Number.isFinite(qty)&&qty<0){toast('Net weight cannot be negative',true);return}
+    // Blank inputs arrive as NaN — ship 0 so the INSERT stores real zeros.
+    if(!Number.isFinite(bags))bags=0;
+    if(!Number.isFinite(litre))litre=0;
+    if(!Number.isFinite(qty))qty=0;
+  }else{
+    if(!bags&&bags!==0){toast('Enter bags',true);return}
+    if(bags<0){toast('Bags cannot be negative',true);return}
+    if(!litre&&litre!==0){toast('Enter litre weight',true);return}
+    if(litre<0){toast('Litre cannot be negative',true);return}
+    if(!qty||qty<=0){toast('Enter net weight',true);return}
+  }
   var moisture=cfgShowMoisture?parseFloat(document.getElementById('le-moisture').value)||null:null;
   if(moisture!==null&&moisture<0){toast('Moisture cannot be negative',true);return}
   var sampleWt=parseFloat(document.getElementById('le-sample').value)||0;
@@ -1668,6 +1770,9 @@ async function saveLot(){
   var rpRaw=(document.getElementById('le-reserved-price')?.value||'').trim();
   var reservedPrice=rpRaw===''?0:(parseFloat(rpRaw)||0);
   var lotData={auction_id:aid,trader_id:selT.id,branch:br,grade:grade,bags:bags,litre:litre,qty:qty,lot_no:lotNo,state:'TAMIL NADU',bank_id:selBankId?parseInt(selBankId):null,gross_weight:grossWt,sample_weight:sampleWt,wt_with_gunny:wwg,gunny_wt:gunnyWt,moisture:moisture,crpt:crptRaw,reserved_price:reservedPrice};
+  // `reserved` is sent only while the feature is on, so an install that turns
+  // Reserve off never writes a 0 over an existing hold (see the desktop form).
+  if(cfgReserveLot)lotData.reserved=isReserved;
   try{
     var r=await fetch(B+'/api/lots',{method:'POST',headers:ah(),body:JSON.stringify(lotData)});
     var d=await r.json();
@@ -1675,9 +1780,9 @@ async function saveLot(){
     lastId=d.lot?.id;
     lastSavedLot={id:d.lot?.id,lot_no:lotNo,trader_name:selT.name,trader_id:selT.id,qty:qty};
     if(navigator.vibrate)navigator.vibrate(50);
-    toast('Lot #'+lotNo+' saved ✓',false,true);
+    toast(isReserved?('Lot #'+lotNo+' reserved ✓'):('Lot #'+lotNo+' saved ✓'),false,true);
     // Show inline print buttons — stays until user starts next entry
-    document.getElementById('le-saved-label').textContent='✓ Saved #'+lotNo;
+    document.getElementById('le-saved-label').textContent=(isReserved?'✓ Held #':'✓ Saved #')+lotNo;
     document.getElementById('le-btn-save').style.display='none';
     document.getElementById('le-btn-saved').style.display='block';
     await loadStats();updUI();
@@ -1693,6 +1798,163 @@ async function undoLot(){if(!lastId)return;try{await fetch(B+'/api/lots/'+lastId
 function showSaveBtn(){document.getElementById('le-btn-save').style.display='flex';document.getElementById('le-btn-saved').style.display='none'}
 function printLastLot(){if(lastSavedLot&&lastSavedLot.id)printLot(lastSavedLot.id)}
 function printLastSeller(){if(lastSavedLot&&lastSavedLot.trader_id)printSellerLots(lastSavedLot.trader_id)}
+
+// ── Share a lot receipt with its seller over WhatsApp ────────────
+// Three routes, tried in order:
+//   (1) the server's WhatsApp Cloud API document send — straight to the
+//       seller's number, no contact picking, nothing for the operator to do;
+//   (2) the phone's native share sheet with the PDF attached (the operator
+//       taps the WhatsApp contact);
+//   (3) download the PDF and open a wa.me chat to the seller so it can be
+//       attached by hand.
+// All of it is gated by flag_whatsapp (cfgWhatsapp) — see applyWhatsappVis.
+
+// Meta wants an international number with no punctuation. A bare 10-digit
+// Indian mobile gets the 91 country code; anything already longer is assumed
+// to carry its own.
+function _waNormPhone(t){var d=String(t||'').replace(/\D/g,'');if(!d)return '';return d.length===10?'91'+d:d}
+
+// Resolve the seller's WhatsApp number from a UNIQUE key. Seller NAMES repeat,
+// so a name lookup can hand back a namesake's number — pass {traderId, name}
+// and the server tries the trader id first. A name matching several sellers
+// comes back `ambiguous`, and we return '' rather than risk the wrong person.
+async function _lookupSellerWa(seller){
+  var s=(typeof seller==='string')?{name:seller}:(seller||{});
+  var qs=[];
+  if(s.traderId!=null&&String(s.traderId).trim()!=='')qs.push('id='+encodeURIComponent(s.traderId));
+  if(s.name)qs.push('name='+encodeURIComponent(s.name));
+  if(!qs.length)return '';
+  try{
+    var r=await fetch(B+'/api/traders/contact?'+qs.join('&'),{headers:ah()});
+    if(!r.ok)return '';
+    var d=await r.json();
+    if(d.ambiguous)return '';   // namesake — don't guess
+    return d.phone||'';
+  }catch(e){return ''}
+}
+
+// Is the Cloud API configured? Cached for the session — the answer only
+// changes when an admin edits Settings → Integrations.
+var _waCloudOk=null;
+async function _waCloudAvail(){
+  if(_waCloudOk!==null)return _waCloudOk;
+  try{
+    var r=await fetch(B+'/api/whatsapp/status',{headers:ah()});
+    if(!r.ok){_waCloudOk=false;return false}
+    var d=await r.json();_waCloudOk=!!d.configured;
+  }catch(e){_waCloudOk=false}
+  return _waCloudOk;
+}
+
+// Saved bar → send the lot just saved.
+async function whatsappLastLot(){
+  if(!lastSavedLot||!lastSavedLot.id){toast('Save a lot first',true);return}
+  return whatsappLotReceipt(lastSavedLot,document.getElementById('le-wa-btn'));
+}
+
+// My Lots → send ANY listed lot's receipt.
+function whatsappLotById(id){
+  var l=(allMyLots||[]).find(function(x){return x.id===id});
+  if(l)whatsappLotReceipt(l);
+}
+
+// Send one lot's receipt PDF to its seller. `l` needs {id, lot_no, qty,
+// trader_name, trader_id}.
+async function whatsappLotReceipt(l,btn){
+  if(!l||!l.id){toast('Lot not found',true);return}
+  if(btn)btn.disabled=true;
+  try{
+    var comp=((document.getElementById('le-title-text')||{}).textContent||'Company').trim();
+    var url=B+'/api/lots/'+l.id+'/receipt?branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt();
+    var pr=await fetch(url,{headers:{'Authorization':'Bearer '+token}});
+    if(!pr.ok){toast('Receipt not available',true);return}
+    var blob=await pr.blob();
+    var fname='Lot_'+l.lot_no+'_Receipt.pdf';
+    var qty=Number(l.qty||0).toFixed(3);
+    var norm=_waNormPhone(await _lookupSellerWa({traderId:(l.trader_id!=null?l.trader_id:null),name:l.trader_name||''}));
+    var summary='Lot #'+l.lot_no+' ('+qty+' kg) receipt is attached.';
+    var caption=(l.trader_name||'Seller')+' — '+summary;
+    // (1) Cloud API, straight to the seller's number.
+    if(norm && await _waCloudAvail()){
+      var fd=new FormData();
+      fd.append('file',blob,fname);fd.append('phone',norm);
+      fd.append('params',JSON.stringify([l.trader_name||'',summary,comp]));
+      fd.append('filename',fname);
+      var sr=await fetch(B+'/api/whatsapp/send-template-document',{method:'POST',headers:{'Authorization':'Bearer '+token},body:fd});
+      if(sr.ok){toast('WhatsApp sent (+'+norm+')',false);return}
+      // Only 501 (not configured) and 400 {fallback:true} (no approved
+      // template) mean "the API can't be used here" — those fall through to
+      // the manual share. Anything else is Meta REFUSING this message (bad
+      // number, expired token, template error): report it, rather than
+      // silently opening a wa.me tab, which reads as the integration
+      // quietly not working.
+      var sd={};try{sd=await sr.json()}catch(e){}
+      if(!(sr.status===501||(sr.status===400&&sd.fallback))){
+        toast('WhatsApp (+'+norm+'): '+(sd.error||('failed, HTTP '+sr.status)),true);
+        return;
+      }
+    }
+    // (2) Native share sheet with the PDF attached.
+    try{
+      var file=new File([blob],fname,{type:'application/pdf'});
+      if(navigator.canShare&&navigator.canShare({files:[file]})){
+        await navigator.share({files:[file],title:fname,text:caption});return;
+      }
+    }catch(e){if(e&&e.name==='AbortError')return}
+    // (3) Download + open a wa.me chat to attach it by hand.
+    var durl=URL.createObjectURL(blob);var a=document.createElement('a');a.href=durl;a.download=fname;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(durl)},30000);
+    window.open(norm?('https://wa.me/'+norm+'?text='+encodeURIComponent(caption)):('https://wa.me/?text='+encodeURIComponent(caption)),'_blank');
+    toast('Receipt downloaded → attach it in WhatsApp',false);
+  }catch(e){toast('WhatsApp share failed',true)}
+  finally{if(btn)btn.disabled=false}
+}
+
+// Bulk: send each seller their SELECTED lots as one grouped receipt. Cloud-API
+// only — the native share sheet and wa.me fallbacks are one-chat-at-a-time, so
+// a bulk run through them would be worse than doing it by hand.
+async function whatsappSelectedMyLots(){
+  var ids=Array.from(document.querySelectorAll('.ml-cb:checked')).map(function(cb){return parseInt(cb.value)});
+  if(!ids.length){toast('Select lots to send',true);return}
+  if(!(await _waCloudAvail())){toast('Set up WhatsApp Business API (Settings → Integrations) to send in bulk.',true);return}
+  var btn=document.getElementById('ml-wa-btn');
+  var comp=((document.getElementById('ml-title-text')||document.getElementById('le-title-text')||{}).textContent||'Company').trim();
+  // Group the ticked lots by seller. The trader id is the unique key the phone
+  // lookup needs; the name is only a fallback for lots that carry no id.
+  var groups={};
+  ids.forEach(function(id){
+    var l=(allMyLots||[]).find(function(x){return x.id===id});
+    if(!l)return;
+    var key=l.trader_id||('u_'+(l.trader_name||'unknown'));
+    (groups[key]||(groups[key]={name:l.trader_name||'',traderId:(l.trader_id!=null?l.trader_id:null),ids:[]})).ids.push(id);
+  });
+  var keys=Object.keys(groups);
+  if(!keys.length){toast('No matching lots',true);return}
+  if(btn)btn.disabled=true;
+  var sent=0,failed=0,noPhone=0,done=0;
+  for(var k of keys){
+    var g=groups[k];
+    try{
+      var norm=_waNormPhone(await _lookupSellerWa({traderId:g.traderId,name:g.name}));
+      if(!norm){noPhone++;done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;continue}
+      var url=B+'/api/lots/print-batch?ids='+g.ids.join(',')+'&branch='+encodeURIComponent(br)+'&token='+token+'&format='+printFmt();
+      var pr=await fetch(url,{headers:{'Authorization':'Bearer '+token}});
+      if(!pr.ok){failed++;done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;continue}
+      var blob=await pr.blob();
+      var fname='Receipt_'+String(g.name||'Seller').replace(/[^A-Za-z0-9]+/g,'_')+'.pdf';
+      var summary=g.ids.length+' lot(s) receipt is attached.';
+      var fd=new FormData();
+      fd.append('file',blob,fname);fd.append('phone',norm);
+      fd.append('params',JSON.stringify([g.name||'',summary,comp]));
+      fd.append('filename',fname);
+      var sr=await fetch(B+'/api/whatsapp/send-template-document',{method:'POST',headers:{'Authorization':'Bearer '+token},body:fd});
+      if(sr.ok)sent++;else failed++;
+    }catch(e){failed++}
+    done++;if(btn)btn.textContent='📲 '+done+'/'+keys.length;
+  }
+  if(btn){btn.disabled=false;btn.textContent='📲 WhatsApp selected'}
+  toast('WhatsApp: '+sent+' sent'+(noPhone?', '+noPhone+' no number':'')+(failed?', '+failed+' failed':''),(failed>0||noPhone>0));
+}
 
 // After save: keep seller+bank, clear bags/litre/qty, auto-select next lot
 function resetFormKeepSeller(){
@@ -1724,7 +1986,12 @@ function resetForm(){selT=null;selectedLots=[];lastSavedLot=null;document.getEle
 async function loadMyLots(){if(!aid)return;try{const r=await fetch(B+'/api/lots?auction_id='+aid+'&branch='+encodeURIComponent(br),{headers:ah()});const d=await r.json();allMyLots=d.lots||[];const stats=d.stats||{};document.getElementById('ml-cnt').textContent=stats.lotCount||0;document.getElementById('ml-bags').textContent=stats.totalBags||0;document.getElementById('ml-qty').textContent=(stats.totalQty||0).toFixed(3);document.getElementById('ml-search').value='';renderMyLots(allMyLots)}catch(e){}}
 function filterMyLots(q){if(!q||q.length<2){renderMyLots(allMyLots);return}const f=q.toUpperCase();renderMyLots(allMyLots.filter(l=>(l.trader_name||'').toUpperCase().includes(f)))}
 function renderMyLots(lots){const list=document.getElementById('ml-list');if(!lots.length){list.innerHTML='<div class="lot-empty">No lots found</div>';return}
-list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';return`<div class="lot-card"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span></label><span style="font-size:10px;color:var(--text3)">${l.user_id} · ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> · ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
+list.innerHTML=lots.map(l=>{const g=String(l.grade||''),q=Number(l.qty).toFixed(3);const tn=(l.trader_name||'Unknown').replace(/'/g,"\\'");const editBtns=editEnabled?` <button class="ico-btn ed" title="Edit lot" onclick="openEdit(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}','${tn}','${g.replace(/'/g,"\\'")}',${l.bags},${l.litre},${l.qty},${l.trader_id},${l.bank_id||'null'})">${ICO_EDIT}</button> <button class="ico-btn dl" title="Delete lot" onclick="deleteLot(${l.id},'${String(l.lot_no).replace(/'/g,"\\'")}')">${ICO_DEL}</button>`:'';
+// Held (reserved) lots get an amber card + RESERVED chip. The per-lot WhatsApp
+// action appears only when flag_whatsapp is on (cfgWhatsapp).
+const isRes=!!Number(l.reserved);
+const waBtn=cfgWhatsapp?` <button class="ico-btn" style="color:#25D366" onclick="whatsappLotById(${l.id})" title="Send receipt on WhatsApp">📲</button>`:'';
+return`<div class="lot-card${isRes?' reserved':''}"><div class="lot-hdr"><label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="ml-cb" value="${l.id}" onchange="updateMySelCount()" style="width:16px;height:16px"><span class="lot-num">#${l.lot_no}</span>${isRes?'<span class="res-badge">RESERVED</span>':''}</label><span style="font-size:10px;color:var(--text3)">${l.user_id} · ${l.created_at?l.created_at.split(' ')[1]||'':''}</span></div><div class="lot-row"><div class="lot-name"><span style="color:var(--green);text-decoration:underline;cursor:pointer" onclick="showBankPop(event,'${tn}','${(l.acctnum||'').replace(/'/g,"\\'")}','${(l.ifsc||'').replace(/'/g,"\\'")}','${(l.tel||'').replace(/'/g,"\\'")}','${(l.cr||'').replace(/'/g,"\\'")}')">${l.trader_name}</span></div><div class="lot-actions"><button class="ico-btn pr" onclick="printLot(${l.id})" title="Print receipt">${ICO_PRINT}</button>${waBtn}${editBtns}</div></div><div class="lot-meta">${g} | ${l.bags} bags | ${l.litre} L | <strong>${q} kg</strong> · ${l.ppla||''}</div></div>`}).join('');updateMySelCount()}
 
 // Select / clear every listed lot's checkbox (respects the active search
 // filter — renderMyLots rebuilds the DOM, so .ml-cb = currently shown lots).
@@ -1743,7 +2010,7 @@ function printLot(id){routePrint(B+'/api/lots/'+id+'/receipt?branch='+encodeURIC
 
 var editBanks=[],editTraderId=null;
 var editLotBankId=null;
-function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';/* Reset e-Auction extras + refresh visibility (flag may have flipped since last open) */ var _ed_crpt=document.getElementById('ed-crpt');if(_ed_crpt)_ed_crpt.value='';var _ed_rp=document.getElementById('ed-reserved-price');if(_ed_rp)_ed_rp.value='';/* Pre-fetch default: clear W/Gunny and let applyEAuctionVisibility reseed Gunny Wt from bags; the /detail fetch below restores both from the stored wt_with_gunny/gunny_wt when the lot has them. */var _ed_wwg=document.getElementById('ed-wwg');if(_ed_wwg)_ed_wwg.value='';applyEAuctionVisibility();document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';/* Populate crpt + reserved_price from the loaded lot. Number coerce w/ blank-as-zero so a 0/null reserved_price renders empty (no stuck "0" placeholder). */if(_ed_crpt)_ed_crpt.value=d.lot.crpt||'';if(_ed_rp){var rp=Number(d.lot.reserved_price);_ed_rp.value=(Number.isFinite(rp)&&rp!==0)?rp:''}/* Restore the persisted gunny weighing (wt_with_gunny/gunny_wt) so the edit form shows the original W/Gunny + tare and round-trips them; blank/reseeded when the lot has none. */var _ed_wwg2=document.getElementById('ed-wwg');if(_ed_wwg2)_ed_wwg2.value=(Number(d.lot.wt_with_gunny)>0)?Number(d.lot.wt_with_gunny).toFixed(3):'';var _ed_gw2=document.getElementById('ed-gunny-wt');if(_ed_gw2&&Number(d.lot.gunny_wt)>0)_ed_gw2.value=Number(d.lot.gunny_wt).toFixed(3);calcEditGross()}}).catch(()=>{calcEditGross()})}
+function openEdit(id,lotNo,s,g,bags,litre,qty,traderId,bankId){editId=id;editTraderId=traderId||null;editLotBankId=bankId||null;document.getElementById('ed-lotno-display').textContent=lotNo;document.getElementById('ed-lotno').value=lotNo;document.getElementById('ed-seller-name').textContent=s;document.getElementById('ed-seller-card').style.display='flex';document.getElementById('ed-seller-search').style.display='none';document.getElementById('ed-seller-res').style.display='none';document.getElementById('ed-grade').value=g;document.getElementById('ed-bags').value=bags;document.getElementById('ed-litre').value=litre;document.getElementById('ed-qty').value=Number(qty).toFixed(3);document.getElementById('ed-sample').value=cfgSampleWeight?Number(cfgSampleWeight).toFixed(3):'0.000';/* Reset e-Auction extras + refresh visibility (flag may have flipped since last open) */ var _ed_crpt=document.getElementById('ed-crpt');if(_ed_crpt)_ed_crpt.value='';var _ed_rp=document.getElementById('ed-reserved-price');if(_ed_rp)_ed_rp.value='';/* Pre-fetch default: clear W/Gunny and let applyEAuctionVisibility reseed Gunny Wt from bags; the /detail fetch below restores both from the stored wt_with_gunny/gunny_wt when the lot has them. */var _ed_wwg=document.getElementById('ed-wwg');if(_ed_wwg)_ed_wwg.value='';applyEAuctionVisibility();applyReserveLotVis();/* Reserve state: cleared here, then set from the /detail fetch below so the sheet shows whether this lot is a hold. */var _ed_res=document.getElementById('ed-reserved');if(_ed_res)_ed_res.checked=false;document.getElementById('ed-err').innerHTML='';document.getElementById('ed-bank-form').style.display='none';document.getElementById('edit-modal').classList.add('show');if(traderId)loadEditBanks(traderId);fetch(B+'/api/lots/'+id+'/detail',{headers:ah()}).then(r=>r.json()).then(d=>{if(d.lot){var sw=d.lot.sample_weight!=null&&d.lot.sample_weight>0?d.lot.sample_weight:cfgSampleWeight||0;document.getElementById('ed-sample').value=Number(sw).toFixed(3);document.getElementById('ed-gross').value=d.lot.gross_weight?Number(d.lot.gross_weight).toFixed(3):'0';/* Populate crpt + reserved_price from the loaded lot. Number coerce w/ blank-as-zero so a 0/null reserved_price renders empty (no stuck "0" placeholder). */if(_ed_crpt)_ed_crpt.value=d.lot.crpt||'';if(_ed_rp){var rp=Number(d.lot.reserved_price);_ed_rp.value=(Number.isFinite(rp)&&rp!==0)?rp:''}/* Reserve (hold) flag — ticked means this lot only claims its number; unticking it here books the lot on save. */if(_ed_res)_ed_res.checked=!!Number(d.lot.reserved);/* Restore the persisted gunny weighing (wt_with_gunny/gunny_wt) so the edit form shows the original W/Gunny + tare and round-trips them; blank/reseeded when the lot has none. */var _ed_wwg2=document.getElementById('ed-wwg');if(_ed_wwg2)_ed_wwg2.value=(Number(d.lot.wt_with_gunny)>0)?Number(d.lot.wt_with_gunny).toFixed(3):'';var _ed_gw2=document.getElementById('ed-gunny-wt');if(_ed_gw2&&Number(d.lot.gunny_wt)>0)_ed_gw2.value=Number(d.lot.gunny_wt).toFixed(3);calcEditGross()}}).catch(()=>{calcEditGross()})}
 function closeEdit(){document.getElementById('edit-modal').classList.remove('show');editId=null;editTraderId=null}
 function editSellerMode(){document.getElementById('ed-seller-card').style.display='none';document.getElementById('ed-seller-search').style.display='block';document.getElementById('ed-seller-input').value='';document.getElementById('ed-seller-input').focus()}
 let edStm;
@@ -1846,7 +2113,7 @@ async function saveEditBankAccount(){
   }catch(e){toast('Failed',true)}
 }
 function calcEditGross(){var net=parseFloat(document.getElementById('ed-qty').value)||0;var sample=parseFloat(document.getElementById('ed-sample').value)||0;document.getElementById('ed-gross').value=(net+sample).toFixed(3)}
-async function saveEdit(){const lotNo=document.getElementById('ed-lotno').value.trim(),grade=document.getElementById('ed-grade').value.trim()||'1',bags=parseInt(document.getElementById('ed-bags').value),litre=parseInt(document.getElementById('ed-litre').value),qty=parseFloat(document.getElementById('ed-qty').value),sampleWt=parseFloat(document.getElementById('ed-sample').value)||0,grossWt=parseFloat(document.getElementById('ed-gross').value)||0,er=document.getElementById('ed-err');er.innerHTML='';if(!lotNo||!bags||!litre||!qty){er.innerHTML='<div class="eb">Fill all fields</div>';return}document.getElementById('ed-save').disabled=true;try{const body={lot_no:lotNo,grade,bags,litre,qty,sample_weight:sampleWt,gross_weight:grossWt,wt_with_gunny:parseFloat(document.getElementById('ed-wwg')?.value)||0,gunny_wt:parseFloat(document.getElementById('ed-gunny-wt')?.value)||0};/* e-Auction extras — always written even when the flag is off; the value sitting in a hidden input typed under a different mode is still valid data we should round-trip. crpt as string preserves zero-padding; reserved_price coerced to number. */ var _ed_crpt2=document.getElementById('ed-crpt');if(_ed_crpt2)body.crpt=(_ed_crpt2.value||'').trim();var _ed_rp2=document.getElementById('ed-reserved-price');if(_ed_rp2){var _rp2=(_ed_rp2.value||'').trim();body.reserved_price=_rp2===''?0:(parseFloat(_rp2)||0)}if(editTraderId)body.trader_id=editTraderId;var edBankSel=document.getElementById('ed-bank-select');if(edBankSel)body.bank_id=edBankSel.value?parseInt(edBankSel.value):null;const r=await fetch(B+'/api/lots/'+editId,{method:'PUT',headers:ah(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';return}toast('Lot updated',false);closeEdit();loadMyLots();await loadStats();updUI()}catch(e){er.innerHTML='<div class="eb">Failed</div>'}finally{document.getElementById('ed-save').disabled=false}}
+async function saveEdit(){const lotNo=document.getElementById('ed-lotno').value.trim(),grade=document.getElementById('ed-grade').value.trim()||'1',bags=parseInt(document.getElementById('ed-bags').value),litre=parseInt(document.getElementById('ed-litre').value),qty=parseFloat(document.getElementById('ed-qty').value),sampleWt=parseFloat(document.getElementById('ed-sample').value)||0,grossWt=parseFloat(document.getElementById('ed-gross').value)||0,er=document.getElementById('ed-err');er.innerHTML='';/* A held (reserved) lot may legitimately carry no bags / litre / weight, so the "fill all fields" gate only applies once the hold is released. */var _ed_res2=document.getElementById('ed-reserved');var _edReserved=(cfgReserveLot&&_ed_res2&&_ed_res2.checked)?1:0;if(!lotNo||(!_edReserved&&(!bags||!litre||!qty))){er.innerHTML='<div class="eb">'+(lotNo?'Fill all fields':'Lot number required')+'</div>';return}document.getElementById('ed-save').disabled=true;try{const body={lot_no:lotNo,grade,bags:Number.isFinite(bags)?bags:0,litre:Number.isFinite(litre)?litre:0,qty:Number.isFinite(qty)?qty:0,sample_weight:sampleWt,gross_weight:grossWt,wt_with_gunny:parseFloat(document.getElementById('ed-wwg')?.value)||0,gunny_wt:parseFloat(document.getElementById('ed-gunny-wt')?.value)||0};/* Reserve flag sent only while the feature is on — see saveLot. */if(cfgReserveLot)body.reserved=_edReserved;/* e-Auction extras — always written even when the flag is off; the value sitting in a hidden input typed under a different mode is still valid data we should round-trip. crpt as string preserves zero-padding; reserved_price coerced to number. */ var _ed_crpt2=document.getElementById('ed-crpt');if(_ed_crpt2)body.crpt=(_ed_crpt2.value||'').trim();var _ed_rp2=document.getElementById('ed-reserved-price');if(_ed_rp2){var _rp2=(_ed_rp2.value||'').trim();body.reserved_price=_rp2===''?0:(parseFloat(_rp2)||0)}if(editTraderId)body.trader_id=editTraderId;var edBankSel=document.getElementById('ed-bank-select');if(edBankSel)body.bank_id=edBankSel.value?parseInt(edBankSel.value):null;const r=await fetch(B+'/api/lots/'+editId,{method:'PUT',headers:ah(),body:JSON.stringify(body)});const d=await r.json();if(!r.ok){er.innerHTML='<div class="eb">'+(d.error||'Failed')+'</div>';return}toast(_edReserved?'Lot held (reserved)':'Lot updated',false);closeEdit();loadMyLots();await loadStats();updUI()}catch(e){er.innerHTML='<div class="eb">Failed</div>'}finally{document.getElementById('ed-save').disabled=false}}
 async function deleteLot(id,n){if(!confirm('Delete Lot #'+n+'?'))return;try{await fetch(B+'/api/lots/'+id,{method:'DELETE',headers:ah()});toast('Deleted',false);loadMyLots();await loadStats();updUI()}catch(e){}}
 
 function clearEntryForm(){

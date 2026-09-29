@@ -210,6 +210,15 @@ const DEFAULTS = [
   // Off by default so existing multi-trade price imports keep working until
   // the operator opts in.
   { key: 'flag_lot_validation', value: 'false', category: 'flags',     label: 'Validate lots before price import',      type: 'boolean' },
+  // Pooler lists are the Grade-1 (agriculturist / planter) side of a trade —
+  // Grade 2 belongs to the Dealer lists. So the three Pooler exports (Pooler
+  // Register, Pooler List Consolidated, and its Pre-Trade sibling) show
+  // Grade 1 only. Turn this ON to admit Grade 2 lots as well.
+  { key: 'flag_pooler_grade2',  value: 'false', category: 'flags',     label: 'Pooler lists include Grade 2 lots',      type: 'boolean' },
+  // Reserve Lot (Lot Entry) — the "hold this lot number" checkbox on the
+  // desktop + mobile lot-entry forms. OFF hides the control everywhere; the
+  // lots.reserved column always exists so flipping the flag never loses data.
+  { key: 'flag_reserve_lot',    value: 'false', category: 'flags',     label: 'Reserve Lot (Lot Entry)',                type: 'boolean' },
 
   // ── BOOKING LIMITS & ALERTS ────────────────────────────────
   // When flag_booking_limit is ON, every lot save recomputes the seller's
@@ -712,6 +721,14 @@ function initCompanySettings(db) {
     // receipts (state-aware). Defaults ASPPL (Kerala) / ISPPL (Tamil Nadu).
     seedNew('lot_receipt_short_name_kl', 'ASPPL', 'lot_entry', 'Lot Receipt Company Short Name — Kerala (e.g. ASPPL)', 'text');
     seedNew('lot_receipt_short_name_tn', 'ISPPL', 'lot_entry', 'Lot Receipt Company Short Name — Tamil Nadu (e.g. ISPPL)', 'text');
+    // flag_pooler_grade2 — Pooler exports show Grade 1 only by default (pooler
+    // = the agriculturist side; Grade 2 is the Dealer lists' business). ON
+    // admits Grade 2 too. Default OFF, which CHANGES the previous behaviour
+    // (every grade was listed) — deliberate: the lists were over-reporting.
+    seedNew('flag_pooler_grade2', 'false', 'flags', 'Pooler lists include Grade 2 lots', 'boolean');
+    // flag_reserve_lot — Reserve Lot checkbox on the lot-entry forms. OFF by
+    // default so upgraded installs see no new control until they opt in.
+    seedNew('flag_reserve_lot', 'false', 'flags', 'Reserve Lot (Lot Entry)', 'boolean');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs
