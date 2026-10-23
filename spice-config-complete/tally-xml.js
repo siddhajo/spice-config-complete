@@ -208,7 +208,10 @@ const _saleLabel = (s) => {
 //     amounttot, gunnyAmt, gunnyBags (optional, count of gunny bags
 //     across all lots), cgst, sgst, igst, tcsamt, total, totalRounded,
 //     vehicleNo (optional), shippedBy (optional), distance (optional),
-//     finalDestination (optional, defaults to place),
+//     consigneePlace / consigneePin (optional ship-to; each falls back to
+//       place / pin when blank — drives SHIPTOPLACE, CONSIGNEEPINCODE,
+//       BASICFINALDESTINATION and the e-way bill's consignee place + PIN),
+//     finalDestination (optional, defaults to the ship-to place),
 //   }, ...]
 //
 function generSalesIspXML(rows, cfg, opts = {}) {
@@ -286,6 +289,14 @@ function generSalesIspXML(rows, cfg, opts = {}) {
     const partyState  = xe(findState(row.partyGstin));
     const partyPin    = xe(row.pin || '');
     const partyPlace  = xe(row.place || '');
+    // Ship-to (consignee) destination. The buyer's own consignee place / PIN
+    // when they have one on file, otherwise the bill-to values — most buyers
+    // ship to the address they're billed at and leave the consignee fields
+    // blank, and a blank <SHIPTOPLACE> / <CONSIGNEEPINCODE> would be worse
+    // than a correct-but-duplicated one (Tally and the e-way bill both need
+    // a destination). Same fallback rule BASICBUYERADDRESS already uses.
+    const shipToPlace = xe(row.consigneePlace || row.place || '');
+    const shipToPin   = xe(row.consigneePin   || row.pin   || '');
     const consigneePAN = _panFromGstin(row.partyGstin);
     const isIntra     = String(row.partyGstin || '').slice(0, 2) === String(intra);
     const sale        = String(row.sale || 'L').toUpperCase();
@@ -306,8 +317,10 @@ function generSalesIspXML(rows, cfg, opts = {}) {
       : (isIntra ? 'Local Sales - Taxable' : 'Interstate Sales - Taxable');
     const gunnyLedger = isExport ? GunnyExport : (isIntra ? GunnyIntra : GunnyInter);
 
-    // Final destination defaults to buyer's place
-    const finalDest = xe(row.finalDestination || row.place || '');
+    // Final destination = where the goods actually go, i.e. the ship-to
+    // place (which itself falls back to bill-to). An explicit
+    // row.finalDestination still wins — that's the documented override.
+    const finalDest = row.finalDestination ? xe(row.finalDestination) : shipToPlace;
     const shippedBy = xe(row.shippedBy || '');
     const vehicleNo = xe(row.vehicleNo || '');
     const distance  = xe(row.distance || '');
@@ -365,10 +378,10 @@ ${dispatchLines.map(l => `<DISPATCHFROMADDRESS>${xe(l)}</DISPATCHFROMADDRESS>`).
     }
 
     xml += `
-<SHIPTOPLACE>${partyPlace}</SHIPTOPLACE>
+<SHIPTOPLACE>${shipToPlace}</SHIPTOPLACE>
 <CONSIGNEEGSTIN>${partyGstin}</CONSIGNEEGSTIN>
 <CONSIGNEEMAILINGNAME>${partyName}</CONSIGNEEMAILINGNAME>
-<CONSIGNEEPINCODE>${partyPin}</CONSIGNEEPINCODE>
+<CONSIGNEEPINCODE>${shipToPin}</CONSIGNEEPINCODE>
 <CONSIGNEESTATENAME>${partyState}</CONSIGNEESTATENAME>
 <CONSIGNEEPINNUMBER>${xe(consigneePAN)}</CONSIGNEEPINNUMBER>
 <CONSIGNEECOUNTRYNAME>India</CONSIGNEECOUNTRYNAME>`;
@@ -422,11 +435,11 @@ ${dispatchLines.map(l => `<DISPATCHFROMADDRESS>${xe(l)}</DISPATCHFROMADDRESS>`).
 </CONSIGNEEADDRESS.LIST>
 <DOCUMENTTYPE>Tax Invoice</DOCUMENTTYPE>
 <SUBTYPE>Supply</SUBTYPE>
-<CONSIGNEEPINCODE>${partyPin}</CONSIGNEEPINCODE>
+<CONSIGNEEPINCODE>${shipToPin}</CONSIGNEEPINCODE>
 <CONSIGNORPLACE>${xe(d_place)}</CONSIGNORPLACE>
 <CONSIGNORPINCODE>${xe(d_pin)}</CONSIGNORPINCODE>
 <SHIPPEDFROMSTATE>${xe(d_state)}</SHIPPEDFROMSTATE>
-<CONSIGNEEPLACE>${partyPlace}</CONSIGNEEPLACE>
+<CONSIGNEEPLACE>${shipToPlace}</CONSIGNEEPLACE>
 <SHIPPEDTOSTATE>${partyState}</SHIPPEDTOSTATE>
 <ISCANCELLED>No</ISCANCELLED>
 <TRANSPORTDETAILS.LIST>
@@ -2374,6 +2387,10 @@ function buildSalesIspRows(db, auctionId, cfg) {
       // voucher BASICBUYERADDRESS; blank falls back to bill-to.
       consigneeAddress: [r.buyer_cadd1, r.buyer_cadd2].filter(Boolean).join(', '),
       consigneePlace: r.buyer_cpla || '',
+      // Ship-to PIN (buyers.cpin). Already read above for the route-distance
+      // lookup; carried onto the row too so the voucher's ship-to tags can
+      // use it. Blank falls back to the bill-to pin in the generator.
+      consigneePin: r.buyer_cpin || '',
       // <BASICSHIPPEDBY>: the "Dispatched Through" value the operator entered
       // in the print modal, persisted on the invoice at PDF-download time.
       // Falls back to the config default (same chain the ISP PDF uses) when
