@@ -4,6 +4,52 @@
  */
 
 const DEFAULTS = [
+  // ── APPLICATION IDENTITY & SCREENSAVER ─────────────────────
+  // The SOFTWARE's own name, as against trade_name below, which is the
+  // CUSTOMER's company. The two are different things and were conflated:
+  // every screen showed the customer's name and the product had none.
+  //
+  // Shown on the SCREENSAVER and in the product chip on the sign-in panel.
+  // Deliberately NOT on the top bar or on the sign-in card's heading, which
+  // keep the customer's own name — that is what an operator wants to see
+  // while working, and the product name earns its place on the one screen
+  // nobody is working on.
+  //
+  // Settings rather than constants so a reseller can badge the app without
+  // a rebuild, and so a changed support number never means editing HTML.
+  //
+  // These live in their OWN category, not in 'company': every key in the
+  // 'company' category is a PRESET field (see company_presets — one value
+  // per ISP/ASP), and the name of the software is install-wide. They are
+  // also GLOBAL_KEYS below, so they are not split per business mode.
+  { key: 'app_name',    value: 'SpiceFlow eAuction Suite', category: 'app', label: 'Application Name (this software)', type: 'text' },
+  // The SOFTWARE's mark, which is not the customer's logo: logo-ispl.png /
+  // logo-asp.png are per-install and belong to the trading house, this one
+  // ships with the build and belongs to the product. A path rather than an
+  // upload so a reseller can point it at their own file; blank shows no mark.
+  { key: 'app_logo',    value: '/logo-app.svg',           category: 'app', label: 'Application logo (path)',         type: 'text' },
+  // The two lines UNDER the name on the screensaver. Blank either one and
+  // its line simply does not render — an install with no support number
+  // must not show an empty row where one should be.
+  { key: 'app_credit',  value: 'Powered by KJ & Co',      category: 'app', label: 'Screensaver credit line',         type: 'text' },
+  { key: 'app_contact', value: '9790745462 / 8248922434', category: 'app', label: 'Screensaver support number(s)',   type: 'text' },
+  // ── Screensaver ───────────────────────────────────────────────────
+  // The office machines sit on one screen all day — a priced lot grid, a
+  // seller's bank details — in a room people walk through. The screensaver
+  // covers that after a few quiet minutes and clears on the first key or
+  // click. It never signs anybody out and never touches a session.
+  //
+  // 0 = never, and that is the default: an install that never asked for
+  // this must not start blanking screens on upgrade.
+  { key: 'screensaver_minutes',   value: '0',    category: 'app', label: 'Screensaver after inactivity (minutes; 0 = never)', type: 'number'  },
+  // Fireworks on the screensaver panel. On by default, but that costs an
+  // install nothing: the screensaver itself is off until somebody sets the
+  // minutes above, so nothing animates on an install that never asked.
+  //
+  // Switchable because this is taste, and because a machine driving a wall
+  // display over remote desktop is better off with a still panel.
+  { key: 'screensaver_fireworks', value: 'true', category: 'app', label: 'Screensaver: fireworks animation', type: 'boolean' },
+
   // ── COMPANY (Primary - ISP) ────────────────────────────────
   { key: 'logo',            value: 'ISP',           category: 'company',   label: 'Logo Code',                type: 'text' },
   { key: 'trade_name',      value: 'IDEAL SPICES',  category: 'company',   label: 'Trade Name',               type: 'text' },
@@ -255,7 +301,22 @@ const DEFAULTS = [
   { key: 'business_state',  value: 'TAMIL NADU',     category: 'mode',      label: 'Business State',           type: 'select' },
 
   // ── INTEGRATIONS ───────────────────────────────────────────
+  // GSTIN lookup. TWO providers are supported; `gst_api_provider` picks the
+  // one the "Fetch from GST" button calls, and each keeps its OWN key — a key
+  // is issued by one provider and is meaningless to the other — so switching
+  // back is just flipping this select, with no re-typing.
+  //
+  //   gstincheck — sheet.gstincheck.co.in, key in the URL path. Credits carry
+  //                a 1-YEAR expiry and the minimum purchase is 1,000.
+  //   gstinapi   — www.gstinapi.in/v1, key in an x-api-key header. Credits do
+  //                NOT expire, report credits_remaining on every call, and the
+  //                service answers with real HTTP codes (402 when out).
+  //
+  // Default stays 'gstincheck' so an existing install keeps calling the
+  // provider its key belongs to until someone deliberately switches.
+  { key: 'gst_api_provider', value: 'gstincheck',    category: 'integrations', label: 'GST Lookup Provider', type: 'select' },
   { key: 'gst_api_key',     value: '',               category: 'integrations', label: 'GST Lookup API Key (gstincheck.co.in)', type: 'text' },
+  { key: 'gst_api_key_gstinapi', value: '',          category: 'integrations', label: 'GST Lookup API Key (gstinapi.in)', type: 'text' },
 
   // ── NOTIFICATIONS ──────────────────────────────────────────
   { key: 'seller_youtube_url', value: '',            category: 'notifications', label: 'Seller YouTube Link (shared in WhatsApp notices)', type: 'text' },
@@ -472,6 +533,7 @@ const DEFAULTS = [
 
 const CATEGORIES = {
   mode:       { order: 0, title: 'Business Mode',        icon: '⚙' },
+  app:        { order: 0.5, title: 'App & Screensaver',   icon: '🖥', description: 'The name of THIS SOFTWARE — not the trading company — plus the credit / support lines and mark shown beneath it. None of these appear on any invoice or report: the product names itself on the screensaver and in the chip on the sign-in panel, and every other screen keeps the customer\u2019s own name. The screensaver covers the screen after a few quiet minutes (an office machine otherwise sits on a priced lot grid or a seller\u2019s bank details all day, in a room people walk through); any key or click clears it, and 0 = never.' },
   company:    { order: 1, title: 'Company Details',       icon: '🏢' },
   display:    { order: 1.5, title: 'Display',             icon: '🗓', description: 'App-wide display preferences. The date format chosen here is used consistently across the screens, exports, and printed reports. Masking hides bank account no., IFSC and phone on receipts and on-screen lists/panels (pick how many digits stay visible); the bank payment file, DBF, Tally and WhatsApp targets always keep the real numbers.' },
   address_kl: { order: 2, title: 'Address (Kerala)',      icon: '📍' },
@@ -487,7 +549,7 @@ const CATEGORIES = {
   booking:    { order: 11.55, title: 'Booking Limits & Alerts', icon: '🚦', description: 'Soft/escalation alerts when a single seller’s booked weight in a trade crosses a share of the planned weight. The limit is a percentage of the per-seller planned weight (MT). At the soft threshold the depot manager is alerted on WhatsApp; if booking continues past the escalation threshold the immediate superior is alerted. Per-branch manager/superior numbers can be set via the Booking Contacts API; the numbers here are fallbacks.' },
   lot_entry:  { order: 11.5, title: 'Lot Entry Defaults',  icon: '📝', description: 'Defaults used by the Lot Entry tab — sample weight, gunny tare, default crop, moisture visibility, extra-field (crop receipt / reserved price) visibility, edit window, receipt format, and the thermal paper width used when printing lot receipts (set this to your printer roll width, e.g. 58 for a HOP-HL58, so slips print edge-to-edge instead of scaling onto A4).' },
   notifications: { order: 11.9, title: 'Notifications',   icon: '🔔', description: 'Seller-facing notification settings. The YouTube link below is appended to the WhatsApp notices sent to sellers (lot-sold alerts and invoice details) when configured.' },
-  integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. The GST API key enables auto-fetching trade name and address when you enter a GSTIN. Get a free key at gstincheck.co.in — sign up, copy the key from your dashboard, paste here.' },
+  integrations: { order: 12, title: 'Integrations',       icon: '🔌', description: 'Optional third-party services. A GST lookup key enables auto-fetching trade name and address when you enter a GSTIN — pick the provider (gstincheck.co.in or gstinapi.in) and paste that provider\u2019s own key. The status card above the fields shows the selected provider\u2019s credit balance and links straight to its recharge page, so a spent plan can be topped up without leaving the screen.' },
   tally:      { order: 13, title: 'To Tally',             icon: '📤', description: 'Configure all settings for the Tally XML export — laid out exactly like the original Configration form. Ledger names here MUST match what exists in your Tally company; if a ledger is missing or misspelled, Tally will reject the import.' },
   spice_board:{ order: 14, title: 'Spice Board Reports',   icon: '🌶', description: 'Statutory cardamom-auction reports. Place values entered below populate the Place of Auction dropdown on the FORM-D report.' },
 };
@@ -500,7 +562,13 @@ const CATEGORIES = {
 // the mode from inside a mode) plus install-wide infra/branding keys.
 const GLOBAL_MODE = '*';
 const MODES = ['e-Trade', 'e-Auction'];
-const GLOBAL_KEYS = new Set(['business_mode', 'business_state', 'tenant_preset', 'preset_config']);
+// Install-wide keys: stored once under the '*' mode rather than once per
+// business mode. The app's own identity and its screensaver are properties of
+// the INSTALL — flipping between e-Trade and e-Auction must not rename the
+// software or hand it a second screensaver timeout.
+const GLOBAL_KEYS = new Set(['business_mode', 'business_state', 'tenant_preset', 'preset_config',
+  'app_name', 'app_logo', 'app_credit', 'app_contact',
+  'screensaver_minutes', 'screensaver_fireworks']);
 
 // Rate/charge keys whose every change is recorded in settings_history so the
 // operator can see how the figure moved over time. Keep in sync with the
@@ -729,6 +797,11 @@ function initCompanySettings(db) {
     // flag_reserve_lot — Reserve Lot checkbox on the lot-entry forms. OFF by
     // default so upgraded installs see no new control until they opt in.
     seedNew('flag_reserve_lot', 'false', 'flags', 'Reserve Lot (Lot Entry)', 'boolean');
+    // GST lookup provider + the second provider's key. Existing installs keep
+    // calling gstincheck (the provider their key belongs to) until someone
+    // deliberately switches, so the default is the incumbent, not the newcomer.
+    seedNew('gst_api_provider', 'gstincheck', 'integrations', 'GST Lookup Provider', 'select');
+    seedNew('gst_api_key_gstinapi', '', 'integrations', 'GST Lookup API Key (gstinapi.in)', 'text');
   } catch (e) { /* non-fatal */ }
 
   // NOTE: business_mode is no longer overridden at boot. Fresh installs

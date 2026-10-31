@@ -493,9 +493,13 @@ app.get('/api/brand', (req, res) => {
     const logoUrl = hasLogo ? ('/logo-' + which + '.png?v=' + Math.floor(fs.statSync(target).mtimeMs)) : null;
     // Two-letter tile (used only when logoUrl is null).
     const mark = active === 'ASP' ? 'AS' : 'IS';
-    res.json({ active, name, code: active, mark, logoUrl, hasLogo });
+    // The name of the SOFTWARE (app_name), distinct from the customer's
+    // company above. The sign-in panel prints it in its product chip, so it
+    // has to be readable before anyone has signed in — which is why it rides
+    // this auth-free endpoint rather than company-settings.
+    res.json({ active, name, code: active, mark, logoUrl, hasLogo, appName: flat.app_name || '' });
   } catch (e) {
-    res.json({ active: 'ISP', name: '', code: 'ISP', mark: 'IS', logoUrl: null, hasLogo: false });
+    res.json({ active: 'ISP', name: '', code: 'ISP', mark: 'IS', logoUrl: null, hasLogo: false, appName: '' });
   }
 });
 
@@ -1416,6 +1420,9 @@ app.get('/api/branding', (req, res) => {
     res.json({
       tradeName: cfg.trade_name || cfg.short_name || '',
       shortName: cfg.short_name || cfg.trade_name || '',
+      // The SOFTWARE's own name — the product, not the customer company
+      // above. Public because the sign-in screen is pre-auth.
+      appName: cfg.app_name || '',
       branch,
       gstin,
       logoUrl: '/logo-ispl.png',
@@ -1442,7 +1449,7 @@ app.get('/api/branding', (req, res) => {
       eauctionKlTheme: cfg.eauction_kl_theme || '',
     });
   } catch (e) {
-    res.json({ tradeName: '', shortName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null, ispTheme: '', aspTheme: '', eauctionTnTheme: '', eauctionKlTheme: '' });
+    res.json({ tradeName: '', shortName: '', appName: '', branch: '', gstin: '', logoUrl: null, theme: '', themeCustomColor: '', preset: '', presetConfig: null, ispTheme: '', aspTheme: '', eauctionTnTheme: '', eauctionKlTheme: '' });
   }
 });
 
@@ -2897,63 +2904,213 @@ const STATE_CODES = {
 };
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
-// Lazily ensure the single-row GST API credit-state table exists.
-function _ensureGstApiState(db) {
-  db.exec(`CREATE TABLE IF NOT EXISTS gst_api_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    credits_remaining INTEGER,
-    credits_total INTEGER,
-    plan_expires_at TEXT,
-    last_checked_at TEXT,
-    last_envelope TEXT
-  )`);
+// ── GST lookup API credit tracking ──────────────────────────
+// Defaults for the low-credit warning thresholds. The operator can override
+// either via the settings keys `gst_warn_below` / `gst_critical_below`.
+const GST_WARN_BELOW_DEFAULT = 50;
+const GST_CRITICAL_BELOW_DEFAULT = 10;
+
+// Neither provider documents ONE field name for the remaining-credit count —
+// it moves between plans, endpoint versions, and (on some gstincheck plans)
+// into the response HEADERS. So probe a list of likely names across the body,
+// a handful of nested envelopes, and the headers. Pure data lookups, so
+// adding a new alias here is always safe.
+function _gstPickField(obj, names) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const n of names) {
+    if (obj[n] != null && obj[n] !== '') return obj[n];
+  }
+  return null;
+}
+// Headers → a plain {lowercase-name: value} object the probe can search
+// alongside the body. Works for a fetch Headers instance or a plain object.
+function _headersToObj(h) {
+  const out = {};
+  if (!h) return out;
+  try {
+    if (typeof h.forEach === 'function') h.forEach((v, k) => { out[String(k).toLowerCase()] = v; });
+    else if (typeof h === 'object') for (const k of Object.keys(h)) out[String(k).toLowerCase()] = h[k];
+  } catch (_) {}
+  return out;
+}
+// Some plans only state the balance in prose: "847 Searches Left",
+// "Total 1000 Credits", "valid upto 2027-08-31".
+function _parseCreditsFromMessage(msg) {
+  const str = String(msg || '');
+  if (!str) return {};
+  const out = {};
+  let m = str.match(/(\d[\d,]*)\s*(?:searches?|credits?|hits?|requests?)\s*(?:left|remaining|available|balance)\b/i);
+  if (m) out.remaining = Number(m[1].replace(/,/g, ''));
+  if (out.remaining == null) {
+    m = str.match(/(?:balance|left|remaining|available)\s*[:=]\s*(\d[\d,]*)/i);
+    if (m) out.remaining = Number(m[1].replace(/,/g, ''));
+  }
+  m = str.match(/(?:of|total|out\s+of)\s*(\d[\d,]*)/i);
+  if (m) out.total = Number(m[1].replace(/,/g, ''));
+  m = str.match(/(?:valid|expir(?:es|y))[^0-9]*?(\d{4}-\d{2}-\d{2})/i);
+  if (m) out.expires = m[1];
+  return out;
+}
+function _gstExtractCredits(rawBody, rawHeaders) {
+  const candidates = [];
+  if (rawBody && typeof rawBody === 'object') {
+    candidates.push(rawBody);
+    for (const k of ['userInfo', 'quota', 'meta', 'pkg', 'plan', 'subscription', 'account']) {
+      if (rawBody[k] && typeof rawBody[k] === 'object') candidates.push(rawBody[k]);
+    }
+  }
+  if (rawHeaders && typeof rawHeaders === 'object') candidates.push(rawHeaders);
+  let remaining = null, total = null, expires = null;
+  for (const c of candidates) {
+    remaining = remaining ?? _gstPickField(c, [
+      'gstinAvailableSearch', 'availableSearch', 'remainingHits',
+      'remainingSearches', 'creditsLeft', 'credits_remaining', 'remaining',
+      'balance', 'searchLeft', 'searches_left', 'available_credits',
+      'creditBalance', 'credit_balance', 'apiCallsRemaining',
+      'x-credits-remaining', 'x-credit-remaining', 'x-credits-left',
+      'x-searches-remaining', 'x-quota-remaining', 'x-ratelimit-remaining',
+    ]);
+    total = total ?? _gstPickField(c, [
+      'gstinTotalSearch', 'totalSearch', 'totalHits',
+      'totalSearches', 'creditsTotal', 'credits_total', 'total',
+      'totalCredits', 'total_credits', 'plan_size', 'planSize',
+      'x-credits-total', 'x-quota-limit', 'x-ratelimit-limit',
+    ]);
+    expires = expires ?? _gstPickField(c, [
+      'gstinValidity', 'searchValidUpto', 'validUpto', 'validity',
+      'planExpiresAt', 'plan_expires_at', 'expiryDate', 'expiry_date',
+      'subscriptionEnd', 'subscription_end', 'expiresOn', 'expires_on',
+      'x-plan-expires', 'x-subscription-expires',
+    ]);
+  }
+  if (remaining == null || total == null || expires == null) {
+    const scan = _parseCreditsFromMessage(rawBody && (rawBody.message || rawBody.msg || rawBody.note));
+    if (remaining == null && scan.remaining != null) remaining = scan.remaining;
+    if (total     == null && scan.total     != null) total     = scan.total;
+    if (expires   == null && scan.expires   != null) expires   = scan.expires;
+  }
+  return {
+    remaining: remaining == null ? null : Number(remaining),
+    total:     total     == null ? null : Number(total),
+    expires:   expires   == null ? null : String(expires),
+  };
+}
+// Did the provider just say "you have no credits"? The two say it in
+// completely different ways, and neither always ships a number:
+//   • gstincheck — HTTP 200, {"flag":false,"errorCode":"CREDIT_NOT_AVAILABLE"}
+//   • gstinapi   — HTTP 402, {"success":false,"error":"Insufficient credits"}
+// Both are read as "0 left", because the alternative — keeping the last GOOD
+// count on file — leaves the card advertising credits that are known to be
+// spent, which is the one reading that stops nobody recharging.
+function _gstLooksOutOfCredit(body, httpStatus) {
+  if (Number(httpStatus) === 402) return true;
+  const code = String((body && (body.errorCode || body.error_code)) || '').toUpperCase();
+  if (code === 'CREDIT_NOT_AVAILABLE') return true;
+  const msg = String((body && (body.message || body.error)) || '').toLowerCase();
+  return /credit\s*(expire|exhaust|not available|insufficient)/.test(msg)
+      || /(insufficient|no|out of|zero|exhausted|expired)\s+credits?/.test(msg);
 }
 
-// Probe a gstincheck response envelope for a remaining-credit count and
-// persist it. Returns a small {credits_remaining,...} summary (or nulls).
-// The provider's field name varies, so we try a list of likely keys; if
-// none match we still store the raw body so the operator can paste it to
-// a dev who can add the alias.
-function _gstCaptureCredits(db, body) {
-  _ensureGstApiState(db);
-  const out = { credits_remaining: null, credits_total: null, plan_expires_at: null };
-  try {
-    const probe = (obj, keys) => {
-      if (!obj || typeof obj !== 'object') return null;
-      for (const k of Object.keys(obj)) {
-        const lk = k.toLowerCase().replace(/[^a-z]/g, '');
-        if (keys.includes(lk)) {
-          const n = Number(obj[k]);
-          if (Number.isFinite(n)) return n;
-        }
-      }
-      return null;
-    };
-    const REM = ['creditsremaining', 'remainingcredits', 'creditleft', 'creditsleft', 'availablesearch', 'availablesearches', 'searchleft', 'searchesleft', 'balance', 'credit', 'credits'];
-    const TOT = ['creditstotal', 'totalcredits', 'totalsearch', 'totalsearches', 'plancredits'];
-    out.credits_remaining = probe(body, REM);
-    if (out.credits_remaining == null && body) out.credits_remaining = probe(body.data, REM);
-    out.credits_total = probe(body, TOT);
-    if (out.credits_total == null && body) out.credits_total = probe(body.data, TOT);
-    const exp = body && (body.expiry || body.plan_expiry || body.expires_at || body.validtill);
-    if (exp) out.plan_expires_at = String(exp);
-  } catch (_) {}
-  const nowIso = (db.get(`SELECT datetime('now','localtime') AS t`) || {}).t || null;
-  try {
+// Credits are per PROVIDER — a lookup answered by gstinapi.in says nothing
+// about the gstincheck.co.in balance — so the observed envelope is filed under
+// the provider that produced it. `httpStatus` is kept too: gstinapi reports
+// "out of credits" as a 402 with no number anywhere, which is then the only
+// evidence the card has that the plan is spent.
+function _gstSaveState(db, provId, rawBody, rawHeaders, httpStatus) {
+  const headerObj = _headersToObj(rawHeaders);
+  const credits = _gstExtractCredits(rawBody, headerObj);
+  // Keep the envelope MINUS the bulky `data` blob, so the Settings card can
+  // show exactly what came back when the probe finds no credit field.
+  const meta = { _body: {}, _headers: {}, _extracted: credits };
+  if (rawBody && typeof rawBody === 'object') {
+    for (const k of Object.keys(rawBody)) {
+      if (k === 'data') continue;
+      meta._body[k] = rawBody[k];
+    }
+  }
+  for (const k of Object.keys(headerObj)) {
+    if (/^(x-credit|x-search|x-quota|x-ratelimit|x-plan|x-subscription|x-balance)/.test(k)) {
+      meta._headers[k] = headerObj[k];
+    }
+  }
+  const now = new Date().toISOString();
+  const provider = String(provId || 'gstincheck');
+  const status = Number.isFinite(Number(httpStatus)) ? Number(httpStatus) : null;
+  // A refusal with no number is still news: pin the balance at 0 instead of
+  // letting the last good count ride on as if nothing had happened.
+  if (credits.remaining == null && _gstLooksOutOfCredit(rawBody, status)) credits.remaining = 0;
+  const cur = db.get('SELECT * FROM gst_provider_state WHERE provider = ?', [provider]);
+  if (!cur) {
     db.run(
-      `INSERT INTO gst_api_state (id, credits_remaining, credits_total, plan_expires_at, last_checked_at, last_envelope)
-       VALUES (1, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         credits_remaining = COALESCE(excluded.credits_remaining, gst_api_state.credits_remaining),
-         credits_total     = COALESCE(excluded.credits_total, gst_api_state.credits_total),
-         plan_expires_at   = COALESCE(excluded.plan_expires_at, gst_api_state.plan_expires_at),
-         last_checked_at   = excluded.last_checked_at,
-         last_envelope     = excluded.last_envelope`,
-      [out.credits_remaining, out.credits_total, out.plan_expires_at, nowIso, JSON.stringify(body || null)]
+      `INSERT INTO gst_provider_state
+        (provider, credits_remaining, credits_total, plan_expires_at, last_checked_at, last_http_status, last_response_raw)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [provider, credits.remaining, credits.total, credits.expires, now, status, JSON.stringify(meta)]
     );
-  } catch (_) {}
-  out.last_checked_at = nowIso;
-  return out;
+  } else {
+    db.run(
+      `UPDATE gst_provider_state SET
+         credits_remaining = ?, credits_total = ?, plan_expires_at = ?,
+         last_checked_at = ?, last_http_status = ?, last_response_raw = ?
+       WHERE provider = ?`,
+      [
+        credits.remaining ?? cur.credits_remaining ?? null,
+        credits.total     ?? cur.credits_total     ?? null,
+        credits.expires   ?? cur.plan_expires_at   ?? null,
+        now, status, JSON.stringify(meta), provider,
+      ]
+    );
+  }
+  return credits;
+}
+
+// The status payload behind the Settings → Integrations card. Key, credits,
+// recharge link and dashboard link ALL follow the SELECTED provider: with two
+// providers configured, showing one's balance under the other's name is worse
+// than showing none, and a recharge button aimed at the wrong site sends the
+// operator to buy credits they already have.
+function _gstStatusFor(db, cfg) {
+  const cfgg = cfg || getSettingsFlat(db);
+  const prov = _gstProvider(cfgg);
+  const row = db.get('SELECT * FROM gst_provider_state WHERE provider = ?', [prov.id]) || {};
+  const warnBelow     = Number(cfgg.gst_warn_below)     || GST_WARN_BELOW_DEFAULT;
+  const criticalBelow = Number(cfgg.gst_critical_below) || GST_CRITICAL_BELOW_DEFAULT;
+  const remaining = row.credits_remaining == null ? null : Number(row.credits_remaining);
+  let level;
+  if (remaining == null)              level = 'unknown';
+  else if (remaining <= 0)            level = 'exhausted';
+  else if (remaining <  criticalBelow) level = 'critical';
+  else if (remaining <  warnBelow)     level = 'warning';
+  else                                 level = 'ok';
+  // A provider that reports no credit COUNT can still say it has none left.
+  // Either refusal shape used to leave the card reading "unknown" — the one
+  // state that tells the operator nothing, on the one occasion they need
+  // telling.
+  if (level === 'unknown') {
+    let lastBody = null;
+    try { lastBody = (JSON.parse(row.last_response_raw || 'null') || {})._body || null; } catch (_) {}
+    if (_gstLooksOutOfCredit(lastBody, row.last_http_status)) level = 'exhausted';
+  }
+  let lastEnvelope = null;
+  if (row.last_response_raw) {
+    try { lastEnvelope = JSON.parse(row.last_response_raw); } catch (_) { lastEnvelope = null; }
+  }
+  return {
+    has_api_key:       !!String(cfgg[prov.keyField] || '').trim(),
+    provider:          prov.id,
+    provider_label:    prov.label,
+    credits_remaining: remaining,
+    credits_total:     row.credits_total == null ? null : Number(row.credits_total),
+    plan_expires_at:   row.plan_expires_at || null,
+    last_checked_at:   row.last_checked_at || null,
+    last_http_status:  row.last_http_status == null ? null : Number(row.last_http_status),
+    warn_below:        warnBelow,
+    critical_below:    criticalBelow,
+    level,
+    recharge_url:      prov.rechargeUrl,
+    dashboard_url:     prov.dashboardUrl || prov.rechargeUrl,
+    last_envelope:     lastEnvelope,
+  };
 }
 
 // Build the best address line from a gstincheck.co.in `pradr` object.
@@ -2985,38 +3142,139 @@ function _gstBuildAddress(pradr) {
   return segs.join(', ');
 }
 
-// GST lookup API status — credits remaining, plan expiry, last-checked
-// timestamp + raw envelope. Drives the Settings → Integrations card and
-// the topbar credit pill. Read-only; never triggers a live lookup.
+// ── Cheap status probe (registered BEFORE the dynamic :gstin route) ──
+// Express matches routes in registration order, so /api/gst-lookup/status
+// MUST be declared first — otherwise the :gstin handler below grabs the word
+// "status", fails the GSTIN regex, and returns 400. Drives the Settings →
+// Integrations card. Read-only; never triggers a live lookup, so it is free.
 app.get('/api/gst-lookup/status', requireView, (req, res) => {
-  const db = getDb();
-  _ensureGstApiState(db);
-  const cfg = getSettingsFlat(db);
-  const hasKey = !!(cfg.gst_api_key && String(cfg.gst_api_key).trim());
-  const st = db.get('SELECT * FROM gst_api_state WHERE id = 1') || {};
-  const warn_below = parseInt(cfg.gst_warn_below, 10) || 50;
-  const critical_below = parseInt(cfg.gst_critical_below, 10) || 10;
-  const left = st.credits_remaining == null ? null : Number(st.credits_remaining);
-  let level;
-  if (!hasKey || left == null) level = 'unknown';
-  else if (left <= 0) level = 'exhausted';
-  else if (left <= critical_below) level = 'critical';
-  else if (left <= warn_below) level = 'warning';
-  else level = 'ok';
-  let envelope = null;
-  try { envelope = st.last_envelope ? JSON.parse(st.last_envelope) : null; } catch (_) {}
-  res.json({
-    has_api_key: hasKey,
-    level,
-    credits_remaining: left,
-    credits_total: st.credits_total != null ? Number(st.credits_total) : null,
-    plan_expires_at: st.plan_expires_at || null,
-    last_checked_at: st.last_checked_at || null,
-    last_envelope: envelope,
-    warn_below, critical_below,
-    recharge_url: 'https://gstincheck.co.in/',
-  });
+  res.set('Cache-Control', 'no-store');
+  try {
+    res.json(_gstStatusFor(getDb(), null));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
+
+// ══════════════════════════════════════════════════════════════
+// GSTIN LOOKUP PROVIDERS
+// ══════════════════════════════════════════════════════════════
+// Two services answer the same question — "who owns this GSTIN?" — with
+// different URLs, auth and JSON. Settings → Integrations → "GST Lookup
+// Provider" picks which one the Fetch button calls; each keeps its own key,
+// because a key issued by one is meaningless to the other.
+//
+// Everything provider-shaped lives in this table. `parse` returns ONE shape
+// for the route to render, so adding a third provider is a table entry, not a
+// new branch in the handler:
+//
+//   { ok, party?, message?, credits? }
+//     ok      — true when the provider actually identified the GSTIN
+//     party   — { name, tradeName, address, place, pin, state, status, regDate }
+//     message — why not, in the provider's own words, when ok is false
+//
+// Note the two report failure very differently, which is the whole reason
+// this abstraction earns its keep:
+//   • gstincheck answers HTTP 200 with {"flag":false,"message":"Credit
+//     Expire."} — a dead account looks like a successful request.
+//   • gstinapi answers a real status code (402 out of credits, 404 unknown
+//     GSTIN) with {"success":false,"error":"…"}.
+// So the route reads the BODY on every response, success or not, and lets the
+// provider decide what it meant.
+//
+// Both providers' origins can be pointed elsewhere with GST_API_BASE. That
+// exists for the test suite (which answers both from a local stub, so a test
+// run costs no credits and needs no network) and for anyone who has to route
+// these calls through a corporate proxy. Unset in normal operation.
+const GST_API_BASE = String(process.env.GST_API_BASE || '').replace(/\/+$/, '');
+
+const GST_PROVIDERS = {
+  gstincheck: {
+    label: 'gstincheck.co.in',
+    keyField: 'gst_api_key',
+    rechargeUrl: 'https://gstincheck.co.in/pricing.html',
+    // Where the key itself is issued / topped up, as opposed to the price
+    // list. The Settings card links both, so a spent plan can be refilled and
+    // the new key copied without anyone hunting for the login page.
+    dashboardUrl: 'https://gstincheck.co.in/login.html',
+    request: (key, gstin) => ({
+      // The key travels in the PATH for this one — never log this URL whole.
+      url: `${GST_API_BASE || 'https://sheet.gstincheck.co.in'}/check/${encodeURIComponent(key)}/${encodeURIComponent(gstin)}`,
+      options: {},
+    }),
+    parse: (body) => {
+      if (!body || !body.flag || !body.data) {
+        return { ok: false, message: (body && (body.message || body.errorCode)) || 'GST portal returned no data' };
+      }
+      const d = body.data;
+      const addr = (d.pradr && d.pradr.addr) || {};
+      return {
+        ok: true,
+        party: {
+          name:      d.lgnm || d.tradeNam || '',
+          tradeName: d.tradeNam || d.lgnm || '',
+          address:   _gstBuildAddress(d.pradr),
+          place:     addr.dst || addr.loc || '',
+          pin:       addr.pncd || '',
+          state:     addr.stcd || '',
+          status:    d.sts || '',
+          regDate:   d.rgdt || '',
+        },
+      };
+    },
+  },
+
+  gstinapi: {
+    label: 'gstinapi.in',
+    keyField: 'gst_api_key_gstinapi',
+    rechargeUrl: 'https://www.gstinapi.in/#pricing',
+    dashboardUrl: 'https://www.gstinapi.in/dashboard',
+    request: (key, gstin) => ({
+      url: `${GST_API_BASE || 'https://www.gstinapi.in'}/v1/gstin/${encodeURIComponent(gstin)}`,
+      options: { headers: { 'x-api-key': key } },
+    }),
+    parse: (body) => {
+      if (!body || !body.success || !body.data) {
+        return {
+          ok: false,
+          message: (body && (body.error || body.message)) || 'GST lookup returned no data',
+          // Reported on every response, failures included — this is what
+          // makes the Settings credit card work at all on this provider.
+          credits: body && body.credits_remaining,
+        };
+      }
+      const d = body.data;
+      const ad = d.address_details || {};
+      return {
+        ok: true,
+        credits: body.credits_remaining,
+        party: {
+          name:      d.legal_name || d.trade_name || '',
+          tradeName: d.trade_name || d.legal_name || '',
+          address:   d.address || '',
+          // `city` is the town; the structured block carries district /
+          // locality when the flat city is missing.
+          place:     d.city || ad.city || ad.district || ad.locality || '',
+          pin:       d.pincode || ad.pincode || '',
+          // This provider returns the state CODE ("33"), not its name, and
+          // leaves address_details.state null — so the route's own
+          // STATE_CODES lookup off the GSTIN prefix supplies the name.
+          state:     '',
+          status:    d.status || '',
+          regDate:   d.registration_date || '',
+        },
+      };
+    },
+  },
+};
+
+// The configured provider, always a valid entry. An unknown or blank setting
+// falls back to the original provider rather than breaking the Fetch button.
+function _gstProvider(cfg) {
+  const id = String((cfg && cfg.gst_api_provider) || '').trim().toLowerCase();
+  const key = GST_PROVIDERS[id] ? id : 'gstincheck';
+  return { id: key, ...GST_PROVIDERS[key] };
+}
 
 // ══════════════════════════════════════════════════════════════
 // WHATSAPP BUSINESS (Cloud API) — config storage + status + send.
@@ -3735,6 +3993,7 @@ app.post('/api/whatsapp/seller-lot-sold/:auctionId', requireView, async (req, re
 
 app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
   const gstin = String(req.params.gstin || '').toUpperCase().trim();
+  // Refused before any provider is called, so a typo never costs a credit.
   if (!GSTIN_RE.test(gstin)) {
     return res.status(400).json({ valid: false, error: 'Invalid GSTIN format' });
   }
@@ -3742,65 +4001,85 @@ app.get('/api/gst-lookup/:gstin', requireView, async (req, res) => {
   const pan    = gstin.substring(2, 12);
   const state  = STATE_CODES[stCode] || '';
 
-  const db = getDb();
+  const db  = getDb();
   const cfg = getSettingsFlat(db);
-  const apiKey = cfg.gst_api_key || '';
+  const prov = _gstProvider(cfg);
+  const apiKey = String(cfg[prov.keyField] || '').trim();
 
-  // No API key → return structural details only
+  // What every answer carries, live or not: the facts the GSTIN itself
+  // encodes. A failed lookup still fills PAN / state / state code.
+  const base = { valid: true, gstin, pan, st_code: stCode, state, provider: prov.id, provider_label: prov.label };
+
+  // No API key for the SELECTED provider → structural details only. Naming
+  // the provider matters here: with two configurable, "no key" is ambiguous,
+  // and the operator may well have a key sitting in the OTHER field.
   if (!apiKey) {
     return res.json({
-      valid: true, gstin, pan, st_code: stCode, state,
+      ...base,
       source: 'structural',
-      note: 'Set "gst_api_key" in settings to auto-fetch trade name/address.'
+      reason: 'no_key',
+      note: `No API key for ${prov.label}. Set it in Settings → Integrations to auto-fetch trade name and address.`,
     });
   }
 
-  // With API key → attempt live lookup
   try {
-    const url = `https://sheet.gstincheck.co.in/check/${apiKey}/${gstin}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const body = await r.json();
-    // Persist whatever credit envelope the provider returned so the
-    // Settings → Integrations card + topbar pill can show how many
-    // searches remain. gstincheck doesn't document a single field name,
-    // so probe common aliases and stash the raw body either way.
-    const api = _gstCaptureCredits(db, body);
-    if (body && body.flag && body.data) {
-      const d = body.data;
-      const addr = (d.pradr && d.pradr.addr) || {};
-      // The portal returns mixed case ("Bodinayakanur", "M/s. Ram Exports").
-      // Party master data in this app is held upper-case throughout — the
-      // built-in state table, the seller/buyer forms, every report and the
-      // Tally ledgers — so normalise here, at the single point the portal's
-      // values enter the system, rather than in each caller. Applies to the
-      // text fields that get stored on the party record; pin/status/regDate
-      // are left alone (no case to normalise / not party text).
+    const { url, options } = prov.request(apiKey, gstin);
+    const r = await fetch(url, options);
+    // Read the body even on a non-2xx: gstinapi puts its reason there (402
+    // "Insufficient credits"), and gstincheck returns 200 for failures
+    // anyway. An unreadable body is itself the error.
+    let body = null;
+    try { body = await r.json(); } catch (_) { body = null; }
+    if (!body) throw new Error(`HTTP ${r.status} — no readable response`);
+
+    // Record the credit envelope against THIS provider before interpreting
+    // the result, so the card updates even when the lookup itself failed.
+    try { _gstSaveState(db, prov.id, body, r.headers, r.status); } catch (_) { /* best-effort */ }
+    const apiStatus = _gstStatusFor(db, cfg);
+
+    const out = prov.parse(body);
+    if (out.ok) {
+      // The portals answer in mixed case ("Bodinayakanur", "M/s. Ram
+      // Exports"). Party master data here is upper-case throughout — the
+      // state table, the seller/buyer forms, every report, the Tally ledgers
+      // — so normalise at this single point of entry rather than in each
+      // caller. pin / status / regDate are left alone (no case to fix).
       const up = (v) => String(v == null ? '' : v).toUpperCase();
+      const pt = out.party;
       return res.json({
-        valid: true, gstin, pan, st_code: stCode,
-        name:     up(d.lgnm || d.tradeNam || ''),
-        tradeName:up(d.tradeNam || d.lgnm || ''),
-        address:  up(_gstBuildAddress(d.pradr)),
-        place:    up(addr.dst || addr.loc || ''),
-        pin:      addr.pncd || '',
-        state:    up(addr.stcd || state),
-        status:   d.sts || '',
-        regDate:  d.rgdt || '',
-        source:   'live',
-        api,
+        ...base,
+        name:      up(pt.name),
+        tradeName: up(pt.tradeName),
+        address:   up(pt.address),
+        place:     up(pt.place),
+        pin:       pt.pin || '',
+        // gstinapi returns no state name — fall back to the one derived from
+        // the GSTIN's own state-code prefix.
+        state:     up(pt.state) || state,
+        status:    pt.status || '',
+        regDate:   pt.regDate || '',
+        source:    'live',
+        api:       apiStatus,
       });
     }
+    // Reached the provider, and it said no. Say WHY — a key IS configured, so
+    // "add an API key" would be a lie, and the operator needs to know whether
+    // to recharge or to check the number.
     return res.json({
-      valid: true, gstin, pan, st_code: stCode, state,
+      ...base,
       source: 'structural',
-      note: body && body.message ? body.message : 'GST portal returned no data'
+      reason: 'provider_refused',
+      note:   `${prov.label}: ${out.message}`,
+      recharge_url: prov.rechargeUrl,
+      http_status: r.status,
+      api: apiStatus,
     });
   } catch (e) {
     return res.json({
-      valid: true, gstin, pan, st_code: stCode, state,
+      ...base,
       source: 'structural',
-      note: 'GST lookup failed: ' + e.message
+      reason: 'request_failed',
+      note: `${prov.label} lookup failed: ${e.message}`,
     });
   }
 });

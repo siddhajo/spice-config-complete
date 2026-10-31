@@ -589,8 +589,13 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
   border-radius:16px;background:#fff;object-fit:contain;padding:6px;
   box-shadow:inset 0 0 0 1px rgba(0,0,0,.04);z-index:1
 }
+/* Product chip at the top of the brand panel — the name of THIS SOFTWARE
+   (app_name), which is the one place on the sign-in screen the product
+   says what it is. Everything below it stays the CUSTOMER's company.
+   align-self so the pill hugs its text instead of being stretched to the
+   full column width by .login-brand's flex layout. */
 .login-brand-chip{
-  display:inline-flex;align-items:center;gap:6px;
+  display:inline-flex;align-items:center;gap:6px;align-self:flex-start;
   font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
   color:var(--spice-cardamom-dk);background:var(--spice-cardamom-lt);
   padding:5px 10px;border-radius:999px;margin-bottom:14px;
@@ -731,6 +736,7 @@ body{background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
 @media (max-width:820px){
   .login-shell{grid-template-columns:1fr;gap:16px;max-width:440px}
   .login-brand{text-align:center;padding:8px 16px 0;align-items:center}
+  .login-brand-chip{align-self:center}
   .login-brand h1{font-size:20px}
   .login-tagline{margin-left:auto;margin-right:auto}
   .login-feats{display:none}
@@ -1783,6 +1789,13 @@ body[data-comfort="1"] .flag-row label,body[data-comfort="1"] .flag-card > label
 #settings-root .set-group-title{
   color:var(--spice-cardamom-dk,var(--spice-cardamom,var(--green)))
 }
+/* A note printed UNDER a settings control — e.g. the "● In use / ○ Not in
+   use" line beneath each GST key box, which says which provider's key the
+   Fetch button actually reads. Small and quiet: it explains the field, it
+   isn't part of it. */
+#settings-root .fg .fg-note{
+  margin:5px 0 0;font-size:11px;line-height:1.45;color:var(--text3)
+}
 /* Compact inline input for text/number fields shown alongside labels. */
 .tally-panel .tally-fld{
   flex:0 0 50%;max-width:50%;
@@ -2752,6 +2765,13 @@ body[data-dark="1"] .act-menu{background:#1e293b;border-color:#334155}
          /api/brand on page load so the active company (ISP vs ASP)
          shows here instead of a hardcoded literal. -->
     <aside class="login-brand">
+      <!-- The name of THIS SOFTWARE (app_name) — the product label. Filled
+           from /api/brand on load; the literal below is the fallback for an
+           install that has not named itself, because an empty chip would be
+           worse than a generic one. Everything under it — the logo, the
+           heading, the topbar after sign-in — stays the CUSTOMER's own
+           name, which is what an operator wants to see while working. -->
+      <span class="login-brand-chip"><span class="dot"></span> <span id="login-app-name">Spice Auction Platform</span></span>
       <div class="login-logo">
         <!-- Image is hidden until /api/brand returns a real logo path;
              falls back to the 2-letter text mark when no logo is set. -->
@@ -8176,6 +8196,10 @@ async function login(){
   }
 }
 function logout(){h('/api/logout',{method:'POST'});T='';localStorage.removeItem('t');
+  // Take the screensaver down and stop its clock: T is now blank, so ssArm()
+  // would not re-arm it anyway, but a panel already up must not be left
+  // covering the sign-in screen.
+  if (typeof ssHide === 'function') { try { ssHide(); ssArm(); } catch (_) {} }
   window._userRole=null;window._userPerms=new Set();
   // Reset the username pill styling so the next login starts neutral
   // (and the dot reverts to its default green).
@@ -8345,6 +8369,14 @@ async function refreshTopbarBrand(){
     if (markEl) markEl.style.display = 'none';
   }
   if (titleEl && d.name) titleEl.textContent = d.name;
+  // The app's own name in the product chip (app_name — the SOFTWARE, not
+  // the customer's company, which is what every other slot on this panel
+  // shows). Blank leaves the markup's own strapline in place.
+  const appEl = document.getElementById('login-app-name');
+  if (appEl) {
+    const appName = String(d.appName || '').trim();
+    if (appName) appEl.textContent = appName;
+  }
 } catch (_) { /* leave defaults */ }})();
 
 // On page load, restore the auth token from localStorage and verify it
@@ -11252,6 +11284,9 @@ async function loadSettings(){
     applyModeLabels();
     applyLogoBadge();
     applyFeatureFlags();   // flip data-feat-* on body now that _sdata is loaded
+    // Screensaver reads its window + its lines from the same _sdata, so it
+    // is configured here: once at boot, and again whenever this reloads.
+    try { ssConfigure(); } catch (_) {}
     renderSettingsNav();
     // Open first category by default
     const firstKey=Object.keys(_cats).sort((a,b)=>_cats[a].order-_cats[b].order).find(k=>(_sdata[k]||[]).length);
@@ -11726,11 +11761,22 @@ async function _renderGstApiStatus(){
     unknown:   { bg:'#f9fafb', bd:'#e5e7eb', fg:'#374151', icon:'ℹ',  head:'GST lookup status unknown' },
   };
   const tone = tones[s.level] || tones.unknown;
+  const provName = s.provider_label || 'gstincheck.co.in';
   const rows = [];
+  // Which service these credits belong to. With two providers selectable, a
+  // bare credit count is ambiguous — and a key set for the OTHER one reads
+  // as "not set" here, which is correct but needs saying.
+  rows.push(['Provider', `<strong>${esc(provName)}</strong>`]);
   if (s.has_api_key) {
     rows.push(['API key', '<span style="color:#065f46;font-weight:600">✓ configured</span>']);
   } else {
-    rows.push(['API key', '<span style="color:#991b1b;font-weight:600">not set</span> — paste your key into the field below to enable live lookups']);
+    rows.push(['API key', `<span style="color:#991b1b;font-weight:600">not set for ${esc(provName)}</span> — paste that provider's key into its field below to enable live lookups`]);
+  }
+  // Where the operator goes to buy more credits and copy the refreshed key.
+  // Both providers sell their own plans, so this link — like the recharge
+  // button above — always points at the SELECTED one.
+  if (s.dashboard_url) {
+    rows.push(['Account', `<a href="${s.dashboard_url}" target="_blank" rel="noopener" style="color:${tone.fg};font-weight:600">${esc(provName)} dashboard ↗</a> — buy credits, then copy the key into the field below`]);
   }
   if (s.credits_remaining != null) {
     const total = s.credits_total != null ? ` of ${fmtI(s.credits_total, 0)}` : '';
@@ -11759,6 +11805,7 @@ async function _renderGstApiStatus(){
   rows.push(['Warn at', `<code>≤ ${s.warn_below}</code> credits · critical at <code>≤ ${s.critical_below}</code>`]);
 
   const rechargeHref = s.recharge_url || 'https://gstincheck.co.in/';
+  const rechargeTxt  = `↗ Recharge at ${provName}`;
   // Raw-envelope viewer — collapsed by default but auto-expanded when
   // the probe failed (level==='unknown' yet a response was captured).
   // The pre block is the GROUND TRUTH of what gstincheck.co.in shipped
@@ -11772,7 +11819,7 @@ async function _renderGstApiStatus(){
     envelopeHtml = `
       <details ${probeMissed ? 'open' : ''} style="margin-top:12px;border-top:1px dashed ${tone.bd};padding-top:10px">
         <summary style="cursor:pointer;font-size:11.5px;font-weight:600;color:${tone.fg};user-select:none">
-          ${probeMissed ? '⚠ Raw response from gstincheck.co.in (probe found no credit field — see what came back)' : 'Show raw response from gstincheck.co.in'}
+          ${probeMissed ? `⚠ Raw response from ${esc(provName)} (probe found no credit field — see what came back)` : `Show raw response from ${esc(provName)}`}
         </summary>
         <pre style="margin:8px 0 0;padding:10px 12px;background:#0b1220;color:#e2e8f0;border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.45;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word">${esc(pretty)}</pre>
         ${probeMissed ? `<div style="margin-top:8px;font-size:11.5px;color:${tone.fg};line-height:1.5">
@@ -11782,22 +11829,64 @@ async function _renderGstApiStatus(){
   }
   host.innerHTML = `
     <div style="padding:14px 16px;border:1px solid ${tone.bd};border-radius:10px;background:${tone.bg};color:${tone.fg}">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
         <span style="font-size:18px;line-height:1">${tone.icon}</span>
-        <strong style="font-size:13.5px">${esc(tone.head)}</strong>
-        <span style="flex:1"></span>
+        <strong style="font-size:13.5px;min-width:0">${esc(tone.head)}</strong>
+        <span style="flex:1;min-width:12px"></span>
+        ${s.has_api_key ? `<button type="button" onclick="_gstCheckBalanceNow()"
+           style="font-size:11.5px;font-weight:700;background:transparent;color:${tone.fg};border:1px solid ${tone.fg};padding:5px 12px;border-radius:6px;cursor:pointer">↻ Check balance now</button>` : ''}
         <a href="${rechargeHref}" target="_blank" rel="noopener"
-           style="font-size:11.5px;font-weight:700;background:${tone.fg};color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none">↗ Recharge at gstincheck.co.in</a>
+           style="font-size:11.5px;font-weight:700;background:${tone.fg};color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none">${esc(rechargeTxt)}</a>
       </div>
       <div style="display:grid;grid-template-columns:140px 1fr;gap:4px 12px;font-size:12.5px">
         ${rows.map(([k, v]) => `<div style="color:var(--text2);font-weight:600">${esc(k)}</div><div>${v}</div>`).join('')}
       </div>
       <div style="margin-top:10px;font-size:11.5px;color:var(--text3);line-height:1.5">
         Credits refresh automatically every time someone runs a real GST lookup (from the Sellers or Buyers form).
-        ${s.has_api_key ? '' : 'Paste your key from the gstincheck.co.in dashboard into the field below to start tracking.'}
+        ${s.has_api_key
+          ? `Recharged at ${esc(provName)} just now? Neither provider publishes a free balance endpoint — press <strong>Check balance now</strong> to spend one lookup and see the new count.`
+          : `Paste your key from the ${esc(provName)} dashboard into the field below to start tracking.`}
       </div>
       ${envelopeHtml}
     </div>`;
+}
+
+// Spend ONE lookup to refresh the credit count. Neither provider offers a
+// free "what is my balance?" endpoint — both report credits only alongside a
+// real GSTIN lookup — so after recharging, the card would keep showing the
+// spent plan until the next seller/buyer fetch. This button closes that loop
+// without making the operator invent a GSTIN to look up: it reuses the
+// company's own, and says plainly what it costs before spending anything.
+const _GSTIN_RE_UI = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+async function _gstCheckBalanceNow(){
+  let gstin = '';
+  try {
+    const cfg = await j('/api/company-settings/flat') || {};
+    gstin = String(cfg.s_gstin || cfg.tn_gstin || cfg.kl_gstin || '').toUpperCase().replace(/\s+/g, '');
+  } catch (_) {}
+  if (!_GSTIN_RE_UI.test(gstin)) {
+    gstin = String(prompt('Type any valid GSTIN to look up — your own company GSTIN is the usual choice.\n\nThe lookup itself is only a vehicle for the credit count that comes back with it.') || '')
+      .toUpperCase().replace(/\s+/g, '');
+    if (!gstin) return;
+    if (!_GSTIN_RE_UI.test(gstin)) { alert('That is not a valid GSTIN — nothing was sent, no credit spent.'); return; }
+  }
+  if (!await appConfirm(
+        `Check the live balance now?\n\nThis runs ONE real lookup on ${gstin} and COSTS ONE CREDIT. The card then shows whatever the provider reports back.`,
+        { title: 'Spend one credit?', okLabel: 'Run the lookup' })) return;
+  const host = document.getElementById('gst-api-status-host');
+  if (host) host.style.opacity = '.5';
+  try {
+    const d = await j('/api/gst-lookup/' + encodeURIComponent(gstin));
+    await _renderGstApiStatus();
+    // A refusal is the answer too — an empty plan is exactly what this button
+    // exists to reveal, so say so rather than leaving the operator to read it
+    // out of the card.
+    if (d && d.source !== 'live' && d.note) alert('⚠ ' + d.note);
+  } catch (e) {
+    alert('Could not reach the lookup service: ' + (e.message || e));
+  } finally {
+    if (host) host.style.opacity = '';
+  }
 }
 
 // ── WhatsApp Business config card (Settings → Integrations) ────────
@@ -13054,6 +13143,12 @@ function renderFlagsGrouped(fields){
 // ── Settings field help text ───────────────────────────
 // Shown as a ? tooltip next to the label. Keep concise (1-2 lines).
 const FIELD_HELP = {
+  app_name:         'The name of THIS SOFTWARE — not the trading company. Shown on the screensaver and in the product chip on the sign-in panel; it never appears on an invoice, report or export.',
+  app_logo:         'Path to the application\u2019s own mark, e.g. /logo-app.svg. This is the product\u2019s logo, not the company logo on your invoices. Leave blank to show no mark on the screensaver.',
+  app_credit:       'First line under the name on the screensaver, e.g. who supplied the software. Leave blank and the line is not drawn.',
+  app_contact:      'Support number(s) shown under the credit line on the screensaver, so whoever walks past a locked machine knows who to call. Leave blank and the line is not drawn.',
+  screensaver_minutes:   'Minutes of no mouse / keyboard before the screen is covered. Any key or click clears it. It does NOT sign anybody out — nothing is lost. 0 = never.',
+  screensaver_fireworks: 'Animate fireworks behind the screensaver panel. Turn OFF for a still panel — worth doing on a machine driving a wall display over remote desktop. A viewer whose system asks for reduced motion never gets the animation either way.',
   is_partnership:   'Turn ON for a partnership firm (no CIN). The invoice letterhead then prints "Partnership: <name>" instead of the CIN line. Enabling this greys out the CIN field and vice-versa.',
   s_is_partnership: 'Turn ON for a partnership firm (no CIN). The invoice letterhead then prints "Partnership: <name>" instead of the CIN line. Enabling this greys out the CIN field and vice-versa.',
   commission:      'In e-Auction mode, the percentage commission charged on (Amount + Refund). Default 1%.',
@@ -13075,6 +13170,9 @@ const FIELD_HELP = {
   flag_bills:      'Shows the Bills of Supply module (sidebar tab + related actions).',
   flag_debit_notes:'Shows the Debit Notes module (sidebar tab + related actions).',
   flag_debit_note_planter:'Shows the Debit Notes - Planter module (sidebar tab + related actions).',
+  gst_api_provider: 'Which GSTIN lookup service the "Fetch from GST" button calls. Each provider needs its OWN key — one issued by gstincheck.co.in is refused by gstinapi.in and vice versa — so both key fields are kept below and switching provider never loses the other key. The status card above always reports the provider selected here. gstincheck credits EXPIRE one year after purchase; gstinapi credits do not, and it reports the balance on every call.',
+  gst_api_key:     'Key issued by gstincheck.co.in. Read only while that provider is selected above. Credits expire 1 year after purchase — watch the Plan expires row on the status card, not just the count.',
+  gst_api_key_gstinapi: 'Key issued by gstinapi.in. Read only while that provider is selected above. This service sends credits_remaining with every response, so the status card stays accurate without a manual refresh.',
   flag_whatsapp:   'Shows WhatsApp share buttons (e.g. the Lot Entry receipt share), and the WhatsApp actions on the mobile app’s Lot Entry + My Lots screens.',
   flag_pooler_grade2: 'OFF (default): the three Pooler reports — Pooler Register and both Pooler List Consolidated (Party-wise) sheets — list Grade 1 lots only, since a pooler IS the Grade-1 (agriculturist) side of a trade. ON: Grade 2 lots are listed too. Dealer lists are unaffected either way.',
   flag_reserve_lot: 'Shows the “Reserve this lot” checkbox on the Lot Entry form (desktop and mobile). A reserved lot holds its lot number for a seller without booking it — no bags/weight needed, it stays out of pricing and invoicing, and no one else can take that number. Untick it on edit to convert the hold into a real booking.',
@@ -13086,7 +13184,46 @@ const FIELD_HELP = {
   tcs_tds:         'TDS / TCS percentage applied on eligible invoices for tax compliance.',
   flag_eauc_dispatch: 'e-Auction sales invoices: show the "Dispatch From" block using the company\'s own address (single-company mode). OFF = hidden (default).',
 };
+// The "which key box is live?" note, shared by the initial render and the
+// provider dropdown's onchange so the two can never drift apart.
+const _gstKeyNote = (live) => live
+  ? '<span style="color:#065f46;font-weight:600">● In use</span> — the Fetch button calls this provider.'
+  : '<span style="color:var(--text3)">○ Not in use</span> — kept so switching provider costs no re-typing.';
+// Repaint the notes the moment the provider changes, WITHOUT re-rendering the
+// panel: a re-render would throw away anything typed but not yet saved.
+function _gstMarkActiveKeyField(sel){
+  document.querySelectorAll('[data-gst-key-note]').forEach(el => {
+    el.innerHTML = _gstKeyNote(el.dataset.gstKeyNote === String(sel));
+  });
+}
+
 function fld(f){
+  // GST lookup provider — which service the "Fetch from GST" button calls.
+  // Each provider keeps its own key field below, so switching is one click
+  // and switching back needs no re-typing.
+  if (f.key === 'gst_api_provider') {
+    const GST_PROVIDER_OPTIONS = [
+      { value:'gstincheck', label:'gstincheck.co.in — key in URL, credits expire after 1 year' },
+      { value:'gstinapi',   label:'gstinapi.in — key in header, credits never expire' },
+    ];
+    const sel = String(f.value || 'gstincheck');
+    const opts = GST_PROVIDER_OPTIONS.map(o =>
+      `<option value="${o.value}"${sel===o.value?' selected':''}>${esc(o.label)}</option>`).join('');
+    return `<div class="fg"><label>${esc(f.label)}${FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : ''}</label>`
+      + `<select data-key="${f.key}" onchange="_gstMarkActiveKeyField(this.value)">${opts}</select></div>`;
+  }
+  // The two key boxes look identical, and only the SELECTED provider's one is
+  // ever read. Say which is which right under the field — a key pasted into
+  // the idle box is silently ignored, which reads exactly like a key that
+  // does not work.
+  if (f.key === 'gst_api_key' || f.key === 'gst_api_key_gstinapi') {
+    const provOf = f.key === 'gst_api_key' ? 'gstincheck' : 'gstinapi';
+    const selected = String(
+      (((_sdata && _sdata.integrations) || []).find(x => x && x.key === 'gst_api_provider') || {}).value || 'gstincheck');
+    return `<div class="fg"><label>${esc(f.label)}${FIELD_HELP[f.key] ? helpTip(FIELD_HELP[f.key]) : ''}</label>`
+      + `<input type="text" data-key="${f.key}" value="${esc(f.value||'')}" autocomplete="off" spellcheck="false">`
+      + `<div class="fg-note" data-gst-key-note="${provOf}">${_gstKeyNote(selected === provOf)}</div></div>`;
+  }
   // Logo Code: special-case as a dropdown (ISP/ASP) with auto-fill behavior.
   //   'logo'   → Company category (primary)  → ISPL defaults
   //   's_logo' → Sister Company category    → ASP  defaults
@@ -13498,6 +13635,10 @@ async function saveSettings(){
   }
   // Pick up a changed date format so fmtD() across the UI uses it right away.
   if (typeof _loadAppDateFmt === 'function') { try { await _loadAppDateFmt(); } catch (_) {} }
+  // Re-arm the screensaver on the new window (captureCurrentPanel above has
+  // already put the edited values into _sdata), so changing the minutes —
+  // or switching the fireworks off — applies from this moment.
+  if (typeof ssConfigure === 'function') { try { ssConfigure(); } catch (_) {} }
   toast('Settings saved');
 }
 async function exportSettings(){const d=await j('/api/company-settings/export');const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
@@ -14779,7 +14920,10 @@ async function gstLookup(prefix){
       const filled = prefix==='t'
         ? 'PAN, State, and State Code'
         : 'PAN, State, and State Code';
-      const msg = `✓ GSTIN structure is valid\n\n${filled} have been filled from the GSTIN itself.\n\n• PAN: ${d.pan}\n• State: ${d.state} (${d.st_code})\n\nTo ALSO auto-fill trade name and address, add a GST API key in Settings. Open it now?`;
+      // Name the provider: with two selectable, "a GST API key" is ambiguous,
+      // and the operator may already have a key in the OTHER field.
+      const prov = d.provider_label || 'your GST lookup provider';
+      const msg = `✓ GSTIN structure is valid\n\n${filled} have been filled from the GSTIN itself.\n\n• PAN: ${d.pan}\n• State: ${d.state} (${d.st_code})\n\nTo ALSO auto-fill trade name and address, add the ${prov} API key in Settings. Open it now?`;
       if(await appConfirm(msg)){
         hideModal(prefix==='t'?'trader-modal':'buyer-modal');
         go('settings');
@@ -14788,9 +14932,12 @@ async function gstLookup(prefix){
           if(typeof selectCat==='function' && _cats && _cats.integrations){
             selectCat('integrations');
           }
-          // Focus the gst_api_key input if present
+          // Focus the key field of the provider that is actually SELECTED —
+          // highlighting the idle box would send the operator to paste a key
+          // the Fetch button is never going to read.
           setTimeout(()=>{
-            const el=document.querySelector('[data-key="gst_api_key"]');
+            const keyField = d.provider === 'gstinapi' ? 'gst_api_key_gstinapi' : 'gst_api_key';
+            const el=document.querySelector(`[data-key="${keyField}"]`);
             if(el){el.focus();el.scrollIntoView({behavior:'smooth',block:'center'});el.style.boxShadow='0 0 0 3px rgba(16,185,129,.32)';setTimeout(()=>el.style.boxShadow='',2000)}
           },250);
         },200);
@@ -29919,6 +30066,297 @@ async function impUndo(logId, filename, moduleKey, insertedCount){
 // chars + matches the prompt's existing helpers' behaviour.
 function _escImp(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+
+// ══════════════════════════════════════════════════════════════
+// SCREENSAVER (screensaver_minutes / screensaver_fireworks)
+// ══════════════════════════════════════════════════════════════
+// An office machine sits on one screen all day — a priced lot grid, a
+// seller's bank details — in a room people walk through. After a few quiet
+// minutes this covers it; the first key or click clears it.
+//
+// What it is NOT: a sign-out. It never ends a session and never touches the
+// auth token — covering a screen is not the same as securing it, and an
+// operator who walks back must not find their work gone. (If an idle
+// sign-out is ever added, its warning has to draw ABOVE this panel, and
+// being covered must not count as activity for its clock.)
+//
+// Config comes from _sdata (the Settings cache), so it is picked up at boot
+// in loadSettings() and again the moment Settings are saved — a changed
+// number takes effect without a reload.
+const _ss = {
+  minutes: 0,            // window, from settings. 0 = never
+  timer: null,           // the "show now" timeout
+  tick: null,            // the clock interval while showing
+  on: false,             // is the panel up?
+  armed: false,          // activity listeners attached?
+  fireworks: true,       // from settings
+};
+const SS_FALLBACK_APP_NAME = 'SpiceFlow eAuction Suite';
+
+// One read of the Settings cache. Category 'app' holds the whole feature,
+// and a missing row (older server) simply reads as blank — which switches
+// the screensaver off rather than guessing a timeout.
+function _ssSetting(key){
+  try {
+    const row = (_sdata && _sdata.app || []).find(f => f.key === key);
+    return row ? String(row.value == null ? '' : row.value) : '';
+  } catch (_) { return ''; }
+}
+
+// Pull the window from settings and (re)start. Called after login and
+// whenever settings are saved.
+function ssConfigure(){
+  const n = parseFloat(_ssSetting('screensaver_minutes'));
+  // parseFloat, not parseInt: a sub-minute window (useful for a quick trial
+  // of the setting) must not truncate to 0, which means "never" — the exact
+  // opposite of what was typed. Capped at a day.
+  _ss.minutes = (Number.isFinite(n) && n > 0) ? Math.min(n, 1440) : 0;
+  _ss.fireworks = String(_ssSetting('screensaver_fireworks') || 'true') !== 'false';
+  if (!_ss.armed) {
+    // `capture` so a click a modal swallows still counts as activity, and
+    // passive so scroll/touch listeners never block painting.
+    for (const ev of ['mousedown', 'keydown', 'wheel', 'touchstart', 'scroll']) {
+      document.addEventListener(ev, ssBump, { capture: true, passive: true });
+    }
+    // Coming back to the tab is activity too — somebody is looking at it.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) ssBump(); });
+    _ss.armed = true;
+  }
+  ssHide();
+  ssArm();
+}
+// Any activity: take the panel down and restart the clock.
+function ssBump(){
+  if (_ss.on) ssHide();
+  ssArm();
+}
+function ssArm(){
+  if (_ss.timer) { clearTimeout(_ss.timer); _ss.timer = null; }
+  // Never on the sign-in screen: there is nothing on it worth covering, and
+  // a panel over the password box would just be in the way.
+  if (!_ss.minutes || !T) return;
+  _ss.timer = setTimeout(ssShow, Math.max(5000, _ss.minutes * 60 * 1000));
+}
+function ssShow(){
+  if (!_ss.minutes || !T) return;
+  const el = document.getElementById('screensaver');
+  if (!el) return;
+  const setText = (id, v) => { const n = document.getElementById(id); if (n) n.textContent = v; };
+  const hide = (id, gone) => { const n = document.getElementById(id); if (n) n.style.display = gone ? 'none' : ''; };
+  setText('ss-app', _ssSetting('app_name').trim() || SS_FALLBACK_APP_NAME);
+  // Credit and support numbers. Each line is dropped when blank, and the
+  // whole block (hairline included) goes when neither is set — an unbadged
+  // install shows no empty rule.
+  const credit  = _ssSetting('app_credit').trim();
+  const contact = _ssSetting('app_contact').trim();
+  setText('ss-credit', credit);
+  setText('ss-contact', contact);
+  hide('ss-credit', !credit);
+  hide('ss-contact', !contact);
+  hide('ss-by', !credit && !contact);
+  // The APPLICATION's mark — deliberately not the topbar image, which is
+  // the CUSTOMER's logo and the one thing this panel should not be showing.
+  const logo = document.getElementById('ss-logo');
+  const logoSrc = _ssSetting('app_logo').trim();
+  if (logo) {
+    if (logoSrc) {
+      // A path that 404s must leave no gap where a mark would be.
+      logo.onerror = function(){ this.style.display = 'none'; };
+      if (logo.getAttribute('src') !== logoSrc) logo.src = logoSrc;
+      logo.style.display = '';
+    } else {
+      logo.style.display = 'none';
+    }
+  }
+  el.style.display = 'flex';
+  _ss.on = true;
+  ssTick();
+  if (_ss.tick) clearInterval(_ss.tick);
+  _ss.tick = setInterval(ssTick, 1000);
+  ssFxStart();
+}
+function ssHide(){
+  if (_ss.tick) { clearInterval(_ss.tick); _ss.tick = null; }
+  ssFxStop();
+  const el = document.getElementById('screensaver');
+  if (el) el.style.display = 'none';
+  _ss.on = false;
+}
+function ssTick(){
+  // IST, not the device clock — same rule as every other stamp in the app
+  // (see istParts / fmtD above). A machine left on UTC would otherwise show
+  // the wrong time in letters big enough to read across the room.
+  const el = document.getElementById('ss-clock');
+  if (!el) return;
+  const p = istParts(new Date());
+  if (!p) { el.textContent = ''; return; }
+  el.textContent = `${fmtD(`${p.y}-${p.mo}-${p.d}`)}  ·  ${p.hh}:${p.mm} IST`;
+}
+
+// ── Screensaver fireworks (screensaver_fireworks) ────────────────────
+//
+// This draws on a machine NOBODY IS SITTING AT, possibly until morning, so
+// it is written to be frugal before it is written to be pretty:
+//
+//   • at most SS_FX_MAX rockets in the air, and sparks die on a timer, so
+//     the particle count has a hard ceiling rather than growing with uptime;
+//   • the rAF loop is started by ssShow and cancelled by ssHide — nothing
+//     keeps running behind a dismissed screensaver;
+//   • a hidden tab stops it: browsers already park rAF there, and the frame
+//     guard below drops the oversized dt that arrives on the way back, so a
+//     machine waking after hours does not replay them as one lurch;
+//   • prefers-reduced-motion means no animation at all.
+//
+// Sizes are fractions of the panel, never pixels, so the same burst reads
+// the same on a counter-top laptop and on a wall display.
+const _ssFx = { raf: 0, cv: null, ctx: null, rockets: [], sparks: [], flashes: [], next: 0, last: 0, w: 0, h: 0 };
+const SS_FX_COLORS = ['#ffd166', '#ffb703', '#ff8f3f', '#ff5d5d', '#ffe9a8', '#b6f5c8', '#9fd8ff'];
+const SS_FX_MAX = 4;
+
+// Honours the setting first, then the operator's own OS-level motion
+// preference — a person who has asked the machine for less movement does
+// not get fireworks because an admin liked them.
+function ssFxEnabled(){
+  if (!_ss.fireworks) return false;
+  try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false; } catch (_) {}
+  return true;
+}
+// Back the canvas with real device pixels, capped at 2× — a 3× phone panel
+// triples the fill cost for a difference nobody sees across a room.
+function ssFxSize(){
+  const cv = _ssFx.cv; if (!cv) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || window.innerWidth;
+  const h = cv.clientHeight || window.innerHeight;
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
+  _ssFx.w = w; _ssFx.h = h;
+  if (_ssFx.ctx) _ssFx.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+const ssFxPick = () => SS_FX_COLORS[(Math.random() * SS_FX_COLORS.length) | 0];
+
+function ssFxLaunch(){
+  const h = _ssFx.h;
+  _ssFx.rockets.push({
+    x: _ssFx.w * (0.12 + Math.random() * 0.76), y: h, py: h,
+    vy: -(h * 0.0128 + Math.random() * h * 0.0042),
+    // Detonate in the upper third, above the lockup. Bursting level with the
+    // name put sparks THROUGH it at the brightest moment; sparks still drift
+    // down across the panel afterwards, which is the part worth having.
+    burstY: h * (0.09 + Math.random() * 0.25),
+    color: ssFxPick(),
+  });
+}
+function ssFxBurst(r){
+  const h = _ssFx.h;
+  _ssFx.flashes.push({ x: r.x, y: r.y, life: 0, max: 220, r: h * 0.055, color: r.color });
+  const n = 68 + ((Math.random() * 30) | 0);
+  for (let i = 0; i < n; i++) {
+    // Jittered ring rather than pure random: an even spread reads as a
+    // burst, where clustering just looks like a handful of stray dots.
+    const a = (i / n) * Math.PI * 2 + Math.random() * 0.22;
+    const sp = h * (0.0062 + Math.random() * 0.0118);
+    _ssFx.sparks.push({
+      x: r.x, y: r.y, px: r.x, py: r.y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      life: 0, max: 1150 + Math.random() * 1150,
+      // A few white sparks per burst give it a hot centre.
+      color: Math.random() < 0.18 ? '#ffffff' : r.color,
+    });
+  }
+}
+function ssFxFrame(ts){
+  if (!_ssFx.ctx) return;
+  // First frame, and any frame after a long park (hidden tab, lid closed),
+  // advances by one step instead of replaying the whole gap at once.
+  const raw = _ssFx.last ? ts - _ssFx.last : 16.7;
+  _ssFx.last = ts;
+  const dt = Math.min(raw, 50);
+  const f = dt / 16.7;
+  const { ctx, w, h } = _ssFx;
+  const g = h * 0.00026;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+
+  _ssFx.next -= dt;
+  if (_ssFx.next <= 0 && _ssFx.rockets.length < SS_FX_MAX) {
+    ssFxLaunch();
+    _ssFx.next = 330 + Math.random() * 560;
+  }
+
+  for (let i = _ssFx.rockets.length - 1; i >= 0; i--) {
+    const r = _ssFx.rockets[i];
+    r.py = r.y; r.y += r.vy * f; r.vy += g * f;
+    if (r.y <= r.burstY || r.vy >= 0) { ssFxBurst(r); _ssFx.rockets.splice(i, 1); continue; }
+    ctx.strokeStyle = r.color;
+    ctx.beginPath(); ctx.moveTo(r.x, r.py); ctx.lineTo(r.x, r.y);
+    ctx.globalAlpha = 0.30; ctx.lineWidth = 6;   ctx.stroke();
+    ctx.globalAlpha = 0.95; ctx.lineWidth = 2.2; ctx.stroke();
+  }
+
+  for (let i = _ssFx.flashes.length - 1; i >= 0; i--) {
+    const fl = _ssFx.flashes[i];
+    fl.life += dt;
+    if (fl.life >= fl.max) { _ssFx.flashes.splice(i, 1); continue; }
+    const k = 1 - fl.life / fl.max;
+    const gr = ctx.createRadialGradient(fl.x, fl.y, 0, fl.x, fl.y, fl.r * (1.7 - k));
+    gr.addColorStop(0, fl.color); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = k * 0.55;
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(fl.x, fl.y, fl.r * (1.7 - k), 0, Math.PI * 2); ctx.fill();
+  }
+
+  for (let i = _ssFx.sparks.length - 1; i >= 0; i--) {
+    const s = _ssFx.sparks[i];
+    s.life += dt;
+    if (s.life >= s.max) { _ssFx.sparks.splice(i, 1); continue; }
+    s.px = s.x; s.py = s.y;
+    s.x += s.vx * f; s.y += s.vy * f;
+    s.vy += g * 0.58 * f;
+    const drag = Math.pow(0.986, f);
+    s.vx *= drag; s.vy *= drag;
+    // Sparks hold their colour then go out fast — a linear fade reads as a
+    // slow dissolve, which is not what a cracker does. k^1.4 keeps them
+    // legible for most of their life and then drops them.
+    const k = 1 - s.life / s.max;
+    const a = Math.pow(k, 1.4);
+    ctx.strokeStyle = s.color;
+    ctx.beginPath(); ctx.moveTo(s.px, s.py); ctx.lineTo(s.x, s.y);
+    // Halo first, bright core over it. Two strokes per spark is what makes
+    // a 2px line read as a point of LIGHT on a dark panel rather than as a
+    // coloured dash — and it is still cheap at this particle count.
+    ctx.globalAlpha = a * 0.30; ctx.lineWidth = 7;   ctx.stroke();
+    ctx.globalAlpha = a;        ctx.lineWidth = 2.3; ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  _ssFx.raf = requestAnimationFrame(ssFxFrame);
+}
+function ssFxStart(){
+  ssFxStop();
+  if (!ssFxEnabled()) return;
+  const cv = document.getElementById('ss-fx');
+  if (!cv || !cv.getContext) return;
+  _ssFx.cv = cv;
+  _ssFx.ctx = cv.getContext('2d');
+  ssFxSize();
+  _ssFx.rockets = []; _ssFx.sparks = []; _ssFx.flashes = [];
+  _ssFx.last = 0;
+  _ssFx.next = 220;              // one goes up almost at once, not after a wait
+  _ssFx.raf = requestAnimationFrame(ssFxFrame);
+}
+function ssFxStop(){
+  if (_ssFx.raf) { cancelAnimationFrame(_ssFx.raf); _ssFx.raf = 0; }
+  _ssFx.rockets = []; _ssFx.sparks = []; _ssFx.flashes = [];
+  _ssFx.last = 0;
+  if (_ssFx.ctx && _ssFx.w) _ssFx.ctx.clearRect(0, 0, _ssFx.w, _ssFx.h);
+}
+// The panel is fixed to the viewport, so a resized window must re-back the
+// canvas or the burst stretches. Only while it is actually up.
+window.addEventListener('resize', () => { if (_ss.on && _ssFx.ctx) ssFxSize(); });
 </script>
 
 <!-- In-app how-to guide overlay. Self-contained (no app JS deps); loads the
@@ -29930,6 +30368,57 @@ function _escImp(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&a
     <button type="button" onclick="document.getElementById('help-ov').style.display='none'" style="background:rgba(255,255,255,.22);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;padding:7px 16px;cursor:pointer">✕ Close</button>
   </div>
   <iframe title="How-to Guide" style="flex:1;width:100%;border:0;background:#fff"></iframe>
+</div>
+
+<!-- ── Screensaver ─────────────────────────────────────────────────────
+     An office machine sits on one screen all day — a priced lot grid, a
+     seller's bank details — in a room people walk through. After a few
+     quiet minutes this covers it, and the first key or click clears it.
+
+     z-index 100000: above everything the app draws, the how-to overlay
+     (99999) included — a screensaver that a forgotten help window could
+     hide would not be covering anything. If an idle sign-out warning is
+     ever ported here, it must sit ABOVE this: a hidden countdown costs
+     somebody their half-typed work.
+
+     End of <body> for the same reason the help overlay is: no sidebar
+     transform can then clip its position:fixed.
+
+     aria-hidden + hidden-by-display: it is scenery, so it never takes
+     focus or appears in the tab order. -->
+<div id="screensaver" aria-hidden="true" style="display:none;position:fixed;inset:0;z-index:100000;
+     background:linear-gradient(145deg,#06281d 0%,#0b3d2c 45%,#06281d 100%);
+     align-items:center;justify-content:center;cursor:none;user-select:none">
+  <!-- Fireworks. Behind the lockup and pointer-events:none, so it is
+       scenery in the literal sense — it can never intercept the key or
+       click that dismisses the screensaver. -->
+  <canvas id="ss-fx" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
+  <!-- One centred column, and every line in it shares that one axis —
+       name, credit, numbers, clock. 860px rather than 640: a three-word
+       product name ("SpiceFlow eAuction Suite") overflows a narrower box
+       and wraps mid-name, which makes the whole block look crooked. -->
+  <div style="position:relative;z-index:1;text-align:center;color:#fff;padding:24px;max-width:860px;margin:0 auto;
+              font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif">
+    <!-- The APPLICATION's mark (app_logo), not the customer's: the company
+         logo is what the operator looks at all day on every other screen. -->
+    <img id="ss-logo" alt="" style="display:none;width:104px;height:104px;object-fit:contain;
+         margin:0 auto 22px;border-radius:18px;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))">
+    <!-- clamp(), not a fixed 46px: the name is operator-typed and can be
+         any length, so it scales with the viewport instead of spilling out
+         of the box on a laptop or a phone. balance keeps a wrap, if one is
+         still needed, from leaving a single orphan word. -->
+    <div id="ss-app" style="font-size:clamp(27px,4.4vw,46px);font-weight:800;letter-spacing:1.5px;line-height:1.14;text-wrap:balance">SpiceFlow eAuction Suite</div>
+    <!-- Credit + support numbers, as one block under a hairline so they
+         read as attribution rather than as part of the product name. The
+         rule is drawn by the wrapper, so it disappears along with the
+         block when both lines are blank. -->
+    <div id="ss-by" style="margin-top:22px;padding-top:18px;border-top:1px solid rgba(255,255,255,.14);display:none">
+      <div id="ss-credit" style="font-size:13.5px;font-weight:600;letter-spacing:1.2px;color:rgba(255,255,255,.78)"></div>
+      <div id="ss-contact" style="margin-top:5px;font-size:13.5px;letter-spacing:1.4px;color:rgba(255,255,255,.58);font-variant-numeric:tabular-nums"></div>
+    </div>
+    <div id="ss-clock" style="margin-top:26px;font-size:19px;font-weight:600;color:rgba(255,255,255,.88);font-variant-numeric:tabular-nums"></div>
+    <div style="margin-top:28px;font-size:12.5px;letter-spacing:.6px;color:rgba(255,255,255,.45)">Press any key or click to resume</div>
+  </div>
 </div>
 </body>
 </html>
