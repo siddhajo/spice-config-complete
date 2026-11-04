@@ -6517,9 +6517,24 @@ app.post('/api/lots', requireLotWrite, (req, res) => {
   const _pan    = _fill(l.pan,      'pan');
   const _tel    = _fill(l.tel,      'tel');
   const _aadhar = _fill(l.aadhar,   'aadhar');
-  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,reserved,branch,state,trader_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,wt_with_gunny,gunny_wt,moisture,user_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,isReserved,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.wt_with_gunny||0,l.gunny_wt||0,l.moisture||'',l.user_id||'']);
+  // Per-lot bank tag (trader_banks.id). Both clients send it from their bank
+  // picker; it was previously missing from this INSERT, so every newly
+  // entered lot landed with bank_id NULL and routed through the seller's
+  // SHARED default account instead — which is why re-pointing one lot's
+  // account appeared to move its siblings' too. Only honoured when the
+  // account really belongs to this lot's seller (a foreign id is dropped
+  // here rather than wiring money to another party — same rule the payment
+  // resolution in calculations.js applies).
+  let _bankId = Number(l.bank_id);
+  if (!Number.isFinite(_bankId) || _bankId <= 0) _bankId = null;
+  if (_bankId != null) {
+    const _ownBank = _db.get('SELECT id FROM trader_banks WHERE id = ? AND trader_id = ?',
+      [_bankId, l.trader_id || null]);
+    if (!_ownBank) _bankId = null;
+  }
+  const _ins = _db.run(`INSERT INTO lots (auction_id,lot_no,crop,grade,crpt,reserved_price,reserved,branch,state,trader_id,bank_id,name,padd,ppla,ppin,pstate,pst_code,cr,pan,tel,aadhar,bags,litre,qty,gross_wt,sample_wt,wt_with_gunny,gunny_wt,moisture,user_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [l.auction_id,l.lot_no,l.crop||'',l.grade||'',l.crpt||'',Number.isFinite(reservedPrice)?reservedPrice:0,isReserved,l.branch||'',stateForRecord(_db, l.state||'TAMIL NADU'),l.trader_id||null,_bankId,_name,_padd,_ppla,_ppin,_pstate,_pstcd,_cr,_pan,_tel,_aadhar,l.bags||0,l.litre||'',l.qty||0,l.gross_wt||0,l.sample_wt||0,l.wt_with_gunny||0,l.gunny_wt||0,l.moisture||'',l.user_id||'']);
   // New lot in this trade → reconciliation is stale.
   pcClearGate(_db, l.auction_id);
   lvClearGate(_db, l.auction_id);   // new lot → trade must be re-validated before price import
@@ -6676,6 +6691,24 @@ app.put('/api/lots/:id', requireLotWrite, (req, res) => {
         _adopt('ppin', 'pin'); _adopt('pstate', 'pstate'); _adopt('pst_code', 'pst_code');
       }
     }
+  }
+  // Per-lot bank tag: same ownership guard as POST. The effective seller is
+  // the one being set by this edit, else the lot's current one — so moving a
+  // lot to a different seller can't leave it pointing at the old seller's
+  // account. An absent key leaves the stored tag untouched (partial updates
+  // stay partial); an invalid or foreign id is normalised to NULL, which
+  // routes the lot to its own seller's default.
+  if (l.bank_id !== undefined) {
+    let _bankId = Number(l.bank_id);
+    if (!Number.isFinite(_bankId) || _bankId <= 0) _bankId = null;
+    if (_bankId != null) {
+      const _cur = db.get('SELECT trader_id FROM lots WHERE id = ?', [req.params.id]);
+      const _traderId = l.trader_id || (_cur && _cur.trader_id) || null;
+      const _ownBank = db.get('SELECT id FROM trader_banks WHERE id = ? AND trader_id = ?',
+        [_bankId, _traderId]);
+      if (!_ownBank) _bankId = null;
+    }
+    l.bank_id = _bankId;
   }
   // Only update real lots columns. Skipping unknown keys guards against a
   // client sending a field that isn't a column (which would make the

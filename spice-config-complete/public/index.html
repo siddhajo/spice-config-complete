@@ -25414,7 +25414,7 @@ async function leSearchSeller(q){
   }, 200);
 }
 
-function lePickSeller(t){
+function lePickSeller(t, preselectBankId){
   _le.selectedSeller = t;
   document.getElementById('le-seller-name').textContent = t.name || '';
   const loc = [t.ppla, t.pin, t.pstate].filter(Boolean).join(', ');
@@ -25424,8 +25424,9 @@ function lePickSeller(t){
   document.getElementById('le-seller-search-wrap').style.display = 'none';
   document.getElementById('le-seller-results').style.display = 'none';
   // Render the bank picker — only shown if seller has 1+ bank rows.
-  // Default selection: the bank flagged is_default, else first bank.
-  leRenderBankPicker(t);
+  // While editing, preselect the account THIS lot is tagged with; for a
+  // fresh entry fall back to the seller's default (see leRenderBankPicker).
+  leRenderBankPicker(t, preselectBankId);
   // Auto-select grade based on CR field — same heuristic as the PWA:
   //   CR.* prefix → grade 1 (registered)
   //   GSTIN-shaped (15 chars) → grade 2 (GST-registered)
@@ -25449,20 +25450,36 @@ function lePickSeller(t){
 
 // Render the bank-account picker inside the selected-seller card. Visible
 // when the seller has 1+ bank rows; hidden otherwise. Selection updates
-// _le.selectedBankId. The save flow then PUTs the choice as the seller's
-// new default if it changed.
-function leRenderBankPicker(t){
+// _le.selectedBankId, which the save flow writes to the LOT (lots.bank_id);
+// the seller's own default is never touched from here.
+//
+// `preselectBankId` is the account the lot being edited is already tagged
+// with. Without it an edit would open on the seller's default and a plain
+// re-save would retag the lot to that default — losing the per-lot account.
+// A tag pointing at an account that no longer belongs to this seller (stale
+// row, or the lot was reassigned to another seller) is ignored, matching how
+// payment resolution drops a foreign tag.
+function leRenderBankPicker(t, preselectBankId){
   const wrap = document.getElementById('le-bank-row');
   const sel  = document.getElementById('le-bank-select');
   const banks = Array.isArray(t.banks) ? t.banks : [];
   if (!banks.length) {
     wrap.style.display = 'none';
     sel.innerHTML = '';
-    _le.selectedBankId = null;
+    // Nothing to pick from, so carry the lot's existing tag through
+    // untouched rather than clearing it: a seller whose bank rows we
+    // couldn't load (the /api/traders fallback in leEnterEditMode) must
+    // not have its lots silently un-tagged by an unrelated edit.
+    _le.selectedBankId = (preselectBankId != null && preselectBankId !== '')
+      ? Number(preselectBankId) : null;
     return;
   }
-  // Pick a default: first is_default=1 bank, else the first bank in the list
-  const defaultBank = banks.find(b => b.is_default) || banks[0];
+  // The lot's own account when it has a valid one, else the seller's
+  // default (first is_default=1 bank), else the first bank in the list.
+  const taggedBank = (preselectBankId != null && preselectBankId !== '')
+    ? banks.find(b => Number(b.id) === Number(preselectBankId))
+    : null;
+  const defaultBank = taggedBank || banks.find(b => b.is_default) || banks[0];
   _le.selectedBankId = defaultBank ? defaultBank.id : null;
   sel.innerHTML = banks.map(b => {
     const labelParts = [b.acctnum];
@@ -25832,6 +25849,12 @@ async function leSaveLot(){
       auction_id: parseInt(aid, 10),
       lot_no: lotNo,
       trader_id: _le.selectedSeller.id,
+      // Per-LOT bank tag (lots.bank_id). Two lots from the same seller may
+      // credit two different accounts, so the choice is stored on the lot —
+      // NOT by flipping the seller's default, which is shared by every lot
+      // of that seller and belongs to Sellers -> Banks. null when the seller
+      // has no bank rows: payment then falls back to the seller's default.
+      bank_id: _le.selectedBankId,
       branch: branch,
       grade: grade,
       bags: bagsSafe,
@@ -25872,23 +25895,12 @@ async function leSaveLot(){
       ? `/api/lots/${_le.editingLotId}`
       : '/api/lots',
       { method: _le.editingLotId ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    // Sync the chosen bank as the seller's default ONLY if the user
-    // picked a different bank than the seller's current default. Avoids
-    // unnecessary writes for the common case where the picker just
-    // showed the existing default and the user didn't touch it.
-    if (_le.selectedBankId && _le.selectedSeller && Array.isArray(_le.selectedSeller.banks)) {
-      const currentDefault = _le.selectedSeller.banks.find(b => b.is_default);
-      if (!currentDefault || currentDefault.id !== _le.selectedBankId) {
-        try {
-          await j(`/api/traders/${_le.selectedSeller.id}/bank-default/${_le.selectedBankId}`, { method: 'PUT' });
-          // Reflect locally so we don't re-PUT on next save with the
-          // same selection.
-          for (const b of _le.selectedSeller.banks) b.is_default = (b.id === _le.selectedBankId) ? 1 : 0;
-        } catch (e) {
-          console.warn('Bank-default sync failed (non-fatal):', e);
-        }
-      }
-    }
+    // NOTE: the picked account is saved ON THE LOT (payload.bank_id above)
+    // and nowhere else. This flow used to also PUT the choice as the
+    // seller's new default, which silently re-routed every OTHER lot of
+    // that seller (they all resolve through the default when untagged) —
+    // so editing one lot's account changed its sibling's too. The seller's
+    // default is now owned solely by Sellers -> Banks.
     toast(_le.editingLotId ? `Lot ${lotNo} updated ✓` : `Lot ${lotNo} saved ✓`);
     // First lot saved for this trade advances the guided-flow stage (1→2)
     // and any lot change clears the validation gate — re-fetch if it's the
@@ -26104,15 +26116,18 @@ async function leEditLot(lotId){
   if (lot.trader_id) {
     try {
       const seller = await j(`/api/traders/${lot.trader_id}`);
-      lePickSeller(seller);
+      // Pass the lot's own bank tag so the picker opens on the account
+      // THIS lot credits, not the seller's default (see leRenderBankPicker).
+      lePickSeller(seller, lot.bank_id);
     } catch (e) {
-      // Fall back to the denormalised seller fields stored on the lot row
+      // Fall back to the denormalised seller fields stored on the lot row.
+      // No banks array here, so the picker hides and the tag is left alone.
       lePickSeller({
         id: lot.trader_id,
         name: lot.name || '', cr: lot.cr || '', pan: lot.pan || '',
         tel: lot.tel || '', ppla: lot.ppla || '', pin: lot.ppin || '',
         pstate: lot.pstate || '', banks: []
-      });
+      }, lot.bank_id);
     }
   }
   // Scroll the form into view so the user sees what they're editing
