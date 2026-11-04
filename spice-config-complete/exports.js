@@ -370,7 +370,8 @@ function _ordinalTrade(n) {
 // row carries: amount (net after TDS), payable (pre-TDS), tds, discount,
 // lots, and bank routing — enough for either layout to render its columns.
 function _prepareBankPayments(db, auctionId, cfg, opts) {
-  const { getBankPaymentData, getPaymentSummary, formatLotList } = require('./calculations');
+  const { getBankPaymentData, getPaymentSummary, formatLotList,
+          loadTraderBanks, foldBankGroups, splitAcrossGroups } = require('./calculations');
   let payments = getBankPaymentData(db, auctionId, cfg);
   // Per-seller display discount (policy discount + manual debit notes),
   // summed across cr splits and keyed by upper-cased seller name — the same
@@ -383,10 +384,23 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
       discByName[k] = (discByName[k] || 0) + (Number(s.total_discount) || 0);
     }
   } catch (_) { /* summary optional — fall back to 0 discount */ }
-  payments = payments.map(p => ({
-    ...p,
-    discount: discByName[String(p.name || '').trim().toUpperCase()] || 0,
-  }));
+  // A seller banking across several accounts has one row per account, so
+  // the seller-level discount is split across them in proportion to what
+  // each account is paid — assigning the full figure to every row would
+  // report the discount two or three times over.
+  {
+    const rowsBySeller = new Map();
+    payments.forEach((p, i) => {
+      const k = String(p.seller_key || ('nm:' + String(p.name || '').trim().toUpperCase()));
+      if (!rowsBySeller.has(k)) rowsBySeller.set(k, []);
+      rowsBySeller.get(k).push(i);
+    });
+    for (const idxs of rowsBySeller.values()) {
+      const whole = discByName[String(payments[idxs[0]].name || '').trim().toUpperCase()] || 0;
+      const parts = splitAcrossGroups(whole, idxs.map(i => payments[i]));
+      idxs.forEach((i, n) => { payments[i] = { ...payments[i], discount: parts[n] || 0 }; });
+    }
+  }
 
   // Optional seller-name filter — when the user clicks "Export Bank
   // Payment (Selected)" in the Payments tab, only the ticked sellers'
@@ -421,31 +435,41 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
   const lotPicks = (opts && opts.lots && typeof opts.lots === 'object') ? opts.lots : null;
   const excludeLots = (opts && opts.excludeLots && typeof opts.excludeLots === 'object') ? opts.excludeLots : null;
   if (lotPicks || excludeLots) {
-    // Index every trader bank by id so a picked-lot subset that all points
-    // at one account can route this export row to THAT account (this is how
-    // "select Account-1's lots → Export Selected" credits Account 1, then a
-    // second export of Account-2's lots credits Account 2).
-    const bankById = {};
-    try {
-      for (const b of db.all('SELECT id, ifsc, acctnum, holder_name FROM trader_banks')) bankById[b.id] = b;
-    } catch (_) { /* table may not exist on partial migrations */ }
+    // Per-lot bank routing for the picked subset: a picked set that spans two
+    // accounts is rebuilt as one row per account (this is how "Account-1's
+    // lots" and "Account-2's lots" each credit the right place), and a set
+    // confined to one account is a single row crediting that account.
+    const { bankById, defaultByTraderId } = loadTraderBanks(db);
     const sellersToRecompute = new Set();
     if (lotPicks)     for (const k of Object.keys(lotPicks))     sellersToRecompute.add(k);
     if (excludeLots)  for (const k of Object.keys(excludeLots))  sellersToRecompute.add(k);
+    // Rebuilt rows are staged by the position of the seller's first row, then
+    // spliced in together at the end — a seller can go from one row to two
+    // (or back), so the array can't be patched in place while iterating.
+    const rebuiltAt = new Map();   // first row index → replacement rows
+    const dropped = new Set();     // the seller's other row indexes
     for (const sellerName of sellersToRecompute) {
       const picksArr   = lotPicks    && Array.isArray(lotPicks[sellerName])    ? lotPicks[sellerName]    : null;
       const excludeArr = excludeLots && Array.isArray(excludeLots[sellerName]) ? excludeLots[sellerName] : null;
       if ((!picksArr || !picksArr.length) && (!excludeArr || !excludeArr.length)) continue;
       const wantedUpper = String(sellerName || '').trim().toUpperCase();
       // The map key is a seller KEY ("id:42") from the current UI, or a plain
-      // name from an older one. Resolve to the one payment row it addresses —
-      // and scope the re-query the same way, so a lot-pick for one seller
-      // never sweeps in a same-named seller's lots.
+      // name from an older one. Resolve to the rows it addresses — and scope
+      // the re-query the same way, so a lot-pick for one seller never sweeps
+      // in a same-named seller's lots.
       const keyMatch = /^ID:(\d+)$/.exec(wantedUpper);
-      const idx = keyMatch
-        ? payments.findIndex(p => String(p.seller_key || '') === 'id:' + keyMatch[1])
-        : payments.findIndex(p => String(p.name || '').trim().toUpperCase() === wantedUpper);
-      if (idx < 0) continue;   // seller not in the current payments set (e.g. fully paid)
+      // EVERY row this seller holds: a multi-bank seller has one per account,
+      // and all of them have to be re-derived together — leaving one behind
+      // would pay its pre-pick amount on top of the recomputed rows.
+      const idxs = payments.reduce((acc, p, i) => {
+        const hit = keyMatch
+          ? String(p.seller_key || '') === 'id:' + keyMatch[1]
+          : String(p.name || '').trim().toUpperCase() === wantedUpper;
+        if (hit) acc.push(i);
+        return acc;
+      }, []);
+      if (!idxs.length) continue;   // seller not in the current payments set (e.g. fully paid)
+      const base = payments[idxs[0]];
       const sellerWhere = keyMatch ? 'l.trader_id = ?' : 'UPPER(TRIM(l.name)) = ?';
       const params = [auctionId, keyMatch ? Number(keyMatch[1]) : wantedUpper];
       let extraWhere = '';
@@ -457,54 +481,79 @@ function _prepareBankPayments(db, auctionId, cfg, opts) {
         extraWhere += ` AND l.lot_no NOT IN (${excludeArr.map(() => '?').join(',')})`;
         for (const lot of excludeArr) params.push(String(lot));
       }
-      const sub = db.get(
-        `SELECT COALESCE(SUM(l.balance),0) AS payable,
+      const subs = db.all(
+        `SELECT l.bank_id AS bank_id,
+                COALESCE(SUM(l.balance),0) AS payable,
                 COALESCE(SUM(l.puramt), 0) AS puramt,
                 GROUP_CONCAT(l.lot_no) AS lot_nos,
-                GROUP_CONCAT(DISTINCT l.bank_id) AS bank_ids,
-                COUNT(*) AS lot_count,
-                COUNT(l.bank_id) AS bank_lot_count
+                COUNT(*) AS lot_count
            FROM lots l
           WHERE l.auction_id = ? AND l.amount > 0
             AND (l.paid IS NULL OR l.paid = '')
-            AND ${sellerWhere}${extraWhere}`,
+            AND ${sellerWhere}${extraWhere}
+          GROUP BY l.bank_id`,
         params
-      ) || { payable: 0, puramt: 0, lot_nos: '' };
-      const rawAmount = Number(sub.payable) || 0;
-      const roundedAmount = cfg.flag_round ? Math.round(rawAmount) : rawAmount;
-      const isRTGS = roundedAmount >= 200000;
-      // If every picked lot points at the same single bank account, route
-      // this row to that account (overrides the seller-default account that
-      // getBankPaymentData put on the base row). Mixed/untagged → leave the
-      // default account as-is.
-      const subBankIds = String(sub.bank_ids || '')
-        .split(',').map(s => s.trim()).filter(s => s !== '' && s !== 'null')
-        .map(Number).filter(Number.isFinite);
-      const subUntagged = Number(sub.lot_count || 0) > Number(sub.bank_lot_count || 0);
-      const subBank = (subBankIds.length === 1 && !subUntagged) ? bankById[subBankIds[0]] : null;
+      ) || [];
+      const tb = base.trader_id != null ? defaultByTraderId[base.trader_id] : null;
+      // Same ownership guard as getBankPaymentData: a lot tagged with another
+      // party's account is stale data, and is paid into this seller's own
+      // default account rather than wiring the money to that other party.
+      const groups = foldBankGroups(subs, (bid) => {
+        const b = bid != null ? bankById[bid] : null;
+        const mine = b && base.trader_id != null && Number(b.trader_id) === Number(base.trader_id);
+        return (mine ? b : tb) || null;
+      });
       // Scale the seller's full-set TDS + discount down to the picked subset
       // by the payable ratio so the new-format money columns stay coherent
-      // for partial exports. `amount` keeps the legacy semantics (subset
+      // for partial exports, then split that down the accounts the same way
+      // the full export does. `amount` keeps the legacy semantics (subset
       // balance, no TDS netting) so the old layout is byte-for-byte unchanged.
-      const prev = payments[idx];
-      const fullPayable = Number(prev.payable) || 0;
-      const ratio = fullPayable > 0 ? (rawAmount / fullPayable) : 0;
-      payments[idx] = {
-        ...prev,
-        amount: roundedAmount,
-        payable: rawAmount,
-        tds: (Number(prev.tds) || 0) * ratio,
-        discount: (Number(prev.discount) || 0) * ratio,
-        transactionType: isRTGS ? 'RTGS' : 'NEFT',
-        // Re-derive the covered-lots list from the same picked/excluded
-        // subset so REMARKS lists exactly the lots this row pays for.
-        lots: formatLotList(sub.lot_nos),
-        ...(subBank ? {
-          ifsc: subBank.ifsc || prev.ifsc,
-          accountNo: subBank.acctnum || prev.accountNo,
-          beneficiaryName: subBank.holder_name || prev.beneficiaryName,
-        } : {}),
-      };
+      const fullPayable  = idxs.reduce((a, i) => a + (Number(payments[i].payable)  || 0), 0);
+      const fullTds      = idxs.reduce((a, i) => a + (Number(payments[i].tds)      || 0), 0);
+      const fullDiscount = idxs.reduce((a, i) => a + (Number(payments[i].discount) || 0), 0);
+      const pickedPayable = groups.reduce((a, g) => a + (Number(g.payable) || 0), 0);
+      const ratio = fullPayable > 0 ? (pickedPayable / fullPayable) : 0;
+      const tdsParts  = splitAcrossGroups(fullTds * ratio, groups);
+      const discParts = splitAcrossGroups(fullDiscount * ratio, groups);
+      rebuiltAt.set(idxs[0], groups.map((g, gi) => {
+        const rawAmount = Number(g.payable) || 0;
+        const roundedAmount = cfg.flag_round ? Math.round(rawAmount) : rawAmount;
+        const bank = g.bank;
+        return {
+          ...base,
+          amount: roundedAmount,
+          payable: rawAmount,
+          tds: tdsParts[gi] || 0,
+          discount: discParts[gi] || 0,
+          transactionType: roundedAmount >= 200000 ? 'RTGS' : 'NEFT',
+          // Re-derive the covered-lots list from the same picked/excluded
+          // subset so REMARKS lists exactly the lots this row pays for.
+          lots: formatLotList(g.lot_nos),
+          lot_count: g.lot_count,
+          bank_id: bank ? bank.id : null,
+          bankName: (bank && bank.bank_name) || '',
+          bankSeq: gi + 1,
+          bankCount: groups.length,
+          multipleBanks: groups.length > 1,
+          // Route the row to the account its lots credit (overrides the
+          // seller-default account on the base row). A group with no account
+          // on file keeps the legacy traders.ifsc/acctnum details.
+          ...(bank ? {
+            ifsc: bank.ifsc || base.ifsc,
+            accountNo: bank.acctnum || base.accountNo,
+            beneficiaryName: bank.holder_name || base.beneficiaryName,
+          } : {}),
+        };
+      }));
+      for (const i of idxs.slice(1)) dropped.add(i);
+    }
+    if (rebuiltAt.size || dropped.size) {
+      const next = [];
+      payments.forEach((p, i) => {
+        if (rebuiltAt.has(i)) next.push(...rebuiltAt.get(i));
+        else if (!dropped.has(i)) next.push(p);
+      });
+      payments = next;
     }
     // Drop any zero-amount rows produced by the recompute — banks reject
     // zero-value RTGS rows, and a seller whose remaining lots all net to

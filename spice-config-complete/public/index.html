@@ -19879,7 +19879,7 @@ function gotoPaymentsPage(p){
 // search/filter changes without hitting the server again.
 let _paymentsAll = [];
 // Bank-routing info keyed by upper-cased seller name (from
-// /api/payments/bank). Drives the Actions column's ⚠ multi-bank badge.
+// /api/payments/bank). Drives the Actions column's 🏦 accounts badge.
 let _payBankInfo = {};
 // A payment row is a registered dealer when its `cr` holds a GSTIN —
 // either the legacy "GSTIN.<…>" UI form or a bare GSTIN that starts with
@@ -19914,7 +19914,7 @@ async function loadPayments(opts){
       // Carry any name-keyed lot-picks / exported marks from an older build
       // over to the party key before anything reads them.
       _payMigrateState(aid, rows);
-      // Bank-routing info for the Actions column's ⚠ multi-bank badge.
+      // Bank-routing info for the Actions column's 🏦 accounts badge.
       // Best-effort: a failure here must not break the payments table, so
       // we swallow errors and just render without badges. Keyed by
       // upper-cased seller name to match the Actions render lookup.
@@ -19922,8 +19922,11 @@ async function loadPayments(opts){
         const bd = await j(`/api/payments/bank/${aid}`);
         _payBankInfo = {};
         for (const b of (Array.isArray(bd) ? bd : [])) {
+          // One entry per seller, not per bank row: a seller paid across
+          // several accounts has one row per account, and each of them
+          // carries the same bankCount, so the last one in wins harmlessly.
           // Index by party key AND name — two sellers can share a name, and
-          // the ⚠ multi-bank badge must reflect the row's own party.
+          // the badge must reflect the row's own party.
           if (b.seller_key) _payBankInfo[String(b.seller_key)] = b;
           _payBankInfo[String(b.name || '').trim().toUpperCase()] = b;
         }
@@ -20075,9 +20078,9 @@ async function loadPayments(opts){
         // Actions — per-seller lot picker. The "Pick lots" button opens
         // a modal to narrow this seller's next Selected export to a lot
         // subset (saved per-auction in localStorage). A badge shows when
-        // a subset is active; a ⚠ multi-bank badge warns when the
-        // seller's lots are split across bank accounts (from the bank
-        // payment data, keyed by upper-cased name).
+        // a subset is active; a 🏦 badge notes how many bank accounts
+        // the seller's lots credit, since Bank Pay then writes one
+        // payment line per account (from the bank payment data).
         { key:'_actions', label:'Actions', sortable:false, searchable:false,
           render:(p)=>{
             const nm = esc(p.name||'');
@@ -20087,7 +20090,7 @@ async function loadPayments(opts){
               : '';
             const bi = _payBankInfo[_payKey(p)] || _payBankInfo[String(p.name||'').trim().toUpperCase()];
             const bankBadge = (bi && bi.multipleBanks)
-              ? `<span title="This seller's lots point at more than one bank account. Use Pick lots to export each account's lots separately." style="background:#FEE2E2;color:#B91C1C;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">⚠ multi-bank</span>`
+              ? `<span title="This seller's lots credit ${Number(bi.bankCount)||2} different bank accounts. Bank Pay writes one payment line per account, each carrying only that account's lots." style="background:#EFF6FF;color:#1D4ED8;font-weight:600;font-size:11px;padding:1px 7px;border-radius:10px;white-space:nowrap">🏦 ${Number(bi.bankCount)||2} accounts</span>`
               : '';
             // Per-row restore (↶) icon shows once anything's been exported.
             const st = _payExportStatus(aid, _payKey(p), p.lot_count);
@@ -21720,8 +21723,8 @@ window.addEventListener('resize', () => {
 
 // ── Exports ───────────────────────────────────────────────
 const EXP_LABELS={lot_slip:'Lot Slip',lot_slip_after:'Lot Slip (After)',lot_payment:'Lot Payment Summary',praman_csv:'e-Trade CSV (Praman)',price_list:'Price List',bank_payment_before:'Bank Payment (Before)',bank_payment:'Bank Payment (RTGS/NEFT)',bank_payment_new:'Bank Payment (New)',
-  pooler_register:'Pooler Register',pooler_list_consolidated:'Pooler List Consolidated (Party-wise)',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List',dealer_list_partywise:'Dealer List (Party-wise)',
-  payment:'Payment Summary',payment_partywise:'Payment Summary (Party-wise)'};
+  pooler_register:'Pooler Register (Lot-wise)',pooler_list_consolidated:'Pooler List Consolidated (Party-wise)',full_file:'Full File',collection:'Collection',trade_report:'Trade Report',dealer_list:'Dealer List (Lot-wise)',dealer_list_partywise:'Dealer List (Party-wise)',
+  payment:'Payment Summary (Lot-wise)',payment_partywise:'Payment Summary (Party-wise)'};
 // Export types that only support a specific format (no XLSX/PDF choice).
 // e.g., Praman (e-Trade) and the e-Auction Spices Board CSV are both
 // CSV-only upload formats for their respective auction platforms.
@@ -21754,7 +21757,7 @@ const EXP_XLSX_ONLY = new Set(['full_file', 'bank_payment_before', 'bank_payment
 // auction selector (#exp-auction) via exportType's fallback.
 const PRETRADE_EXP_LABELS={lot_slip:'Lot Slip',lot_buyer:'Lot Buyer',lot_name:'Lot Name',
   praman_csv:'e-Trade CSV (Praman)',price_list_before:'Price List (Before)',
-  dealer_list:'Dealer List',dealer_list_partywise:'Dealer List (Party-wise)',
+  dealer_list:'Dealer List (Lot-wise)',dealer_list_partywise:'Dealer List (Party-wise)',
   planter_list:'Planter List (Grade 1)',pooler_list_consolidated_before:'Pooler List Consolidated (Party-wise)',
   full_file:'Full File'};
 // Render a single export card (label + format buttons). Shared by the
