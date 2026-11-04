@@ -12217,9 +12217,13 @@ function _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds) {
   // puramt so a lot-filtered statement nets the proportionate share. The
   // "Total" column is the pre-TDS payable (balance); "Payable" = Total − TDS.
   const tdsCtx = paymentTdsContext(db, auctionId);
-  const tdsKey = String(sellerName || '').trim().toUpperCase();
-  const sellerTds  = tdsCtx.tdsByName[tdsKey] || 0;
-  const fullPuramt = tdsCtx.puramtByName[tdsKey] || 0;
+  // Keyed by SELLER KEY ("id:42" / "nm:ABC"), not by bare name — two sellers
+  // can share a name, so the context groups on the party. Resolve the party
+  // we know (trader id when the caller sent a key, else the name, which
+  // resolves to its key when unambiguous).
+  const tdsKey = tdsCtx.resolve(_traderId != null ? sellerKey(_traderId, sellerName) : sellerName);
+  const sellerTds  = tdsCtx.tdsByKey[tdsKey] || 0;
+  const fullPuramt = tdsCtx.puramtByKey[tdsKey] || 0;
   const tdsRate = fullPuramt > 0 ? sellerTds / fullPuramt : 0;
   const hasTds = sellerTds > 0;
   const roundPay = cfg.flag_round === true || String(cfg.flag_round || '').toLowerCase() === 'true';
@@ -12307,7 +12311,14 @@ app.get('/api/payments/pdf/:auctionId/:sellerName', requireView, (req, res) => {
     _renderPaymentStatement(doc, db, auctionId, sellerName, cfg);
     doc.end();
   } catch (e) {
-    if (piped && doc) { try { doc.end(); } catch(_){} }
+    // Once the PDF is streaming the status line is gone, so a render error
+    // can only be reported on the page itself — ending the doc silently is
+    // what turned a broken statement into a header with nothing under it.
+    if (piped && doc) {
+      try { doc.font('Helvetica').fontSize(10).fillColor('#B91C1C')
+               .text(`Statement could not be rendered: ${e.message}`); } catch(_){}
+      try { doc.end(); } catch(_){}
+    }
     else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
   }
 });
@@ -12337,7 +12348,14 @@ app.post('/api/payments/pdf-lots', requireView, (req, res) => {
     _renderPaymentStatement(doc, db, auctionId, sellerName, cfg, lotIds);
     doc.end();
   } catch (e) {
-    if (piped && doc) { try { doc.end(); } catch(_){} }
+    // Once the PDF is streaming the status line is gone, so a render error
+    // can only be reported on the page itself — ending the doc silently is
+    // what turned a broken statement into a header with nothing under it.
+    if (piped && doc) {
+      try { doc.font('Helvetica').fontSize(10).fillColor('#B91C1C')
+               .text(`Statement could not be rendered: ${e.message}`); } catch(_){}
+      try { doc.end(); } catch(_){}
+    }
     else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
   }
 });
@@ -12367,7 +12385,14 @@ app.post('/api/payments/pdf-bulk', requireView, (req, res) => {
     });
     doc.end();
   } catch (e) {
-    if (piped && doc) { try { doc.end(); } catch(_){} }
+    // Once the PDF is streaming the status line is gone, so a render error
+    // can only be reported on the page itself — ending the doc silently is
+    // what turned a broken statement into a header with nothing under it.
+    if (piped && doc) {
+      try { doc.font('Helvetica').fontSize(10).fillColor('#B91C1C')
+               .text(`Statement could not be rendered: ${e.message}`); } catch(_){}
+      try { doc.end(); } catch(_){}
+    }
     else if (!res.headersSent) res.status(500).json({ error: e.message || 'PDF failed' });
   }
 });

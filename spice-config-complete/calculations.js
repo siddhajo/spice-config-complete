@@ -897,6 +897,10 @@ function paymentTdsContext(db, auctionId) {
   return {
     tdsByKey,
     puramtByKey,
+    // Map a seller key or bare name onto the key the two maps above use, so
+    // callers that read the maps directly (the payment statement PDF) key
+    // them the same way `share` does.
+    resolve,
     // Accepts a seller key ("id:42" / "nm:ABC") or a bare seller name, so
     // callers that only carry a name (e.g. the PDF payment export) keep
     // working; a bare name resolves to its key when unambiguous.
