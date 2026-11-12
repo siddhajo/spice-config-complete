@@ -2915,6 +2915,10 @@ function generLedgerXML(rows, cfg, opts = {}) {
     // Sub-kind hint from the builder so we know whether this party is sales,
     // RD, or URD. Falls back to a heuristic based on parent group name when
     // not provided (keeps backward compat with the all-in-one builder).
+    // Every builder in this file sets partyKind explicitly, and must keep
+    // doing so: the parent group names are operator-configurable, so the
+    // guesses below can no longer be trusted to separate the three kinds
+    // (a planter group named "…Dealer-Purchase" reads as sales-side here).
     let partyKind = r.partyKind || '';
     if (!partyKind && isParty) {
       const p = String(r.parent || '').toLowerCase();
@@ -3097,12 +3101,12 @@ function _rdTraderRow(t, todayDate, intra, interDealPur, localDealPur) {
   };
 }
 
-function _urdTraderRow(t, todayDate, auctionLDR) {
+function _urdTraderRow(t, todayDate, planterGroup) {
   return {
     kind: 'party',
     partyKind: 'urd',
     name: t.name || '',
-    parent: auctionLDR,           // Agriculturists go under the auction-purchase parent
+    parent: planterGroup,         // Tally group the planters are filed under
     gstin: '',
     pan: t.pan || '',
     address: t.padd || '',
@@ -3179,7 +3183,12 @@ function buildRDPartyLedgerRows(db, auctionId, cfg, opts = {}) {
  */
 function buildURDPartyLedgerRows(db, auctionId, cfg, opts = {}) {
   const todayDate = toTallyDate(new Date());
-  const auctionLDR = cfgGet(cfg, 'tally_purchase_auction', 'Purchase From Agriculturist');
+  // <PARENT> of each planter's ledger = the Tally GROUP they are filed
+  // under, configured by its own setting ('Planters (purchase side)').
+  // This used to read tally_purchase_auction, which is the purchase LEDGER
+  // the auction voucher posts to — a different thing that merely happened
+  // to carry a usable value, so editing one changed the other.
+  const planterGroup = cfgGet(cfg, 'tally_purchase_planter', 'Interstate Dealer-Purchase');
 
   let sql = `
     SELECT DISTINCT name, padd, ppla, ppin, pstate, pan
@@ -3195,7 +3204,7 @@ function buildURDPartyLedgerRows(db, auctionId, cfg, opts = {}) {
   sql += ` ORDER BY name`;
 
   const traders = db.prepare(sql).all(...params);
-  return traders.map(t => _urdTraderRow(t, todayDate, auctionLDR));
+  return traders.map(t => _urdTraderRow(t, todayDate, planterGroup));
 }
 
 /**

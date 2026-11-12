@@ -367,6 +367,13 @@ const DEFAULTS = [
   { key: 'tally_purchase_dealer',     value: 'Trade Purchase From Dealer',category: 'tally', label: 'Trade Purchase From Dealer (base; gets -Local / -Inter_State suffix)', type: 'text' },
   { key: 'tally_purchase_dealer_inter', value: 'Interstate Dealer',      category: 'tally', label: 'Interstate Dealer (purchase-side)',     type: 'text' },
   { key: 'tally_purchase_dealer_intra', value: 'Local Dealer',           category: 'tally', label: 'Local Dealer (purchase-side)',          type: 'text' },
+  // Tally GROUP the agriculturist (URD) party ledgers are filed under —
+  // the <PARENT> of each planter's ledger in the URD Purchase Party
+  // Ledgers XML. Separate from tally_purchase_auction below, which is the
+  // purchase LEDGER the auction voucher posts to: the two were the same
+  // value only by accident, so renaming the group used to rename the
+  // ledger too.
+  { key: 'tally_purchase_planter',      value: 'Interstate Dealer-Purchase', category: 'tally', label: 'Planters (purchase side)',          type: 'text' },
 
   // Agriculturist & TDS-on-sales
   { key: 'tally_purchase_auction',value: 'Purchase From Agriculturist', category: 'tally', label: 'Purchase From Agriculturist (URD ledger)', type: 'text' },
